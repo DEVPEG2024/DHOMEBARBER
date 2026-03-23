@@ -1,20 +1,24 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Home, Scissors, Calendar, ShoppingBag, User, Sun, Moon } from 'lucide-react';
+import { Home, Scissors, Calendar, ShoppingBag, User, LogIn, Sun, Moon } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useTheme } from '@/lib/ThemeContext';
-
-const navItems = [
-  { path: '/', icon: Home, label: 'Accueil' },
-  { path: '/services', icon: Scissors, label: 'Services' },
-  { path: '/booking', icon: Calendar, label: 'Réserver' },
-  { path: '/shop', icon: ShoppingBag, label: 'Boutique' },
-  { path: '/profile', icon: User, label: 'Profil' },
-];
+import { useAuth } from '@/lib/AuthContext';
 
 export default function BottomNav() {
   const location = useLocation();
   const { theme, toggleTheme } = useTheme();
+  const { isAuthenticated } = useAuth();
+
+  const navItems = [
+    { path: '/', icon: Home, label: 'Accueil' },
+    { path: '/services', icon: Scissors, label: 'Services' },
+    { path: '/booking', icon: Calendar, label: 'Réserver' },
+    { path: '/shop', icon: ShoppingBag, label: 'Boutique' },
+    isAuthenticated
+      ? { path: '/profile', icon: User, label: 'Profil' }
+      : { path: '/login', icon: LogIn, label: 'Connexion' },
+  ];
 
   if (location.pathname.startsWith('/admin')) return null;
 

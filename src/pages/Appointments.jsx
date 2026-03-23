@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
+import { useAuth } from '@/lib/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Calendar, Clock, User, X, Scissors, Plus } from 'lucide-react';
@@ -25,16 +26,12 @@ export default function Appointments() {
   const [tab, setTab] = useState('upcoming');
   const [cancelId, setCancelId] = useState(null);
   const queryClient = useQueryClient();
-
-  const { data: user } = useQuery({
-    queryKey: ['currentUser'],
-    queryFn: () => base44.auth.me(),
-  });
+  const { user } = useAuth();
 
   const { data: appointments = [], isLoading } = useQuery({
     queryKey: ['myAppointments', user?.email],
     queryFn: () => base44.entities.Appointment.filter({ client_email: user.email }, '-date', 100),
-    enabled: !!user,
+    enabled: !!user?.email,
   });
 
   const cancelMutation = useMutation({

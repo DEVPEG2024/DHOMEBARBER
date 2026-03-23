@@ -2,6 +2,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import { useQuery } from '@tanstack/react-query';
+import { useAuth } from '@/lib/AuthContext';
 import { motion } from 'framer-motion';
 import { Calendar, Star, ShoppingBag, Settings, LogOut, ChevronRight, Shield, Scissors } from 'lucide-react';
 
@@ -13,10 +14,7 @@ const menuItems = [
 ];
 
 export default function Profile() {
-  const { data: user } = useQuery({
-    queryKey: ['currentUser'],
-    queryFn: () => base44.auth.me(),
-  });
+  const { user, logout } = useAuth();
 
   const { data: appointments = [] } = useQuery({
     queryKey: ['myAppointments', user?.email],
@@ -108,7 +106,7 @@ export default function Profile() {
         <motion.button
           initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }}
           whileTap={{ scale: 0.97 }}
-          onClick={() => base44.auth.logout()}
+          onClick={logout}
           className="w-full h-12 rounded-2xl border border-red-500/20 bg-red-500/8 text-red-400 text-sm font-semibold flex items-center justify-center gap-2 hover:bg-red-500/12 transition-colors"
         >
           <LogOut className="w-4 h-4" />

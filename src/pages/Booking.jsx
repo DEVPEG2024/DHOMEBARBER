@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
+import { useAuth } from '@/lib/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeft, ChevronRight, Check, Calendar, Clock, User, Scissors, Sparkles } from 'lucide-react';
@@ -31,6 +32,7 @@ function generateTimeSlots(start, end, interval = 30) {
 export default function Booking() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { user, isAuthenticated } = useAuth();
   const [step, setStep] = useState(0);
   const [selectedServices, setSelectedServices] = useState([]);
   const [selectedEmployee, setSelectedEmployee] = useState(null);
@@ -128,13 +130,17 @@ export default function Booking() {
 
   const createAppointment = useMutation({
     mutationFn: async () => {
-      const user = await base44.auth.me();
+      if (!isAuthenticated || !user) {
+        // Redirect to login, will come back to booking
+        navigate('/login?redirect=/booking');
+        throw new Error('Non connecté');
+      }
       const [sh, sm] = selectedTime.split(':').map(Number);
       const endMin = sh * 60 + sm + totalDuration;
       const endTime = `${String(Math.floor(endMin / 60)).padStart(2, '0')}:${String(endMin % 60).padStart(2, '0')}`;
       return base44.entities.Appointment.create({
         client_email: user.email,
-        client_name: user.full_name,
+        client_name: user.full_name || user.name || '',
         employee_id: selectedEmployee.id,
         employee_name: selectedEmployee.name,
         services: selectedServices.map(s => ({ service_id: s.id, name: s.name, duration: s.duration, price: s.price })),

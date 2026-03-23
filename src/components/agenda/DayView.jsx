@@ -105,22 +105,6 @@ function AppointmentBlock({ apt, onStatusChange, employeeColor, onClick }) {
     >
       <p className="text-[10px] font-bold truncate" style={{ color: accentColor }}>{apt.start_time}</p>
       <p className="text-xs font-semibold text-foreground truncate">{apt.client_name}</p>
-      {apt.status === 'confirmed' && height > 70 && (
-        <div className="absolute bottom-1 right-1 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-          <button className="w-5 h-5 rounded bg-green-500/30 flex items-center justify-center hover:bg-green-500/60"
-            onClick={e => { e.stopPropagation(); onStatusChange(apt.id, 'completed'); }}>
-            <Check className="w-3 h-3 text-green-300" />
-          </button>
-          <button className="w-5 h-5 rounded bg-red-500/30 flex items-center justify-center hover:bg-red-500/60"
-            onClick={e => { e.stopPropagation(); onStatusChange(apt.id, 'no_show'); }}>
-            <AlertTriangle className="w-3 h-3 text-red-300" />
-          </button>
-          <button className="w-5 h-5 rounded bg-secondary flex items-center justify-center hover:bg-secondary/80"
-            onClick={e => { e.stopPropagation(); onStatusChange(apt.id, 'cancelled'); }}>
-            <X className="w-3 h-3 text-muted-foreground" />
-          </button>
-        </div>
-      )}
     </div>
   );
 }
