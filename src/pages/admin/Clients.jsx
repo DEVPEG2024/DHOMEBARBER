@@ -41,12 +41,35 @@ export default function Clients() {
     queryFn: () => base44.entities.Employee.filter({ is_active: true }),
   });
 
+  const { data: registeredUsers = [] } = useQuery({
+    queryKey: ['registeredUsers'],
+    queryFn: () => base44.entities.User.list('-created_at', 1000),
+  });
+
   const clients = useMemo(() => {
     const map = {};
+
+    // D'abord, ajouter tous les utilisateurs inscrits
+    registeredUsers.forEach(user => {
+      if (!user.email) return;
+      map[user.email.toLowerCase()] = {
+        email: user.email,
+        name: user.full_name || user.email,
+        phone: user.phone || '',
+        visits: 0,
+        noShows: 0,
+        totalSpent: 0,
+        lastVisit: null,
+        registeredAt: user.created_at,
+      };
+    });
+
+    // Ensuite, enrichir/ajouter avec les données des rendez-vous
     appointments.forEach(apt => {
       if (!apt.client_email) return;
-      if (!map[apt.client_email]) {
-        map[apt.client_email] = {
+      const key = apt.client_email.toLowerCase();
+      if (!map[key]) {
+        map[key] = {
           email: apt.client_email,
           name: apt.client_name,
           phone: apt.client_phone,
@@ -56,7 +79,10 @@ export default function Clients() {
           lastVisit: null,
         };
       }
-      const c = map[apt.client_email];
+      const c = map[key];
+      // Mettre à jour le nom/téléphone depuis le RDV si manquant
+      if (!c.name || c.name === c.email) c.name = apt.client_name || c.name;
+      if (!c.phone) c.phone = apt.client_phone || '';
       if (apt.status === 'completed') {
         c.visits++;
         c.totalSpent += apt.total_price || 0;
@@ -64,8 +90,8 @@ export default function Clients() {
       if (apt.status === 'no_show') c.noShows++;
       if (!c.lastVisit || apt.date > c.lastVisit) c.lastVisit = apt.date;
     });
-    return Object.values(map).sort((a, b) => (b.lastVisit || '').localeCompare(a.lastVisit || ''));
-  }, [appointments]);
+    return Object.values(map).sort((a, b) => (b.lastVisit || b.registeredAt || '').localeCompare(a.lastVisit || a.registeredAt || ''));
+  }, [appointments, registeredUsers]);
 
   const filtered = clients.filter(c =>
     c.name?.toLowerCase().includes(search.toLowerCase()) ||
