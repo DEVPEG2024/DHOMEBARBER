@@ -89,6 +89,7 @@ export default function Login() {
           alt="D'Home Barber"
           className="w-64 h-64 object-contain mx-auto drop-shadow-2xl"
         />
+        <p className="text-sm font-light tracking-[0.3em] uppercase text-muted-foreground mt-1">Premium BarberShop</p>
       </motion.div>
 
       {/* Title */}
