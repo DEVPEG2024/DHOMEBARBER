@@ -8,10 +8,12 @@ import { format, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
 
 const statusConfig = {
-  pending: { label: 'En attente', bg: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' },
-  confirmed: { label: 'Confirmée', bg: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
-  completed: { label: 'Livrée', bg: 'bg-primary/10 text-primary border-primary/20' },
-  cancelled: { label: 'Annulée', bg: 'bg-red-500/10 text-red-400 border-red-500/20' },
+  pending:   { label: 'En attente',       bg: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' },
+  confirmed: { label: 'Confirmée',        bg: 'bg-blue-500/10 text-blue-400 border-blue-500/20' },
+  ready:     { label: 'Prête à retirer',  bg: 'bg-primary/10 text-primary border-primary/20' },
+  delivered: { label: 'Retirée',          bg: 'bg-green-500/10 text-green-400 border-green-500/20' },
+  completed: { label: 'Livrée',           bg: 'bg-green-500/10 text-green-400 border-green-500/20' },
+  cancelled: { label: 'Annulée',          bg: 'bg-red-500/10 text-red-400 border-red-500/20' },
 };
 
 export default function Orders() {
