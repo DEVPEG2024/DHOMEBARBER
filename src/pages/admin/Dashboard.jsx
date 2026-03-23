@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
@@ -10,11 +11,12 @@ import { format, subDays, startOfWeek, addDays } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 
-function StatCard({ title, value, subtitle, icon: Icon, trend, color = 'primary' }) {
+function StatCard({ title, value, subtitle, icon: Icon, trend, color = 'primary', onClick }) {
   const isUp = trend > 0;
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-      className="bg-card border border-border rounded-xl p-4">
+      onClick={onClick}
+      className={`bg-card border border-border rounded-xl p-4 ${onClick ? 'cursor-pointer hover:border-primary/30 active:scale-[0.98] transition-all' : ''}`}>
       <div className="flex items-start justify-between">
         <div className="flex-1 min-w-0">
           <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">{title}</p>
@@ -51,6 +53,7 @@ function MiniCard({ label, value, icon: Icon, color }) {
 }
 
 export default function AdminDashboard() {
+  const navigate = useNavigate();
   const today = format(new Date(), 'yyyy-MM-dd');
   const yesterday = format(subDays(new Date(), 1), 'yyyy-MM-dd');
   const monthPrefix = format(new Date(), 'yyyy-MM');
@@ -196,15 +199,17 @@ export default function AdminDashboard() {
         <StatCard
           title="CA Aujourd'hui"
           value={`${todayRevenue}€`}
-          subtitle={todayUnpaid > 0 ? `+ ${todayUnpaid}€ non encaissés` : `${paidToday.length} RDV encaissés`}
+          subtitle={todayUnpaid > 0 ? `+ ${todayUnpaid}€ non encaissés ▸` : `${paidToday.length} RDV encaissés`}
           icon={Euro}
           trend={revenueTrend}
+          onClick={todayUnpaid > 0 ? () => navigate('/admin/agenda') : undefined}
         />
         <StatCard
           title="RDV Aujourd'hui"
           value={todayAppts.length}
           subtitle={`${completedToday.length} terminés · ${confirmedToday.length} à venir`}
           icon={Calendar}
+          onClick={confirmedToday.length > 0 ? () => navigate('/admin/agenda') : undefined}
         />
         <StatCard
           title="CA du Mois"
@@ -423,7 +428,9 @@ export default function AdminDashboard() {
               .map(apt => {
                 const emp = employees.find(e => e.id === apt.employee_id);
                 return (
-                  <div key={apt.id} className="flex items-center gap-3 p-3 rounded-lg bg-secondary/50">
+                  <div key={apt.id}
+                    onClick={() => { if (apt.status === 'confirmed') navigate('/admin/agenda'); }}
+                    className={`flex items-center gap-3 p-3 rounded-lg bg-secondary/50 ${apt.status === 'confirmed' ? 'cursor-pointer hover:bg-secondary/80 active:scale-[0.99] transition-all' : ''}`}>
                     <div className="text-center min-w-[50px]">
                       <p className="text-sm font-bold text-primary">{apt.start_time}</p>
                       <p className="text-[10px] text-muted-foreground">{apt.end_time}</p>
@@ -443,7 +450,7 @@ export default function AdminDashboard() {
                         ) : apt.status === 'cancelled' ? (
                           <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
                         ) : (
-                          <Clock className="w-3.5 h-3.5 text-muted-foreground" />
+                          <Clock className="w-3.5 h-3.5 text-yellow-400" />
                         )}
                         <span className="text-[9px] text-muted-foreground">{emp?.name}</span>
                       </div>
