@@ -1,6 +1,6 @@
 import React, { useState, useReducer } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Clock, User, Phone, Mail, Scissors, CreditCard, FileText, Calendar, Banknote, CheckCircle, Heart, ShoppingBag, ChevronDown, Check, BadgeCheck } from 'lucide-react';
+import { Clock, User, Phone, Mail, Scissors, CreditCard, FileText, Calendar, Banknote, CheckCircle, Heart, ShoppingBag, ChevronDown, Check, BadgeCheck, X, AlertTriangle } from 'lucide-react';
 import { getServiceColor } from '@/utils/serviceColors';
 import { base44 } from '@/api/base44Client';
 import { useQuery } from '@tanstack/react-query';
@@ -325,6 +325,50 @@ function ModalInner({ appointment, onUpdate }) {
               <Check className="w-4 h-4" />
               {state.saving ? 'Validation...' : 'Valider la prestation'}
             </button>
+          )}
+
+          {/* Cancel / No-show buttons */}
+          {appointment.status !== 'cancelled' && appointment.status !== 'no_show' && (
+            <div className="flex gap-2">
+              <button
+                onClick={async () => {
+                  dispatch({ type: 'SAVING', value: true });
+                  try {
+                    await base44.entities.Appointment.update(appointment.id, { status: 'cancelled' });
+                    toast.success('Rendez-vous annulé');
+                    onUpdate?.();
+                  } catch (e) {
+                    toast.error('Erreur');
+                  } finally {
+                    dispatch({ type: 'SAVING', value: false });
+                  }
+                }}
+                disabled={state.saving}
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-medium bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 transition-all disabled:opacity-60"
+              >
+                <X className="w-3.5 h-3.5" />
+                Annuler
+              </button>
+              <button
+                onClick={async () => {
+                  dispatch({ type: 'SAVING', value: true });
+                  try {
+                    await base44.entities.Appointment.update(appointment.id, { status: 'no_show' });
+                    toast.success('Marqué absent');
+                    onUpdate?.();
+                  } catch (e) {
+                    toast.error('Erreur');
+                  } finally {
+                    dispatch({ type: 'SAVING', value: false });
+                  }
+                }}
+                disabled={state.saving}
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-medium bg-yellow-500/10 border border-yellow-500/20 text-yellow-400 hover:bg-yellow-500/20 transition-all disabled:opacity-60"
+              >
+                <AlertTriangle className="w-3.5 h-3.5" />
+                Absent
+              </button>
+            </div>
           )}
         </>
       )}
