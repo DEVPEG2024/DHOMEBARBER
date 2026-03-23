@@ -10,7 +10,8 @@ import { toast } from 'sonner';
 
 function SkillSlider({ category, value, onChange }) {
   const level = value || 0;
-  const labels = ['', 'Débutant', 'Intermédiaire', 'Avancé', 'Expert', 'Maître'];
+  const labels = ['Non évalué', 'Débutant', 'Intermédiaire', 'Avancé', 'Expert', 'Maître'];
+  const greens = ['#22c55e30', '#22c55e50', '#22c55e80', '#22c55ecc', '#22c55e'];
 
   return (
     <motion.div
@@ -18,54 +19,53 @@ function SkillSlider({ category, value, onChange }) {
       animate={{ opacity: 1, x: 0 }}
       className="group"
     >
-      <div className="flex items-center gap-3 mb-2">
+      <div className="flex items-center gap-3 mb-2.5">
         <div
-          className="w-10 h-10 rounded-xl flex items-center justify-center text-lg shadow-lg transition-transform group-hover:scale-110"
-          style={{ backgroundColor: category.color + '20', boxShadow: `0 4px 12px ${category.color}30` }}
+          className="w-10 h-10 rounded-xl flex items-center justify-center text-lg transition-transform group-hover:scale-110"
+          style={{ backgroundColor: category.color + '20', boxShadow: `0 4px 12px ${category.color}25` }}
         >
           {category.emoji}
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-foreground">{category.name}</p>
-          <p className="text-[11px] font-medium transition-colors" style={{ color: level > 0 ? category.color : 'var(--muted-foreground)' }}>
-            {labels[level] || 'Non évalué'}
+          <p className="text-[11px] font-medium" style={{ color: level > 0 ? '#22c55e' : 'var(--muted-foreground)' }}>
+            {labels[level]}
           </p>
         </div>
-        <span className="text-lg font-bold tabular-nums" style={{ color: level > 0 ? category.color : 'var(--muted-foreground)' }}>
-          {level > 0 ? `${level}/5` : '—'}
-        </span>
+        <motion.span
+          key={level}
+          initial={{ scale: 1.3 }}
+          animate={{ scale: 1 }}
+          className="text-lg font-bold tabular-nums"
+          style={{ color: level > 0 ? '#22c55e' : 'var(--muted-foreground)' }}
+        >
+          {level}/5
+        </motion.span>
       </div>
 
-      {/* Gauge */}
+      {/* Green gauge segments */}
       <div className="flex gap-1.5 ml-[52px]">
         {[1, 2, 3, 4, 5].map((n) => (
-          <button
+          <motion.button
             key={n}
             onClick={() => onChange(level === n ? 0 : n)}
-            className="relative flex-1 h-3 rounded-full overflow-hidden transition-all duration-200"
-            style={{ backgroundColor: 'var(--secondary)' }}
+            whileTap={{ scale: 0.9 }}
+            className="relative flex-1 h-4 rounded-full cursor-pointer overflow-hidden border"
+            style={{
+              backgroundColor: n <= level ? greens[n - 1] : 'var(--secondary)',
+              borderColor: n <= level ? '#22c55e40' : 'transparent',
+              boxShadow: n <= level ? `0 0 8px #22c55e30` : 'none',
+            }}
           >
-            <motion.div
-              initial={false}
-              animate={{
-                width: n <= level ? '100%' : '0%',
-                opacity: n <= level ? 1 : 0,
-              }}
-              transition={{ duration: 0.3, ease: 'easeOut' }}
-              className="absolute inset-y-0 left-0 rounded-full"
-              style={{ backgroundColor: category.color }}
-            />
-            <motion.div
-              initial={false}
-              animate={{ scale: n <= level ? [1, 1.4, 1] : 1 }}
-              transition={{ duration: 0.3 }}
-              className="absolute inset-0 rounded-full"
-              style={{
-                backgroundColor: n <= level ? category.color : 'transparent',
-                boxShadow: n <= level ? `0 0 8px ${category.color}60` : 'none',
-              }}
-            />
-          </button>
+            {n <= level && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.5 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="absolute inset-0 rounded-full"
+                style={{ backgroundColor: greens[n - 1] }}
+              />
+            )}
+          </motion.button>
         ))}
       </div>
     </motion.div>
