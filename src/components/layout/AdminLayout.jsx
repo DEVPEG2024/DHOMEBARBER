@@ -38,11 +38,11 @@ export default function AdminLayout() {
     if (!user || user.role === 'admin') {
       return allSidebarItems.filter(item => !item.barberOnly);
     }
-    // Barber sees only permitted pages + barberOnly items
+    // Barber sees: alwaysShow items + barberOnly items + permitted items
     const perms = user.permissions || [];
     return allSidebarItems.filter(item => {
       if (item.adminOnly) return false;
-      if (item.alwaysShow) return true;
+      if (item.alwaysShow || item.barberOnly) return true;
       return perms.includes(item.perm);
     });
   }, [user]);
