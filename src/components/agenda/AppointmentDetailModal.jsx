@@ -1,6 +1,6 @@
 import React, { useState, useReducer } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Clock, User, Phone, Mail, Scissors, CreditCard, FileText, Calendar, Banknote, CheckCircle, Heart, ShoppingBag, ChevronDown, Check } from 'lucide-react';
+import { Clock, User, Phone, Mail, Scissors, CreditCard, FileText, Calendar, Banknote, CheckCircle, Heart, ShoppingBag, ChevronDown, Check, BadgeCheck } from 'lucide-react';
 import { getServiceColor } from '@/utils/serviceColors';
 import { base44 } from '@/api/base44Client';
 import { useQuery } from '@tanstack/react-query';
@@ -43,11 +43,12 @@ function ModalInner({ appointment, onUpdate }) {
   });
 
   const status = statusLabel[appointment.status] || statusLabel.confirmed;
-  const tipValue = parseFloat(state.tip) || 0;
-  const prodValue = parseFloat(state.productPrice) || 0;
+  const isCompleted = appointment.status === 'completed';
+  const tipValue = isCompleted ? (appointment.tip || 0) : (parseFloat(state.tip) || 0);
+  const prodValue = isCompleted ? (appointment.product_price || 0) : (parseFloat(state.productPrice) || 0);
   const serviceTotal = appointment.total_price || 0;
-  const grandTotal = serviceTotal + tipValue + prodValue;
-  const canValidate = state.paymentMethod && (tipValue === 0 || state.tipMethod);
+  const grandTotal = isCompleted ? (appointment.grand_total || serviceTotal + tipValue + prodValue) : (serviceTotal + tipValue + prodValue);
+  const canValidate = !isCompleted && state.paymentMethod && (tipValue === 0 || state.tipMethod);
 
   const handleValidate = async () => {
     dispatch({ type: 'SAVING', value: true });
@@ -133,156 +134,199 @@ function ModalInner({ appointment, onUpdate }) {
         </div>
       )}
 
-      {/* Tip */}
-      <div className="space-y-2">
-        <label className="text-xs text-muted-foreground flex items-center gap-1.5">
-          <Heart className="w-3 h-3 text-pink-400" />
-          Pourboire
-        </label>
-        <div className="flex items-center gap-2">
-          <div className="relative flex-1">
-            <input
-              type="text"
-              inputMode="decimal"
-              placeholder="0"
-              value={state.tip}
-              onChange={(e) => dispatch({ type: 'SET', field: 'tip', value: e.target.value })}
-              className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-primary/40"
-            />
-            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">€</span>
+      {isCompleted ? (
+        <>
+          {/* Completed banner */}
+          <div className="flex items-center gap-2 bg-green-500/10 border border-green-500/20 rounded-xl px-4 py-3">
+            <BadgeCheck className="w-5 h-5 text-green-400" />
+            <span className="text-sm font-semibold text-green-400">Prestation effectuée</span>
           </div>
-          <button
-            onClick={() => dispatch({ type: 'SET', field: 'tipMethod', value: 'cb' })}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all ${
-              state.tipMethod === 'cb'
-                ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20'
-                : 'bg-white/5 border border-white/10 text-muted-foreground hover:bg-white/10'
-            }`}
-          >
-            <CreditCard className="w-3 h-3" />
-            CB
-          </button>
-          <button
-            onClick={() => dispatch({ type: 'SET', field: 'tipMethod', value: 'especes' })}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all ${
-              state.tipMethod === 'especes'
-                ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20'
-                : 'bg-white/5 border border-white/10 text-muted-foreground hover:bg-white/10'
-            }`}
-          >
-            <Banknote className="w-3 h-3" />
-            Espèces
-          </button>
-        </div>
-      </div>
 
-      {/* Product */}
-      <div className="space-y-2">
-        <label className="text-xs text-muted-foreground flex items-center gap-1.5">
-          <ShoppingBag className="w-3 h-3 text-blue-400" />
-          Produit vendu
-        </label>
-        <div className="relative">
-          <select
-            value={state.selectedProductId}
-            onChange={(e) => {
-              const id = e.target.value;
-              if (id) {
-                const product = products.find(p => String(p.id) === String(id));
-                if (product) {
-                  dispatch({ type: 'SET_PRODUCT', id, name: product.name, price: String(product.price) });
-                }
-              } else {
-                dispatch({ type: 'CLEAR_PRODUCT' });
-              }
-            }}
-            className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 pr-8 text-sm text-foreground appearance-none focus:outline-none focus:border-primary/40"
-          >
-            <option value="" className="bg-card">{state.productSold || 'Sélectionner un produit...'}</option>
-            {products.map(p => (
-              <option key={p.id} value={p.id} className="bg-card">
-                {p.name} — {p.price}€
-              </option>
-            ))}
-          </select>
-          <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
-        </div>
-        {prodValue > 0 && (
-          <div className="flex items-center justify-between text-xs text-blue-400 px-1">
-            <span>{state.productSold}</span>
-            <span>{prodValue}€</span>
-          </div>
-        )}
-      </div>
-
-      {/* Total + payment */}
-      <div className="bg-primary/10 rounded-xl px-4 py-3 space-y-3">
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>Prestations</span>
-            <span>{serviceTotal}€</span>
-          </div>
-          {tipValue > 0 && (
-            <div className="flex items-center justify-between text-xs text-pink-400">
-              <span>Pourboire {state.tipMethod === 'cb' ? '(CB)' : state.tipMethod === 'especes' ? '(Espèces)' : ''}</span>
-              <span>+{tipValue}€</span>
+          {/* Read-only summary */}
+          <div className="bg-primary/10 rounded-xl px-4 py-3 space-y-1.5">
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>Prestations</span>
+              <span>{serviceTotal}€</span>
             </div>
-          )}
-          {prodValue > 0 && (
-            <div className="flex items-center justify-between text-xs text-blue-400">
-              <span>Produit{state.productSold ? ` (${state.productSold})` : ''}</span>
-              <span>+{prodValue}€</span>
+            {tipValue > 0 && (
+              <div className="flex items-center justify-between text-xs text-pink-400">
+                <span>Pourboire {appointment.tip_method === 'cb' ? '(CB)' : appointment.tip_method === 'especes' ? '(Espèces)' : ''}</span>
+                <span>+{tipValue}€</span>
+              </div>
+            )}
+            {prodValue > 0 && (
+              <div className="flex items-center justify-between text-xs text-blue-400">
+                <span>Produit{appointment.product_sold ? ` (${appointment.product_sold})` : ''}</span>
+                <span>+{prodValue}€</span>
+              </div>
+            )}
+            <div className="flex items-center justify-between pt-2 border-t border-white/10">
+              <span className="text-sm font-semibold text-foreground">Commande totale</span>
+              <span className="text-lg font-bold text-primary">{grandTotal}€</span>
             </div>
+            <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+              <span>{appointment.total_duration} min</span>
+              <span className="flex items-center gap-1">
+                {appointment.payment_method === 'cb' ? <CreditCard className="w-3 h-3" /> : <Banknote className="w-3 h-3" />}
+                {appointment.payment_method === 'cb' ? 'CB' : 'Espèces'}
+              </span>
+            </div>
+          </div>
+        </>
+      ) : (
+        <>
+          {/* Tip */}
+          <div className="space-y-2">
+            <label className="text-xs text-muted-foreground flex items-center gap-1.5">
+              <Heart className="w-3 h-3 text-pink-400" />
+              Pourboire
+            </label>
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="0"
+                  value={state.tip}
+                  onChange={(e) => dispatch({ type: 'SET', field: 'tip', value: e.target.value })}
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-primary/40"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">€</span>
+              </div>
+              <button
+                onClick={() => dispatch({ type: 'SET', field: 'tipMethod', value: 'cb' })}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all ${
+                  state.tipMethod === 'cb'
+                    ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20'
+                    : 'bg-white/5 border border-white/10 text-muted-foreground hover:bg-white/10'
+                }`}
+              >
+                <CreditCard className="w-3 h-3" />
+                CB
+              </button>
+              <button
+                onClick={() => dispatch({ type: 'SET', field: 'tipMethod', value: 'especes' })}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all ${
+                  state.tipMethod === 'especes'
+                    ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20'
+                    : 'bg-white/5 border border-white/10 text-muted-foreground hover:bg-white/10'
+                }`}
+              >
+                <Banknote className="w-3 h-3" />
+                Espèces
+              </button>
+            </div>
+          </div>
+
+          {/* Product */}
+          <div className="space-y-2">
+            <label className="text-xs text-muted-foreground flex items-center gap-1.5">
+              <ShoppingBag className="w-3 h-3 text-blue-400" />
+              Produit vendu
+            </label>
+            <div className="relative">
+              <select
+                value={state.selectedProductId}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  if (id) {
+                    const product = products.find(p => String(p.id) === String(id));
+                    if (product) {
+                      dispatch({ type: 'SET_PRODUCT', id, name: product.name, price: String(product.price) });
+                    }
+                  } else {
+                    dispatch({ type: 'CLEAR_PRODUCT' });
+                  }
+                }}
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 pr-8 text-sm text-foreground appearance-none focus:outline-none focus:border-primary/40"
+              >
+                <option value="" className="bg-card">{state.productSold || 'Sélectionner un produit...'}</option>
+                {products.map(p => (
+                  <option key={p.id} value={p.id} className="bg-card">
+                    {p.name} — {p.price}€
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+            </div>
+            {prodValue > 0 && (
+              <div className="flex items-center justify-between text-xs text-blue-400 px-1">
+                <span>{state.productSold}</span>
+                <span>{prodValue}€</span>
+              </div>
+            )}
+          </div>
+
+          {/* Total + payment */}
+          <div className="bg-primary/10 rounded-xl px-4 py-3 space-y-3">
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>Prestations</span>
+                <span>{serviceTotal}€</span>
+              </div>
+              {tipValue > 0 && (
+                <div className="flex items-center justify-between text-xs text-pink-400">
+                  <span>Pourboire {state.tipMethod === 'cb' ? '(CB)' : state.tipMethod === 'especes' ? '(Espèces)' : ''}</span>
+                  <span>+{tipValue}€</span>
+                </div>
+              )}
+              {prodValue > 0 && (
+                <div className="flex items-center justify-between text-xs text-blue-400">
+                  <span>Produit{state.productSold ? ` (${state.productSold})` : ''}</span>
+                  <span>+{prodValue}€</span>
+                </div>
+              )}
+              <div className="flex items-center justify-between pt-2 border-t border-white/10">
+                <span className="text-sm font-semibold text-foreground">Commande totale</span>
+                <span className="text-lg font-bold text-primary">{grandTotal}€</span>
+              </div>
+              <p className="text-[10px] text-muted-foreground text-right">{appointment.total_duration} min</p>
+            </div>
+
+            {/* Payment method selector */}
+            <div>
+              <p className="text-xs text-muted-foreground mb-2">Mode de paiement</p>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => dispatch({ type: 'SET', field: 'paymentMethod', value: 'cb' })}
+                  className={`flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 ${
+                    state.paymentMethod === 'cb'
+                      ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/25'
+                      : 'bg-white/5 border border-white/10 text-foreground hover:bg-white/10'
+                  }`}
+                >
+                  <CreditCard className="w-4 h-4" />
+                  CB
+                  {state.paymentMethod === 'cb' && <CheckCircle className="w-3.5 h-3.5" />}
+                </button>
+                <button
+                  onClick={() => dispatch({ type: 'SET', field: 'paymentMethod', value: 'especes' })}
+                  className={`flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 ${
+                    state.paymentMethod === 'especes'
+                      ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/25'
+                      : 'bg-white/5 border border-white/10 text-foreground hover:bg-white/10'
+                  }`}
+                >
+                  <Banknote className="w-4 h-4" />
+                  Espèces
+                  {state.paymentMethod === 'especes' && <CheckCircle className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Validate button */}
+          {canValidate && (
+            <button
+              onClick={handleValidate}
+              disabled={state.saving}
+              className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-green-500 text-white font-semibold text-sm shadow-lg shadow-green-500/25 hover:bg-green-600 transition-all disabled:opacity-60"
+            >
+              <Check className="w-4 h-4" />
+              {state.saving ? 'Validation...' : 'Valider la prestation'}
+            </button>
           )}
-          <div className="flex items-center justify-between pt-2 border-t border-white/10">
-            <span className="text-sm font-semibold text-foreground">Commande totale</span>
-            <span className="text-lg font-bold text-primary">{grandTotal}€</span>
-          </div>
-          <p className="text-[10px] text-muted-foreground text-right">{appointment.total_duration} min</p>
-        </div>
-
-        {/* Payment method selector */}
-        <div>
-          <p className="text-xs text-muted-foreground mb-2">Mode de paiement</p>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              onClick={() => dispatch({ type: 'SET', field: 'paymentMethod', value: 'cb' })}
-              className={`flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 ${
-                state.paymentMethod === 'cb'
-                  ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/25'
-                  : 'bg-white/5 border border-white/10 text-foreground hover:bg-white/10'
-              }`}
-            >
-              <CreditCard className="w-4 h-4" />
-              CB
-              {state.paymentMethod === 'cb' && <CheckCircle className="w-3.5 h-3.5" />}
-            </button>
-            <button
-              onClick={() => dispatch({ type: 'SET', field: 'paymentMethod', value: 'especes' })}
-              className={`flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 ${
-                state.paymentMethod === 'especes'
-                  ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/25'
-                  : 'bg-white/5 border border-white/10 text-foreground hover:bg-white/10'
-              }`}
-            >
-              <Banknote className="w-4 h-4" />
-              Espèces
-              {state.paymentMethod === 'especes' && <CheckCircle className="w-3.5 h-3.5" />}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Validate button */}
-      {canValidate && (
-        <button
-          onClick={handleValidate}
-          disabled={state.saving}
-          className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-green-500 text-white font-semibold text-sm shadow-lg shadow-green-500/25 hover:bg-green-600 transition-all disabled:opacity-60"
-        >
-          <Check className="w-4 h-4" />
-          {state.saving ? 'Validation...' : 'Valider la prestation'}
-        </button>
+        </>
       )}
 
       {/* Notes */}
