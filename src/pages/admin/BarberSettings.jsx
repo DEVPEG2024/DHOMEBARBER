@@ -11,18 +11,17 @@ import { toast } from 'sonner';
 function SkillSlider({ category, value, onChange }) {
   const level = value || 0;
   const labels = ['Non évalué', 'Débutant', 'Intermédiaire', 'Avancé', 'Expert', 'Maître'];
-  const greens = ['#22c55e30', '#22c55e50', '#22c55e80', '#22c55ecc', '#22c55e'];
 
   return (
     <motion.div
       initial={{ opacity: 0, x: -10 }}
       animate={{ opacity: 1, x: 0 }}
-      className="group"
+      className="rounded-xl border border-border bg-secondary/30 p-4"
     >
-      <div className="flex items-center gap-3 mb-2.5">
+      <div className="flex items-center gap-3 mb-3">
         <div
-          className="w-10 h-10 rounded-xl flex items-center justify-center text-lg transition-transform group-hover:scale-110"
-          style={{ backgroundColor: category.color + '20', boxShadow: `0 4px 12px ${category.color}25` }}
+          className="w-10 h-10 rounded-xl flex items-center justify-center text-lg"
+          style={{ backgroundColor: category.color + '20' }}
         >
           {category.emoji}
         </div>
@@ -43,30 +42,34 @@ function SkillSlider({ category, value, onChange }) {
         </motion.span>
       </div>
 
-      {/* Green gauge segments */}
-      <div className="flex gap-1.5 ml-[52px]">
-        {[1, 2, 3, 4, 5].map((n) => (
-          <motion.button
-            key={n}
-            onClick={() => onChange(level === n ? 0 : n)}
-            whileTap={{ scale: 0.9 }}
-            className="relative flex-1 h-4 rounded-full cursor-pointer overflow-hidden border"
-            style={{
-              backgroundColor: n <= level ? greens[n - 1] : 'var(--secondary)',
-              borderColor: n <= level ? '#22c55e40' : 'transparent',
-              boxShadow: n <= level ? `0 0 8px #22c55e30` : 'none',
-            }}
-          >
-            {n <= level && (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.5 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="absolute inset-0 rounded-full"
-                style={{ backgroundColor: greens[n - 1] }}
-              />
-            )}
-          </motion.button>
-        ))}
+      {/* Green gauge - 5 clickable segments */}
+      <div className="flex gap-2">
+        {[1, 2, 3, 4, 5].map((n) => {
+          const active = n <= level;
+          return (
+            <motion.button
+              key={n}
+              type="button"
+              onClick={() => onChange(level === n ? 0 : n)}
+              whileTap={{ scale: 0.85 }}
+              whileHover={{ scale: 1.05 }}
+              className="flex-1 h-6 rounded-lg cursor-pointer transition-all duration-300"
+              style={{
+                backgroundColor: active ? '#22c55e' : '#27272a',
+                border: active ? '2px solid #22c55e' : '2px solid #3f3f46',
+                opacity: active ? 0.4 + (n * 0.15) : 1,
+                boxShadow: active ? '0 0 12px rgba(34, 197, 94, 0.4)' : 'none',
+              }}
+            />
+          );
+        })}
+      </div>
+      <div className="flex justify-between mt-1.5 px-1">
+        <span className="text-[9px] text-muted-foreground">1</span>
+        <span className="text-[9px] text-muted-foreground">2</span>
+        <span className="text-[9px] text-muted-foreground">3</span>
+        <span className="text-[9px] text-muted-foreground">4</span>
+        <span className="text-[9px] text-muted-foreground">5</span>
       </div>
     </motion.div>
   );
