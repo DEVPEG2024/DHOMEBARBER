@@ -1,13 +1,26 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { base44 } from '@/api/base44Client';
 import { useQuery } from '@tanstack/react-query';
-import { Send, Users, User, Bell, CheckCircle } from 'lucide-react';
+import { Send, Users, User, Bell, CheckCircle, Smartphone } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
+
+const API_BASE = import.meta.env.PROD
+  ? 'https://dhomebarber-api-3aabb8313cb6.herokuapp.com'
+  : '';
+
+function getAppId() {
+  return localStorage.getItem('base44_app_id') || import.meta.env.VITE_BASE44_APP_ID || 'dhomebarber';
+}
+
+function getAuthHeaders() {
+  const token = localStorage.getItem('base44_access_token') || localStorage.getItem('token');
+  return token ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
+}
 
 export default function Notifications() {
   const [target, setTarget] = useState('all');
@@ -16,6 +29,8 @@ export default function Notifications() {
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState([]);
+  const [pushSubCount, setPushSubCount] = useState(0);
+  const [pushSubscribers, setPushSubscribers] = useState([]);
 
   const { data: appointments = [] } = useQuery({
     queryKey: ['appointments'],
@@ -33,11 +48,22 @@ export default function Notifications() {
     return Object.values(map);
   }, [appointments]);
 
+  // Fetch push subscriber count
+  useEffect(() => {
+    fetch(`${API_BASE}/api/apps/${getAppId()}/push/subscribers`, { headers: getAuthHeaders() })
+      .then(r => r.json())
+      .then(data => {
+        setPushSubCount(data.count || 0);
+        setPushSubscribers(data.subscribers || []);
+      })
+      .catch(() => {});
+  }, [sent]);
+
   const templates = [
-    { label: 'Rappel RDV', subject: 'Rappel de votre rendez-vous demain', body: 'Bonjour,\n\nNous vous rappelons votre rendez-vous demain. À très bientôt chez D\'Home Barber !' },
-    { label: 'Promotion', subject: '🎉 Offre spéciale cette semaine', body: 'Bonjour,\n\nProfitez de -20% sur toutes nos prestations cette semaine uniquement. Réservez vite !' },
-    { label: 'Fermeture exceptionnelle', subject: 'Fermeture exceptionnelle', body: 'Bonjour,\n\nNous vous informons que le salon sera fermé exceptionnellement. Nous vous remercions de votre compréhension.' },
-    { label: 'Nouveauté', subject: 'Découvrez nos nouvelles prestations', body: 'Bonjour,\n\nNous avons le plaisir de vous présenter nos nouvelles prestations. Venez les découvrir !' },
+    { label: 'Rappel RDV', subject: 'Rappel de votre rendez-vous demain', body: "Nous vous rappelons votre rendez-vous demain. À très bientôt chez D'Home Barber !" },
+    { label: 'Promotion', subject: 'Offre spéciale cette semaine', body: 'Profitez de -20% sur toutes nos prestations cette semaine uniquement. Réservez vite !' },
+    { label: 'Fermeture', subject: 'Fermeture exceptionnelle', body: 'Le salon sera fermé exceptionnellement. Nous vous remercions de votre compréhension.' },
+    { label: 'Nouveauté', subject: 'Nouvelles prestations', body: 'Nous avons le plaisir de vous présenter nos nouvelles prestations. Venez les découvrir !' },
   ];
 
   const handleSend = async () => {
@@ -47,22 +73,45 @@ export default function Notifications() {
     }
     setSending(true);
     try {
+      // Send push notification
+      const pushRes = await fetch(`${API_BASE}/api/apps/${getAppId()}/push/send`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          title: subject,
+          body: message,
+          target_email: target === 'one' ? clientEmail : undefined,
+        }),
+      });
+      const pushResult = await pushRes.json();
+
+      // Also send email
       const targets = target === 'all' ? clients : clients.filter(c => c.email === clientEmail);
-      let count = 0;
+      let emailCount = 0;
       for (const client of targets) {
-        await base44.integrations.Core.SendEmail({
-          to: client.email,
-          subject,
-          body: `Bonjour ${client.name || ''},\n\n${message}\n\n— L'équipe D'Home Barber`,
-        });
-        count++;
+        try {
+          await base44.integrations.Core.SendEmail({
+            to: client.email,
+            subject,
+            body: `Bonjour ${client.name || ''},\n\n${message}\n\n— L'équipe D'Home Barber`,
+          });
+          emailCount++;
+        } catch {
+          // Email send failed for this client, continue
+        }
       }
-      setSent(prev => [...prev, { subject, count, date: new Date().toLocaleTimeString('fr-FR') }]);
-      toast.success(`Notification envoyée à ${count} client(s)`);
+
+      setSent(prev => [...prev, {
+        subject,
+        pushSent: pushResult.sent || 0,
+        emailSent: emailCount,
+        date: new Date().toLocaleTimeString('fr-FR'),
+      }]);
+      toast.success(`Push: ${pushResult.sent || 0} appareil(s) · Email: ${emailCount} client(s)`);
       setSubject('');
       setMessage('');
-    } catch (e) {
-      toast.error('Erreur lors de l\'envoi');
+    } catch {
+      toast.error("Erreur lors de l'envoi");
     }
     setSending(false);
   };
@@ -70,7 +119,7 @@ export default function Notifications() {
   return (
     <div>
       <div className="mb-6">
-        <p className="text-[10px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Communication</p>
+        <p className="text-[11px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Communication</p>
         <h1 className="font-display text-2xl font-bold">Notifications Clients</h1>
       </div>
 
@@ -130,9 +179,9 @@ export default function Notifications() {
               )}
 
               <div>
-                <Label className="text-xs">Objet</Label>
+                <Label className="text-xs">Titre / Objet</Label>
                 <Input value={subject} onChange={e => setSubject(e.target.value)}
-                  placeholder="Objet du message..." className="bg-secondary border-border mt-1" />
+                  placeholder="Titre de la notification..." className="bg-secondary border-border mt-1" />
               </div>
 
               <div>
@@ -141,25 +190,52 @@ export default function Notifications() {
                   placeholder="Votre message..." className="bg-secondary border-border mt-1 resize-none" rows={5} />
               </div>
 
+              <div className="bg-secondary/50 rounded-lg p-3 text-xs text-muted-foreground">
+                <p className="font-medium text-foreground mb-1">Canaux d'envoi :</p>
+                <p>• <strong>Push</strong> — notification sur le téléphone ({pushSubCount} abonné{pushSubCount > 1 ? 's' : ''})</p>
+                <p>• <strong>Email</strong> — envoi par email ({target === 'all' ? clients.length : 1} destinataire{target === 'all' && clients.length > 1 ? 's' : ''})</p>
+              </div>
+
               <Button onClick={handleSend} disabled={sending || !subject || !message}
                 className="w-full bg-primary text-primary-foreground hover:bg-primary/90">
                 <Send className="w-4 h-4 mr-2" />
-                {sending ? 'Envoi en cours...' : `Envoyer à ${target === 'all' ? `tous (${clients.length})` : '1 client'}`}
+                {sending ? 'Envoi en cours...' : 'Envoyer (Push + Email)'}
               </Button>
             </div>
           </div>
         </div>
 
-        {/* History & Stats */}
+        {/* Sidebar */}
         <div className="space-y-4">
+          {/* Push subscribers */}
           <div className="bg-card border border-border rounded-xl p-4">
             <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
-              <Bell className="w-4 h-4 text-primary" /> Clients enregistrés
+              <Smartphone className="w-4 h-4 text-primary" /> Abonnés Push
+            </h3>
+            <p className="text-3xl font-bold text-primary">{pushSubCount}</p>
+            <p className="text-xs text-muted-foreground mt-1">appareil(s) avec notifications activées</p>
+            {pushSubscribers.length > 0 && (
+              <div className="mt-3 space-y-1">
+                {pushSubscribers.map(s => (
+                  <div key={s.user_email} className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground truncate">{s.user_email}</span>
+                    <span className="text-foreground font-medium">{s.devices} app.</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Email clients */}
+          <div className="bg-card border border-border rounded-xl p-4">
+            <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+              <Bell className="w-4 h-4 text-primary" /> Clients email
             </h3>
             <p className="text-3xl font-bold text-primary">{clients.length}</p>
             <p className="text-xs text-muted-foreground mt-1">clients dans la base</p>
           </div>
 
+          {/* Recent sends */}
           <div className="bg-card border border-border rounded-xl p-4">
             <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
               <CheckCircle className="w-4 h-4 text-accent" /> Envois récents
@@ -171,28 +247,13 @@ export default function Notifications() {
                 {sent.slice(-5).reverse().map((s, i) => (
                   <div key={i} className="text-xs border border-border rounded-lg p-2">
                     <p className="font-medium truncate">{s.subject}</p>
-                    <p className="text-muted-foreground">{s.count} destinataire(s) · {s.date}</p>
+                    <p className="text-muted-foreground">
+                      Push: {s.pushSent} · Email: {s.emailSent} · {s.date}
+                    </p>
                   </div>
                 ))}
               </div>
             )}
-          </div>
-
-          <div className="bg-card border border-border rounded-xl p-4">
-            <h3 className="text-sm font-semibold mb-3">Liste des clients</h3>
-            <div className="space-y-1.5 max-h-48 overflow-y-auto">
-              {clients.slice(0, 20).map(c => (
-                <div key={c.email} className="flex items-center gap-2 text-xs">
-                  <div className="w-6 h-6 rounded-full bg-secondary flex items-center justify-center text-[10px] font-bold text-primary">
-                    {c.name?.charAt(0) || '?'}
-                  </div>
-                  <div className="min-w-0">
-                    <p className="font-medium truncate">{c.name}</p>
-                    <p className="text-muted-foreground truncate">{c.email}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
           </div>
         </div>
       </div>
