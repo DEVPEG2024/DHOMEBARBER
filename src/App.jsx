@@ -78,7 +78,7 @@ function RequireAdmin() {
 
 // Redirect to home if already authenticated
 function GuestOnly() {
-  const { isAuthenticated, isLoadingAuth } = useAuth();
+  const { user, isAuthenticated, isLoadingAuth } = useAuth();
 
   if (isLoadingAuth) {
     return (
@@ -89,7 +89,7 @@ function GuestOnly() {
   }
 
   if (isAuthenticated) {
-    return <Navigate to="/" replace />;
+    return <Navigate to={user?.role === 'admin' ? '/admin' : '/'} replace />;
   }
 
   return <Outlet />;
@@ -116,17 +116,13 @@ const AppRoutes = () => {
         <Route path="/login" element={<Login />} />
       </Route>
 
-      {/* Public client routes */}
-      <Route element={<ClientLayout />}>
-        <Route path="/" element={<Home />} />
-        <Route path="/services" element={<Services />} />
-        <Route path="/booking" element={<Booking />} />
-        <Route path="/shop" element={<Shop />} />
-      </Route>
-
-      {/* Auth-required client routes */}
+      {/* All client routes require auth */}
       <Route element={<RequireAuth />}>
         <Route element={<ClientLayout />}>
+          <Route path="/" element={<Home />} />
+          <Route path="/services" element={<Services />} />
+          <Route path="/booking" element={<Booking />} />
+          <Route path="/shop" element={<Shop />} />
           <Route path="/appointments" element={<Appointments />} />
           <Route path="/profile" element={<Profile />} />
         </Route>
