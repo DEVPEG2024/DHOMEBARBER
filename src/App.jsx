@@ -36,6 +36,7 @@ import Stats from '@/pages/admin/Stats';
 import AdminSettings from '@/pages/admin/AdminSettings';
 import Notifications from '@/pages/admin/Notifications';
 import SmartAgenda from '@/pages/admin/SmartAgenda';
+import BarberAccounts from '@/pages/admin/BarberAccounts';
 
 // Route guard: requires authentication
 function RequireAuth() {
@@ -57,7 +58,7 @@ function RequireAuth() {
   return <Outlet />;
 }
 
-// Route guard: requires admin role
+// Route guard: requires admin or barber role
 function RequireAdmin() {
   const { user, isAuthenticated, isLoadingAuth } = useAuth();
   const location = useLocation();
@@ -74,7 +75,7 @@ function RequireAdmin() {
     return <Navigate to={`/login?redirect=${encodeURIComponent(location.pathname)}`} replace />;
   }
 
-  if (user?.role !== 'admin') {
+  if (user?.role !== 'admin' && user?.role !== 'barber') {
     return <Navigate to="/" replace />;
   }
 
@@ -94,7 +95,7 @@ function GuestOnly() {
   }
 
   if (isAuthenticated) {
-    return <Navigate to={user?.role === 'admin' ? '/admin' : '/'} replace />;
+    return <Navigate to={(user?.role === 'admin' || user?.role === 'barber') ? '/admin' : '/'} replace />;
   }
 
   return <Outlet />;
@@ -152,6 +153,7 @@ const AppRoutes = () => {
           <Route path="/admin/settings" element={<AdminSettings />} />
           <Route path="/admin/notifications" element={<Notifications />} />
           <Route path="/admin/smart-agenda" element={<SmartAgenda />} />
+          <Route path="/admin/barber-accounts" element={<BarberAccounts />} />
         </Route>
       </Route>
 

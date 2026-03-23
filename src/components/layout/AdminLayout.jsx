@@ -1,30 +1,44 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Calendar, Users, Scissors, UserCircle,
-  BarChart3, Settings, Menu, X, ChevronLeft, ShoppingBag, Star, Bell, Brain, Sun, Moon, ClipboardList
+  BarChart3, Settings, Menu, X, ChevronLeft, ShoppingBag, Star, Bell, Brain, Sun, Moon, ClipboardList, ShieldCheck
 } from 'lucide-react';
 import { useTheme } from '@/lib/ThemeContext';
+import { useAuth } from '@/lib/AuthContext';
 
-const sidebarItems = [
-  { path: '/admin', icon: LayoutDashboard, label: 'Dashboard', exact: true },
-  { path: '/admin/agenda', icon: Calendar, label: 'Agenda' },
-  { path: '/admin/services', icon: Scissors, label: 'Prestations' },
-  { path: '/admin/team', icon: Users, label: 'Équipe' },
-  { path: '/admin/clients', icon: UserCircle, label: 'Clients' },
-  { path: '/admin/products', icon: ShoppingBag, label: 'Produits' },
-  { path: '/admin/orders', icon: ClipboardList, label: 'Commandes' },
-  { path: '/admin/reviews', icon: Star, label: 'Avis' },
-  { path: '/admin/stats', icon: BarChart3, label: 'Statistiques' },
-  { path: '/admin/notifications', icon: Bell, label: 'Notifications' },
-  { path: '/admin/smart-agenda', icon: Brain, label: 'Agenda IA' },
-  { path: '/admin/settings', icon: Settings, label: 'Paramètres' },
+const allSidebarItems = [
+  { path: '/admin', icon: LayoutDashboard, label: 'Dashboard', exact: true, perm: 'dashboard' },
+  { path: '/admin/agenda', icon: Calendar, label: 'Agenda', perm: 'agenda' },
+  { path: '/admin/services', icon: Scissors, label: 'Prestations', perm: 'services' },
+  { path: '/admin/team', icon: Users, label: 'Équipe', perm: 'team' },
+  { path: '/admin/clients', icon: UserCircle, label: 'Clients', perm: 'clients' },
+  { path: '/admin/products', icon: ShoppingBag, label: 'Produits', perm: 'products' },
+  { path: '/admin/orders', icon: ClipboardList, label: 'Commandes', perm: 'orders' },
+  { path: '/admin/reviews', icon: Star, label: 'Avis', perm: 'reviews' },
+  { path: '/admin/stats', icon: BarChart3, label: 'Statistiques', perm: 'stats' },
+  { path: '/admin/notifications', icon: Bell, label: 'Notifications', perm: 'notifications' },
+  { path: '/admin/smart-agenda', icon: Brain, label: 'Agenda IA', perm: 'smart-agenda' },
+  { path: '/admin/settings', icon: Settings, label: 'Paramètres', perm: 'settings' },
+  { path: '/admin/barber-accounts', icon: ShieldCheck, label: 'Comptes Barbers', adminOnly: true },
 ];
 
 export default function AdminLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
   const { theme, toggleTheme } = useTheme();
+  const { user } = useAuth();
+
+  const sidebarItems = useMemo(() => {
+    // Admin sees everything
+    if (!user || user.role === 'admin') return allSidebarItems;
+    // Barber sees only permitted pages
+    const perms = user.permissions || [];
+    return allSidebarItems.filter(item => {
+      if (item.adminOnly) return false;
+      return perms.includes(item.perm);
+    });
+  }, [user]);
 
   const isActive = (item) => {
     if (item.exact) return location.pathname === item.path;
