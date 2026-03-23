@@ -2,7 +2,20 @@ import React, { useState, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { base44 } from '@/api/base44Client';
 import { motion } from 'framer-motion';
-import { CalendarDays, CheckCircle, XCircle, Clock, Trash2, Filter } from 'lucide-react';
+import { CalendarDays, CheckCircle, XCircle, Clock, Trash2 } from 'lucide-react';
+
+const API_BASE = import.meta.env.PROD
+  ? 'https://dhomebarber-api-3aabb8313cb6.herokuapp.com'
+  : '';
+
+function getAppId() {
+  return localStorage.getItem('base44_app_id') || import.meta.env.VITE_BASE44_APP_ID || 'dhomebarber';
+}
+
+function getAuthHeaders() {
+  const token = localStorage.getItem('base44_access_token') || localStorage.getItem('token');
+  return token ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
+}
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
@@ -45,12 +58,17 @@ export default function AdminLeave() {
 
   const handleUpdateStatus = async (leave, newStatus) => {
     try {
-      await base44.entities.TimeOff.update(leave.id, { status: newStatus });
+      const res = await fetch(`${API_BASE}/api/apps/${getAppId()}/leave/${leave.id}/status`, {
+        method: 'PATCH',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (!res.ok) throw new Error('Erreur');
       queryClient.invalidateQueries({ queryKey: ['timeOffs'] });
       toast.success(
         newStatus === 'approved'
-          ? `Congé de ${leave.employee_name} approuvé - dates bloquées dans l'agenda`
-          : `Congé de ${leave.employee_name} refusé`
+          ? `Congé de ${leave.employee_name} approuvé - notification envoyée`
+          : `Congé de ${leave.employee_name} refusé - notification envoyée`
       );
     } catch (err) {
       toast.error('Erreur lors de la mise à jour');
