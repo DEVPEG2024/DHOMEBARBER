@@ -33,15 +33,7 @@ export default function Home() {
     <div className="min-h-screen">
       {/* Hero */}
       <div className="relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-black/50 to-background z-10" />
-        <img
-          src="https://images.unsplash.com/photo-1585747860019-8008f990f30f?w=800&q=80"
-          alt="Barbershop"
-          className="absolute inset-0 w-full h-full object-cover scale-105"
-        />
-        <div className="absolute bottom-0 left-0 right-0 h-40 bg-gradient-to-t from-background to-transparent z-10" />
-
-        <div className="relative z-20 flex flex-col items-center justify-center px-5 pt-10 pb-8">
+        <div className="relative flex flex-col items-center justify-center px-5 pt-10 pb-8">
           {/* Logo grand */}
           <motion.img
             initial={{ opacity: 0, scale: 0.85 }}
