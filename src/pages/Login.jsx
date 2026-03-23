@@ -36,6 +36,7 @@ export default function Login() {
       const user = await login(email, password);
       toast.success(`Bienvenue ${user.full_name || ''} !`);
       if ((user.role === 'admin' || user.role === 'barber') && redirect === '/') {
+        // Barbers go to /admin, the layout will redirect to their first permitted page
         navigate('/admin');
       } else {
         navigate(redirect);

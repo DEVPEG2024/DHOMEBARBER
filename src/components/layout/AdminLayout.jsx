@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Outlet, Link, useLocation } from 'react-router-dom';
+import { Outlet, Link, useLocation, Navigate } from 'react-router-dom';
 import {
   LayoutDashboard, Calendar, Users, Scissors, UserCircle,
   BarChart3, Settings, Menu, X, ChevronLeft, ShoppingBag, Star, Bell, Brain, Sun, Moon, ClipboardList, ShieldCheck, Sparkles
@@ -40,6 +40,19 @@ export default function AdminLayout() {
       return perms.includes(item.perm);
     });
   }, [user]);
+
+  // Barber route protection: redirect to first allowed page if current route is not permitted
+  const isBarber = user?.role === 'barber';
+  if (isBarber && sidebarItems.length > 0) {
+    const currentPath = location.pathname;
+    const isAllowed = sidebarItems.some(item => {
+      if (item.exact) return currentPath === item.path;
+      return currentPath.startsWith(item.path);
+    });
+    if (!isAllowed) {
+      return <Navigate to={sidebarItems[0].path} replace />;
+    }
+  }
 
   const isActive = (item) => {
     if (item.exact) return location.pathname === item.path;
