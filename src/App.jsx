@@ -41,6 +41,7 @@ import BarberCleaning from '@/pages/admin/BarberCleaning';
 import BarberAccounts from '@/pages/admin/BarberAccounts';
 import AdminLeave from '@/pages/admin/AdminLeave';
 import BarberLeave from '@/pages/admin/BarberLeave';
+import BarberSettings from '@/pages/admin/BarberSettings';
 
 // Route guard: requires authentication
 function RequireAuth() {
@@ -170,6 +171,7 @@ const AppRoutes = () => {
           <Route path="/admin/barber-accounts" element={<BarberAccounts />} />
           <Route path="/admin/leave" element={<AdminLeave />} />
           <Route path="/admin/my-leave" element={<BarberLeave />} />
+          <Route path="/admin/my-settings" element={<BarberSettings />} />
         </Route>
       </Route>
 

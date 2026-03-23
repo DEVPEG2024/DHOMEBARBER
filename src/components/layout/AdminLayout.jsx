@@ -24,6 +24,7 @@ const allSidebarItems = [
   { path: '/admin/settings', icon: Settings, label: 'Paramètres', perm: 'settings' },
   { path: '/admin/leave', icon: CalendarDays, label: 'Congés', adminOnly: true },
   { path: '/admin/my-leave', icon: CalendarDays, label: 'Mes Congés', barberOnly: true, alwaysShow: true },
+  { path: '/admin/my-settings', icon: Settings, label: 'Paramètres', barberOnly: true, alwaysShow: true },
   { path: '/admin/barber-accounts', icon: ShieldCheck, label: 'Comptes Barbers', adminOnly: true },
 ];
 
