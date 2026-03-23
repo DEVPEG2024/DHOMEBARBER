@@ -29,17 +29,21 @@ function SkillBar({ category, level, delay }) {
           {labels[level]} {level}/5
         </span>
       </div>
-      <div className="ml-12 h-2.5 rounded-full overflow-hidden bg-white/10">
-        <motion.div
-          initial={{ width: 0 }}
-          animate={{ width: level > 0 ? `${(level / 5) * 100}%` : '0%' }}
-          transition={{ delay: delay + 0.2, duration: 0.6, ease: 'easeOut' }}
-          className="h-full rounded-full"
-          style={{
-            backgroundColor: category.color,
-            boxShadow: level > 0 ? `0 0 10px ${category.color}50` : 'none',
-          }}
-        />
+      <div className="flex gap-1.5 ml-12">
+        {[1, 2, 3, 4, 5].map((n) => (
+          <motion.div
+            key={n}
+            initial={{ scaleX: 0 }}
+            animate={{ scaleX: 1 }}
+            transition={{ delay: delay + n * 0.06, duration: 0.3 }}
+            className="flex-1 h-3 rounded-full"
+            style={{
+              backgroundColor: n <= level ? category.color : 'rgba(255,255,255,0.1)',
+              boxShadow: n <= level ? `0 0 8px ${category.color}40` : 'none',
+              opacity: n <= level ? 0.5 + (n * 0.1) : 1,
+            }}
+          />
+        ))}
       </div>
     </motion.div>
   );
