@@ -32,6 +32,7 @@ export default function Appointments() {
     queryKey: ['myAppointments', user?.email],
     queryFn: () => base44.entities.Appointment.filter({ client_email: user.email }, '-date', 100),
     enabled: !!user?.email,
+    refetchInterval: 15000, // Auto-refresh toutes les 15s
   });
 
   const cancelMutation = useMutation({
