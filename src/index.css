@@ -9,39 +9,39 @@
     --font-inter: 'Inter', sans-serif;
     --font-display: 'Playfair Display', serif;
 
-    --background: 0 0% 98%;
-    --foreground: 220 15% 10%;
+    --background: 220 10% 96%;
+    --foreground: 220 20% 12%;
     --card: 0 0% 100%;
-    --card-foreground: 220 15% 10%;
+    --card-foreground: 220 20% 12%;
     --popover: 0 0% 100%;
-    --popover-foreground: 220 15% 10%;
-    --primary: 150 55% 35%;
+    --popover-foreground: 220 20% 12%;
+    --primary: 150 55% 32%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 220 8% 93%;
-    --secondary-foreground: 220 8% 30%;
-    --muted: 220 8% 94%;
-    --muted-foreground: 220 5% 45%;
-    --accent: 150 45% 90%;
-    --accent-foreground: 150 45% 20%;
+    --secondary: 220 10% 90%;
+    --secondary-foreground: 220 15% 20%;
+    --muted: 220 10% 92%;
+    --muted-foreground: 220 8% 40%;
+    --accent: 150 30% 92%;
+    --accent-foreground: 150 50% 18%;
     --destructive: 0 62% 50%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 220 8% 88%;
-    --input: 220 8% 90%;
-    --ring: 150 55% 35%;
-    --chart-1: 150 55% 35%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 10% 82%;
+    --input: 220 10% 85%;
+    --ring: 150 55% 32%;
+    --chart-1: 150 55% 32%;
     --chart-2: 150 45% 28%;
     --chart-3: 220 15% 15%;
-    --chart-4: 150 60% 55%;
-    --chart-5: 150 40% 50%;
+    --chart-4: 150 60% 45%;
+    --chart-5: 150 40% 40%;
     --radius: 0.75rem;
-    --sidebar-background: 0 0% 97%;
-    --sidebar-foreground: 220 8% 30%;
-    --sidebar-primary: 150 55% 35%;
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 220 15% 20%;
+    --sidebar-primary: 150 55% 32%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 220 8% 93%;
-    --sidebar-accent-foreground: 220 8% 30%;
-    --sidebar-border: 220 8% 88%;
-    --sidebar-ring: 150 55% 35%;
+    --sidebar-accent: 220 10% 93%;
+    --sidebar-accent-foreground: 220 15% 20%;
+    --sidebar-border: 220 10% 85%;
+    --sidebar-ring: 150 55% 32%;
   }
 
   .dark {
@@ -94,15 +94,15 @@
 .glass {
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
 }
 
 .glass-strong {
   backdrop-filter: blur(40px);
   -webkit-backdrop-filter: blur(40px);
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
 }
 
 /* Green accent stripe */
@@ -115,10 +115,10 @@
   width: 4px;
 }
 ::-webkit-scrollbar-track {
-  background: hsl(220 12% 9%);
+  background: hsl(var(--background));
 }
 ::-webkit-scrollbar-thumb {
-  background: hsl(220 8% 25%);
+  background: hsl(var(--border));
   border-radius: 4px;
 }
 

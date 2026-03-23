@@ -13,12 +13,12 @@ const SNAP_GRID = 5; // snap every 5 minutes for better precision
 const DRAG_THRESHOLD = 4; // pixels before starting drag
 
 const statusStyle = {
-  pending: { border: '#facc15', bg: 'rgba(234,179,8,0.12)' },
-  confirmed: { border: '#4ade80', bg: 'rgba(74,222,128,0.10)' },
-  completed: { border: '#3fcf8e', bg: 'rgba(63,207,142,0.12)' },
-  cancelled: { border: '#f87171', bg: 'rgba(248,113,113,0.07)', opacity: 0.5 },
-  no_show: { border: '#ef4444', bg: 'rgba(239,68,68,0.10)' },
-  break: { border: '#94a3b8', bg: 'rgba(148,163,184,0.18)' },
+  pending: { border: '#facc15', bg: 'rgba(234,179,8,0.18)' },
+  confirmed: { border: '#4ade80', bg: 'rgba(74,222,128,0.18)' },
+  completed: { border: '#3fcf8e', bg: 'rgba(63,207,142,0.20)' },
+  cancelled: { border: '#f87171', bg: 'rgba(248,113,113,0.15)', opacity: 0.6 },
+  no_show: { border: '#ef4444', bg: 'rgba(239,68,68,0.15)' },
+  break: { border: '#94a3b8', bg: 'rgba(148,163,184,0.25)' },
 };
 
 function timeToMinutes(t) {
@@ -209,9 +209,9 @@ export default function DayView({ appointments, employees, employeeFilter, onSta
   const renderColumn = (empId, empColor, columnApts) => (
     <>
       {Array.from({ length: TOTAL_HOURS }).map((_, i) => (
-        <div key={i} className="absolute w-full border-t border-border/40" style={{ top: i * HOUR_HEIGHT, height: HOUR_HEIGHT }}>
+        <div key={i} className="absolute w-full border-t border-border" style={{ top: i * HOUR_HEIGHT, height: HOUR_HEIGHT }}>
           {/* Half-hour line */}
-          <div className="absolute w-full border-t border-border/15" style={{ top: HOUR_HEIGHT / 2 }} />
+          <div className="absolute w-full border-t border-border/40" style={{ top: HOUR_HEIGHT / 2 }} />
         </div>
       ))}
 
