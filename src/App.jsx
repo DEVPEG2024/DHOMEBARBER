@@ -37,6 +37,7 @@ import AdminSettings from '@/pages/admin/AdminSettings';
 import Notifications from '@/pages/admin/Notifications';
 import SmartAgenda from '@/pages/admin/SmartAgenda';
 import Cleaning from '@/pages/admin/Cleaning';
+import BarberCleaning from '@/pages/admin/BarberCleaning';
 import BarberAccounts from '@/pages/admin/BarberAccounts';
 import AdminLeave from '@/pages/admin/AdminLeave';
 import BarberLeave from '@/pages/admin/BarberLeave';
@@ -156,6 +157,7 @@ const AppRoutes = () => {
           <Route path="/admin/settings" element={<AdminSettings />} />
           <Route path="/admin/notifications" element={<Notifications />} />
           <Route path="/admin/cleaning" element={<Cleaning />} />
+          <Route path="/admin/my-cleaning" element={<BarberCleaning />} />
           <Route path="/admin/smart-agenda" element={<SmartAgenda />} />
           <Route path="/admin/barber-accounts" element={<BarberAccounts />} />
           <Route path="/admin/leave" element={<AdminLeave />} />

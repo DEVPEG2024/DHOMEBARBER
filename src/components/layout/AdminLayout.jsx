@@ -19,6 +19,7 @@ const allSidebarItems = [
   { path: '/admin/stats', icon: BarChart3, label: 'Statistiques', perm: 'stats' },
   { path: '/admin/notifications', icon: Bell, label: 'Notifications', perm: 'notifications' },
   { path: '/admin/cleaning', icon: Sparkles, label: 'Entretien', perm: 'cleaning' },
+  { path: '/admin/my-cleaning', icon: Sparkles, label: 'Mes Tâches', barberOnly: true, perm: 'cleaning' },
   { path: '/admin/smart-agenda', icon: Brain, label: 'Agenda IA', perm: 'smart-agenda' },
   { path: '/admin/settings', icon: Settings, label: 'Paramètres', perm: 'settings' },
   { path: '/admin/leave', icon: CalendarDays, label: 'Congés', adminOnly: true },
@@ -119,10 +120,12 @@ export default function AdminLayout() {
             {theme === 'dark' ? <Sun className="w-4 h-4 text-yellow-400" /> : <Moon className="w-4 h-4" />}
             {theme === 'dark' ? 'Mode clair' : 'Mode sombre'}
           </button>
-          <Link to="/" className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm text-muted-foreground hover:bg-secondary hover:text-foreground transition-all">
-            <ChevronLeft className="w-4 h-4" />
-            Retour au salon
-          </Link>
+          {!isBarber && (
+            <Link to="/" className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm text-muted-foreground hover:bg-secondary hover:text-foreground transition-all">
+              <ChevronLeft className="w-4 h-4" />
+              Retour au salon
+            </Link>
+          )}
         </div>
       </aside>
 
