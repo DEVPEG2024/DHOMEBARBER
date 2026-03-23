@@ -71,82 +71,104 @@ export default function SmartAgenda() {
     });
   }, [weekDays, appointments]);
 
-  // Analyze slow periods and generate AI suggestions
-  const handleAISuggestions = async () => {
+  // Analyze slow periods and generate suggestions
+  const handleAISuggestions = () => {
     setAiLoading(true);
-    try {
-      // Count appointments per day of week over last 30 days
-      const dayCounts = {};
-      for (let i = 0; i < 7; i++) dayCounts[i] = { total: 0, days: 0 };
-      const cutoff = new Date();
-      cutoff.setDate(cutoff.getDate() - 60);
-      appointments
-        .filter(a => a.status !== 'cancelled' && new Date(a.date) >= cutoff)
-        .forEach(a => {
+
+    setTimeout(() => {
+      try {
+        const dayNames = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
+        const dayCounts = {};
+        for (let i = 0; i < 7; i++) dayCounts[i] = { total: 0, revenue: 0 };
+
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - 60);
+        const recentApts = appointments.filter(a => a.status !== 'cancelled' && a.status !== 'break' && new Date(a.date) >= cutoff);
+
+        recentApts.forEach(a => {
           const d = new Date(a.date).getDay();
           dayCounts[d].total++;
-          dayCounts[d].days = Math.max(dayCounts[d].days, 1);
+          dayCounts[d].revenue += a.total_price || 0;
         });
 
-      const avgPerDay = {};
-      for (let i = 0; i < 7; i++) {
         const weeks = 8;
-        avgPerDay[i] = (dayCounts[i].total / weeks).toFixed(1);
-      }
+        const dayAvgs = [];
+        for (let i = 0; i < 7; i++) {
+          dayAvgs.push({ day: i, name: dayNames[i], avg: dayCounts[i].total / weeks, revenue: dayCounts[i].revenue / weeks });
+        }
 
-      const result = await base44.integrations.Core.InvokeLLM({
-        prompt: `Tu es un expert en gestion de planning pour un barbershop.
+        // Sort by avg to find slow days
+        const sorted = [...dayAvgs].filter(d => d.avg > 0).sort((a, b) => a.avg - b.avg);
+        const overallAvg = dayAvgs.reduce((s, d) => s + d.avg, 0) / 7;
 
-Voici les moyennes de rendez-vous par jour de la semaine sur les 2 derniers mois:
-- Lundi: ${avgPerDay[1]} RDV/semaine
-- Mardi: ${avgPerDay[2]} RDV/semaine
-- Mercredi: ${avgPerDay[3]} RDV/semaine
-- Jeudi: ${avgPerDay[4]} RDV/semaine
-- Vendredi: ${avgPerDay[5]} RDV/semaine
-- Samedi: ${avgPerDay[6]} RDV/semaine
-- Dimanche: ${avgPerDay[0]} RDV/semaine
+        const suggestions = [];
 
-L'équipe compte ${employees.length} barbers: ${employees.map(e => e.name).join(', ')}.
+        // Find slow days
+        const slowDays = sorted.filter(d => d.avg < overallAvg * 0.7);
+        if (slowDays.length > 0) {
+          const slowNames = slowDays.map(d => d.name).join(', ');
+          const empCount = employees.length;
+          const maxOff = Math.max(1, Math.floor(empCount / 2));
+          suggestions.push({
+            title: `Jours creux : ${slowNames}`,
+            description: `Ces jours ont en moyenne ${slowDays.map(d => d.avg.toFixed(1)).join(' et ')} RDV/semaine contre ${overallAvg.toFixed(1)} en moyenne. Vous pouvez réduire l'équipe.`,
+            recommended_employees: employees.slice(-maxOff).map(e => e.name),
+            days: slowNames,
+            savings: `${maxOff} barber${maxOff > 1 ? 's' : ''} en moins`,
+          });
+        }
 
-Identifie les 3 périodes creuses principales et propose des recommandations de congés optimisées pour réduire les coûts tout en maintenant la couverture client. Pour chaque suggestion, indique le jour de la semaine, quel(s) barber(s) peuvent être en congé, et l'économie estimée.`,
-        response_json_schema: {
-          type: 'object',
-          properties: {
-            slow_periods: {
-              type: 'array',
-              items: {
-                type: 'object',
-                properties: {
-                  day: { type: 'string' },
-                  avg_appointments: { type: 'number' },
-                  severity: { type: 'string' }
-                }
-              }
-            },
-            suggestions: {
-              type: 'array',
-              items: {
-                type: 'object',
-                properties: {
-                  title: { type: 'string' },
-                  description: { type: 'string' },
-                  recommended_employees: { type: 'array', items: { type: 'string' } },
-                  days: { type: 'string' },
-                  savings: { type: 'string' }
-                }
-              }
-            },
-            summary: { type: 'string' }
+        // Find busiest day
+        const busiest = [...dayAvgs].sort((a, b) => b.avg - a.avg)[0];
+        if (busiest && busiest.avg > overallAvg * 1.3) {
+          suggestions.push({
+            title: `Jour fort : ${busiest.name}`,
+            description: `${busiest.name} est votre meilleur jour avec ${busiest.avg.toFixed(1)} RDV en moyenne et ${busiest.revenue.toFixed(0)}€ de CA/semaine. Assurez la présence complète de l'équipe.`,
+            recommended_employees: employees.map(e => e.name),
+            days: busiest.name,
+            savings: 'CA max',
+          });
+        }
+
+        // Employee load balance
+        const empLoads = {};
+        employees.forEach(e => { empLoads[e.id] = { name: e.name, count: 0 }; });
+        recentApts.forEach(a => {
+          if (empLoads[a.employee_id]) empLoads[a.employee_id].count++;
+        });
+        const loads = Object.values(empLoads).sort((a, b) => a.count - b.count);
+        if (loads.length >= 2) {
+          const least = loads[0];
+          const most = loads[loads.length - 1];
+          if (most.count > least.count * 1.5) {
+            suggestions.push({
+              title: 'Rééquilibrer la charge',
+              description: `${most.name} a ${most.count} RDV sur 2 mois vs ${least.count} pour ${least.name}. Pensez à mieux répartir les réservations.`,
+              recommended_employees: [least.name, most.name],
+              days: 'Tous les jours',
+              savings: 'Meilleur équilibre',
+            });
           }
         }
-      });
 
-      setAiSuggestions(result.suggestions || []);
-      toast.success('Analyse IA terminée');
-    } catch (e) {
-      toast.error('Erreur analyse IA');
-    }
-    setAiLoading(false);
+        // No data fallback
+        if (suggestions.length === 0) {
+          suggestions.push({
+            title: 'Données insuffisantes',
+            description: `Seulement ${recentApts.length} RDV sur les 2 derniers mois. Continuez à utiliser l'app pour obtenir des recommandations plus précises.`,
+            recommended_employees: [],
+            days: '-',
+            savings: '-',
+          });
+        }
+
+        setAiSuggestions(suggestions);
+        toast.success('Analyse terminée');
+      } catch {
+        toast.error("Erreur lors de l'analyse");
+      }
+      setAiLoading(false);
+    }, 800); // Petit délai pour l'effet "analyse"
   };
 
   const isTimeOff = (dayStr, employeeId) => {
