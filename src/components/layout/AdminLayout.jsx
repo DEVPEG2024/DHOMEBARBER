@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Outlet, Link, useLocation, Navigate } from 'react-router-dom';
 import {
   LayoutDashboard, Calendar, Users, Scissors, UserCircle,
-  BarChart3, Settings, Menu, X, ChevronLeft, ShoppingBag, Star, Bell, Brain, Sun, Moon, ClipboardList, ShieldCheck, Sparkles
+  BarChart3, Settings, Menu, X, ChevronLeft, ShoppingBag, Star, Bell, Brain, Sun, Moon, ClipboardList, ShieldCheck, Sparkles, CalendarDays
 } from 'lucide-react';
 import { useTheme } from '@/lib/ThemeContext';
 import { useAuth } from '@/lib/AuthContext';
@@ -21,6 +21,8 @@ const allSidebarItems = [
   { path: '/admin/cleaning', icon: Sparkles, label: 'Entretien', perm: 'cleaning' },
   { path: '/admin/smart-agenda', icon: Brain, label: 'Agenda IA', perm: 'smart-agenda' },
   { path: '/admin/settings', icon: Settings, label: 'Paramètres', perm: 'settings' },
+  { path: '/admin/leave', icon: CalendarDays, label: 'Congés', adminOnly: true },
+  { path: '/admin/my-leave', icon: CalendarDays, label: 'Mes Congés', barberOnly: true, perm: 'conges' },
   { path: '/admin/barber-accounts', icon: ShieldCheck, label: 'Comptes Barbers', adminOnly: true },
 ];
 
@@ -31,12 +33,15 @@ export default function AdminLayout() {
   const { user } = useAuth();
 
   const sidebarItems = useMemo(() => {
-    // Admin sees everything
-    if (!user || user.role === 'admin') return allSidebarItems;
-    // Barber sees only permitted pages
+    // Admin sees everything except barberOnly items
+    if (!user || user.role === 'admin') {
+      return allSidebarItems.filter(item => !item.barberOnly);
+    }
+    // Barber sees only permitted pages + barberOnly items with matching perm
     const perms = user.permissions || [];
     return allSidebarItems.filter(item => {
       if (item.adminOnly) return false;
+      if (item.barberOnly) return perms.includes(item.perm);
       return perms.includes(item.perm);
     });
   }, [user]);

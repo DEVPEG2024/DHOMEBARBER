@@ -28,6 +28,7 @@ const ALL_PERMISSIONS = [
   { key: 'reviews', label: 'Avis' },
   { key: 'stats', label: 'Statistiques' },
   { key: 'notifications', label: 'Notifications' },
+  { key: 'conges', label: 'Congés' },
   { key: 'settings', label: 'Paramètres' },
 ];
 

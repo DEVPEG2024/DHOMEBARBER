@@ -172,7 +172,7 @@ export default function SmartAgenda() {
   };
 
   const isTimeOff = (dayStr, employeeId) => {
-    return timeOffs.some(t => t.employee_id === employeeId && dayStr >= t.start_date && dayStr <= t.end_date);
+    return timeOffs.some(t => t.employee_id === employeeId && dayStr >= t.start_date && dayStr <= t.end_date && (t.status === 'approved' || !t.status));
   };
 
   const upcomingTimeOffs = timeOffs.filter(t => t.end_date >= format(new Date(), 'yyyy-MM-dd')).sort((a, b) => a.start_date.localeCompare(b.start_date));
