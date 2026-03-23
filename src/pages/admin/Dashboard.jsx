@@ -253,7 +253,8 @@ export default function AdminDashboard() {
 
       {/* Non renseigné warning */}
       {(todayNoMethod > 0 || monthNoMethod > 0) && (
-        <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl px-4 py-3 mb-4 flex items-center gap-3">
+        <div onClick={() => navigate('/admin/agenda')}
+          className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl px-4 py-3 mb-4 flex items-center gap-3 cursor-pointer hover:bg-yellow-500/15 active:scale-[0.99] transition-all">
           <AlertTriangle className="w-4 h-4 text-yellow-400 shrink-0" />
           <p className="text-xs text-yellow-300">
             {todayNoMethod > 0 && <><strong>{todayNoMethod}€</strong> aujourd'hui</>}
