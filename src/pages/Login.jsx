@@ -5,7 +5,7 @@ import { motion } from 'framer-motion';
 import { Mail, Lock, User, Phone, Eye, EyeOff } from 'lucide-react';
 import { toast } from 'sonner';
 
-const LOGO_URL = 'https://media.base44.com/images/public/69c06ae86f050e715edd5046/71f45dd08_Capturedecran2026-02-07a170222.png';
+const LOGO_URL = '/logo.png';
 
 export default function Login() {
   const [mode, setMode] = useState('login');
@@ -87,7 +87,7 @@ export default function Login() {
         <img
           src={LOGO_URL}
           alt="D'Home Barber"
-          className="w-36 h-36 object-contain mx-auto drop-shadow-2xl"
+          className="w-48 h-48 object-contain mx-auto drop-shadow-2xl"
         />
       </motion.div>
 

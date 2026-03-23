@@ -7,7 +7,7 @@ import { motion } from 'framer-motion';
 import SectionHeader from '@/components/shared/SectionHeader';
 import StarRating from '@/components/shared/StarRating';
 
-const LOGO_URL = 'https://media.base44.com/images/public/69c06ae86f050e715edd5046/71f45dd08_Capturedecran2026-02-07a170222.png';
+const LOGO_URL = '/logo.png';
 
 export default function Home() {
   const { data: services = [] } = useQuery({
@@ -49,7 +49,7 @@ export default function Home() {
             transition={{ duration: 0.6 }}
             src={LOGO_URL}
             alt="D'Home Barber"
-            className="w-44 h-44 object-contain drop-shadow-2xl mb-4"
+            className="w-52 h-52 object-contain drop-shadow-2xl mb-4"
           />
 
           <div className="flex items-center gap-3 mb-5">
@@ -163,7 +163,7 @@ export default function Home() {
         <div className="glass-strong rounded-3xl p-6 text-center relative overflow-hidden">
           <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent pointer-events-none" />
           <div className="relative">
-            <img src={LOGO_URL} alt="D'Home Barber" className="w-14 h-14 object-contain mx-auto mb-3 opacity-80" />
+            <img src={LOGO_URL} alt="D'Home Barber" className="w-16 h-16 object-contain mx-auto mb-3 opacity-80" />
             <h3 className="font-display text-lg font-bold text-foreground">Prêt pour un nouveau look ?</h3>
             <p className="text-xs text-muted-foreground mt-1 mb-4">Réservez votre créneau en quelques clics</p>
             <Link to="/booking">
