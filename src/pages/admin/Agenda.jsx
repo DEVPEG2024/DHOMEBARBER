@@ -1,0 +1,295 @@
+import React, { useState, useMemo } from 'react';
+import { base44 } from '@/api/base44Client';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { format, startOfWeek, endOfMonth, addDays } from 'date-fns';
+import { exportToCSV } from '@/utils/exportCSV';
+import { toast } from 'sonner';
+
+const BARBER_COLORS = ['#3fcf8e','#60a5fa','#f59e0b','#a78bfa','#f472b6','#34d399','#fb923c','#38bdf8','#e879f9','#4ade80'];
+
+import AgendaToolbar from '@/components/agenda/AgendaToolbar';
+import DayView from '@/components/agenda/DayView';
+import WeekView from '@/components/agenda/WeekView';
+import MonthView from '@/components/agenda/MonthView';
+import BreakModal from '@/components/agenda/BreakModal';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+
+function timeToMinutes(t) {
+  if (!t) return 0;
+  const [h, m] = t.split(':').map(Number);
+  return h * 60 + m;
+}
+
+export default function Agenda() {
+  const [view, setView] = useState('week');
+  const [currentDate, setCurrentDate] = useState(new Date());
+  const [employeeFilter, setEmployeeFilter] = useState('all');
+  const [selectedBreak, setSelectedBreak] = useState(null);
+  const [pendingBreak, setPendingBreak] = useState(null); // { start_time, end_time, date } waiting for barber selection
+  const queryClient = useQueryClient();
+
+  const { queryStart, queryEnd } = useMemo(() => {
+    if (view === 'day') return { queryStart: format(currentDate, 'yyyy-MM-dd'), queryEnd: format(currentDate, 'yyyy-MM-dd') };
+    if (view === 'week') {
+      const s = startOfWeek(currentDate, { weekStartsOn: 1 });
+      return { queryStart: format(s, 'yyyy-MM-dd'), queryEnd: format(addDays(s, 6), 'yyyy-MM-dd') };
+    }
+    const s = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+    const e = endOfMonth(currentDate);
+    return { queryStart: format(s, 'yyyy-MM-dd'), queryEnd: format(e, 'yyyy-MM-dd') };
+  }, [view, currentDate]);
+
+  const { data: appointments = [] } = useQuery({
+    queryKey: ['agendaAppointments', queryStart, queryEnd],
+    queryFn: () => base44.entities.Appointment.list('start_time', 500),
+  });
+
+  const { data: rawEmployees = [] } = useQuery({
+    queryKey: ['employees'],
+    queryFn: () => base44.entities.Employee.filter({ is_active: true }),
+  });
+
+  const employees = useMemo(() =>
+    rawEmployees.map((emp, idx) => ({
+      ...emp,
+      color: emp.color || BARBER_COLORS[idx % BARBER_COLORS.length],
+    })),
+    [rawEmployees]
+  );
+
+  const filteredAppointments = useMemo(() => {
+    let apts = appointments.filter(a => a.date >= queryStart && a.date <= queryEnd);
+    if (employeeFilter !== 'all') apts = apts.filter(a => a.employee_id === employeeFilter);
+    return apts;
+  }, [appointments, queryStart, queryEnd, employeeFilter]);
+
+  const updateStatus = useMutation({
+    mutationFn: ({ id, status }) => base44.entities.Appointment.update(id, { status }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['agendaAppointments'] });
+      toast.success('Statut mis à jour');
+    },
+  });
+
+  const createBreak = useMutation({
+    mutationFn: (breakData) => base44.entities.Appointment.create(breakData),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['agendaAppointments'] });
+    },
+    onError: (err) => {
+      console.error('Break creation error:', err);
+    },
+  });
+
+  const deleteBreak = useMutation({
+    mutationFn: (id) => base44.entities.Appointment.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['agendaAppointments'] });
+      toast.success('Pause supprimée');
+    },
+  });
+
+  const handleStatusChange = (id, status) => updateStatus.mutate({ id, status });
+
+  const buildBreakPayload = (start_time, end_time, employee_id, breakDate) => ({
+    date: breakDate,
+    start_time,
+    end_time,
+    status: 'break',
+    client_name: 'Pause',
+    client_email: '',
+    employee_id: employee_id || '',
+    employee_name: employees.find(e => e.id === employee_id)?.name || 'Salon',
+    services: [],
+    total_duration: timeToMinutes(end_time) - timeToMinutes(start_time),
+    total_price: 0,
+    notes: 'Pause',
+  });
+
+  const handleCreateBreak = ({ start_time, end_time, employee_id, date }) => {
+    const breakDate = date || format(currentDate, 'yyyy-MM-dd');
+
+    // Toujours ouvrir le sélecteur de barber pour choisir indépendamment
+    setPendingBreak({ start_time, end_time, date: breakDate });
+  };
+
+  const handlePendingBreakSelectEmployee = (empId) => {
+    if (!pendingBreak) return;
+    createBreak.mutate(
+      buildBreakPayload(pendingBreak.start_time, pendingBreak.end_time, empId, pendingBreak.date),
+      { onSuccess: () => toast.success('Pause ajoutée') }
+    );
+    setPendingBreak(null);
+  };
+
+  const handlePendingBreakSelectAll = () => {
+    if (!pendingBreak || employees.length === 0) return;
+    Promise.all(
+      employees.map(emp =>
+        base44.entities.Appointment.create(
+          buildBreakPayload(pendingBreak.start_time, pendingBreak.end_time, emp.id, pendingBreak.date)
+        )
+      )
+    ).then(() => {
+      queryClient.invalidateQueries({ queryKey: ['agendaAppointments'] });
+      toast.success(`Pause ajoutée pour ${employees.length} barbers`);
+    }).catch(() => {
+      queryClient.invalidateQueries({ queryKey: ['agendaAppointments'] });
+      toast.error('Erreur lors de la création des pauses');
+    });
+    setPendingBreak(null);
+  };
+
+  const handleDeleteBreak = (id) => deleteBreak.mutate(id);
+
+  const handleBreakClick = (breakItem) => {
+    setSelectedBreak(breakItem);
+  };
+
+  const handleApplyRecurrence = async ({ start_time, end_time, employee_id, dates }) => {
+    let created = 0;
+    let errors = 0;
+
+    for (const date of dates) {
+      try {
+        await base44.entities.Appointment.create(
+          buildBreakPayload(start_time, end_time, employee_id, date)
+        );
+        created++;
+      } catch (err) {
+        errors++;
+        console.error(`Failed to create break for ${date}:`, err);
+      }
+    }
+
+    queryClient.invalidateQueries({ queryKey: ['agendaAppointments'] });
+
+    if (errors === 0) {
+      toast.success(`${created} pauses créées`);
+    } else {
+      toast.warning(`${created} pauses créées, ${errors} erreurs`);
+    }
+  };
+
+  const handleExport = () => {
+    exportToCSV(
+      filteredAppointments.filter(a => a.status !== 'break').map(a => ({
+        date: a.date, heure_debut: a.start_time, heure_fin: a.end_time,
+        client: a.client_name, email: a.client_email, telephone: a.client_phone || '',
+        barber: a.employee_name, services: a.services?.map(s => s.name).join(' + ') || '',
+        duree_min: a.total_duration, prix_eur: a.total_price, statut: a.status, notes: a.notes || '',
+      })),
+      `agenda_${queryStart}`
+    );
+  };
+
+  const handleMonthDayClick = (day) => {
+    setCurrentDate(day);
+    setView('day');
+  };
+
+  const realAppointmentCount = filteredAppointments.filter(a => a.status !== 'break').length;
+
+  return (
+    <div className="flex flex-col h-full">
+      <AgendaToolbar
+        view={view} setView={setView}
+        currentDate={currentDate} setCurrentDate={setCurrentDate}
+        onExport={handleExport}
+      />
+
+      {/* Employee filter */}
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
+        <span className="text-xs text-muted-foreground">Barber :</span>
+        <button
+          onClick={() => setEmployeeFilter('all')}
+          className={`px-3 py-1 text-xs rounded-full border transition-all ${employeeFilter === 'all' ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:border-primary/50'}`}
+        >
+          Tous
+        </button>
+        {employees.map(emp => (
+          <button
+            key={emp.id}
+            onClick={() => setEmployeeFilter(emp.id)}
+            className={`px-3 py-1 text-xs rounded-full border transition-all flex items-center gap-1.5 ${employeeFilter === emp.id ? 'text-primary-foreground border-transparent' : 'border-border text-muted-foreground hover:border-primary/50'}`}
+            style={employeeFilter === emp.id ? { background: emp.color || '#3fcf8e', borderColor: emp.color || '#3fcf8e' } : {}}
+          >
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: emp.color || '#3fcf8e' }} />
+            {emp.name}
+          </button>
+        ))}
+        <span className="text-xs text-muted-foreground ml-auto">{realAppointmentCount} rdv</span>
+      </div>
+
+      {view === 'day' && (
+        <DayView
+          appointments={filteredAppointments}
+          employees={employees}
+          employeeFilter={employeeFilter}
+          onStatusChange={handleStatusChange}
+          date={format(currentDate, 'yyyy-MM-dd')}
+          onCreateBreak={handleCreateBreak}
+          onDeleteBreak={handleDeleteBreak}
+          onBreakClick={handleBreakClick}
+        />
+      )}
+      {view === 'week' && (
+        <WeekView
+          currentDate={currentDate}
+          appointments={filteredAppointments}
+          employees={employees}
+          employeeFilter={employeeFilter}
+          onStatusChange={handleStatusChange}
+          onCreateBreak={handleCreateBreak}
+          onDeleteBreak={handleDeleteBreak}
+          onBreakClick={handleBreakClick}
+        />
+      )}
+      {view === 'month' && (
+        <MonthView
+          currentDate={currentDate}
+          appointments={filteredAppointments}
+          employees={employees}
+          onDayClick={handleMonthDayClick}
+        />
+      )}
+
+      {/* Break recurrence modal */}
+      <BreakModal
+        breakItem={selectedBreak}
+        employees={employees}
+        onClose={() => setSelectedBreak(null)}
+        onDelete={handleDeleteBreak}
+        onApplyRecurrence={handleApplyRecurrence}
+      />
+
+      {/* Barber picker for break creation */}
+      <Dialog open={!!pendingBreak} onOpenChange={(open) => !open && setPendingBreak(null)}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-sm">Pause {pendingBreak?.start_time} – {pendingBreak?.end_time}</DialogTitle>
+          </DialogHeader>
+          <p className="text-xs text-muted-foreground mb-3">Pour quel barber ?</p>
+          <div className="space-y-2">
+            {employees.map(emp => (
+              <button
+                key={emp.id}
+                onClick={() => handlePendingBreakSelectEmployee(emp.id)}
+                className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-border hover:border-primary/50 hover:bg-primary/5 transition-all text-left"
+              >
+                <span className="w-3 h-3 rounded-full shrink-0" style={{ background: emp.color || '#3fcf8e' }} />
+                <span className="text-sm font-medium">{emp.name}</span>
+              </button>
+            ))}
+            <button
+              onClick={handlePendingBreakSelectAll}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-dashed border-border hover:border-primary/50 hover:bg-primary/5 transition-all text-sm text-muted-foreground"
+            >
+              Tous les barbers
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
