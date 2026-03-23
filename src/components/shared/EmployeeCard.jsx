@@ -43,7 +43,7 @@ export default function EmployeeCard({ employee, onClick, selected }) {
 
       <h3 className="font-semibold text-sm text-foreground">{employee.name}</h3>
       {employee.title && (
-        <p className="text-[10px] text-muted-foreground uppercase tracking-wider mt-0.5">{employee.title}</p>
+        <p className="text-[11px] text-muted-foreground uppercase tracking-wider mt-0.5">{employee.title}</p>
       )}
 
       {hasDetails && (
@@ -72,7 +72,7 @@ export default function EmployeeCard({ employee, onClick, selected }) {
               {employee.specialties?.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 mt-2">
                   {employee.specialties.map((spec, i) => (
-                    <span key={i} className="text-[10px] uppercase tracking-wider text-primary/60 bg-primary/8 px-2 py-0.5 rounded-full">
+                    <span key={i} className="text-[11px] uppercase tracking-wider text-primary/60 bg-primary/8 px-2 py-0.5 rounded-full">
                       {spec}
                     </span>
                   ))}

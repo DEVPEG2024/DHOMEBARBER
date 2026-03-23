@@ -73,7 +73,7 @@ export default function ServiceCard({ service, onClick, selected, compact }) {
             <div className="mt-3 pt-3 border-t border-white/10">
               <p className="text-xs text-muted-foreground leading-relaxed">{service.description}</p>
               {service.category && (
-                <span className="inline-block mt-2 text-[10px] uppercase tracking-wider text-primary/60 bg-primary/8 px-2 py-0.5 rounded-full">
+                <span className="inline-block mt-2 text-[11px] uppercase tracking-wider text-primary/60 bg-primary/8 px-2 py-0.5 rounded-full">
                   {service.category}
                 </span>
               )}

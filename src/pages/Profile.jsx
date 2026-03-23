@@ -72,7 +72,7 @@ export default function Profile() {
           ].map(({ value, label }) => (
             <div key={label} className="rounded-2xl bg-white/4 border border-white/8 backdrop-blur-xl p-4 text-center">
               <p className="text-2xl font-bold text-primary font-display">{value}</p>
-              <p className="text-[10px] uppercase tracking-widest text-muted-foreground mt-0.5">{label}</p>
+              <p className="text-[11px] uppercase tracking-widest text-muted-foreground mt-0.5">{label}</p>
             </div>
           ))}
         </motion.div>
@@ -94,7 +94,7 @@ export default function Profile() {
                 </div>
                 <div>
                   <p className="text-sm font-semibold text-foreground">{item.label}</p>
-                  <p className="text-[10px] text-muted-foreground">{item.desc}</p>
+                  <p className="text-[11px] text-muted-foreground">{item.desc}</p>
                 </div>
               </div>
               <ChevronRight className="w-4 h-4 text-muted-foreground/40 group-hover:text-muted-foreground transition-colors" />

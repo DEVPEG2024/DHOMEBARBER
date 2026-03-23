@@ -60,7 +60,7 @@ export default function Appointments() {
         <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mb-7">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-[10px] uppercase tracking-[0.3em] text-primary font-semibold mb-1">Mes réservations</p>
+              <p className="text-[11px] uppercase tracking-[0.3em] text-primary font-semibold mb-1">Mes réservations</p>
               <h1 className="font-display text-3xl font-bold text-foreground">Rendez-vous</h1>
               <div className="h-0.5 w-12 mt-2 rounded-full bg-gradient-to-r from-primary to-primary/30" />
             </div>
@@ -155,7 +155,7 @@ export default function Appointments() {
                             <p className="text-xs text-muted-foreground font-medium">{apt.start_time} — {apt.end_time}</p>
                           </div>
                         </div>
-                        <span className={`text-[10px] font-semibold px-2.5 py-1 rounded-full border ${status.bg}`}>
+                        <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${status.bg}`}>
                           {status.label}
                         </span>
                       </div>
@@ -166,7 +166,7 @@ export default function Appointments() {
                           <User className="w-3.5 h-3.5 text-primary" />
                         </div>
                         <div>
-                          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Barber</p>
+                          <p className="text-[11px] text-muted-foreground uppercase tracking-wider">Barber</p>
                           <p className="text-xs font-semibold text-foreground">{apt.employee_name || 'Non assigné'}</p>
                         </div>
                       </div>

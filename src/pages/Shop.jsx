@@ -104,7 +104,7 @@ export default function Shop() {
 
   return (
     <div className="max-w-lg mx-auto px-4 py-6 pb-32">
-      <p className="text-[10px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Boutique</p>
+      <p className="text-[11px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Boutique</p>
       <h1 className="font-display text-2xl font-bold mb-6">Nos Produits</h1>
 
       {/* Category Filter */}
@@ -155,25 +155,25 @@ export default function Shop() {
               )}
             </div>
             <div className="p-3">
-              <h3 className="text-xs font-semibold line-clamp-1">{product.name}</h3>
+              <h3 className="text-sm font-semibold line-clamp-1">{product.name}</h3>
               {product.description && (
-                <p className="text-[10px] text-muted-foreground line-clamp-2 mt-0.5">{product.description}</p>
+                <p className="text-[11px] text-muted-foreground line-clamp-2 mt-0.5">{product.description}</p>
               )}
               <div className="flex items-center justify-between mt-2">
                 <span className="text-sm font-bold text-primary">{product.price}€</span>
                 {cart[product.id] ? (
-                  <div className="flex items-center gap-2">
-                    <button onClick={() => updateCart(product.id, -1)} className="w-6 h-6 rounded-full bg-secondary flex items-center justify-center">
-                      <Minus className="w-3 h-3" />
+                  <div className="flex items-center gap-2.5">
+                    <button onClick={() => updateCart(product.id, -1)} className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center active:scale-95">
+                      <Minus className="w-3.5 h-3.5" />
                     </button>
-                    <span className="text-xs font-bold w-4 text-center">{cart[product.id]}</span>
-                    <button onClick={() => updateCart(product.id, 1)} className="w-6 h-6 rounded-full bg-primary flex items-center justify-center">
-                      <Plus className="w-3 h-3 text-primary-foreground" />
+                    <span className="text-sm font-bold w-4 text-center">{cart[product.id]}</span>
+                    <button onClick={() => updateCart(product.id, 1)} className="w-8 h-8 rounded-full bg-primary flex items-center justify-center active:scale-95">
+                      <Plus className="w-3.5 h-3.5 text-primary-foreground" />
                     </button>
                   </div>
                 ) : (
-                  <button onClick={() => updateCart(product.id, 1)} className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center hover:bg-primary/20 transition-colors">
-                    <Plus className="w-3.5 h-3.5 text-primary" />
+                  <button onClick={() => updateCart(product.id, 1)} className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center hover:bg-primary/20 transition-colors active:scale-95">
+                    <Plus className="w-4 h-4 text-primary" />
                   </button>
                 )}
               </div>
@@ -259,7 +259,7 @@ export default function Shop() {
                   {/* Header */}
                   <div className="flex items-center justify-between px-5 py-3 border-b border-border">
                     <h3 className="font-display text-base font-bold">Votre commande</h3>
-                    <button onClick={closeCart} className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center">
+                    <button onClick={closeCart} className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center">
                       <X className="w-4 h-4" />
                     </button>
                   </div>
@@ -280,12 +280,12 @@ export default function Shop() {
                           <div className="flex items-center justify-between">
                             <p className="text-xs text-muted-foreground">{product.price.toFixed(2)}€ / unité</p>
                             <div className="flex items-center gap-3">
-                              <button onClick={() => updateCart(id, -1)} className="w-7 h-7 rounded-full bg-secondary flex items-center justify-center">
-                                {qty === 1 ? <Trash2 className="w-3 h-3 text-red-400" /> : <Minus className="w-3 h-3" />}
+                              <button onClick={() => updateCart(id, -1)} className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center active:scale-95">
+                                {qty === 1 ? <Trash2 className="w-3.5 h-3.5 text-red-400" /> : <Minus className="w-3.5 h-3.5" />}
                               </button>
                               <span className="text-sm font-bold w-5 text-center">{qty}</span>
-                              <button onClick={() => updateCart(id, 1)} className="w-7 h-7 rounded-full bg-primary flex items-center justify-center">
-                                <Plus className="w-3 h-3 text-primary-foreground" />
+                              <button onClick={() => updateCart(id, 1)} className="w-9 h-9 rounded-full bg-primary flex items-center justify-center active:scale-95">
+                                <Plus className="w-3.5 h-3.5 text-primary-foreground" />
                               </button>
                             </div>
                           </div>
@@ -320,7 +320,7 @@ export default function Shop() {
                         <span className="text-sm font-semibold">Total</span>
                         <span className="text-lg font-bold text-primary">{cartTotal.toFixed(2)}€</span>
                       </div>
-                      <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                      <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
                         <Store className="w-3.5 h-3.5" />
                         Retrait au salon — paiement sur place
                       </div>

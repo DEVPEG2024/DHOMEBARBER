@@ -7,6 +7,8 @@ import { motion } from 'framer-motion';
 import SectionHeader from '@/components/shared/SectionHeader';
 import StarRating from '@/components/shared/StarRating';
 
+const LOGO_URL = 'https://media.base44.com/images/public/69c06ae86f050e715edd5046/71f45dd08_Capturedecran2026-02-07a170222.png';
+
 export default function Home() {
   const { data: services = [] } = useQuery({
     queryKey: ['services'],
@@ -30,70 +32,63 @@ export default function Home() {
   return (
     <div className="min-h-screen">
       {/* Hero */}
-      <div className="relative h-[65vh] min-h-[420px] overflow-hidden">
+      <div className="relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-black/50 to-background z-10" />
         <img
           src="https://images.unsplash.com/photo-1585747860019-8008f990f30f?w=800&q=80"
           alt="Barbershop"
           className="absolute inset-0 w-full h-full object-cover scale-105"
         />
-
-        {/* Ambient glow */}
         <div className="absolute bottom-0 left-0 right-0 h-40 bg-gradient-to-t from-background to-transparent z-10" />
 
-        <div className="relative z-20 h-full flex flex-col items-center justify-center p-6 max-w-lg mx-auto text-center">
-          <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7 }} className="flex flex-col items-center">
-            <div className="w-28 h-28 rounded-3xl overflow-hidden backdrop-blur-xl bg-white/10 border border-white/20 p-2 flex items-center justify-center mb-5 shadow-2xl shadow-black/30">
-              <img src="https://media.base44.com/images/public/69c06ae86f050e715edd5046/71f45dd08_Capturedecran2026-02-07a170222.png" alt="Logo" className="w-full h-full object-contain" />
+        <div className="relative z-20 flex flex-col items-center justify-center px-5 pt-10 pb-8">
+          {/* Logo grand */}
+          <motion.img
+            initial={{ opacity: 0, scale: 0.85 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.6 }}
+            src={LOGO_URL}
+            alt="D'Home Barber"
+            className="w-44 h-44 object-contain drop-shadow-2xl mb-4"
+          />
+
+          <div className="flex items-center gap-3 mb-5">
+            <div className="flex items-center gap-1.5 backdrop-blur-xl bg-white/10 border border-white/15 rounded-full px-3 py-1.5">
+              <Star className="w-3.5 h-3.5 text-primary fill-primary" />
+              <span className="text-white font-bold text-sm">{avgRating}</span>
+              <span className="text-white/50 text-xs">({reviews.length})</span>
             </div>
-
-            <div className="h-px w-20 mb-4 italian-stripe rounded-full opacity-70" />
-
-            <h1 className="font-display text-2xl uppercase tracking-[0.25em] font-bold text-white leading-tight mb-2">
-              Premium Barber Shop
-            </h1>
-
-            <div className="flex items-center justify-center gap-4 mb-7 mt-2">
-              <div className="flex items-center gap-1.5 backdrop-blur-xl bg-white/10 border border-white/15 rounded-full px-3 py-1.5">
-                <Star className="w-3.5 h-3.5 text-primary fill-primary" />
-                <span className="text-white font-bold text-sm">{avgRating}</span>
-                <span className="text-white/40 text-xs">({reviews.length})</span>
-              </div>
-              <div className="flex items-center gap-1.5 text-white/50 text-xs">
-                <MapPin className="w-3.5 h-3.5" />
-                Douvaine
-              </div>
+            <div className="flex items-center gap-1.5 text-white/60 text-xs">
+              <MapPin className="w-3.5 h-3.5" />
+              Douvaine
             </div>
+          </div>
 
-            <Link to="/booking">
-              <motion.button whileTap={{ scale: 0.97 }}
-                className="flex items-center gap-2 px-7 h-12 rounded-2xl bg-primary text-primary-foreground font-semibold text-sm shadow-2xl shadow-primary/30 hover:bg-primary/90 transition-all">
-                <Scissors className="w-4 h-4" />
-                Réserver maintenant
-              </motion.button>
-            </Link>
-          </motion.div>
+          <Link to="/booking">
+            <motion.button whileTap={{ scale: 0.97 }}
+              className="flex items-center gap-2 px-7 h-12 rounded-2xl bg-primary text-primary-foreground font-semibold text-sm shadow-2xl shadow-primary/30 hover:bg-primary/90 transition-all">
+              <Scissors className="w-4 h-4" />
+              Réserver maintenant
+            </motion.button>
+          </Link>
         </div>
       </div>
 
-      <div className="max-w-lg mx-auto px-4 py-8 space-y-10 relative">
-        {/* Ambient blob */}
-        <div className="absolute top-0 right-0 w-64 h-64 bg-primary/5 rounded-full blur-3xl pointer-events-none" />
-
+      <div className="max-w-lg mx-auto px-5 py-6 space-y-8">
         {/* Quick Info */}
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
-          className="grid grid-cols-3 gap-3">
+          className="grid grid-cols-3 gap-2">
           {[
             { icon: Clock, label: 'Mar - Sam', sub: '9h - 20h' },
             { icon: Phone, label: 'Appeler', sub: '06 66 08 36 05' },
             { icon: MapPin, label: 'Itinéraire', sub: 'Douvaine' },
           ].map(({ icon: Icon, label, sub }) => (
             <div key={label} className="glass rounded-2xl p-3 text-center">
-              <div className="w-8 h-8 rounded-xl bg-primary/10 flex items-center justify-center mx-auto mb-2">
-                <Icon className="w-3.5 h-3.5 text-primary" />
+              <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center mx-auto mb-2">
+                <Icon className="w-4 h-4 text-primary" />
               </div>
               <p className="text-xs font-semibold text-foreground">{label}</p>
-              <p className="text-[10px] text-muted-foreground">{sub}</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">{sub}</p>
             </div>
           ))}
         </motion.div>
@@ -101,10 +96,10 @@ export default function Home() {
         {/* Services Preview */}
         <div>
           <SectionHeader title="Nos Prestations" subtitle="Services" linkTo="/services" />
-          <div className="space-y-3">
+          <div className="space-y-2.5">
             {services.slice(0, 4).map((service, i) => (
-              <motion.div key={service.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
-                className="glass rounded-2xl p-4 flex items-center justify-between">
+              <motion.div key={service.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
+                className="glass rounded-2xl px-4 py-3.5 flex items-center justify-between">
                 <div>
                   <p className="text-sm font-semibold text-foreground">{service.name}</p>
                   <p className="text-xs text-muted-foreground mt-0.5">{service.duration} min</p>
@@ -118,23 +113,21 @@ export default function Home() {
         {/* Team Preview */}
         <div>
           <SectionHeader title="Notre Équipe" subtitle="Les Barbers" />
-          <div className="flex gap-3 overflow-x-auto pb-2 -mx-4 px-4">
+          <div className="flex gap-3 overflow-x-auto pb-2 -mx-5 px-5 scrollbar-hide">
             {employees.map((emp, i) => (
               <motion.div key={emp.id} initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: i * 0.07 }}
                 className="flex-shrink-0 w-24 text-center">
-                <div className="w-18 h-18 mx-auto mb-2">
-                  <div className="w-16 h-16 mx-auto rounded-2xl overflow-hidden glass border-white/10">
-                    {emp.photo_url ? (
-                      <img src={emp.photo_url} alt={emp.name} className="w-full h-full object-cover" />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-lg font-bold text-muted-foreground">
-                        {emp.name?.charAt(0)}
-                      </div>
-                    )}
-                  </div>
+                <div className="w-16 h-16 mx-auto rounded-2xl overflow-hidden glass border-white/10 mb-2">
+                  {emp.photo_url ? (
+                    <img src={emp.photo_url} alt={emp.name} className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-lg font-bold text-muted-foreground">
+                      {emp.name?.charAt(0)}
+                    </div>
+                  )}
                 </div>
                 <p className="text-xs font-semibold text-foreground">{emp.name}</p>
-                <p className="text-[10px] text-muted-foreground">{emp.title || 'Barber'}</p>
+                <p className="text-[11px] text-muted-foreground">{emp.title || 'Barber'}</p>
               </motion.div>
             ))}
           </div>
@@ -144,7 +137,7 @@ export default function Home() {
         {reviews.length > 0 && (
           <div>
             <SectionHeader title="Avis Clients" subtitle="Témoignages" />
-            <div className="space-y-3">
+            <div className="space-y-2.5">
               {reviews.slice(0, 3).map((review, i) => (
                 <motion.div key={review.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.07 }}
                   className="glass rounded-2xl p-4">
@@ -153,7 +146,7 @@ export default function Home() {
                       <p className="text-sm font-semibold text-foreground">{review.client_name || 'Client'}</p>
                       <StarRating rating={review.rating} />
                     </div>
-                    <span className="text-[10px] text-muted-foreground">
+                    <span className="text-[11px] text-muted-foreground">
                       {new Date(review.created_date).toLocaleDateString('fr-FR')}
                     </span>
                   </div>
@@ -170,14 +163,12 @@ export default function Home() {
         <div className="glass-strong rounded-3xl p-6 text-center relative overflow-hidden">
           <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent pointer-events-none" />
           <div className="relative">
-            <div className="w-12 h-12 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center mx-auto mb-4">
-              <Scissors className="w-5 h-5 text-primary" />
-            </div>
+            <img src={LOGO_URL} alt="D'Home Barber" className="w-14 h-14 object-contain mx-auto mb-3 opacity-80" />
             <h3 className="font-display text-lg font-bold text-foreground">Prêt pour un nouveau look ?</h3>
-            <p className="text-xs text-muted-foreground mt-1 mb-5">Réservez votre créneau en quelques clics</p>
+            <p className="text-xs text-muted-foreground mt-1 mb-4">Réservez votre créneau en quelques clics</p>
             <Link to="/booking">
               <motion.button whileTap={{ scale: 0.97 }}
-                className="inline-flex items-center gap-2 px-7 h-11 rounded-2xl bg-primary text-primary-foreground font-semibold text-sm shadow-lg shadow-primary/25 hover:bg-primary/90 transition-all">
+                className="inline-flex items-center gap-2 px-7 h-12 rounded-2xl bg-primary text-primary-foreground font-semibold text-sm shadow-lg shadow-primary/25 hover:bg-primary/90 transition-all">
                 Réserver
                 <ArrowRight className="w-4 h-4" />
               </motion.button>

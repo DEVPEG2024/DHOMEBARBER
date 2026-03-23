@@ -182,7 +182,7 @@ export default function Booking() {
       <div className="relative max-w-lg mx-auto px-4 py-6">
         {/* Header */}
         <div className="mb-8">
-          <p className="text-[10px] uppercase tracking-[0.3em] text-primary/70 font-medium mb-2 flex items-center gap-2">
+          <p className="text-[11px] uppercase tracking-[0.3em] text-primary/70 font-medium mb-2 flex items-center gap-2">
             <Sparkles className="w-3 h-3" />
             Réservation
           </p>
@@ -269,9 +269,9 @@ export default function Booking() {
                           : 'backdrop-blur-xl bg-white/5 border border-white/10 text-foreground hover:bg-white/10'
                       }`}
                     >
-                      <p className="text-[10px] uppercase opacity-70">{format(date, 'EEE', { locale: fr })}</p>
+                      <p className="text-[11px] uppercase opacity-70">{format(date, 'EEE', { locale: fr })}</p>
                       <p className="text-lg font-bold leading-tight">{format(date, 'd')}</p>
-                      <p className="text-[10px] opacity-60">{format(date, 'MMM', { locale: fr })}</p>
+                      <p className="text-[11px] opacity-60">{format(date, 'MMM', { locale: fr })}</p>
                     </button>
                   ))}
                 </div>
@@ -283,12 +283,12 @@ export default function Booking() {
                     <Clock className="w-4 h-4 text-primary" /> Créneaux disponibles
                   </p>
                   {availableSlots.length > 0 ? (
-                    <div className="grid grid-cols-4 gap-2">
+                    <div className="grid grid-cols-3 gap-2">
                       {availableSlots.map(slot => (
                         <button
                           key={slot}
                           onClick={() => { setSelectedTime(slot); setTimeout(() => setStep(3), 250); }}
-                          className={`py-2.5 rounded-xl text-xs font-semibold transition-all duration-300 ${
+                          className={`py-3 rounded-xl text-sm font-semibold transition-all duration-300 ${
                             selectedTime === slot
                               ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/25'
                               : 'backdrop-blur-xl bg-white/5 border border-white/10 text-foreground hover:bg-white/10'
@@ -323,7 +323,7 @@ export default function Booking() {
                       <Icon className="w-4 h-4 text-primary" />
                     </div>
                     <div>
-                      <p className="text-[10px] uppercase tracking-widest text-muted-foreground">{label}</p>
+                      <p className="text-[11px] uppercase tracking-widest text-muted-foreground">{label}</p>
                       <p className="text-sm font-semibold text-foreground capitalize">{value}</p>
                     </div>
                   </div>
@@ -333,7 +333,7 @@ export default function Booking() {
                     <Scissors className="w-4 h-4 text-primary" />
                   </div>
                   <div>
-                    <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Prestations</p>
+                    <p className="text-[11px] uppercase tracking-widest text-muted-foreground mb-1">Prestations</p>
                     {selectedServices.map(s => (
                       <p key={s.id} className="text-sm text-foreground">{s.name} <span className="text-primary font-semibold">{s.price}€</span></p>
                     ))}

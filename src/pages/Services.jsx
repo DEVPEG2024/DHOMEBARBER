@@ -56,7 +56,7 @@ export default function Services() {
             <div className="w-5 h-5 rounded-lg bg-primary/15 flex items-center justify-center">
               <Scissors className="w-3 h-3 text-primary" />
             </div>
-            <p className="text-[10px] uppercase tracking-[0.3em] text-primary font-semibold">Catalogue</p>
+            <p className="text-[11px] uppercase tracking-[0.3em] text-primary font-semibold">Catalogue</p>
           </div>
           <h1 className="font-display text-3xl font-bold text-foreground">Nos Prestations</h1>
           <div className="h-0.5 w-12 mt-2 rounded-full bg-gradient-to-r from-primary to-primary/30" />
@@ -132,7 +132,7 @@ export default function Services() {
               >
                 <div className="text-left">
                   <p className="text-xs font-bold">{selectedServices.length} prestation{selectedServices.length > 1 ? 's' : ''} · {totalDuration} min</p>
-                  <p className="text-[10px] opacity-70 mt-0.5">{totalPrice}€ au total</p>
+                  <p className="text-[11px] opacity-70 mt-0.5">{totalPrice}€ au total</p>
                 </div>
                 <div className="flex items-center gap-2 font-semibold text-sm">
                   Réserver

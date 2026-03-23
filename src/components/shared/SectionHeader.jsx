@@ -7,7 +7,7 @@ export default function SectionHeader({ title, subtitle, linkTo, linkLabel }) {
     <div className="flex items-end justify-between mb-4">
       <div>
         {subtitle && (
-          <p className="text-[10px] uppercase tracking-[0.2em] text-primary font-medium mb-1">{subtitle}</p>
+          <p className="text-[11px] uppercase tracking-[0.2em] text-primary font-medium mb-1">{subtitle}</p>
         )}
         <h2 className="text-xl font-display font-bold text-foreground">{title}</h2>
       </div>
