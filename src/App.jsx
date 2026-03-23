@@ -36,6 +36,7 @@ import Stats from '@/pages/admin/Stats';
 import AdminSettings from '@/pages/admin/AdminSettings';
 import Notifications from '@/pages/admin/Notifications';
 import SmartAgenda from '@/pages/admin/SmartAgenda';
+import Cleaning from '@/pages/admin/Cleaning';
 import BarberAccounts from '@/pages/admin/BarberAccounts';
 
 // Route guard: requires authentication
@@ -152,6 +153,7 @@ const AppRoutes = () => {
           <Route path="/admin/stats" element={<Stats />} />
           <Route path="/admin/settings" element={<AdminSettings />} />
           <Route path="/admin/notifications" element={<Notifications />} />
+          <Route path="/admin/cleaning" element={<Cleaning />} />
           <Route path="/admin/smart-agenda" element={<SmartAgenda />} />
           <Route path="/admin/barber-accounts" element={<BarberAccounts />} />
         </Route>

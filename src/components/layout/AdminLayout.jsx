@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Calendar, Users, Scissors, UserCircle,
-  BarChart3, Settings, Menu, X, ChevronLeft, ShoppingBag, Star, Bell, Brain, Sun, Moon, ClipboardList, ShieldCheck
+  BarChart3, Settings, Menu, X, ChevronLeft, ShoppingBag, Star, Bell, Brain, Sun, Moon, ClipboardList, ShieldCheck, Sparkles
 } from 'lucide-react';
 import { useTheme } from '@/lib/ThemeContext';
 import { useAuth } from '@/lib/AuthContext';
@@ -18,6 +18,7 @@ const allSidebarItems = [
   { path: '/admin/reviews', icon: Star, label: 'Avis', perm: 'reviews' },
   { path: '/admin/stats', icon: BarChart3, label: 'Statistiques', perm: 'stats' },
   { path: '/admin/notifications', icon: Bell, label: 'Notifications', perm: 'notifications' },
+  { path: '/admin/cleaning', icon: Sparkles, label: 'Entretien', perm: 'cleaning' },
   { path: '/admin/smart-agenda', icon: Brain, label: 'Agenda IA', perm: 'smart-agenda' },
   { path: '/admin/settings', icon: Settings, label: 'Paramètres', perm: 'settings' },
   { path: '/admin/barber-accounts', icon: ShieldCheck, label: 'Comptes Barbers', adminOnly: true },
