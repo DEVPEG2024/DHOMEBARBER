@@ -114,10 +114,10 @@ export default function Home() {
         {/* Team Preview */}
         <div>
           <SectionHeader title="Notre Équipe" subtitle="Les Barbers" />
-          <div className="flex gap-3 overflow-x-auto pb-2 -mx-5 px-5 scrollbar-hide">
+          <div className="grid grid-cols-5 gap-2">
             {employees.map((emp, i) => (
               <motion.div key={emp.id} initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: i * 0.07 }}
-                className="flex-shrink-0 w-24 text-center">
+                className="text-center">
                 <div className="w-16 h-16 mx-auto rounded-2xl overflow-hidden glass border-white/10 mb-2">
                   {emp.photo_url ? (
                     <img src={emp.photo_url} alt={emp.name} className="w-full h-full object-cover" />
