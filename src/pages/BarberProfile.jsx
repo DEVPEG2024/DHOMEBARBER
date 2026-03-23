@@ -149,14 +149,12 @@ export default function BarberProfile() {
   }
 
   const employeeSkills = employee.skills || [];
-  const visibleSkills = skillCategories
-    .map(cat => {
-      const s = employeeSkills.find(s => s.category_id === cat.id);
-      return s?.level > 0 ? { category: cat, level: s.level } : null;
-    })
-    .filter(Boolean);
+  const allSkills = skillCategories.map(cat => {
+    const s = employeeSkills.find(s => s.category_id === cat.id);
+    return { category: cat, level: s?.level || 0 };
+  });
 
-  const hasAboutContent = employee.bio || visibleSkills.length > 0 || (employee.experience_level > 0);
+  const hasAboutContent = employee.bio || allSkills.length > 0 || (employee.experience_level > 0);
 
   return (
     <div className="min-h-screen relative overflow-hidden">
@@ -210,16 +208,16 @@ export default function BarberProfile() {
             )}
 
             {/* Divider if both bio/experience and skills */}
-            {(employee.bio || employee.experience_level > 0) && visibleSkills.length > 0 && (
+            {(employee.bio || employee.experience_level > 0) && allSkills.length > 0 && (
               <div className="border-t border-white/8" />
             )}
 
             {/* Skills */}
-            {visibleSkills.length > 0 && (
+            {allSkills.length > 0 && (
               <div>
                 <h4 className="text-xs uppercase tracking-widest text-primary/70 font-medium mb-4">🎯 Spécialités</h4>
                 <div className="space-y-4">
-                  {visibleSkills.map(({ category, level }, i) => (
+                  {allSkills.map(({ category, level }, i) => (
                     <SkillBar key={category.id} category={category} level={level} delay={0.2 + i * 0.08} />
                   ))}
                 </div>
