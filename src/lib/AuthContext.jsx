@@ -37,10 +37,12 @@ export const AuthProvider = ({ children }) => {
   };
 
   const login = useCallback(async (email, password) => {
-    const { access_token, user: loggedUser } = await base44.auth.loginViaEmailPassword(email, password);
-    setUser(loggedUser);
+    await base44.auth.loginViaEmailPassword(email, password);
+    // Fetch full user with permissions from /me endpoint
+    const fullUser = await base44.auth.me();
+    setUser(fullUser);
     setIsAuthenticated(true);
-    return loggedUser;
+    return fullUser;
   }, []);
 
   const register = useCallback(async ({ email, password, full_name, phone }) => {
