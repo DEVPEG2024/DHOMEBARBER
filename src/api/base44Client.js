@@ -8,7 +8,7 @@ export const base44 = createClient({
   appId,
   token,
   functionsVersion,
-  serverUrl: import.meta.env.PROD ? 'https://app.base44.com' : '',
+  serverUrl: import.meta.env.PROD ? 'https://dhomebarber-api-3aabb8313cb6.herokuapp.com' : '',
   requiresAuth: false,
   appBaseUrl
 });

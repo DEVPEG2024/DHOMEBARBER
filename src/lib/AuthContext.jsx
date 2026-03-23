@@ -36,7 +36,7 @@ export const AuthProvider = ({ children }) => {
 
       // First, check app public settings (with token if available)
       // This will tell us if auth is required, user not registered, etc.
-      const apiBase = import.meta.env.PROD ? 'https://app.base44.com' : '';
+      const apiBase = import.meta.env.PROD ? 'https://dhomebarber-api-3aabb8313cb6.herokuapp.com' : '';
       const appClient = createAxiosClient({
         baseURL: `${apiBase}/api/apps/public`,
         headers: {
