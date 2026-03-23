@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { base44 } from '@/api/base44Client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Pencil, Trash2, Package } from 'lucide-react';
+import { Plus, Pencil, Trash2, Package, Upload, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -50,9 +50,26 @@ export default function AdminProducts() {
     },
   });
 
+  const [uploading, setUploading] = useState(false);
+
   const openNew = () => {
-    setEditProduct({ name: '', description: '', price: 0, stock: 0, category: 'other', brand: '', is_active: true });
+    setEditProduct({ name: '', description: '', price: 0, stock: 0, category: 'other', brand: '', image_url: '', is_active: true });
     setShowDialog(true);
+  };
+
+  const handleImageUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const { file_url } = await base44.integrations.Core.UploadFile({ file });
+      setEditProduct(prev => ({ ...prev, image_url: file_url }));
+      toast.success('Photo ajoutée');
+    } catch {
+      toast.error("Erreur lors de l'upload");
+    } finally {
+      setUploading(false);
+    }
   };
 
   return (
@@ -114,6 +131,35 @@ export default function AdminProducts() {
           </DialogHeader>
           {editProduct && (
             <div className="space-y-4">
+              {/* Photo */}
+              <div>
+                <Label className="text-xs mb-2 block">Photo du produit</Label>
+                <div className="flex items-center gap-4">
+                  <div className="w-20 h-20 rounded-xl bg-secondary border border-border overflow-hidden flex items-center justify-center shrink-0">
+                    {editProduct.image_url ? (
+                      <img src={editProduct.image_url} alt="Produit" className="w-full h-full object-cover" />
+                    ) : (
+                      <Package className="w-8 h-8 text-muted-foreground/30" />
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <label className="cursor-pointer">
+                      <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} disabled={uploading} />
+                      <span className="flex items-center gap-1.5 text-xs text-primary border border-primary/30 bg-primary/5 hover:bg-primary/10 px-3 py-1.5 rounded-lg transition-all cursor-pointer">
+                        <Upload className="w-3 h-3" />
+                        {uploading ? 'Upload...' : 'Choisir une photo'}
+                      </span>
+                    </label>
+                    {editProduct.image_url && (
+                      <button onClick={() => setEditProduct({ ...editProduct, image_url: '' })}
+                        className="flex items-center gap-1 text-xs text-red-400 hover:text-red-300 transition-colors">
+                        <X className="w-3 h-3" /> Supprimer
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
               <div>
                 <Label className="text-xs">Nom</Label>
                 <Input value={editProduct.name} onChange={e => setEditProduct({ ...editProduct, name: e.target.value })}
