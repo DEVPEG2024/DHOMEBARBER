@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Clock, User, Phone, Mail, Scissors, CreditCard, FileText, Calendar, Banknote, CheckCircle, Heart, ShoppingBag, ChevronDown, Check } from 'lucide-react';
 import { getServiceColor } from '@/utils/serviceColors';
@@ -14,16 +14,35 @@ const statusLabel = {
   no_show: { label: 'No-show', color: 'bg-red-500/15 text-red-400 border-red-500/50' },
 };
 
+function TipInput({ initial, onChange }) {
+  const [val, setVal] = useState(initial);
+  return (
+    <div className="relative flex-1">
+      <input
+        type="text"
+        inputMode="decimal"
+        placeholder="0"
+        value={val}
+        onChange={(e) => {
+          setVal(e.target.value);
+          onChange(e.target.value);
+        }}
+        className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-primary/40"
+      />
+      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">€</span>
+    </div>
+  );
+}
+
 export default function AppointmentDetailModal({ appointment, onClose, onUpdate }) {
   const [saving, setSaving] = useState(false);
+  const [tipStr, setTipStr] = useState('');
   const [tipMethod, setTipMethod] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('');
   const [selectedProductId, setSelectedProductId] = useState('');
   const [productPrice, setProductPrice] = useState('');
   const [productSold, setProductSold] = useState('');
-  const [, forceUpdate] = useState(0);
 
-  const tipRef = useRef(null);
   const initRef = useRef(null);
 
   const { data: products = [] } = useQuery({
@@ -34,6 +53,7 @@ export default function AppointmentDetailModal({ appointment, onClose, onUpdate 
   // Init once per appointment
   if (appointment && appointment.id !== initRef.current) {
     initRef.current = appointment.id;
+    setTipStr(appointment.tip ? String(appointment.tip) : '');
     setTipMethod(appointment.tip_method || '');
     setPaymentMethod(appointment.payment_method || '');
     setProductPrice(appointment.product_price ? String(appointment.product_price) : '');
@@ -45,22 +65,21 @@ export default function AppointmentDetailModal({ appointment, onClose, onUpdate 
   if (!appointment) return null;
 
   const status = statusLabel[appointment.status] || statusLabel.confirmed;
-  const tipValue = tipRef.current ? (parseFloat(tipRef.current.value) || 0) : (appointment.tip || 0);
+  const tipValue = parseFloat(tipStr) || 0;
   const prodValue = parseFloat(productPrice) || 0;
   const serviceTotal = appointment.total_price || 0;
   const grandTotal = serviceTotal + tipValue + prodValue;
   const canValidate = paymentMethod && (tipValue === 0 || tipMethod);
 
   const handleValidate = async () => {
-    const finalTip = tipRef.current ? (parseFloat(tipRef.current.value) || 0) : 0;
-    const finalGrandTotal = serviceTotal + finalTip + prodValue;
+    const finalGrandTotal = serviceTotal + tipValue + prodValue;
     setSaving(true);
     try {
       await base44.entities.Appointment.update(appointment.id, {
         payment_method: paymentMethod,
         payment_status: 'paid',
         status: 'completed',
-        tip: finalTip,
+        tip: tipValue,
         tip_method: tipMethod,
         product_sold: productSold,
         product_price: prodValue,
@@ -153,18 +172,11 @@ export default function AppointmentDetailModal({ appointment, onClose, onUpdate 
               Pourboire
             </label>
             <div className="flex items-center gap-2">
-              <div className="relative flex-1">
-                <input
-                  ref={tipRef}
-                  type="text"
-                  inputMode="decimal"
-                  placeholder="0"
-                  defaultValue={appointment.tip || ''}
-                  onInput={() => forceUpdate(n => n + 1)}
-                  className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-primary/40"
-                />
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">€</span>
-              </div>
+              <TipInput
+                key={appointment.id}
+                initial={appointment.tip ? String(appointment.tip) : ''}
+                onChange={setTipStr}
+              />
               <button
                 onClick={() => setTipMethod('cb')}
                 className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all ${
