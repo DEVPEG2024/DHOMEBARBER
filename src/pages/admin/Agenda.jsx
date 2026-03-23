@@ -49,6 +49,17 @@ export default function Agenda() {
     queryFn: () => base44.entities.Employee.filter({ is_active: true }),
   });
 
+  const { data: timeOffs = [] } = useQuery({
+    queryKey: ['timeOffs'],
+    queryFn: () => base44.entities.TimeOff.list('-start_date', 200),
+  });
+
+  // Only approved time offs block the agenda
+  const approvedTimeOffs = useMemo(() =>
+    timeOffs.filter(t => t.status === 'approved' || (!t.status)),
+    [timeOffs]
+  );
+
   const employees = useMemo(() =>
     rawEmployees.map((emp, idx) => ({
       ...emp,
@@ -241,6 +252,7 @@ export default function Agenda() {
           onCreateBreak={handleCreateBreak}
           onDeleteBreak={handleDeleteBreak}
           onBreakClick={handleBreakClick}
+          timeOffs={approvedTimeOffs}
         />
       )}
       {view === 'week' && (
@@ -253,6 +265,7 @@ export default function Agenda() {
           onCreateBreak={handleCreateBreak}
           onDeleteBreak={handleDeleteBreak}
           onBreakClick={handleBreakClick}
+          timeOffs={approvedTimeOffs}
         />
       )}
       {view === 'month' && (

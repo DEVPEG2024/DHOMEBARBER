@@ -155,7 +155,7 @@ function DragPreview({ startMin, endMin }) {
   );
 }
 
-export default function WeekView({ currentDate, appointments, employees, onStatusChange, onCreateBreak, onDeleteBreak, onBreakClick, employeeFilter }) {
+export default function WeekView({ currentDate, appointments, employees, onStatusChange, onCreateBreak, onDeleteBreak, onBreakClick, employeeFilter, timeOffs = [] }) {
   const scrollRef = useRef();
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState(null);
@@ -284,6 +284,37 @@ export default function WeekView({ currentDate, appointments, employees, onStatu
                       <div className="absolute w-full border-t border-foreground/10" style={{ top: HOUR_HEIGHT / 2 }} />
                     </div>
                   ))}
+
+                  {/* Leave overlay */}
+                  {(() => {
+                    const onLeaveEmps = employees.filter(emp =>
+                      timeOffs.some(t => t.employee_id === emp.id && dateStr >= t.start_date && dateStr <= t.end_date)
+                    );
+                    // If filtering one barber and they're on leave, block the whole column
+                    if (employeeFilter !== 'all' && onLeaveEmps.some(e => e.id === employeeFilter)) {
+                      return (
+                        <div className="absolute inset-0 z-20 pointer-events-none flex flex-col items-center justify-center"
+                          style={{ background: 'repeating-linear-gradient(135deg, rgba(239,68,68,0.06), rgba(239,68,68,0.06) 8px, transparent 8px, transparent 16px)' }}>
+                          <div className="bg-red-500/15 border border-red-500/30 rounded-lg px-3 py-1.5 text-center">
+                            <p className="text-red-500 font-bold text-xs">CONGÉ</p>
+                          </div>
+                        </div>
+                      );
+                    }
+                    // Show small badges for barbers on leave
+                    if (onLeaveEmps.length > 0 && employeeFilter === 'all') {
+                      return (
+                        <div className="absolute top-1 left-1 right-1 z-20 pointer-events-none flex flex-wrap gap-0.5">
+                          {onLeaveEmps.map(emp => (
+                            <span key={emp.id} className="text-[8px] bg-red-500/15 text-red-400 border border-red-500/20 rounded px-1 py-0.5 font-medium truncate max-w-full">
+                              {emp.name} congé
+                            </span>
+                          ))}
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
 
                   {/* Break blocks */}
                   {dayBreaks.map(apt => (

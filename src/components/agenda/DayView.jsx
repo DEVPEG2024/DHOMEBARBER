@@ -131,7 +131,7 @@ function DragPreview({ startMin, endMin }) {
   );
 }
 
-export default function DayView({ appointments, employees, employeeFilter, onStatusChange, date, onCreateBreak, onDeleteBreak, onBreakClick }) {
+export default function DayView({ appointments, employees, employeeFilter, onStatusChange, date, onCreateBreak, onDeleteBreak, onBreakClick, timeOffs = [] }) {
   const scrollRef = useRef();
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState(null);
@@ -209,30 +209,48 @@ export default function DayView({ appointments, employees, employeeFilter, onSta
     return <DragPreview startMin={s} endMin={e} />;
   };
 
-  const renderColumn = (empId, empColor, columnApts) => (
-    <>
-      {Array.from({ length: TOTAL_HOURS }).map((_, i) => (
-        <div key={i} className="absolute w-full border-t border-foreground/20" style={{ top: i * HOUR_HEIGHT, height: HOUR_HEIGHT }}>
-          {/* Half-hour line */}
-          <div className="absolute w-full border-t border-foreground/10" style={{ top: HOUR_HEIGHT / 2 }} />
-        </div>
-      ))}
+  const isOnLeave = (empId) => {
+    return timeOffs.some(t => t.employee_id === empId && date >= t.start_date && date <= t.end_date);
+  };
 
-      {columnApts.map(apt =>
-        apt.status === 'break' ? (
-          <div key={apt.id} data-block>
-            <BreakBlock apt={apt} onClick={onBreakClick} />
-          </div>
-        ) : (
-          <div key={apt.id} data-block>
-            <AppointmentBlock apt={apt} onStatusChange={onStatusChange} employeeColor={empColor} onClick={setSelected} />
-          </div>
-        )
-      )}
+  const renderColumn = (empId, empColor, columnApts) => {
+    const onLeave = isOnLeave(empId);
 
-      {renderDragPreview(empId)}
-    </>
-  );
+    return (
+      <>
+        {Array.from({ length: TOTAL_HOURS }).map((_, i) => (
+          <div key={i} className="absolute w-full border-t border-foreground/20" style={{ top: i * HOUR_HEIGHT, height: HOUR_HEIGHT }}>
+            {/* Half-hour line */}
+            <div className="absolute w-full border-t border-foreground/10" style={{ top: HOUR_HEIGHT / 2 }} />
+          </div>
+        ))}
+
+        {onLeave && (
+          <div className="absolute inset-0 z-20 pointer-events-none flex flex-col items-center justify-center"
+            style={{ background: 'repeating-linear-gradient(135deg, rgba(239,68,68,0.06), rgba(239,68,68,0.06) 8px, transparent 8px, transparent 16px)' }}>
+            <div className="bg-red-500/15 border border-red-500/30 rounded-lg px-4 py-2 text-center">
+              <p className="text-red-500 font-bold text-sm">CONGÉ</p>
+              <p className="text-red-400 text-[10px]">Journée bloquée</p>
+            </div>
+          </div>
+        )}
+
+        {columnApts.map(apt =>
+          apt.status === 'break' ? (
+            <div key={apt.id} data-block>
+              <BreakBlock apt={apt} onClick={onBreakClick} />
+            </div>
+          ) : (
+            <div key={apt.id} data-block>
+              <AppointmentBlock apt={apt} onStatusChange={onStatusChange} employeeColor={empColor} onClick={setSelected} />
+            </div>
+          )
+        )}
+
+        {renderDragPreview(empId)}
+      </>
+    );
+  };
 
   return (
     <>
@@ -244,6 +262,9 @@ export default function DayView({ appointments, employees, employeeFilter, onSta
               <div key={emp.id} className="flex-1 text-center py-2 border-l border-foreground/15">
                 <div className="w-2 h-2 rounded-full mx-auto mb-1" style={{ background: emp.color || '#3fcf8e' }} />
                 <p className="text-xs font-semibold">{emp.name}</p>
+                {isOnLeave(emp.id) && (
+                  <span className="text-[9px] bg-red-500/15 text-red-500 border border-red-500/20 rounded px-1.5 py-0.5 font-semibold inline-block mt-0.5">CONGÉ</span>
+                )}
               </div>
             ))}
           </div>

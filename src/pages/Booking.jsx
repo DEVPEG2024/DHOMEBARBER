@@ -53,6 +53,11 @@ export default function Booking() {
     queryFn: () => base44.entities.Employee.filter({ is_active: true }, 'sort_order', 50),
   });
 
+  const { data: timeOffs = [] } = useQuery({
+    queryKey: ['timeOffs'],
+    queryFn: () => base44.entities.TimeOff.list('-start_date', 200),
+  });
+
   const { data: confirmedApts = [] } = useQuery({
     queryKey: ['appointments-confirmed', selectedDate, selectedEmployee?.id],
     queryFn: () => {
@@ -101,6 +106,12 @@ export default function Booking() {
 
   const availableSlots = useMemo(() => {
     if (!selectedEmployee || !selectedDate) return [];
+    // Check if barber is on approved leave
+    const dateStr = format(selectedDate, 'yyyy-MM-dd');
+    const onLeave = timeOffs.some(t =>
+      t.employee_id === selectedEmployee.id && dateStr >= t.start_date && dateStr <= t.end_date && (t.status === 'approved' || !t.status)
+    );
+    if (onLeave) return [];
     const dayName = format(selectedDate, 'EEEE').toLowerCase();
     const hours = selectedEmployee.working_hours?.[dayName];
     if (!hours || hours.closed) return [];
