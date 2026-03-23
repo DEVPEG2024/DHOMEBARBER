@@ -43,6 +43,9 @@ export default function Team() {
       setShowDialog(false);
       toast.success('Collaborateur sauvegardé');
     },
+    onError: () => {
+      toast.error('Erreur lors de la sauvegarde');
+    },
   });
 
   const deleteMutation = useMutation({
@@ -50,6 +53,9 @@ export default function Team() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['employees'] });
       toast.success('Collaborateur supprimé');
+    },
+    onError: () => {
+      toast.error('Erreur lors de la suppression');
     },
   });
 
@@ -142,8 +148,12 @@ export default function Team() {
                   <input type="file" accept="image/*" className="hidden" onChange={async (e) => {
                     const file = e.target.files[0];
                     if (!file) return;
-                    const { file_url } = await base44.integrations.Core.UploadFile({ file });
-                    setEditEmployee(prev => ({ ...prev, photo_url: file_url }));
+                    try {
+                      const { file_url } = await base44.integrations.Core.UploadFile({ file });
+                      setEditEmployee(prev => ({ ...prev, photo_url: file_url }));
+                    } catch {
+                      toast.error('Erreur lors de l\'upload de la photo');
+                    }
                   }} />
                   <span className="flex items-center gap-1.5 text-xs text-primary border border-primary/30 bg-primary/5 hover:bg-primary/10 px-3 py-1.5 rounded-lg transition-all cursor-pointer">
                     <Upload className="w-3 h-3" /> Changer la photo

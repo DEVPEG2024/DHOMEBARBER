@@ -29,7 +29,13 @@ export default function AdminServices() {
 
   const { data: categories = [] } = useQuery({
     queryKey: ['serviceCategories'],
-    queryFn: () => base44.entities.ServiceCategory.list('sort_order', 50),
+    queryFn: async () => {
+      try {
+        return await base44.entities.ServiceCategory.list('sort_order', 50);
+      } catch {
+        return [];
+      }
+    },
   });
 
   const saveMutation = useMutation({

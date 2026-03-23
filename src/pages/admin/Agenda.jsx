@@ -78,6 +78,7 @@ export default function Agenda() {
     },
     onError: (err) => {
       console.error('Break creation error:', err);
+      toast.error('Erreur lors de la création de la pause');
     },
   });
 

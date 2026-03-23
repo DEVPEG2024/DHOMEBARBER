@@ -113,7 +113,7 @@ export default function Clients() {
       toast.error('L\'email est obligatoire');
       return;
     }
-    if (clients.some(c => c.email.toLowerCase() === newClient.email.trim().toLowerCase())) {
+    if (clients.some(c => c.email?.toLowerCase() === newClient.email.trim().toLowerCase())) {
       toast.error('Ce client existe déjà');
       return;
     }

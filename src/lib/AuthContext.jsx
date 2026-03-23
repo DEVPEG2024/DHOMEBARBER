@@ -10,8 +10,9 @@ const DEV_BYPASS_AUTH = true;
 
 const DEV_MOCK_USER = {
   id: 'dev-user',
-  name: 'Dev User',
-  email: 'dev@localhost',
+  name: 'Admin',
+  full_name: 'Admin D\'Home Barber',
+  email: 'admin@dhomebarber.com',
   role: 'admin',
 };
 

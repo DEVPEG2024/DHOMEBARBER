@@ -25,7 +25,7 @@ export default function Profile() {
   });
 
   const completedCount = appointments.filter(a => a.status === 'completed').length;
-  const totalSpent = appointments.filter(a => a.status === 'completed').reduce((sum, a) => sum + (a.total_price || 0), 0);
+  const totalSpent = appointments.filter(a => a.status === 'completed').reduce((sum, a) => sum + (a.grand_total || a.total_price || 0), 0);
   const upcomingCount = appointments.filter(a => a.status === 'confirmed').length;
   const initials = user?.full_name?.split(' ').map(n => n[0]).join('').slice(0, 2) || '?';
 

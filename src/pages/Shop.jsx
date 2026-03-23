@@ -53,17 +53,20 @@ export default function Shop() {
 
   const cartItems = Object.entries(cart);
   const cartTotal = cartItems.reduce((sum, [id, qty]) => {
-    const product = products.find(p => p.id === id);
+    const product = products.find(p => String(p.id) === String(id));
     return sum + (product?.price || 0) * qty;
   }, 0);
   const cartCount = cartItems.reduce((sum, [, qty]) => sum + qty, 0);
 
   const handleOrder = async () => {
-    if (cartItems.length === 0) return;
+    if (cartItems.length === 0) {
+      toast.error('Votre panier est vide');
+      return;
+    }
     setOrdering(true);
     try {
       const items = cartItems.map(([id, qty]) => {
-        const product = products.find(p => p.id === id);
+        const product = products.find(p => String(p.id) === String(id));
         return {
           product_id: id,
           name: product?.name || '',
@@ -264,7 +267,7 @@ export default function Shop() {
                   {/* Items */}
                   <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
                     {cartItems.map(([id, qty]) => {
-                      const product = products.find(p => p.id === id);
+                      const product = products.find(p => String(p.id) === String(id));
                       if (!product) return null;
                       return (
                         <div key={id} className="bg-card rounded-lg p-3 border border-border">

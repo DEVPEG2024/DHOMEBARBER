@@ -12,7 +12,13 @@ export default function Services() {
 
   const { data: categories = [] } = useQuery({
     queryKey: ['serviceCategories'],
-    queryFn: () => base44.entities.ServiceCategory.filter({ is_active: true }, 'sort_order', 50),
+    queryFn: async () => {
+      try {
+        return await base44.entities.ServiceCategory.filter({ is_active: true }, 'sort_order', 50);
+      } catch {
+        return [];
+      }
+    },
   });
 
   const { data: services = [] } = useQuery({

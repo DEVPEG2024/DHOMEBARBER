@@ -188,7 +188,7 @@ function ModalInner({ appointment, onUpdate }) {
             onChange={(e) => {
               const id = e.target.value;
               if (id) {
-                const product = products.find(p => p.id === id);
+                const product = products.find(p => String(p.id) === String(id));
                 if (product) {
                   dispatch({ type: 'SET_PRODUCT', id, name: product.name, price: String(product.price) });
                 }

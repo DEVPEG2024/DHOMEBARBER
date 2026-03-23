@@ -152,6 +152,9 @@ export default function Booking() {
       toast.success('Rendez-vous confirmé !');
       navigate('/appointments');
     },
+    onError: () => {
+      toast.error('Erreur lors de la création du rendez-vous');
+    },
   });
 
   const canNext = () => {
