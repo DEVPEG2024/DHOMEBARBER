@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { base44 } from '@/api/base44Client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Save, Loader2, Plus, Trash2, GripVertical } from 'lucide-react';
+import { Save, Loader2, Plus, Trash2, Pencil, X, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -30,12 +30,23 @@ export default function AdminSettings() {
     queryFn: () => base44.entities.SkillCategory.list('sort_order', 100),
   });
 
+  const [editingSkill, setEditingSkill] = useState(null);
+
   const addSkillMutation = useMutation({
     mutationFn: (data) => base44.entities.SkillCategory.create(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['skillCategories'] });
       setNewSkill({ name: '', emoji: '✂️', color: '#3fcf8e' });
       toast.success('Compétence ajoutée');
+    },
+  });
+
+  const updateSkillMutation = useMutation({
+    mutationFn: ({ id, data }) => base44.entities.SkillCategory.update(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['skillCategories'] });
+      setEditingSkill(null);
+      toast.success('Compétence modifiée');
     },
   });
 
@@ -235,17 +246,85 @@ export default function AdminSettings() {
           {/* Existing skills */}
           <div className="space-y-2 mb-4">
             {skillCategories.map((cat) => (
-              <div key={cat.id} className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-secondary/50 border border-border group">
-                <span className="text-lg">{cat.emoji}</span>
-                <span className="text-sm font-medium flex-1">{cat.name}</span>
-                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: cat.color }} />
-                <button
-                  onClick={() => deleteSkillMutation.mutate(cat.id)}
-                  className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-red-400"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
+              editingSkill?.id === cat.id ? (
+                <div key={cat.id} className="rounded-xl bg-secondary/80 border border-primary/30 p-4 space-y-3">
+                  <div className="flex gap-2">
+                    <Input
+                      value={editingSkill.name}
+                      onChange={e => setEditingSkill({ ...editingSkill, name: e.target.value })}
+                      className="bg-background border-border text-sm flex-1"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground mb-1.5 block">Emoji</Label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {SKILL_EMOJIS.map(emoji => (
+                        <button
+                          key={emoji}
+                          onClick={() => setEditingSkill({ ...editingSkill, emoji })}
+                          className={`w-8 h-8 rounded-lg text-base flex items-center justify-center transition-all ${
+                            editingSkill.emoji === emoji ? 'bg-primary/20 ring-2 ring-primary scale-110' : 'bg-secondary hover:bg-secondary/80'
+                          }`}
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground mb-1.5 block">Couleur</Label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {SKILL_COLORS.map(color => (
+                        <button
+                          key={color}
+                          onClick={() => setEditingSkill({ ...editingSkill, color })}
+                          className={`w-8 h-8 rounded-lg transition-all ${
+                            editingSkill.color === color ? 'ring-2 ring-white scale-110' : 'hover:scale-105'
+                          }`}
+                          style={{ backgroundColor: color }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        if (!editingSkill.name.trim()) return toast.error('Nom requis');
+                        const { id, ...data } = editingSkill;
+                        updateSkillMutation.mutate({ id, data: { name: data.name, emoji: data.emoji, color: data.color } });
+                      }}
+                      disabled={updateSkillMutation.isPending}
+                      className="bg-primary text-primary-foreground text-xs"
+                    >
+                      <Check className="w-3.5 h-3.5 mr-1" />
+                      Enregistrer
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => setEditingSkill(null)} className="text-xs">
+                      <X className="w-3.5 h-3.5 mr-1" />
+                      Annuler
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div key={cat.id} className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-secondary/50 border border-border group">
+                  <span className="text-lg">{cat.emoji}</span>
+                  <span className="text-sm font-medium flex-1">{cat.name}</span>
+                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: cat.color }} />
+                  <button
+                    onClick={() => setEditingSkill({ id: cat.id, name: cat.name, emoji: cat.emoji, color: cat.color })}
+                    className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-primary"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => deleteSkillMutation.mutate(cat.id)}
+                    className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-red-400"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )
             ))}
             {skillCategories.length === 0 && (
               <p className="text-xs text-muted-foreground text-center py-3">Aucune compétence configurée</p>
