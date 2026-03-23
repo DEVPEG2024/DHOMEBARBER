@@ -7,7 +7,7 @@ import { ChevronLeft, Scissors, Calendar, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 function SkillBar({ category, level, delay }) {
-  const labels = ['', 'Débutant', 'Intermédiaire', 'Avancé', 'Expert', 'Maître'];
+  const labels = ['Non évalué', 'Débutant', 'Intermédiaire', 'Avancé', 'Expert', 'Maître'];
 
   return (
     <motion.div
@@ -25,29 +25,21 @@ function SkillBar({ category, level, delay }) {
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-foreground">{category.name}</p>
         </div>
-        <span className="text-xs font-medium" style={{ color: category.color }}>
-          {labels[level]}
+        <span className="text-xs font-medium" style={{ color: level > 0 ? category.color : 'var(--muted-foreground)' }}>
+          {labels[level]} {level}/5
         </span>
       </div>
-      <div className="ml-12 h-2.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--secondary)' }}>
+      <div className="ml-12 h-2.5 rounded-full overflow-hidden bg-white/10">
         <motion.div
           initial={{ width: 0 }}
-          animate={{ width: `${(level / 5) * 100}%` }}
+          animate={{ width: level > 0 ? `${(level / 5) * 100}%` : '0%' }}
           transition={{ delay: delay + 0.2, duration: 0.6, ease: 'easeOut' }}
-          className="h-full rounded-full relative"
+          className="h-full rounded-full"
           style={{
             backgroundColor: category.color,
-            boxShadow: `0 0 10px ${category.color}50`,
+            boxShadow: level > 0 ? `0 0 10px ${category.color}50` : 'none',
           }}
-        >
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: [0, 0.6, 0] }}
-            transition={{ delay: delay + 0.4, duration: 0.8 }}
-            className="absolute inset-0 rounded-full"
-            style={{ backgroundColor: 'white' }}
-          />
-        </motion.div>
+        />
       </div>
     </motion.div>
   );
