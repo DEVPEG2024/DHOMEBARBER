@@ -251,30 +251,24 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* Prestations à clôturer */}
-      {unpaidToday.length > 0 && (
-        <div onClick={() => navigate('/admin/agenda')}
-          className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl px-4 py-3 mb-4 flex items-center gap-3 cursor-pointer hover:bg-yellow-500/15 active:scale-[0.99] transition-all animate-pulse">
-          <AlertTriangle className="w-4 h-4 text-yellow-400 shrink-0" />
-          <p className="text-xs text-yellow-300">
-            <strong>{unpaidToday.length} prestation{unpaidToday.length > 1 ? 's' : ''}</strong> à clôturer aujourd'hui ({todayUnpaid}€) — appuyez pour ouvrir l'agenda
-          </p>
-        </div>
-      )}
-
-      {/* Paiement non renseigné (clôturés sans méthode) */}
-      {unpaidToday.length === 0 && (todayNoMethod > 0 || monthNoMethod > 0) && (
-        <div onClick={() => navigate('/admin/agenda')}
-          className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl px-4 py-3 mb-4 flex items-center gap-3 cursor-pointer hover:bg-yellow-500/15 active:scale-[0.99] transition-all">
-          <AlertTriangle className="w-4 h-4 text-yellow-400 shrink-0" />
-          <p className="text-xs text-yellow-300">
-            {todayNoMethod > 0 && <><strong>{todayNoMethod}€</strong> aujourd'hui</>}
-            {todayNoMethod > 0 && monthNoMethod > todayNoMethod && ' · '}
-            {monthNoMethod > todayNoMethod && <><strong>{monthNoMethod}€</strong> ce mois</>}
-            {' '}sans mode de paiement renseigné
-          </p>
-        </div>
-      )}
+      {/* Prestations à clôturer (confirmés non payés + completed sans méthode) */}
+      {(() => {
+        const toClose = todayAppts.filter(a =>
+          (a.status === 'confirmed' && !isPaid(a)) ||
+          (a.status === 'completed' && !a.payment_method)
+        );
+        if (toClose.length === 0) return null;
+        const totalToClose = toClose.reduce((s, a) => s + (a.total_price || 0), 0);
+        return (
+          <div onClick={() => navigate('/admin/agenda')}
+            className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl px-4 py-3 mb-4 flex items-center gap-3 cursor-pointer hover:bg-yellow-500/15 active:scale-[0.99] transition-all animate-pulse">
+            <AlertTriangle className="w-4 h-4 text-yellow-400 shrink-0" />
+            <p className="text-xs text-yellow-300">
+              <strong>{toClose.length} prestation{toClose.length > 1 ? 's' : ''}</strong> à clôturer ({totalToClose}€) — appuyez pour ouvrir l'agenda
+            </p>
+          </div>
+        );
+      })()}
 
       {/* Products + Alerts Row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">

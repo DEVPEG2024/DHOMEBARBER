@@ -91,8 +91,8 @@ function AppointmentBlock({ apt, onStatusChange, employeeColor, onClick }) {
     ? getServiceColor(apt.services[0].service_id)
     : (employeeColor || '#3fcf8e');
 
-  // Non clôturé = confirmé sans paiement
-  const needsClose = apt.status === 'confirmed' && !apt.payment_method;
+  // À clôturer = confirmé non payé OU completed sans méthode de paiement
+  const needsClose = (apt.status === 'confirmed' && !apt.payment_method) || (apt.status === 'completed' && !apt.payment_method);
 
   return (
     <div

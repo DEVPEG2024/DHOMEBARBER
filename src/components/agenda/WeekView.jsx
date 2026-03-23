@@ -115,7 +115,7 @@ function AppointmentBlock({ apt, empColor, onStatusChange, onClick }) {
 
   const isLight = apt.status === 'cancelled' || apt.status === 'no_show';
   const borderColor = apt.status === 'cancelled' ? '#f87171' : apt.status === 'pending' ? '#facc15' : empColor;
-  const needsClose = apt.status === 'confirmed' && !apt.payment_method;
+  const needsClose = (apt.status === 'confirmed' && !apt.payment_method) || (apt.status === 'completed' && !apt.payment_method);
 
   return (
     <div
