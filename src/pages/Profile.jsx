@@ -4,10 +4,11 @@ import { base44 } from '@/api/base44Client';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { motion } from 'framer-motion';
-import { Calendar, Star, ShoppingBag, Settings, LogOut, ChevronRight, Shield, Scissors } from 'lucide-react';
+import { Calendar, Star, ShoppingBag, Settings, LogOut, ChevronRight, Shield, Scissors, Bell } from 'lucide-react';
 
 const menuItems = [
   { icon: Calendar, label: 'Mes Rendez-vous', path: '/appointments', desc: 'Historique & prochains RDV' },
+  { icon: Bell, label: 'Notifications', path: '/notifications', desc: 'Messages & alertes' },
   { icon: ShoppingBag, label: 'Mes Commandes', path: '/orders', desc: 'Suivi de vos achats' },
   { icon: Star, label: 'Mes Avis', path: '/reviews', desc: 'Vos évaluations' },
   { icon: Settings, label: 'Paramètres', path: '/settings', desc: 'Compte & préférences' },

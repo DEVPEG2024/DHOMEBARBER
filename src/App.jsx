@@ -21,6 +21,7 @@ import Login from '@/pages/Login';
 import Orders from '@/pages/Orders';
 import MyReviews from '@/pages/MyReviews';
 import UserSettings from '@/pages/Settings';
+import ClientNotifications from '@/pages/ClientNotifications';
 
 // Admin pages
 import AdminDashboard from '@/pages/admin/Dashboard';
@@ -130,6 +131,7 @@ const AppRoutes = () => {
           <Route path="/orders" element={<Orders />} />
           <Route path="/reviews" element={<MyReviews />} />
           <Route path="/settings" element={<UserSettings />} />
+          <Route path="/notifications" element={<ClientNotifications />} />
           <Route path="/profile" element={<Profile />} />
         </Route>
       </Route>
