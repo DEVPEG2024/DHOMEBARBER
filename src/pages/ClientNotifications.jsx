@@ -43,11 +43,14 @@ export default function ClientNotifications() {
     const updated = notifs.map(n => ({ ...n, read: true }));
     saveNotifications(updated);
     setNotifications(updated);
+    // Clear badge
+    if (navigator.clearAppBadge) navigator.clearAppBadge();
   }, []);
 
   const handleClear = () => {
     saveNotifications([]);
     setNotifications([]);
+    if (navigator.clearAppBadge) navigator.clearAppBadge();
   };
 
   const handleDelete = (id) => {
