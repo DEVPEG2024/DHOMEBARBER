@@ -19,7 +19,7 @@ const allSidebarItems = [
   { path: '/admin/stats', icon: BarChart3, label: 'Statistiques', perm: 'stats' },
   { path: '/admin/notifications', icon: Bell, label: 'Notifications', perm: 'notifications' },
   { path: '/admin/cleaning', icon: Sparkles, label: 'Entretien', perm: 'cleaning' },
-  { path: '/admin/my-cleaning', icon: Sparkles, label: 'Mes Tâches', barberOnly: true, alwaysShow: true },
+  { path: '/admin/my-cleaning', icon: Sparkles, label: 'Entretien', barberOnly: true, alwaysShow: true },
   { path: '/admin/smart-agenda', icon: Brain, label: 'Agenda IA', perm: 'smart-agenda' },
   { path: '/admin/settings', icon: Settings, label: 'Paramètres', perm: 'settings' },
   { path: '/admin/leave', icon: CalendarDays, label: 'Congés', adminOnly: true },
