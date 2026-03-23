@@ -226,12 +226,12 @@ export default function WeekView({ currentDate, appointments, employees, onStatu
         style={{ height: 'calc(100vh - 200px)' }}>
         {/* Day headers */}
         <div className="flex border-b border-border shrink-0">
-          <div className="w-14 shrink-0 border-r border-border/30" />
+          <div className="w-14 shrink-0 border-r border-foreground/15" />
           {days.map(day => {
             const isToday = isSameDay(day, new Date());
             const count = appointments.filter(a => a.date === format(day, 'yyyy-MM-dd') && a.status !== 'break').length;
             return (
-              <div key={day.toISOString()} className={`flex-1 text-center py-3 border-l border-border/30 ${isToday ? 'bg-primary/5' : ''}`}>
+              <div key={day.toISOString()} className={`flex-1 text-center py-3 border-l border-foreground/15 ${isToday ? 'bg-primary/5' : ''}`}>
                 <p className="text-[10px] text-muted-foreground uppercase tracking-widest font-medium">
                   {format(day, 'EEE', { locale: fr })}
                 </p>
@@ -252,7 +252,7 @@ export default function WeekView({ currentDate, appointments, employees, onStatu
         <div ref={scrollRef} data-scroll-container className="overflow-y-auto flex-1 overflow-x-hidden">
           <div className="flex" style={{ minHeight: TOTAL_HOURS * HOUR_HEIGHT }}>
             {/* Hour labels */}
-            <div className="w-14 shrink-0 relative border-r border-border/20">
+            <div className="w-14 shrink-0 relative border-r border-foreground/15">
               {Array.from({ length: TOTAL_HOURS }).map((_, i) => (
                 <div key={i} className="absolute w-full" style={{ top: i * HOUR_HEIGHT }}>
                   <span className="text-[10px] text-muted-foreground/60 absolute -top-2.5 right-2 font-mono select-none">
@@ -273,7 +273,7 @@ export default function WeekView({ currentDate, appointments, employees, onStatu
               return (
                 <div
                   key={dateStr}
-                  className={`flex-1 relative border-l border-border/20 select-none cursor-crosshair ${isToday ? 'bg-primary/[0.02]' : ''}`}
+                  className={`flex-1 relative border-l border-foreground/15 select-none cursor-crosshair ${isToday ? 'bg-primary/[0.02]' : ''}`}
                   style={{ minWidth: 0 }}
                   onMouseDown={e => handleMouseDown(e, dateStr, e.currentTarget)}
                 >

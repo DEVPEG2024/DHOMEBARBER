@@ -238,7 +238,7 @@ export default function DayView({ appointments, employees, employeeFilter, onSta
           <div className="flex border-b border-border">
             <div className="w-14 shrink-0" />
             {cols.map(emp => (
-              <div key={emp.id} className="flex-1 text-center py-2 border-l border-border">
+              <div key={emp.id} className="flex-1 text-center py-2 border-l border-foreground/15">
                 <div className="w-2 h-2 rounded-full mx-auto mb-1" style={{ background: emp.color || '#3fcf8e' }} />
                 <p className="text-xs font-semibold">{emp.name}</p>
               </div>
@@ -261,14 +261,14 @@ export default function DayView({ appointments, employees, employeeFilter, onSta
             {showCols ? cols.map(emp => (
               <div
                 key={emp.id}
-                className="flex-1 relative border-l border-border select-none cursor-crosshair"
+                className="flex-1 relative border-l border-foreground/15 select-none cursor-crosshair"
                 onMouseDown={e => handleMouseDown(e, emp.id, e.currentTarget)}
               >
                 {renderColumn(emp.id, emp.color, appointments.filter(a => a.employee_id === emp.id))}
               </div>
             )) : (
               <div
-                className="flex-1 relative border-l border-border select-none cursor-crosshair"
+                className="flex-1 relative border-l border-foreground/15 select-none cursor-crosshair"
                 onMouseDown={e => handleMouseDown(e, employeeFilter, e.currentTarget)}
               >
                 {renderColumn(employeeFilter, cols[0]?.color, filtered)}
