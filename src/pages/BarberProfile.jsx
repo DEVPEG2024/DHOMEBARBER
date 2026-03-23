@@ -170,25 +170,25 @@ export default function BarberProfile() {
           Retour
         </Link>
 
-        {/* Photo */}
-        <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="text-center mb-8">
-          <div className="relative inline-block mb-4">
-            <div className="w-32 h-32 rounded-3xl overflow-hidden bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/20 mx-auto shadow-2xl shadow-primary/10">
-              {employee.photo_url ? (
-                <img src={employee.photo_url} alt={employee.name} className="w-full h-full object-cover" />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center">
-                  <User className="w-14 h-14 text-muted-foreground/30" />
-                </div>
-              )}
-            </div>
-            <div className="absolute -bottom-1.5 -right-1.5 w-8 h-8 rounded-xl bg-primary flex items-center justify-center shadow-lg shadow-primary/30">
-              <Scissors className="w-4 h-4 text-primary-foreground" />
-            </div>
-          </div>
-
+        {/* Name + Title */}
+        <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="text-center mb-4">
           <h1 className="font-display text-2xl font-bold text-foreground">{employee.name}</h1>
           <p className="text-sm text-primary font-medium mt-1">{employee.title || 'Barber'}</p>
+        </motion.div>
+
+        {/* Photo - full width */}
+        <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.05 }}
+          className="relative rounded-2xl overflow-hidden bg-gradient-to-br from-primary/20 to-primary/5 border border-white/8 mb-6 aspect-square">
+          {employee.photo_url ? (
+            <img src={employee.photo_url} alt={employee.name} className="w-full h-full object-cover" />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center">
+              <User className="w-20 h-20 text-muted-foreground/30" />
+            </div>
+          )}
+          <div className="absolute bottom-3 right-3 w-10 h-10 rounded-xl bg-primary flex items-center justify-center shadow-lg shadow-primary/30">
+            <Scissors className="w-5 h-5 text-primary-foreground" />
+          </div>
         </motion.div>
 
         {/* À propos - Bio + Experience + Skills combined */}
