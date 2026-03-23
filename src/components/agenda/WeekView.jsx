@@ -115,17 +115,18 @@ function AppointmentBlock({ apt, empColor, onStatusChange, onClick }) {
 
   const isLight = apt.status === 'cancelled' || apt.status === 'no_show';
   const borderColor = apt.status === 'cancelled' ? '#f87171' : apt.status === 'pending' ? '#facc15' : empColor;
+  const needsClose = apt.status === 'confirmed' && !apt.payment_method;
 
   return (
     <div
       onClick={e => { e.stopPropagation(); onClick(apt); }}
-      className="absolute rounded-lg overflow-hidden cursor-pointer group transition-all hover:z-30 hover:shadow-xl flex items-center gap-1.5 px-2"
+      className={`absolute rounded-lg overflow-hidden cursor-pointer group transition-all hover:z-30 hover:shadow-xl flex items-center gap-1.5 px-2 ${needsClose ? 'ring-2 ring-yellow-400/60 animate-pulse' : ''}`}
       style={{
         top, height: Math.min(height, 32),
         borderLeft: `3px solid ${borderColor}`,
         background: `${empColor}15`,
         opacity: isLight ? 0.5 : 1,
-        zIndex: 10,
+        zIndex: needsClose ? 15 : 10,
         backdropFilter: 'blur(4px)',
       }}
     >

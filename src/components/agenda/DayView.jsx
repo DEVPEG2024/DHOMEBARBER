@@ -91,16 +91,19 @@ function AppointmentBlock({ apt, onStatusChange, employeeColor, onClick }) {
     ? getServiceColor(apt.services[0].service_id)
     : (employeeColor || '#3fcf8e');
 
+  // Non clôturé = confirmé sans paiement
+  const needsClose = apt.status === 'confirmed' && !apt.payment_method;
+
   return (
     <div
       onClick={e => { e.stopPropagation(); onClick(apt); }}
-      className="absolute left-1 right-1 rounded-lg overflow-hidden cursor-pointer group transition-all hover:z-20 hover:shadow-lg hover:brightness-110 flex items-center gap-2 px-2.5"
+      className={`absolute left-1 right-1 rounded-lg overflow-hidden cursor-pointer group transition-all hover:z-20 hover:shadow-lg hover:brightness-110 flex items-center gap-2 px-2.5 ${needsClose ? 'ring-2 ring-yellow-400/60 animate-pulse' : ''}`}
       style={{
         top, height: Math.min(height, 36),
         background: style.bg,
         borderLeft: `4px solid ${accentColor}`,
         opacity: style.opacity || 1,
-        zIndex: 10,
+        zIndex: needsClose ? 15 : 10,
       }}
     >
       <span className="text-[10px] font-bold shrink-0" style={{ color: accentColor }}>{apt.start_time}</span>
