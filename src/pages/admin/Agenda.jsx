@@ -1,9 +1,10 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { base44 } from '@/api/base44Client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { format, startOfWeek, endOfMonth, addDays } from 'date-fns';
 import { exportToCSV } from '@/utils/exportCSV';
 import { toast } from 'sonner';
+import { useAuth } from '@/lib/AuthContext';
 
 const BARBER_COLORS = ['#3fcf8e','#60a5fa','#f59e0b','#a78bfa','#f472b6','#34d399','#fb923c','#38bdf8','#e879f9','#4ade80'];
 
@@ -21,12 +22,20 @@ function timeToMinutes(t) {
 }
 
 export default function Agenda() {
+  const { user } = useAuth();
   const [view, setView] = useState('week');
   const [currentDate, setCurrentDate] = useState(new Date());
   const [employeeFilter, setEmployeeFilter] = useState('all');
   const [selectedBreak, setSelectedBreak] = useState(null);
   const [pendingBreak, setPendingBreak] = useState(null); // { start_time, end_time, date } waiting for barber selection
   const queryClient = useQueryClient();
+
+  // Auto-filter barber's agenda to their own employee
+  useEffect(() => {
+    if (user?.role === 'barber' && user?.employee_id) {
+      setEmployeeFilter(user.employee_id);
+    }
+  }, [user]);
 
   const { queryStart, queryEnd } = useMemo(() => {
     if (view === 'day') return { queryStart: format(currentDate, 'yyyy-MM-dd'), queryEnd: format(currentDate, 'yyyy-MM-dd') };
@@ -52,6 +61,8 @@ export default function Agenda() {
   const { data: timeOffs = [] } = useQuery({
     queryKey: ['timeOffs'],
     queryFn: () => base44.entities.TimeOff.list('-start_date', 200),
+    refetchOnMount: 'always',
+    refetchInterval: 30000,
   });
 
   // Only approved time offs block the agenda

@@ -43,7 +43,7 @@ export default function SmartAgenda() {
   const addTimeOff = useMutation({
     mutationFn: (data) => {
       const emp = employees.find(e => e.id === data.employee_id);
-      return base44.entities.TimeOff.create({ ...data, employee_name: emp?.name });
+      return base44.entities.TimeOff.create({ ...data, employee_name: emp?.name, status: 'approved' });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['timeOffs'] });
@@ -172,7 +172,7 @@ export default function SmartAgenda() {
   };
 
   const isTimeOff = (dayStr, employeeId) => {
-    return timeOffs.some(t => t.employee_id === employeeId && dayStr >= t.start_date && dayStr <= t.end_date && (t.status === 'approved' || !t.status));
+    return timeOffs.some(t => String(t.employee_id) === String(employeeId) && dayStr >= String(t.start_date).slice(0,10) && dayStr <= String(t.end_date).slice(0,10) && (t.status === 'approved' || !t.status));
   };
 
   const upcomingTimeOffs = timeOffs.filter(t => t.end_date >= format(new Date(), 'yyyy-MM-dd')).sort((a, b) => a.start_date.localeCompare(b.start_date));

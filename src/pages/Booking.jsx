@@ -56,6 +56,7 @@ export default function Booking() {
   const { data: timeOffs = [] } = useQuery({
     queryKey: ['timeOffs'],
     queryFn: () => base44.entities.TimeOff.list('-start_date', 200),
+    refetchOnMount: 'always',
   });
 
   const { data: confirmedApts = [] } = useQuery({
@@ -109,7 +110,7 @@ export default function Booking() {
     // Check if barber is on approved leave
     const dateStr = format(selectedDate, 'yyyy-MM-dd');
     const onLeave = timeOffs.some(t =>
-      t.employee_id === selectedEmployee.id && dateStr >= t.start_date && dateStr <= t.end_date && (t.status === 'approved' || !t.status)
+      String(t.employee_id) === String(selectedEmployee.id) && dateStr >= String(t.start_date).slice(0,10) && dateStr <= String(t.end_date).slice(0,10) && (t.status === 'approved' || !t.status)
     );
     if (onLeave) return [];
     const dayName = format(selectedDate, 'EEEE').toLowerCase();

@@ -214,7 +214,7 @@ export default function DayView({ appointments, employees, employeeFilter, onSta
       const d = String(date);
       const s = String(t.start_date).slice(0, 10);
       const e = String(t.end_date).slice(0, 10);
-      return t.employee_id === empId && d >= s && d <= e;
+      return String(t.employee_id) === String(empId) && d >= s && d <= e;
     });
   };
 
@@ -232,10 +232,10 @@ export default function DayView({ appointments, employees, employeeFilter, onSta
 
         {onLeave && (
           <div className="absolute inset-0 z-20 pointer-events-none flex flex-col items-center justify-center"
-            style={{ background: 'repeating-linear-gradient(135deg, rgba(239,68,68,0.06), rgba(239,68,68,0.06) 8px, transparent 8px, transparent 16px)' }}>
-            <div className="bg-red-500/15 border border-red-500/30 rounded-lg px-4 py-2 text-center">
-              <p className="text-red-500 font-bold text-sm">CONGÉ</p>
-              <p className="text-red-400 text-[10px]">Journée bloquée</p>
+            style={{ background: 'repeating-linear-gradient(135deg, rgba(239,68,68,0.18), rgba(239,68,68,0.18) 8px, rgba(239,68,68,0.08) 8px, rgba(239,68,68,0.08) 16px)' }}>
+            <div className="bg-red-500/25 border-2 border-red-500/50 rounded-xl px-5 py-3 text-center shadow-lg">
+              <p className="text-red-500 font-bold text-base">CONGÉ</p>
+              <p className="text-red-400 text-xs font-medium">Journée bloquée</p>
             </div>
           </div>
         )}

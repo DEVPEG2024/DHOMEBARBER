@@ -230,16 +230,24 @@ export default function WeekView({ currentDate, appointments, employees, onStatu
           <div className="w-14 shrink-0 border-r border-foreground/15" />
           {days.map(day => {
             const isToday = isSameDay(day, new Date());
-            const count = appointments.filter(a => a.date === format(day, 'yyyy-MM-dd') && a.status !== 'break').length;
+            const dayStr = format(day, 'yyyy-MM-dd');
+            const count = appointments.filter(a => a.date === dayStr && a.status !== 'break').length;
+            const dayLeaveEmps = employeeFilter !== 'all'
+              ? timeOffs.some(t => String(t.employee_id) === String(employeeFilter) && dayStr >= String(t.start_date).slice(0,10) && dayStr <= String(t.end_date).slice(0,10))
+              : false;
             return (
-              <div key={day.toISOString()} className={`flex-1 text-center py-3 border-l border-foreground/15 ${isToday ? 'bg-primary/5' : ''}`}>
+              <div key={day.toISOString()} className={`flex-1 text-center py-3 border-l border-foreground/15 ${dayLeaveEmps ? 'bg-red-500/10' : isToday ? 'bg-primary/5' : ''}`}>
                 <p className="text-[10px] text-muted-foreground uppercase tracking-widest font-medium">
                   {format(day, 'EEE', { locale: fr })}
                 </p>
-                <p className={`text-xl font-bold leading-snug ${isToday ? 'text-primary' : 'text-foreground'}`}>
+                <p className={`text-xl font-bold leading-snug ${dayLeaveEmps ? 'text-red-500' : isToday ? 'text-primary' : 'text-foreground'}`}>
                   {format(day, 'd')}
                 </p>
-                {count > 0 ? (
+                {dayLeaveEmps ? (
+                  <span className="text-[9px] px-2 py-0.5 rounded-full font-bold inline-block mt-0.5 bg-red-500/20 text-red-500 border border-red-500/30">
+                    CONGÉ
+                  </span>
+                ) : count > 0 ? (
                   <span className={`text-[9px] px-2 py-0.5 rounded-full font-semibold inline-block mt-0.5 ${isToday ? 'bg-primary/25 text-primary' : 'bg-secondary text-muted-foreground'}`}>
                     {count}
                   </span>
@@ -288,29 +296,34 @@ export default function WeekView({ currentDate, appointments, employees, onStatu
                   {/* Leave overlay */}
                   {(() => {
                     const onLeaveEmps = employees.filter(emp =>
-                      timeOffs.some(t => t.employee_id === emp.id && dateStr >= String(t.start_date).slice(0,10) && dateStr <= String(t.end_date).slice(0,10))
+                      timeOffs.some(t => String(t.employee_id) === String(emp.id) && dateStr >= String(t.start_date).slice(0,10) && dateStr <= String(t.end_date).slice(0,10))
                     );
                     // If filtering one barber and they're on leave, block the whole column
-                    if (employeeFilter !== 'all' && onLeaveEmps.some(e => e.id === employeeFilter)) {
+                    if (employeeFilter !== 'all' && onLeaveEmps.some(e => String(e.id) === String(employeeFilter))) {
                       return (
                         <div className="absolute inset-0 z-20 pointer-events-none flex flex-col items-center justify-center"
-                          style={{ background: 'repeating-linear-gradient(135deg, rgba(239,68,68,0.06), rgba(239,68,68,0.06) 8px, transparent 8px, transparent 16px)' }}>
-                          <div className="bg-red-500/15 border border-red-500/30 rounded-lg px-3 py-1.5 text-center">
-                            <p className="text-red-500 font-bold text-xs">CONGÉ</p>
+                          style={{ background: 'repeating-linear-gradient(135deg, rgba(239,68,68,0.18), rgba(239,68,68,0.18) 8px, rgba(239,68,68,0.08) 8px, rgba(239,68,68,0.08) 16px)' }}>
+                          <div className="bg-red-500/25 border-2 border-red-500/50 rounded-xl px-4 py-2.5 text-center shadow-lg">
+                            <p className="text-red-500 font-bold text-sm">CONGÉ</p>
+                            <p className="text-red-400 text-[10px] font-medium">Journée bloquée</p>
                           </div>
                         </div>
                       );
                     }
-                    // Show small badges for barbers on leave
+                    // Show badges for barbers on leave (all view)
                     if (onLeaveEmps.length > 0 && employeeFilter === 'all') {
                       return (
-                        <div className="absolute top-1 left-1 right-1 z-20 pointer-events-none flex flex-wrap gap-0.5">
-                          {onLeaveEmps.map(emp => (
-                            <span key={emp.id} className="text-[8px] bg-red-500/15 text-red-400 border border-red-500/20 rounded px-1 py-0.5 font-medium truncate max-w-full">
-                              {emp.name} congé
-                            </span>
-                          ))}
-                        </div>
+                        <>
+                          <div className="absolute inset-0 z-10 pointer-events-none"
+                            style={{ background: `rgba(239,68,68,${onLeaveEmps.length === employees.length ? 0.12 : 0.06})` }} />
+                          <div className="absolute top-1 left-1 right-1 z-20 pointer-events-none flex flex-wrap gap-0.5">
+                            {onLeaveEmps.map(emp => (
+                              <span key={emp.id} className="text-[9px] bg-red-500/20 text-red-500 border border-red-500/30 rounded px-1.5 py-0.5 font-semibold truncate max-w-full">
+                                {emp.name} congé
+                              </span>
+                            ))}
+                          </div>
+                        </>
                       );
                     }
                     return null;
