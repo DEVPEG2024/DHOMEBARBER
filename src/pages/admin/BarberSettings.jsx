@@ -1,30 +1,107 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { base44 } from '@/api/base44Client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
-import { Camera, LogOut, Loader2, User } from 'lucide-react';
+import { Camera, LogOut, Loader2, User, Save } from 'lucide-react';
+import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
+
+function SkillSlider({ category, value, onChange }) {
+  const level = value || 0;
+  const labels = ['', 'Débutant', 'Intermédiaire', 'Avancé', 'Expert', 'Maître'];
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: -10 }}
+      animate={{ opacity: 1, x: 0 }}
+      className="group"
+    >
+      <div className="flex items-center gap-3 mb-2">
+        <div
+          className="w-10 h-10 rounded-xl flex items-center justify-center text-lg shadow-lg transition-transform group-hover:scale-110"
+          style={{ backgroundColor: category.color + '20', boxShadow: `0 4px 12px ${category.color}30` }}
+        >
+          {category.emoji}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-foreground">{category.name}</p>
+          <p className="text-[11px] font-medium transition-colors" style={{ color: level > 0 ? category.color : 'var(--muted-foreground)' }}>
+            {labels[level] || 'Non évalué'}
+          </p>
+        </div>
+        <span className="text-lg font-bold tabular-nums" style={{ color: level > 0 ? category.color : 'var(--muted-foreground)' }}>
+          {level > 0 ? `${level}/5` : '—'}
+        </span>
+      </div>
+
+      {/* Gauge */}
+      <div className="flex gap-1.5 ml-[52px]">
+        {[1, 2, 3, 4, 5].map((n) => (
+          <button
+            key={n}
+            onClick={() => onChange(level === n ? 0 : n)}
+            className="relative flex-1 h-3 rounded-full overflow-hidden transition-all duration-200"
+            style={{ backgroundColor: 'var(--secondary)' }}
+          >
+            <motion.div
+              initial={false}
+              animate={{
+                width: n <= level ? '100%' : '0%',
+                opacity: n <= level ? 1 : 0,
+              }}
+              transition={{ duration: 0.3, ease: 'easeOut' }}
+              className="absolute inset-y-0 left-0 rounded-full"
+              style={{ backgroundColor: category.color }}
+            />
+            <motion.div
+              initial={false}
+              animate={{ scale: n <= level ? [1, 1.4, 1] : 1 }}
+              transition={{ duration: 0.3 }}
+              className="absolute inset-0 rounded-full"
+              style={{
+                backgroundColor: n <= level ? category.color : 'transparent',
+                boxShadow: n <= level ? `0 0 8px ${category.color}60` : 'none',
+              }}
+            />
+          </button>
+        ))}
+      </div>
+    </motion.div>
+  );
+}
 
 export default function BarberSettings() {
   const { user, logout } = useAuth();
   const queryClient = useQueryClient();
   const fileInputRef = useRef(null);
   const [uploading, setUploading] = useState(false);
+  const [skills, setSkills] = useState(null);
+  const [skillsDirty, setSkillsDirty] = useState(false);
 
-  // Fetch employee profile linked to this barber
   const { data: employees = [] } = useQuery({
     queryKey: ['employees'],
     queryFn: () => base44.entities.Employee.list('-created_at', 100),
   });
 
+  const { data: skillCategories = [] } = useQuery({
+    queryKey: ['skillCategories'],
+    queryFn: () => base44.entities.SkillCategory.list('sort_order', 100),
+  });
+
   const employee = employees.find(e => e.id === user?.employee_id);
+
+  // Init skills from employee data
+  useEffect(() => {
+    if (employee && skills === null) {
+      setSkills(employee.skills || []);
+    }
+  }, [employee]);
 
   const updateMutation = useMutation({
     mutationFn: ({ id, data }) => base44.entities.Employee.update(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['employees'] });
-      toast.success('Photo mise à jour');
     },
     onError: () => {
       toast.error('Erreur lors de la mise à jour');
@@ -37,12 +114,40 @@ export default function BarberSettings() {
     setUploading(true);
     try {
       const { file_url } = await base44.integrations.Core.UploadFile({ file });
-      updateMutation.mutate({ id: employee.id, data: { photo_url: file_url } });
+      updateMutation.mutate({ id: employee.id, data: { photo_url: file_url } }, {
+        onSuccess: () => toast.success('Photo mise à jour'),
+      });
     } catch {
       toast.error("Erreur lors de l'upload");
     } finally {
       setUploading(false);
     }
+  };
+
+  const getSkillLevel = (categoryId) => {
+    const s = (skills || []).find(s => s.category_id === categoryId);
+    return s?.level || 0;
+  };
+
+  const setSkillLevel = (categoryId, level) => {
+    setSkillsDirty(true);
+    setSkills(prev => {
+      const existing = (prev || []).filter(s => s.category_id !== categoryId);
+      if (level > 0) {
+        return [...existing, { category_id: categoryId, level }];
+      }
+      return existing;
+    });
+  };
+
+  const saveSkills = () => {
+    if (!employee) return;
+    updateMutation.mutate({ id: employee.id, data: { skills } }, {
+      onSuccess: () => {
+        toast.success('Compétences sauvegardées ✨');
+        setSkillsDirty(false);
+      },
+    });
   };
 
   return (
@@ -55,8 +160,7 @@ export default function BarberSettings() {
       <div className="space-y-6 max-w-md">
         {/* Profile photo */}
         <div className="bg-card border border-border rounded-xl p-6">
-          <h3 className="text-sm font-semibold mb-5">Photo de profil</h3>
-
+          <h3 className="text-sm font-semibold mb-5">📸 Photo de profil</h3>
           <div className="flex items-center gap-5">
             <div className="relative group">
               <div className="w-24 h-24 rounded-2xl overflow-hidden bg-secondary border border-border flex items-center justify-center">
@@ -77,45 +181,67 @@ export default function BarberSettings() {
                   <Camera className="w-6 h-6 text-white" />
                 )}
               </button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={handlePhotoUpload}
-                disabled={uploading}
-              />
+              <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} disabled={uploading} />
             </div>
-
             <div className="flex-1">
               <p className="text-sm font-medium">{employee?.name || user?.full_name || '—'}</p>
               <p className="text-xs text-muted-foreground mt-0.5">{user?.email}</p>
-              <Button
-                variant="outline"
-                size="sm"
-                className="mt-3 text-xs"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploading}
-              >
-                {uploading ? (
-                  <>
-                    <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
-                    Upload...
-                  </>
-                ) : (
-                  <>
-                    <Camera className="w-3 h-3 mr-1.5" />
-                    Changer la photo
-                  </>
-                )}
+              <Button variant="outline" size="sm" className="mt-3 text-xs" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+                {uploading ? <><Loader2 className="w-3 h-3 mr-1.5 animate-spin" />Upload...</> : <><Camera className="w-3 h-3 mr-1.5" />Changer la photo</>}
               </Button>
             </div>
           </div>
         </div>
 
+        {/* Skills */}
+        {skillCategories.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-card border border-border rounded-xl p-6"
+          >
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <h3 className="text-sm font-semibold">🎯 Mes compétences</h3>
+                <p className="text-[11px] text-muted-foreground mt-0.5">Évaluez votre niveau de 1 à 5</p>
+              </div>
+              {skillsDirty && (
+                <motion.div initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }}>
+                  <Button
+                    size="sm"
+                    onClick={saveSkills}
+                    disabled={updateMutation.isPending}
+                    className="bg-primary text-primary-foreground text-xs"
+                  >
+                    {updateMutation.isPending ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Save className="w-3 h-3 mr-1" />}
+                    Sauvegarder
+                  </Button>
+                </motion.div>
+              )}
+            </div>
+
+            <div className="space-y-5">
+              {skillCategories.map((cat, i) => (
+                <motion.div
+                  key={cat.id}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.05 }}
+                >
+                  <SkillSlider
+                    category={cat}
+                    value={getSkillLevel(cat.id)}
+                    onChange={(level) => setSkillLevel(cat.id, level)}
+                  />
+                </motion.div>
+              ))}
+            </div>
+          </motion.div>
+        )}
+
         {/* Account info */}
         <div className="bg-card border border-border rounded-xl p-6">
-          <h3 className="text-sm font-semibold mb-4">Informations du compte</h3>
+          <h3 className="text-sm font-semibold mb-4">👤 Informations du compte</h3>
           <div className="space-y-3 text-sm">
             <div className="flex justify-between">
               <span className="text-muted-foreground">Nom</span>

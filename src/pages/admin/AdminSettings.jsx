@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { base44 } from '@/api/base44Client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Save, Loader2 } from 'lucide-react';
+import { Save, Loader2, Plus, Trash2, GripVertical } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -12,13 +12,39 @@ import { toast } from 'sonner';
 const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 const DAY_LABELS = { monday: 'Lundi', tuesday: 'Mardi', wednesday: 'Mercredi', thursday: 'Jeudi', friday: 'Vendredi', saturday: 'Samedi', sunday: 'Dimanche' };
 
+const SKILL_EMOJIS = ['✂️', '💇', '💈', '🎨', '👑', '💪', '🔥', '⭐', '💎', '🧔', '🪮', '💆', '🌍', '🌊', '🧴', '✨'];
+const SKILL_COLORS = ['#3fcf8e', '#f59e0b', '#ef4444', '#8b5cf6', '#3b82f6', '#ec4899', '#14b8a6', '#f97316'];
+
 export default function AdminSettings() {
   const [settings, setSettings] = useState(null);
+  const [newSkill, setNewSkill] = useState({ name: '', emoji: '✂️', color: '#3fcf8e' });
   const queryClient = useQueryClient();
 
   const { data: allSettings = [] } = useQuery({
     queryKey: ['salonSettings'],
     queryFn: () => base44.entities.SalonSettings.list('-created_date', 1),
+  });
+
+  const { data: skillCategories = [] } = useQuery({
+    queryKey: ['skillCategories'],
+    queryFn: () => base44.entities.SkillCategory.list('sort_order', 100),
+  });
+
+  const addSkillMutation = useMutation({
+    mutationFn: (data) => base44.entities.SkillCategory.create(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['skillCategories'] });
+      setNewSkill({ name: '', emoji: '✂️', color: '#3fcf8e' });
+      toast.success('Compétence ajoutée');
+    },
+  });
+
+  const deleteSkillMutation = useMutation({
+    mutationFn: (id) => base44.entities.SkillCategory.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['skillCategories'] });
+      toast.success('Compétence supprimée');
+    },
   });
 
   useEffect(() => {
@@ -198,6 +224,88 @@ export default function AdminSettings() {
               <Input value={settings.social_tiktok || ''} onChange={e => setSettings({ ...settings, social_tiktok: e.target.value })}
                 className="bg-secondary border-border mt-1" />
             </div>
+          </div>
+        </div>
+
+        {/* Skill Categories */}
+        <div className="bg-card border border-border rounded-xl p-5">
+          <h3 className="text-sm font-semibold mb-1">Compétences Barbers</h3>
+          <p className="text-xs text-muted-foreground mb-4">Les barbers pourront évaluer leur niveau sur chaque compétence</p>
+
+          {/* Existing skills */}
+          <div className="space-y-2 mb-4">
+            {skillCategories.map((cat) => (
+              <div key={cat.id} className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-secondary/50 border border-border group">
+                <span className="text-lg">{cat.emoji}</span>
+                <span className="text-sm font-medium flex-1">{cat.name}</span>
+                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: cat.color }} />
+                <button
+                  onClick={() => deleteSkillMutation.mutate(cat.id)}
+                  className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-red-400"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))}
+            {skillCategories.length === 0 && (
+              <p className="text-xs text-muted-foreground text-center py-3">Aucune compétence configurée</p>
+            )}
+          </div>
+
+          {/* Add new skill */}
+          <div className="border border-dashed border-border rounded-xl p-4 space-y-3">
+            <p className="text-xs font-medium text-muted-foreground">Ajouter une compétence</p>
+            <div className="flex gap-2">
+              <Input
+                value={newSkill.name}
+                onChange={e => setNewSkill({ ...newSkill, name: e.target.value })}
+                placeholder="Ex: Cheveux afro"
+                className="bg-secondary border-border text-sm flex-1"
+              />
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground mb-2 block">Emoji</Label>
+              <div className="flex flex-wrap gap-1.5">
+                {SKILL_EMOJIS.map(emoji => (
+                  <button
+                    key={emoji}
+                    onClick={() => setNewSkill({ ...newSkill, emoji })}
+                    className={`w-8 h-8 rounded-lg text-base flex items-center justify-center transition-all ${
+                      newSkill.emoji === emoji ? 'bg-primary/20 ring-2 ring-primary scale-110' : 'bg-secondary hover:bg-secondary/80'
+                    }`}
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground mb-2 block">Couleur</Label>
+              <div className="flex flex-wrap gap-1.5">
+                {SKILL_COLORS.map(color => (
+                  <button
+                    key={color}
+                    onClick={() => setNewSkill({ ...newSkill, color })}
+                    className={`w-8 h-8 rounded-lg transition-all ${
+                      newSkill.color === color ? 'ring-2 ring-white scale-110' : 'hover:scale-105'
+                    }`}
+                    style={{ backgroundColor: color }}
+                  />
+                ))}
+              </div>
+            </div>
+            <Button
+              onClick={() => {
+                if (!newSkill.name.trim()) return toast.error('Nom requis');
+                addSkillMutation.mutate({ ...newSkill, sort_order: skillCategories.length });
+              }}
+              disabled={addSkillMutation.isPending}
+              size="sm"
+              className="bg-primary text-primary-foreground text-xs"
+            >
+              <Plus className="w-3.5 h-3.5 mr-1" />
+              Ajouter
+            </Button>
           </div>
         </div>
       </div>

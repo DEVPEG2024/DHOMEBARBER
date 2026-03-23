@@ -6,6 +6,53 @@ import { motion } from 'framer-motion';
 import { ChevronLeft, Scissors, Calendar, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
+function SkillBar({ category, level, delay }) {
+  const labels = ['', 'Débutant', 'Intermédiaire', 'Avancé', 'Expert', 'Maître'];
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: -20 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ delay, duration: 0.4 }}
+    >
+      <div className="flex items-center gap-3 mb-1.5">
+        <div
+          className="w-9 h-9 rounded-xl flex items-center justify-center text-base"
+          style={{ backgroundColor: category.color + '20' }}
+        >
+          {category.emoji}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-foreground">{category.name}</p>
+        </div>
+        <span className="text-xs font-medium" style={{ color: category.color }}>
+          {labels[level]}
+        </span>
+      </div>
+      <div className="ml-12 h-2.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--secondary)' }}>
+        <motion.div
+          initial={{ width: 0 }}
+          animate={{ width: `${(level / 5) * 100}%` }}
+          transition={{ delay: delay + 0.2, duration: 0.6, ease: 'easeOut' }}
+          className="h-full rounded-full relative"
+          style={{
+            backgroundColor: category.color,
+            boxShadow: `0 0 10px ${category.color}50`,
+          }}
+        >
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: [0, 0.6, 0] }}
+            transition={{ delay: delay + 0.4, duration: 0.8 }}
+            className="absolute inset-0 rounded-full"
+            style={{ backgroundColor: 'white' }}
+          />
+        </motion.div>
+      </div>
+    </motion.div>
+  );
+}
+
 export default function BarberProfile() {
   const { id } = useParams();
 
@@ -16,6 +63,11 @@ export default function BarberProfile() {
       return all.find(e => e.id === id) || null;
     },
     enabled: !!id,
+  });
+
+  const { data: skillCategories = [] } = useQuery({
+    queryKey: ['skillCategories'],
+    queryFn: () => base44.entities.SkillCategory.list('sort_order', 100),
   });
 
   if (isLoading) {
@@ -35,7 +87,13 @@ export default function BarberProfile() {
     );
   }
 
-  const initials = employee.name?.charAt(0) || '?';
+  const employeeSkills = employee.skills || [];
+  const visibleSkills = skillCategories
+    .map(cat => {
+      const s = employeeSkills.find(s => s.category_id === cat.id);
+      return s?.level > 0 ? { category: cat, level: s.level } : null;
+    })
+    .filter(Boolean);
 
   return (
     <div className="min-h-screen relative overflow-hidden">
@@ -81,11 +139,24 @@ export default function BarberProfile() {
           </motion.div>
         )}
 
+        {/* Skills */}
+        {visibleSkills.length > 0 && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }}
+            className="rounded-2xl bg-white/4 border border-white/8 backdrop-blur-xl p-5 mb-6">
+            <h3 className="text-xs uppercase tracking-widest text-primary font-medium mb-4">🎯 Spécialités</h3>
+            <div className="space-y-4">
+              {visibleSkills.map(({ category, level }, i) => (
+                <SkillBar key={category.id} category={category} level={level} delay={0.15 + i * 0.08} />
+              ))}
+            </div>
+          </motion.div>
+        )}
+
         {/* Working hours */}
         {employee.working_hours && Object.keys(employee.working_hours).length > 0 && (
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
             className="rounded-2xl bg-white/4 border border-white/8 backdrop-blur-xl p-5 mb-6">
-            <h3 className="text-xs uppercase tracking-widest text-primary font-medium mb-3">Horaires</h3>
+            <h3 className="text-xs uppercase tracking-widest text-primary font-medium mb-3">🕐 Horaires</h3>
             <div className="space-y-2">
               {Object.entries(employee.working_hours).map(([day, hours]) => {
                 const dayLabels = { monday: 'Lundi', tuesday: 'Mardi', wednesday: 'Mercredi', thursday: 'Jeudi', friday: 'Vendredi', saturday: 'Samedi', sunday: 'Dimanche' };
@@ -110,7 +181,7 @@ export default function BarberProfile() {
         )}
 
         {/* CTA */}
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }}>
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.25 }}>
           <Link to="/booking">
             <Button className="w-full h-12 rounded-2xl bg-primary text-primary-foreground font-semibold text-sm shadow-lg shadow-primary/25 hover:bg-primary/90">
               <Calendar className="w-4 h-4 mr-2" />
