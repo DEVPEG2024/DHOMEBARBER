@@ -122,7 +122,11 @@ export default function Settings() {
               <div className="text-left">
                 <p className="text-sm font-semibold text-foreground">Notifications</p>
                 <p className="text-[11px] text-muted-foreground">
-                  {!pushSupported ? 'Non supporté sur ce navigateur' : 'Rappels de rendez-vous'}
+                  {!pushSupported
+                    ? (navigator.standalone !== undefined && !navigator.standalone
+                      ? "Ajoutez l'app à l'écran d'accueil d'abord"
+                      : 'Non supporté sur ce navigateur')
+                    : 'Rappels de rendez-vous'}
                 </p>
               </div>
             </div>
