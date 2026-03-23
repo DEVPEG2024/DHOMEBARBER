@@ -87,7 +87,7 @@ export default function Login() {
         <img
           src={LOGO_URL}
           alt="D'Home Barber"
-          className="w-48 h-48 object-contain mx-auto drop-shadow-2xl"
+          className="w-64 h-64 object-contain mx-auto drop-shadow-2xl"
         />
       </motion.div>
 

@@ -49,7 +49,7 @@ export default function Home() {
             transition={{ duration: 0.6 }}
             src={LOGO_URL}
             alt="D'Home Barber"
-            className="w-52 h-52 object-contain drop-shadow-2xl mb-4"
+            className="w-72 h-72 object-contain drop-shadow-2xl mb-4"
           />
 
           <div className="flex items-center gap-3 mb-5">
