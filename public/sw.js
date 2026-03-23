@@ -10,13 +10,18 @@ self.addEventListener('push', (event) => {
   }
 
   event.waitUntil(
-    self.registration.showNotification(data.title, {
-      body: data.body,
-      icon: data.icon || '/logo.png',
-      badge: data.badge || '/logo.png',
-      data: data.data || { url: '/' },
-      vibrate: [200, 100, 200],
-    })
+    Promise.all([
+      // Show notification
+      self.registration.showNotification(data.title, {
+        body: data.body,
+        icon: data.icon || '/logo.png',
+        badge: data.badge || '/logo.png',
+        data: data.data || { url: '/' },
+        vibrate: [200, 100, 200],
+      }),
+      // Set badge count on app icon
+      navigator.setAppBadge ? navigator.setAppBadge(1) : Promise.resolve(),
+    ])
   );
 });
 
@@ -25,13 +30,18 @@ self.addEventListener('notificationclick', (event) => {
   const url = event.notification.data?.url || '/';
 
   event.waitUntil(
-    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-      for (const client of clientList) {
-        if (client.url.includes(self.location.origin) && 'focus' in client) {
-          return client.focus();
+    Promise.all([
+      // Clear badge
+      navigator.clearAppBadge ? navigator.clearAppBadge() : Promise.resolve(),
+      // Focus or open window
+      clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+        for (const client of clientList) {
+          if (client.url.includes(self.location.origin) && 'focus' in client) {
+            return client.focus();
+          }
         }
-      }
-      return clients.openWindow(url);
-    })
+        return clients.openWindow(url);
+      }),
+    ])
   );
 });
