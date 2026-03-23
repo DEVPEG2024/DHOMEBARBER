@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { base44 } from '@/api/base44Client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
-import { Plus, Pencil, Trash2, Sparkles, ChevronLeft, ChevronRight, Bell, Check, RefreshCw } from 'lucide-react';
+import { Plus, Pencil, Trash2, Sparkles, ChevronLeft, ChevronRight, Bell, Check, RefreshCw, History, ChevronDown, ChevronUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -34,6 +34,7 @@ export default function Cleaning() {
   const [showDialog, setShowDialog] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [notifying, setNotifying] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
   const queryClient = useQueryClient();
 
   const mondayDate = useMemo(() => {
@@ -56,6 +57,18 @@ export default function Cleaning() {
   const { data: employees = [] } = useQuery({
     queryKey: ['employees'],
     queryFn: () => base44.entities.Employee.filter({ is_active: true }),
+  });
+
+  const { data: history = [] } = useQuery({
+    queryKey: ['cleaningHistory'],
+    queryFn: async () => {
+      const res = await fetch(`${API_BASE}/api/apps/${getAppId()}/cleaning/history`, {
+        headers: getAuthHeaders(),
+      });
+      if (!res.ok) throw new Error('Erreur');
+      return res.json();
+    },
+    enabled: showHistory,
   });
 
   // Mutations
@@ -84,8 +97,19 @@ export default function Cleaning() {
   });
 
   const toggleDone = useMutation({
-    mutationFn: ({ id, status }) => base44.entities.CleaningSchedule.update(id, { status }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['cleaningSchedule'] }),
+    mutationFn: async ({ id, status }) => {
+      const res = await fetch(`${API_BASE}/api/apps/${getAppId()}/cleaning/schedule/${id}/toggle`, {
+        method: 'PATCH',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ status }),
+      });
+      if (!res.ok) throw new Error('Erreur');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['cleaningSchedule'] });
+      queryClient.invalidateQueries({ queryKey: ['cleaningHistory'] });
+    },
   });
 
   // Generate schedule
@@ -270,6 +294,63 @@ export default function Cleaning() {
           {notifying ? 'Envoi...' : 'Envoyer les tâches du jour aux barbers'}
         </Button>
       )}
+
+      {/* History section */}
+      <div className="mb-6">
+        <button
+          onClick={() => setShowHistory(h => !h)}
+          className="w-full flex items-center justify-between bg-card border border-border rounded-xl px-4 py-3 hover:bg-secondary/50 transition-colors"
+        >
+          <span className="flex items-center gap-2 text-sm font-semibold">
+            <History className="w-4 h-4 text-primary" />
+            Historique des tâches effectuées
+          </span>
+          {showHistory ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+        </button>
+
+        {showHistory && (
+          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}
+            className="mt-2 bg-card border border-border rounded-xl overflow-hidden">
+            {history.length === 0 ? (
+              <p className="text-xs text-muted-foreground text-center py-6">Aucune tâche effectuée</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-border bg-secondary/30">
+                      <th className="text-left font-semibold px-3 py-2.5">Date</th>
+                      <th className="text-left font-semibold px-3 py-2.5">Tâche</th>
+                      <th className="text-left font-semibold px-3 py-2.5">Barber</th>
+                      <th className="text-left font-semibold px-3 py-2.5">Validé à</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {history.map(item => (
+                      <tr key={item.id} className="border-b border-border/50">
+                        <td className="px-3 py-2.5 text-muted-foreground">
+                          {item.date ? format(new Date(item.date + 'T00:00:00'), 'dd/MM/yyyy') : '—'}
+                        </td>
+                        <td className="px-3 py-2.5 font-medium">{item.task_name}</td>
+                        <td className="px-3 py-2.5">
+                          <span className="inline-flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full shrink-0" style={{ background: getEmpColor(item.employee_id) }} />
+                            {item.employee_name}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5 text-muted-foreground">
+                          {item.completed_at
+                            ? format(new Date(item.completed_at), 'HH:mm', { locale: fr })
+                            : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </motion.div>
+        )}
+      </div>
 
       {/* Task Dialog */}
       <Dialog open={showDialog} onOpenChange={setShowDialog}>

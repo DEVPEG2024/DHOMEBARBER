@@ -8,6 +8,19 @@ import { Button } from '@/components/ui/button';
 import { format, startOfWeek, addDays } from 'date-fns';
 import { fr } from 'date-fns/locale';
 
+const API_BASE = import.meta.env.PROD
+  ? 'https://dhomebarber-api-3aabb8313cb6.herokuapp.com'
+  : '';
+
+function getAppId() {
+  return localStorage.getItem('base44_app_id') || import.meta.env.VITE_BASE44_APP_ID || 'dhomebarber';
+}
+
+function getAuthHeaders() {
+  const token = localStorage.getItem('base44_access_token') || localStorage.getItem('token');
+  return token ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
+}
+
 const DAY_LABELS = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
 
 export default function BarberCleaning() {
@@ -34,7 +47,15 @@ export default function BarberCleaning() {
   }, [allSchedule, user]);
 
   const toggleDone = useMutation({
-    mutationFn: ({ id, status }) => base44.entities.CleaningSchedule.update(id, { status }),
+    mutationFn: async ({ id, status }) => {
+      const res = await fetch(`${API_BASE}/api/apps/${getAppId()}/cleaning/schedule/${id}/toggle`, {
+        method: 'PATCH',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ status }),
+      });
+      if (!res.ok) throw new Error('Erreur');
+      return res.json();
+    },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['cleaningSchedule'] }),
   });
 
