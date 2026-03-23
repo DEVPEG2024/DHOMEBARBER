@@ -42,29 +42,31 @@ function SkillSlider({ category, value, onChange }) {
         </motion.span>
       </div>
 
-      {/* Green gauge - 5 clickable segments */}
-      <div className="flex gap-2">
-        {[1, 2, 3, 4, 5].map((n) => {
-          const active = n <= level;
-          return (
-            <motion.button
-              key={n}
-              type="button"
-              onClick={() => onChange(level === n ? 0 : n)}
-              whileTap={{ scale: 0.85 }}
-              whileHover={{ scale: 1.05 }}
-              className="flex-1 h-6 rounded-lg cursor-pointer transition-all duration-300"
-              style={{
-                backgroundColor: active ? '#22c55e' : '#27272a',
-                border: active ? '2px solid #22c55e' : '2px solid #3f3f46',
-                opacity: active ? 0.4 + (n * 0.15) : 1,
-                boxShadow: active ? '0 0 12px rgba(34, 197, 94, 0.4)' : 'none',
-              }}
-            />
-          );
-        })}
+      {/* Green gauge - full bar, clickable zones */}
+      <div
+        className="relative h-6 rounded-full overflow-hidden cursor-pointer"
+        style={{ backgroundColor: '#27272a', border: '2px solid #3f3f46' }}
+        onClick={(e) => {
+          const rect = e.currentTarget.getBoundingClientRect();
+          const x = e.clientX - rect.left;
+          const pct = x / rect.width;
+          const newLevel = Math.ceil(pct * 5);
+          onChange(newLevel === level ? 0 : newLevel);
+        }}
+      >
+        <motion.div
+          initial={false}
+          animate={{ width: `${(level / 5) * 100}%` }}
+          transition={{ duration: 0.3, ease: 'easeOut' }}
+          className="absolute inset-y-0 left-0 rounded-full"
+          style={{
+            backgroundColor: '#22c55e',
+            boxShadow: level > 0 ? '0 0 12px rgba(34, 197, 94, 0.4)' : 'none',
+          }}
+        />
       </div>
       <div className="flex justify-between mt-1.5 px-1">
+        <span className="text-[9px] text-muted-foreground">0</span>
         <span className="text-[9px] text-muted-foreground">1</span>
         <span className="text-[9px] text-muted-foreground">2</span>
         <span className="text-[9px] text-muted-foreground">3</span>
