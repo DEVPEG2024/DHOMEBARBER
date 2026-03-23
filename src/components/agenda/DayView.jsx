@@ -103,10 +103,8 @@ function AppointmentBlock({ apt, onStatusChange, employeeColor, onClick }) {
         zIndex: 10,
       }}
     >
-      <p className="text-[10px] font-bold truncate" style={{ color: accentColor }}>{apt.start_time} - {apt.end_time}</p>
+      <p className="text-[10px] font-bold truncate" style={{ color: accentColor }}>{apt.start_time}</p>
       <p className="text-xs font-semibold text-foreground truncate">{apt.client_name}</p>
-      <p className="text-[10px] text-muted-foreground truncate">{apt.services?.map(s => s.name).join(', ')}</p>
-      {height > 60 && <p className="text-[10px] font-bold mt-0.5" style={{ color: accentColor }}>{apt.total_price}€</p>}
       {apt.status === 'confirmed' && height > 70 && (
         <div className="absolute bottom-1 right-1 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
           <button className="w-5 h-5 rounded bg-green-500/30 flex items-center justify-center hover:bg-green-500/60"

@@ -133,14 +133,6 @@ function AppointmentBlock({ apt, empColor, onStatusChange, onClick }) {
       <div className="px-2 py-1 h-full flex flex-col justify-start overflow-hidden">
         <p className="text-[10px] font-bold leading-none mb-0.5" style={{ color: borderColor }}>{apt.start_time}</p>
         <p className="text-[11px] font-semibold text-foreground leading-tight truncate">{apt.client_name}</p>
-        {height > 44 && (
-          <p className="text-[9px] text-muted-foreground leading-tight truncate mt-0.5">
-            {apt.services?.map(s => s.name).join(', ')}
-          </p>
-        )}
-        {height > 60 && apt.total_price > 0 && (
-          <p className="text-[10px] font-bold mt-auto" style={{ color: empColor }}>{apt.total_price}€</p>
-        )}
       </div>
 
       {apt.status === 'confirmed' && (
