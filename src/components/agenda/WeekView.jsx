@@ -279,8 +279,8 @@ export default function WeekView({ currentDate, appointments, employees, onStatu
                 >
                   {/* Hour lines + half-hour lines */}
                   {Array.from({ length: TOTAL_HOURS }).map((_, i) => (
-                    <div key={i} className="absolute w-full border-t border-border/20" style={{ top: i * HOUR_HEIGHT, height: HOUR_HEIGHT }}>
-                      <div className="absolute w-full border-t border-border/10" style={{ top: HOUR_HEIGHT / 2 }} />
+                    <div key={i} className="absolute w-full border-t border-foreground/20" style={{ top: i * HOUR_HEIGHT, height: HOUR_HEIGHT }}>
+                      <div className="absolute w-full border-t border-foreground/10" style={{ top: HOUR_HEIGHT / 2 }} />
                     </div>
                   ))}
 
