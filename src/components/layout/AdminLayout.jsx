@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { 
-  LayoutDashboard, Calendar, Users, Scissors, UserCircle, 
-  BarChart3, Settings, Menu, X, ChevronLeft, ShoppingBag, Star, Bell, Brain
+import {
+  LayoutDashboard, Calendar, Users, Scissors, UserCircle,
+  BarChart3, Settings, Menu, X, ChevronLeft, ShoppingBag, Star, Bell, Brain, Sun, Moon
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useTheme } from '@/lib/ThemeContext';
 
 const sidebarItems = [
   { path: '/admin', icon: LayoutDashboard, label: 'Dashboard', exact: true },
@@ -23,6 +24,7 @@ const sidebarItems = [
 export default function AdminLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
+  const { theme, toggleTheme } = useTheme();
 
   const isActive = (item) => {
     if (item.exact) return location.pathname === item.path;
@@ -70,7 +72,14 @@ export default function AdminLayout() {
           ))}
         </nav>
 
-        <div className="absolute bottom-4 left-3 right-3">
+        <div className="absolute bottom-4 left-3 right-3 space-y-1">
+          <button
+            onClick={toggleTheme}
+            className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm text-muted-foreground hover:bg-secondary hover:text-foreground transition-all"
+          >
+            {theme === 'dark' ? <Sun className="w-4 h-4 text-yellow-400" /> : <Moon className="w-4 h-4" />}
+            {theme === 'dark' ? 'Mode clair' : 'Mode sombre'}
+          </button>
           <Link to="/" className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm text-muted-foreground hover:bg-secondary hover:text-foreground transition-all">
             <ChevronLeft className="w-4 h-4" />
             Retour au salon
@@ -84,7 +93,10 @@ export default function AdminLayout() {
           <Button variant="ghost" size="icon" onClick={() => setSidebarOpen(true)}>
             <Menu className="w-5 h-5" />
           </Button>
-          <span className="ml-3 font-display text-sm font-semibold text-primary">D'HOME BARBER</span>
+          <span className="ml-3 font-display text-sm font-semibold text-primary flex-1">D'HOME BARBER</span>
+          <Button variant="ghost" size="icon" onClick={toggleTheme}>
+            {theme === 'dark' ? <Sun className="w-4 h-4 text-yellow-400" /> : <Moon className="w-4 h-4" />}
+          </Button>
         </header>
         <main className="p-4 lg:p-6 max-w-[1600px]">
           <Outlet />

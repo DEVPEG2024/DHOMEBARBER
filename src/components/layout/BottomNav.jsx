@@ -1,7 +1,8 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Home, Scissors, Calendar, ShoppingBag, User } from 'lucide-react';
+import { Home, Scissors, Calendar, ShoppingBag, User, Sun, Moon } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { useTheme } from '@/lib/ThemeContext';
 
 const navItems = [
   { path: '/', icon: Home, label: 'Accueil' },
@@ -13,11 +14,20 @@ const navItems = [
 
 export default function BottomNav() {
   const location = useLocation();
+  const { theme, toggleTheme } = useTheme();
 
   if (location.pathname.startsWith('/admin')) return null;
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50">
+      {/* Theme toggle */}
+      <button
+        onClick={toggleTheme}
+        className="absolute -top-12 right-4 w-9 h-9 rounded-full bg-card border border-border flex items-center justify-center shadow-lg z-50"
+      >
+        {theme === 'dark' ? <Sun className="w-4 h-4 text-yellow-400" /> : <Moon className="w-4 h-4 text-muted-foreground" />}
+      </button>
+
       {/* Gradient fade */}
       <div className="absolute inset-0 bg-gradient-to-t from-background via-background/95 to-transparent" />
       <div className="absolute inset-0 backdrop-blur-2xl" style={{ WebkitBackdropFilter: 'blur(24px)' }} />
