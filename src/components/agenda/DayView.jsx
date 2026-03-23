@@ -210,7 +210,12 @@ export default function DayView({ appointments, employees, employeeFilter, onSta
   };
 
   const isOnLeave = (empId) => {
-    return timeOffs.some(t => t.employee_id === empId && date >= t.start_date && date <= t.end_date);
+    return timeOffs.some(t => {
+      const d = String(date);
+      const s = String(t.start_date).slice(0, 10);
+      const e = String(t.end_date).slice(0, 10);
+      return t.employee_id === empId && d >= s && d <= e;
+    });
   };
 
   const renderColumn = (empId, empColor, columnApts) => {

@@ -288,7 +288,7 @@ export default function WeekView({ currentDate, appointments, employees, onStatu
                   {/* Leave overlay */}
                   {(() => {
                     const onLeaveEmps = employees.filter(emp =>
-                      timeOffs.some(t => t.employee_id === emp.id && dateStr >= t.start_date && dateStr <= t.end_date)
+                      timeOffs.some(t => t.employee_id === emp.id && dateStr >= String(t.start_date).slice(0,10) && dateStr <= String(t.end_date).slice(0,10))
                     );
                     // If filtering one barber and they're on leave, block the whole column
                     if (employeeFilter !== 'all' && onLeaveEmps.some(e => e.id === employeeFilter)) {

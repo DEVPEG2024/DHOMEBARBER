@@ -129,7 +129,7 @@ export default function Booking() {
         return slotStart < aptEnd && slotEnd > aptStart;
       });
     });
-  }, [selectedEmployee, selectedDate, appointments, totalDuration]);
+  }, [selectedEmployee, selectedDate, appointments, totalDuration, timeOffs]);
 
   const toggleService = (service) => {
     setSelectedServices(prev =>
