@@ -126,20 +126,23 @@ export default function Home() {
           <SectionHeader title="Notre Équipe" subtitle="Les Barbers" />
           <div className="grid grid-cols-5 gap-2">
             {employees.map((emp, i) => (
-              <motion.div key={emp.id} initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: i * 0.07 }}
-                className="text-center">
-                <div className="w-16 h-16 mx-auto rounded-2xl overflow-hidden glass border-white/10 mb-2">
-                  {emp.photo_url ? (
-                    <img src={emp.photo_url} alt={emp.name} className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-lg font-bold text-muted-foreground">
-                      {emp.name?.charAt(0)}
-                    </div>
-                  )}
-                </div>
-                <p className="text-xs font-semibold text-foreground">{emp.name}</p>
-                <p className="text-[11px] text-muted-foreground">{emp.title || 'Barber'}</p>
-              </motion.div>
+              <Link key={emp.id} to={`/barber/${emp.id}`}>
+                <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: i * 0.07 }}
+                  whileTap={{ scale: 0.93 }}
+                  className="text-center cursor-pointer">
+                  <div className="w-16 h-16 mx-auto rounded-2xl overflow-hidden glass border-white/10 mb-2">
+                    {emp.photo_url ? (
+                      <img src={emp.photo_url} alt={emp.name} className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-lg font-bold text-muted-foreground">
+                        {emp.name?.charAt(0)}
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-xs font-semibold text-foreground">{emp.name}</p>
+                  <p className="text-[11px] text-muted-foreground">{emp.title || 'Barber'}</p>
+                </motion.div>
+              </Link>
             ))}
           </div>
         </div>
