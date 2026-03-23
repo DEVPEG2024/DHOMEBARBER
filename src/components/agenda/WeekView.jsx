@@ -322,12 +322,20 @@ export default function WeekView({ currentDate, appointments, employees, onStatu
         </div>
       </div>
 
-      <AppointmentDetailModal appointment={selected} onClose={() => setSelected(null)} onUpdate={() => {
-        queryClient.invalidateQueries({ queryKey: ['appointments'] });
-        queryClient.invalidateQueries({ queryKey: ['agendaAppointments'] });
-        queryClient.invalidateQueries({ queryKey: ['adminAppointments'] });
-        setSelected(null);
-      }} />
+      <AppointmentDetailModal appointment={selected} onClose={() => setSelected(null)}
+        onUpdate={() => {
+          queryClient.invalidateQueries({ queryKey: ['appointments'] });
+          queryClient.invalidateQueries({ queryKey: ['agendaAppointments'] });
+          queryClient.invalidateQueries({ queryKey: ['adminAppointments'] });
+          setSelected(null);
+        }}
+        onDelete={() => {
+          queryClient.invalidateQueries({ queryKey: ['appointments'] });
+          queryClient.invalidateQueries({ queryKey: ['agendaAppointments'] });
+          queryClient.invalidateQueries({ queryKey: ['adminAppointments'] });
+          setSelected(null);
+        }}
+      />
     </>
   );
 }

@@ -1,6 +1,6 @@
 import React, { useState, useReducer } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Clock, User, Phone, Mail, Scissors, CreditCard, FileText, Calendar, Banknote, CheckCircle, Heart, ShoppingBag, ChevronDown, Check, BadgeCheck, X, AlertTriangle } from 'lucide-react';
+import { Clock, User, Phone, Mail, Scissors, CreditCard, FileText, Calendar, Banknote, CheckCircle, Heart, ShoppingBag, ChevronDown, Check, BadgeCheck, X, AlertTriangle, Trash2 } from 'lucide-react';
 import { getServiceColor } from '@/utils/serviceColors';
 import { base44 } from '@/api/base44Client';
 import { useQuery } from '@tanstack/react-query';
@@ -34,7 +34,7 @@ function reducer(state, action) {
   }
 }
 
-function ModalInner({ appointment, onUpdate }) {
+function ModalInner({ appointment, onUpdate, onDelete }) {
   const [state, dispatch] = useReducer(reducer, appointment, initialState);
 
   const { data: products = [] } = useQuery({
@@ -386,11 +386,33 @@ function ModalInner({ appointment, onUpdate }) {
           <p className="text-xs text-yellow-300/80">{appointment.internal_notes}</p>
         </div>
       )}
+
+      {/* Delete */}
+      <button
+        onClick={async () => {
+          if (!window.confirm('Supprimer définitivement ce rendez-vous ?')) return;
+          dispatch({ type: 'SAVING', value: true });
+          try {
+            await base44.entities.Appointment.delete(appointment.id);
+            toast.success('Rendez-vous supprimé');
+            onDelete?.();
+          } catch {
+            toast.error('Erreur lors de la suppression');
+          } finally {
+            dispatch({ type: 'SAVING', value: false });
+          }
+        }}
+        disabled={state.saving}
+        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-medium bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 transition-all disabled:opacity-60 mt-2"
+      >
+        <Trash2 className="w-3.5 h-3.5" />
+        Supprimer le rendez-vous
+      </button>
     </div>
   );
 }
 
-export default function AppointmentDetailModal({ appointment, onClose, onUpdate }) {
+export default function AppointmentDetailModal({ appointment, onClose, onUpdate, onDelete }) {
   return (
     <Dialog open={!!appointment} onOpenChange={onClose}>
       <DialogContent className="bg-card border-border max-w-md max-h-[90vh] overflow-y-auto">
@@ -402,7 +424,7 @@ export default function AppointmentDetailModal({ appointment, onClose, onUpdate 
                 Détails du rendez-vous
               </DialogTitle>
             </DialogHeader>
-            <ModalInner key={appointment.id} appointment={appointment} onUpdate={onUpdate} />
+            <ModalInner key={appointment.id} appointment={appointment} onUpdate={onUpdate} onDelete={onDelete} />
           </>
         )}
       </DialogContent>
