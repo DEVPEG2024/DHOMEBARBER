@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { base44 } from '@/api/base44Client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Pencil, Trash2, Package, Upload, X } from 'lucide-react';
+import { Plus, Pencil, Trash2, Package, Upload, X, Percent } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -20,6 +20,9 @@ const categoryLabels = {
 export default function AdminProducts() {
   const [editProduct, setEditProduct] = useState(null);
   const [showDialog, setShowDialog] = useState(false);
+  const [showPriceDialog, setShowPriceDialog] = useState(false);
+  const [pricePercent, setPricePercent] = useState('');
+  const [priceDirection, setPriceDirection] = useState('increase');
   const queryClient = useQueryClient();
 
   const { data: products = [] } = useQuery({
@@ -48,6 +51,25 @@ export default function AdminProducts() {
       queryClient.invalidateQueries({ queryKey: ['products'] });
       toast.success('Produit supprimé');
     },
+  });
+
+  const applyPriceMutation = useMutation({
+    mutationFn: async () => {
+      const percent = parseFloat(pricePercent);
+      if (!percent || percent <= 0) throw new Error('Pourcentage invalide');
+      const multiplier = priceDirection === 'increase' ? 1 + percent / 100 : 1 - percent / 100;
+      for (const product of products) {
+        const newPrice = Math.round(product.price * multiplier * 100) / 100;
+        await base44.entities.Product.update(product.id, { price: newPrice });
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+      setShowPriceDialog(false);
+      setPricePercent('');
+      toast.success('Prix mis à jour');
+    },
+    onError: (err) => toast.error(err.message),
   });
 
   const [uploading, setUploading] = useState(false);
@@ -79,17 +101,22 @@ export default function AdminProducts() {
           <p className="text-[11px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Boutique</p>
           <h1 className="font-display text-2xl font-bold">Produits</h1>
         </div>
-        <Button onClick={openNew} className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg">
-          <Plus className="w-4 h-4 mr-1.5" /> Ajouter
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setShowPriceDialog(true)} className="rounded-lg">
+            <Percent className="w-4 h-4 mr-1.5" /> Modifier les prix
+          </Button>
+          <Button onClick={openNew} className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg">
+            <Plus className="w-4 h-4 mr-1.5" /> Ajouter
+          </Button>
+        </div>
       </div>
 
       <div className="space-y-2">
         {products.map(product => (
           <div key={product.id} className="bg-card border border-border rounded-xl p-4 flex items-center gap-4">
-            <div className="w-12 h-12 rounded-lg bg-secondary flex items-center justify-center overflow-hidden flex-shrink-0">
+            <div className="w-12 h-12 rounded-lg bg-white flex items-center justify-center overflow-hidden flex-shrink-0">
               {product.image_url ? (
-                <img src={product.image_url} alt={product.name} className="w-full h-full object-cover" />
+                <img src={product.image_url} alt={product.name} className="w-full h-full object-contain" />
               ) : (
                 <Package className="w-5 h-5 text-muted-foreground/40" />
               )}
@@ -135,9 +162,9 @@ export default function AdminProducts() {
               <div>
                 <Label className="text-xs mb-2 block">Photo du produit</Label>
                 <div className="flex items-center gap-4">
-                  <div className="w-20 h-20 rounded-xl bg-secondary border border-border overflow-hidden flex items-center justify-center shrink-0">
+                  <div className="w-20 h-20 rounded-xl bg-white border border-border overflow-hidden flex items-center justify-center shrink-0">
                     {editProduct.image_url ? (
-                      <img src={editProduct.image_url} alt="Produit" className="w-full h-full object-cover" />
+                      <img src={editProduct.image_url} alt="Produit" className="w-full h-full object-contain" />
                     ) : (
                       <Package className="w-8 h-8 text-muted-foreground/30" />
                     )}
@@ -212,6 +239,52 @@ export default function AdminProducts() {
               </Button>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showPriceDialog} onOpenChange={setShowPriceDialog}>
+        <DialogContent className="bg-card border-border max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="font-display">Modifier tous les prix</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label className="text-xs">Type de modification</Label>
+              <Select value={priceDirection} onValueChange={setPriceDirection}>
+                <SelectTrigger className="bg-secondary border-border mt-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="increase">Augmenter</SelectItem>
+                  <SelectItem value="decrease">Diminuer</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs">Pourcentage (%)</Label>
+              <Input
+                type="number"
+                min="0"
+                max="100"
+                placeholder="Ex: 10"
+                value={pricePercent}
+                onChange={e => setPricePercent(e.target.value)}
+                className="bg-secondary border-border mt-1"
+              />
+            </div>
+            {pricePercent && parseFloat(pricePercent) > 0 && (
+              <p className="text-xs text-muted-foreground">
+                {priceDirection === 'increase' ? '↑' : '↓'} {pricePercent}% sur {products.length} produits
+              </p>
+            )}
+            <Button
+              className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
+              disabled={!pricePercent || parseFloat(pricePercent) <= 0 || applyPriceMutation.isPending}
+              onClick={() => applyPriceMutation.mutate()}
+            >
+              {applyPriceMutation.isPending ? 'Application...' : 'Appliquer'}
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
