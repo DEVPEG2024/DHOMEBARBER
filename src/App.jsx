@@ -99,7 +99,15 @@ function GuestOnly() {
   }
 
   if (isAuthenticated) {
-    return <Navigate to={(user?.role === 'admin' || user?.role === 'barber') ? '/admin' : '/'} replace />;
+    if (user?.role === 'admin') return <Navigate to="/admin" replace />;
+    if (user?.role === 'barber') {
+      // Redirect to first permitted page
+      const perms = user.permissions || [];
+      const permToPath = { agenda: '/admin/agenda', dashboard: '/admin', services: '/admin/services', clients: '/admin/clients' };
+      const firstPerm = perms[0];
+      return <Navigate to={permToPath[firstPerm] || '/admin/my-cleaning'} replace />;
+    }
+    return <Navigate to="/" replace />;
   }
 
   return <Outlet />;

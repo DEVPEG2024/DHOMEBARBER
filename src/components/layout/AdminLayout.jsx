@@ -47,16 +47,17 @@ export default function AdminLayout() {
     });
   }, [user]);
 
-  // Barber route protection: redirect to first allowed page if current route is not permitted
+  // Barber route protection: redirect immediately without rendering layout
   const isBarber = user?.role === 'barber';
-  if (isBarber && sidebarItems.length > 0) {
+  if (isBarber) {
     const currentPath = location.pathname;
-    const isAllowed = sidebarItems.some(item => {
+    const isAllowed = sidebarItems.length > 0 && sidebarItems.some(item => {
       if (item.exact) return currentPath === item.path;
       return currentPath.startsWith(item.path);
     });
     if (!isAllowed) {
-      return <Navigate to={sidebarItems[0].path} replace />;
+      const target = sidebarItems[0]?.path || '/admin/my-cleaning';
+      return <Navigate to={target} replace />;
     }
   }
 

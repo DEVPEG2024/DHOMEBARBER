@@ -35,11 +35,16 @@ export default function Login() {
     try {
       const user = await login(email, password);
       toast.success(`Bienvenue ${user.full_name || ''} !`);
-      if ((user.role === 'admin' || user.role === 'barber') && redirect === '/') {
-        // Barbers go to /admin, the layout will redirect to their first permitted page
-        navigate('/admin');
-      } else {
+      if (redirect !== '/') {
         navigate(redirect);
+      } else if (user.role === 'admin') {
+        navigate('/admin');
+      } else if (user.role === 'barber') {
+        const perms = user.permissions || [];
+        const permToPath = { agenda: '/admin/agenda', dashboard: '/admin', services: '/admin/services', clients: '/admin/clients' };
+        navigate(permToPath[perms[0]] || '/admin/my-cleaning');
+      } else {
+        navigate('/');
       }
     } catch (err) {
       const msg = err?.response?.data?.error || err?.data?.error || 'Email ou mot de passe incorrect';
