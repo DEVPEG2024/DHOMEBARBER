@@ -66,10 +66,11 @@ export default function Agenda() {
   });
 
   // Only approved time offs block the agenda
-  const approvedTimeOffs = useMemo(() =>
-    timeOffs.filter(t => t.status === 'approved' || (!t.status)),
-    [timeOffs]
-  );
+  const approvedTimeOffs = useMemo(() => {
+    const result = timeOffs.filter(t => t.status === 'approved' || (!t.status));
+    console.log('[AGENDA DEBUG] timeOffs bruts:', timeOffs.length, '| approuvés:', result.length, '| data:', result.map(t => `${t.employee_name} ${t.start_date}-${t.end_date} status=${t.status}`));
+    return result;
+  }, [timeOffs]);
 
   const employees = useMemo(() =>
     rawEmployees.map((emp, idx) => ({

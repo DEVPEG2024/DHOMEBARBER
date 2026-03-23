@@ -210,12 +210,16 @@ export default function DayView({ appointments, employees, employeeFilter, onSta
   };
 
   const isOnLeave = (empId) => {
-    return timeOffs.some(t => {
+    const result = timeOffs.some(t => {
       const d = String(date);
       const s = String(t.start_date).slice(0, 10);
       const e = String(t.end_date).slice(0, 10);
-      return String(t.employee_id) === String(empId) && d >= s && d <= e;
+      const match = String(t.employee_id) === String(empId) && d >= s && d <= e;
+      if (match) console.log('[DAYVIEW] MATCH congé:', t.employee_name, s, '->', e, 'pour date:', d);
+      return match;
     });
+    console.log('[DAYVIEW] isOnLeave empId=', empId, 'date=', date, 'timeOffs reçus=', timeOffs.length, 'result=', result);
+    return result;
   };
 
   const renderColumn = (empId, empColor, columnApts) => {
