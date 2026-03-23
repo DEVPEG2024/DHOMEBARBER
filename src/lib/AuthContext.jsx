@@ -5,8 +5,8 @@ import { createAxiosClient } from '@base44/sdk/dist/utils/axios-client';
 
 const AuthContext = createContext();
 
-// Bypass auth when no token is present (dev mode or production without login)
-const DEV_BYPASS_AUTH = !appParams.token;
+// Always bypass Base44 auth - we use our own Heroku backend
+const DEV_BYPASS_AUTH = true;
 
 const DEV_MOCK_USER = {
   id: 'dev-user',
