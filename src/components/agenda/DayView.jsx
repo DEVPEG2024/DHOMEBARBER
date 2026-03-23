@@ -84,7 +84,7 @@ function AppointmentBlock({ apt, onStatusChange, employeeColor, onClick }) {
   const startMin = timeToMinutes(apt.start_time) - START_HOUR * 60;
   const endMin = timeToMinutes(apt.end_time) - START_HOUR * 60;
   const top = (startMin / 60) * HOUR_HEIGHT;
-  const height = Math.max(((endMin - startMin) / 60) * HOUR_HEIGHT, 28);
+  const height = Math.max(((endMin - startMin) / 60) * HOUR_HEIGHT, 36);
   const style = statusStyle[apt.status] || statusStyle.confirmed;
 
   const accentColor = apt.services?.[0]?.service_id
@@ -94,17 +94,17 @@ function AppointmentBlock({ apt, onStatusChange, employeeColor, onClick }) {
   return (
     <div
       onClick={e => { e.stopPropagation(); onClick(apt); }}
-      className="absolute left-1 right-1 rounded-lg px-2 py-1 overflow-hidden cursor-pointer group transition-all hover:z-20 hover:shadow-lg hover:brightness-110"
+      className="absolute left-1 right-1 rounded-lg overflow-hidden cursor-pointer group transition-all hover:z-20 hover:shadow-lg hover:brightness-110 flex items-center gap-2 px-2.5"
       style={{
-        top, height,
+        top, height: Math.min(height, 36),
         background: style.bg,
         borderLeft: `4px solid ${accentColor}`,
         opacity: style.opacity || 1,
         zIndex: 10,
       }}
     >
-      <p className="text-[10px] font-bold truncate" style={{ color: accentColor }}>{apt.start_time}</p>
-      <p className="text-xs font-semibold text-foreground truncate">{apt.client_name}</p>
+      <span className="text-[10px] font-bold shrink-0" style={{ color: accentColor }}>{apt.start_time}</span>
+      <span className="text-xs font-semibold text-foreground truncate">{apt.client_name}</span>
     </div>
   );
 }

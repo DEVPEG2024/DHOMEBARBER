@@ -111,7 +111,7 @@ function AppointmentBlock({ apt, empColor, onStatusChange, onClick }) {
   const startMin = timeToMinutes(apt.start_time) - START_HOUR * 60;
   const endMin = timeToMinutes(apt.end_time) - START_HOUR * 60;
   const top = (startMin / 60) * HOUR_HEIGHT;
-  const height = Math.max(((endMin - startMin) / 60) * HOUR_HEIGHT, 28);
+  const height = Math.max(((endMin - startMin) / 60) * HOUR_HEIGHT, 32);
 
   const isLight = apt.status === 'cancelled' || apt.status === 'no_show';
   const borderColor = apt.status === 'cancelled' ? '#f87171' : apt.status === 'pending' ? '#facc15' : empColor;
@@ -119,9 +119,9 @@ function AppointmentBlock({ apt, empColor, onStatusChange, onClick }) {
   return (
     <div
       onClick={e => { e.stopPropagation(); onClick(apt); }}
-      className="absolute rounded-lg overflow-hidden cursor-pointer group transition-all hover:z-30 hover:shadow-xl"
+      className="absolute rounded-lg overflow-hidden cursor-pointer group transition-all hover:z-30 hover:shadow-xl flex items-center gap-1.5 px-2"
       style={{
-        top, height,
+        top, height: Math.min(height, 32),
         borderLeft: `3px solid ${borderColor}`,
         background: `${empColor}15`,
         opacity: isLight ? 0.5 : 1,
@@ -129,12 +129,8 @@ function AppointmentBlock({ apt, empColor, onStatusChange, onClick }) {
         backdropFilter: 'blur(4px)',
       }}
     >
-      <div className="absolute inset-x-0 top-0 h-[2px]" style={{ background: empColor, opacity: 0.7 }} />
-      <div className="px-2 py-1 h-full flex flex-col justify-start overflow-hidden">
-        <p className="text-[10px] font-bold leading-none mb-0.5" style={{ color: borderColor }}>{apt.start_time}</p>
-        <p className="text-[11px] font-semibold text-foreground leading-tight truncate">{apt.client_name}</p>
-      </div>
-
+      <span className="text-[9px] font-bold shrink-0" style={{ color: borderColor }}>{apt.start_time}</span>
+      <span className="text-[10px] font-semibold text-foreground truncate">{apt.client_name}</span>
     </div>
   );
 }
