@@ -4,7 +4,6 @@ import {
   LayoutDashboard, Calendar, Users, Scissors, UserCircle,
   BarChart3, Settings, Menu, X, ChevronLeft, ShoppingBag, Star, Bell, Brain, Sun, Moon
 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 import { useTheme } from '@/lib/ThemeContext';
 
 const sidebarItems = [
@@ -39,40 +38,46 @@ export default function AdminLayout() {
       )}
 
       {/* Sidebar */}
-      <aside className={`fixed lg:sticky top-0 left-0 h-screen w-64 bg-card border-r border-border z-50 
-        transform transition-transform duration-300 lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <div className="flex items-center justify-between p-5 border-b border-border">
-          <div className="flex items-center gap-2">
-            <img src="https://media.base44.com/images/public/69c06ae86f050e715edd5046/71f45dd08_Capturedecran2026-02-07a170222.png" alt="Logo" className="w-10 h-10 object-contain" />
+      <aside className={`fixed lg:sticky top-0 left-0 h-screen w-[260px] bg-card border-r border-border z-50
+        transform transition-transform duration-300 lg:translate-x-0 flex flex-col
+        ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+
+        {/* Header */}
+        <div className="flex items-center justify-between p-4 border-b border-border shrink-0">
+          <div className="flex items-center gap-2.5">
+            <img src="/logo.png" alt="Logo" className="w-9 h-9 object-contain" />
             <div>
-              <h1 className="font-display text-base font-bold text-primary tracking-wide">D'HOME BARBER</h1>
-              <p className="text-[10px] text-muted-foreground tracking-[0.2em] uppercase">Back Office</p>
+              <h1 className="font-display text-sm font-bold text-primary tracking-wide">D'HOME BARBER</h1>
+              <p className="text-[10px] text-muted-foreground tracking-[0.15em] uppercase">Back Office</p>
             </div>
           </div>
-          <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setSidebarOpen(false)}>
+          <button className="lg:hidden w-9 h-9 flex items-center justify-center rounded-lg hover:bg-secondary transition-colors"
+            onClick={() => setSidebarOpen(false)}>
             <X className="w-4 h-4" />
-          </Button>
+          </button>
         </div>
 
-        <nav className="p-3 space-y-1">
+        {/* Nav */}
+        <nav className="flex-1 overflow-y-auto p-2.5 space-y-0.5">
           {sidebarItems.map((item) => (
             <Link
               key={item.path}
               to={item.path}
               onClick={() => setSidebarOpen(false)}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
-                isActive(item) 
-                  ? 'bg-primary/10 text-primary' 
+                isActive(item)
+                  ? 'bg-primary/10 text-primary'
                   : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
               }`}
             >
-              <item.icon className="w-4 h-4" />
+              <item.icon className="w-4 h-4 shrink-0" />
               {item.label}
             </Link>
           ))}
         </nav>
 
-        <div className="absolute bottom-4 left-3 right-3 space-y-1">
+        {/* Bottom */}
+        <div className="p-2.5 border-t border-border space-y-0.5 shrink-0">
           <button
             onClick={toggleTheme}
             className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm text-muted-foreground hover:bg-secondary hover:text-foreground transition-all"
@@ -88,17 +93,22 @@ export default function AdminLayout() {
       </aside>
 
       {/* Main content */}
-      <div className="flex-1 min-h-screen">
-        <header className="sticky top-0 z-30 bg-background/80 backdrop-blur-xl border-b border-border px-4 lg:px-6 h-14 flex items-center lg:hidden">
-          <Button variant="ghost" size="icon" onClick={() => setSidebarOpen(true)}>
+      <div className="flex-1 min-h-screen min-w-0">
+        {/* Mobile header */}
+        <header className="sticky top-0 z-30 bg-background/80 backdrop-blur-xl border-b border-border px-3 h-14 flex items-center lg:hidden">
+          <button className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-secondary transition-colors"
+            onClick={() => setSidebarOpen(true)}>
             <Menu className="w-5 h-5" />
-          </Button>
-          <span className="ml-3 font-display text-sm font-semibold text-primary flex-1">D'HOME BARBER</span>
-          <Button variant="ghost" size="icon" onClick={toggleTheme}>
+          </button>
+          <span className="ml-2 font-display text-sm font-semibold text-primary flex-1 truncate">D'HOME BARBER</span>
+          <button className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-secondary transition-colors"
+            onClick={toggleTheme}>
             {theme === 'dark' ? <Sun className="w-4 h-4 text-yellow-400" /> : <Moon className="w-4 h-4" />}
-          </Button>
+          </button>
         </header>
-        <main className="p-4 lg:p-6 max-w-[1600px]">
+
+        {/* Page content */}
+        <main className="p-3 sm:p-4 lg:p-6 max-w-[1600px]">
           <Outlet />
         </main>
       </div>

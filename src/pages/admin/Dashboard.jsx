@@ -184,9 +184,9 @@ export default function AdminDashboard() {
   const breaksToday = allAppointments.filter(a => a.date === today && a.status === 'break');
 
   return (
-    <div>
+    <div className="min-w-0">
       <div className="mb-6">
-        <p className="text-[10px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Tableau de bord</p>
+        <p className="text-[11px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Tableau de bord</p>
         <h1 className="font-display text-2xl font-bold">Bonjour 👋</h1>
         <p className="text-sm text-muted-foreground mt-1">{format(new Date(), 'EEEE d MMMM yyyy', { locale: fr })}</p>
       </div>

@@ -132,12 +132,12 @@ export default function AdminServices() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <p className="text-[10px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Gestion</p>
+      <div className="flex items-center justify-between mb-6 gap-3">
+        <div className="shrink-0">
+          <p className="text-[11px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Gestion</p>
           <h1 className="font-display text-2xl font-bold">Prestations</h1>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2 justify-end">
           <Button variant="outline" size="sm" className="border-border gap-1.5"
             onClick={() => exportToCSV(services.map(s => ({ nom: s.name, description: s.description || '', duree_min: s.duration, prix_eur: s.price, actif: s.is_active ? 'oui' : 'non' })), 'prestations')}>
             <Download className="w-3.5 h-3.5" /> Exporter

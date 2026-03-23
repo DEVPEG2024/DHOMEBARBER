@@ -74,9 +74,9 @@ export default function AdminProducts() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <p className="text-[10px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Boutique</p>
+      <div className="flex items-center justify-between mb-6 gap-3">
+        <div className="shrink-0">
+          <p className="text-[11px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Boutique</p>
           <h1 className="font-display text-2xl font-bold">Produits</h1>
         </div>
         <Button onClick={openNew} className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg">

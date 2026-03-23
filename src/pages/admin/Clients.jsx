@@ -254,13 +254,13 @@ export default function Clients() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <p className="text-[10px] uppercase tracking-[0.2em] text-primary font-medium mb-1">CRM</p>
+      <div className="flex items-start justify-between mb-6 gap-3">
+        <div className="shrink-0">
+          <p className="text-[11px] uppercase tracking-[0.2em] text-primary font-medium mb-1">CRM</p>
           <h1 className="font-display text-2xl font-bold">Clients</h1>
           <p className="text-xs text-muted-foreground mt-1">{clients.length} clients enregistrés</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 justify-end">
           <input
             ref={fileInputRef}
             type="file"
