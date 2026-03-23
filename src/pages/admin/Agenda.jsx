@@ -109,7 +109,16 @@ export default function Agenda() {
   const handleCreateBreak = ({ start_time, end_time, employee_id, date }) => {
     const breakDate = date || format(currentDate, 'yyyy-MM-dd');
 
-    // Toujours ouvrir le sélecteur de barber pour choisir indépendamment
+    // Si un barber est déjà sélectionné dans le filtre, créer directement pour lui
+    if (employeeFilter !== 'all') {
+      createBreak.mutate(
+        buildBreakPayload(start_time, end_time, employeeFilter, breakDate),
+        { onSuccess: () => toast.success('Pause ajoutée') }
+      );
+      return;
+    }
+
+    // Sinon, ouvrir le sélecteur de barber
     setPendingBreak({ start_time, end_time, date: breakDate });
   };
 
