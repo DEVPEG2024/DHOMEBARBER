@@ -15,7 +15,7 @@ export default function BarberSettings() {
   // Fetch employee profile linked to this barber
   const { data: employees = [] } = useQuery({
     queryKey: ['employees'],
-    queryFn: () => base44.entities.Employee.list('-created_date', 100),
+    queryFn: () => base44.entities.Employee.list('-created_at', 100),
   });
 
   const employee = employees.find(e => e.id === user?.employee_id);

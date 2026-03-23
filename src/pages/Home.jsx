@@ -72,18 +72,36 @@ export default function Home() {
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
           className="grid grid-cols-3 gap-2">
           {[
-            { icon: Clock, label: 'Mar - Sam', sub: '9h - 20h' },
-            { icon: Phone, label: 'Appeler', sub: '06 66 08 36 05' },
-            { icon: MapPin, label: 'Itinéraire', sub: 'Douvaine' },
-          ].map(({ icon: Icon, label, sub }) => (
-            <div key={label} className="glass rounded-2xl p-3 text-center">
-              <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center mx-auto mb-2">
-                <Icon className="w-4 h-4 text-primary" />
+            { icon: Clock, label: 'Mar - Sam', sub: '9h - 20h', href: null },
+            { icon: Phone, label: 'Appeler', sub: '06 66 08 36 05', href: 'tel:0666083605' },
+            { icon: MapPin, label: 'Itinéraire', sub: 'Douvaine', href: 'https://maps.google.com/?q=3+Rue+du+Bois+Arquet+74140+Douvaine' },
+          ].map(({ icon: Icon, label, sub, href }) => {
+            const content = (
+              <>
+                <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center mx-auto mb-2">
+                  <Icon className="w-4 h-4 text-primary" />
+                </div>
+                <p className="text-xs font-semibold text-foreground">{label}</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">{sub}</p>
+              </>
+            );
+            return href ? (
+              <motion.a
+                key={label}
+                href={href}
+                target={href.startsWith('http') ? '_blank' : undefined}
+                rel={href.startsWith('http') ? 'noopener noreferrer' : undefined}
+                whileTap={{ scale: 0.93 }}
+                className="glass rounded-2xl p-3 text-center cursor-pointer active:bg-white/10 transition-colors"
+              >
+                {content}
+              </motion.a>
+            ) : (
+              <div key={label} className="glass rounded-2xl p-3 text-center">
+                {content}
               </div>
-              <p className="text-xs font-semibold text-foreground">{label}</p>
-              <p className="text-[11px] text-muted-foreground mt-0.5">{sub}</p>
-            </div>
-          ))}
+            );
+          })}
         </motion.div>
 
         {/* Services Preview */}
