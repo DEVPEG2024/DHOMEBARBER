@@ -5,8 +5,8 @@ import { createAxiosClient } from '@base44/sdk/dist/utils/axios-client';
 
 const AuthContext = createContext();
 
-// DEV MODE: Set to true to bypass authentication for local development
-const DEV_BYPASS_AUTH = import.meta.env.DEV && !appParams.token;
+// Bypass auth when no token is present (dev mode or production without login)
+const DEV_BYPASS_AUTH = !appParams.token;
 
 const DEV_MOCK_USER = {
   id: 'dev-user',
