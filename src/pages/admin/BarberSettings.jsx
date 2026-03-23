@@ -5,6 +5,7 @@ import { useAuth } from '@/lib/AuthContext';
 import { Camera, LogOut, Loader2, User, Save } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 
 function SkillSlider({ category, value, onChange }) {
@@ -71,13 +72,88 @@ function SkillSlider({ category, value, onChange }) {
   );
 }
 
+function ExperienceGauge({ value, onChange }) {
+  const getColor = (v) => {
+    if (v < 25) return '#ef4444';
+    if (v < 50) return '#f59e0b';
+    if (v < 75) return '#3b82f6';
+    return '#3fcf8e';
+  };
+  const getLabel = (v) => {
+    if (v === 0) return 'Non défini';
+    if (v < 25) return '🌱 Junior';
+    if (v < 50) return '💪 Confirmé';
+    if (v < 75) return '🔥 Expérimenté';
+    if (v < 90) return '⭐ Expert';
+    return '👑 Maître';
+  };
+
+  const color = getColor(value);
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <span className="text-base font-bold" style={{ color }}>{getLabel(value)}</span>
+        </div>
+        <motion.span
+          key={value}
+          initial={{ scale: 1.3, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          className="text-2xl font-bold tabular-nums"
+          style={{ color }}
+        >
+          {value}%
+        </motion.span>
+      </div>
+
+      {/* Track */}
+      <div className="relative h-4 rounded-full overflow-hidden bg-secondary mb-2">
+        <motion.div
+          initial={false}
+          animate={{ width: `${value}%` }}
+          transition={{ duration: 0.3, ease: 'easeOut' }}
+          className="absolute inset-y-0 left-0 rounded-full"
+          style={{
+            background: `linear-gradient(90deg, #ef4444, #f59e0b, #3b82f6, #3fcf8e)`,
+            boxShadow: `0 0 12px ${color}40`,
+          }}
+        />
+      </div>
+
+      {/* Slider input */}
+      <input
+        type="range"
+        min="0"
+        max="100"
+        value={value}
+        onChange={(e) => onChange(parseInt(e.target.value))}
+        className="w-full h-2 appearance-none bg-transparent cursor-pointer"
+        style={{
+          accentColor: color,
+        }}
+      />
+
+      <div className="flex justify-between text-[10px] text-muted-foreground mt-1">
+        <span>🌱 0</span>
+        <span>💪 25</span>
+        <span>🔥 50</span>
+        <span>⭐ 75</span>
+        <span>👑 100</span>
+      </div>
+    </div>
+  );
+}
+
 export default function BarberSettings() {
   const { user, logout } = useAuth();
   const queryClient = useQueryClient();
   const fileInputRef = useRef(null);
   const [uploading, setUploading] = useState(false);
   const [skills, setSkills] = useState(null);
-  const [skillsDirty, setSkillsDirty] = useState(false);
+  const [bio, setBio] = useState('');
+  const [experienceLevel, setExperienceLevel] = useState(0);
+  const [dirty, setDirty] = useState(false);
 
   const { data: employees = [] } = useQuery({
     queryKey: ['employees'],
@@ -91,10 +167,12 @@ export default function BarberSettings() {
 
   const employee = employees.find(e => e.id === user?.employee_id);
 
-  // Init skills from employee data
+  // Init from employee data
   useEffect(() => {
     if (employee && skills === null) {
       setSkills(employee.skills || []);
+      setBio(employee.bio || '');
+      setExperienceLevel(employee.experience_level || 0);
     }
   }, [employee]);
 
@@ -130,7 +208,7 @@ export default function BarberSettings() {
   };
 
   const setSkillLevel = (categoryId, level) => {
-    setSkillsDirty(true);
+    setDirty(true);
     setSkills(prev => {
       const existing = (prev || []).filter(s => s.category_id !== categoryId);
       if (level > 0) {
@@ -140,21 +218,38 @@ export default function BarberSettings() {
     });
   };
 
-  const saveSkills = () => {
+  const saveProfile = () => {
     if (!employee) return;
-    updateMutation.mutate({ id: employee.id, data: { skills } }, {
+    updateMutation.mutate({
+      id: employee.id,
+      data: { skills, bio, experience_level: experienceLevel }
+    }, {
       onSuccess: () => {
-        toast.success('Compétences sauvegardées ✨');
-        setSkillsDirty(false);
+        toast.success('Profil sauvegardé ✨');
+        setDirty(false);
       },
     });
   };
 
   return (
     <div>
-      <div className="mb-6">
-        <p className="text-[10px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Mon compte</p>
-        <h1 className="font-display text-2xl font-bold">Paramètres</h1>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <p className="text-[10px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Mon compte</p>
+          <h1 className="font-display text-2xl font-bold">Paramètres</h1>
+        </div>
+        {dirty && (
+          <motion.div initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }}>
+            <Button
+              onClick={saveProfile}
+              disabled={updateMutation.isPending}
+              className="bg-primary text-primary-foreground text-xs"
+            >
+              {updateMutation.isPending ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Save className="w-3.5 h-3.5 mr-1.5" />}
+              Sauvegarder
+            </Button>
+          </motion.div>
+        )}
       </div>
 
       <div className="space-y-6 max-w-md">
@@ -193,32 +288,39 @@ export default function BarberSettings() {
           </div>
         </div>
 
+        {/* Bio */}
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-card border border-border rounded-xl p-6">
+          <h3 className="text-sm font-semibold mb-1">📝 À propos de moi</h3>
+          <p className="text-[11px] text-muted-foreground mb-4">Présentez-vous aux clients en quelques lignes</p>
+          <Textarea
+            value={bio}
+            onChange={(e) => { setBio(e.target.value); setDirty(true); }}
+            placeholder="Ex: Passionné par la coiffure depuis 10 ans, spécialisé dans les coupes modernes et les dégradés..."
+            className="bg-secondary border-border text-sm"
+            rows={4}
+          />
+        </motion.div>
+
+        {/* Experience Level Gauge */}
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="bg-card border border-border rounded-xl p-6">
+          <h3 className="text-sm font-semibold mb-1">🏆 Niveau d'expérience</h3>
+          <p className="text-[11px] text-muted-foreground mb-4">Ajustez votre niveau global d'expérience</p>
+          <ExperienceGauge
+            value={experienceLevel}
+            onChange={(v) => { setExperienceLevel(v); setDirty(true); }}
+          />
+        </motion.div>
+
         {/* Skills */}
         {skillCategories.length > 0 && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
             className="bg-card border border-border rounded-xl p-6"
           >
-            <div className="flex items-center justify-between mb-5">
-              <div>
-                <h3 className="text-sm font-semibold">🎯 Mes compétences</h3>
-                <p className="text-[11px] text-muted-foreground mt-0.5">Évaluez votre niveau de 1 à 5</p>
-              </div>
-              {skillsDirty && (
-                <motion.div initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }}>
-                  <Button
-                    size="sm"
-                    onClick={saveSkills}
-                    disabled={updateMutation.isPending}
-                    className="bg-primary text-primary-foreground text-xs"
-                  >
-                    {updateMutation.isPending ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Save className="w-3 h-3 mr-1" />}
-                    Sauvegarder
-                  </Button>
-                </motion.div>
-              )}
-            </div>
+            <h3 className="text-sm font-semibold mb-1">🎯 Mes spécialités</h3>
+            <p className="text-[11px] text-muted-foreground mb-5">Évaluez votre niveau de 1 à 5</p>
 
             <div className="space-y-5">
               {skillCategories.map((cat, i) => (

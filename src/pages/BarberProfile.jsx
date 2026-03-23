@@ -53,6 +53,67 @@ function SkillBar({ category, level, delay }) {
   );
 }
 
+function ExperienceBar({ value, delay }) {
+  const getColor = (v) => {
+    if (v < 25) return '#ef4444';
+    if (v < 50) return '#f59e0b';
+    if (v < 75) return '#3b82f6';
+    return '#3fcf8e';
+  };
+  const getLabel = (v) => {
+    if (v < 25) return '🌱 Junior';
+    if (v < 50) return '💪 Confirmé';
+    if (v < 75) return '🔥 Expérimenté';
+    if (v < 90) return '⭐ Expert';
+    return '👑 Maître';
+  };
+
+  const color = getColor(value);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay }}
+    >
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-sm font-semibold">🏆 Niveau d'expérience</span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-medium" style={{ color }}>{getLabel(value)}</span>
+          <motion.span
+            initial={{ scale: 0 }}
+            animate={{ scale: 1 }}
+            transition={{ delay: delay + 0.3, type: 'spring' }}
+            className="text-sm font-bold tabular-nums"
+            style={{ color }}
+          >
+            {value}%
+          </motion.span>
+        </div>
+      </div>
+      <div className="h-3 rounded-full overflow-hidden bg-white/8">
+        <motion.div
+          initial={{ width: 0 }}
+          animate={{ width: `${value}%` }}
+          transition={{ delay: delay + 0.2, duration: 0.8, ease: 'easeOut' }}
+          className="h-full rounded-full relative"
+          style={{
+            background: `linear-gradient(90deg, #ef4444, #f59e0b, #3b82f6, #3fcf8e)`,
+            boxShadow: `0 0 12px ${color}40`,
+          }}
+        >
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: [0, 0.5, 0] }}
+            transition={{ delay: delay + 0.6, duration: 0.8 }}
+            className="absolute inset-0 rounded-full bg-white"
+          />
+        </motion.div>
+      </div>
+    </motion.div>
+  );
+}
+
 export default function BarberProfile() {
   const { id } = useParams();
 
@@ -95,6 +156,8 @@ export default function BarberProfile() {
     })
     .filter(Boolean);
 
+  const hasAboutContent = employee.bio || visibleSkills.length > 0 || (employee.experience_level > 0);
+
   return (
     <div className="min-h-screen relative overflow-hidden">
       {/* Ambient background */}
@@ -130,31 +193,44 @@ export default function BarberProfile() {
           <p className="text-sm text-primary font-medium mt-1">{employee.title || 'Barber'}</p>
         </motion.div>
 
-        {/* Bio */}
-        {employee.bio && (
+        {/* À propos - Bio + Experience + Skills combined */}
+        {hasAboutContent && (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
-            className="rounded-2xl bg-white/4 border border-white/8 backdrop-blur-xl p-5 mb-6">
-            <h3 className="text-xs uppercase tracking-widest text-primary font-medium mb-3">À propos</h3>
-            <p className="text-sm text-muted-foreground leading-relaxed">{employee.bio}</p>
-          </motion.div>
-        )}
+            className="rounded-2xl bg-white/4 border border-white/8 backdrop-blur-xl p-5 mb-6 space-y-5">
+            <h3 className="text-xs uppercase tracking-widest text-primary font-medium">✨ À propos</h3>
 
-        {/* Skills */}
-        {visibleSkills.length > 0 && (
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }}
-            className="rounded-2xl bg-white/4 border border-white/8 backdrop-blur-xl p-5 mb-6">
-            <h3 className="text-xs uppercase tracking-widest text-primary font-medium mb-4">🎯 Spécialités</h3>
-            <div className="space-y-4">
-              {visibleSkills.map(({ category, level }, i) => (
-                <SkillBar key={category.id} category={category} level={level} delay={0.15 + i * 0.08} />
-              ))}
-            </div>
+            {/* Bio text */}
+            {employee.bio && (
+              <p className="text-sm text-muted-foreground leading-relaxed">{employee.bio}</p>
+            )}
+
+            {/* Experience gauge */}
+            {employee.experience_level > 0 && (
+              <ExperienceBar value={employee.experience_level} delay={0.15} />
+            )}
+
+            {/* Divider if both bio/experience and skills */}
+            {(employee.bio || employee.experience_level > 0) && visibleSkills.length > 0 && (
+              <div className="border-t border-white/8" />
+            )}
+
+            {/* Skills */}
+            {visibleSkills.length > 0 && (
+              <div>
+                <h4 className="text-xs uppercase tracking-widest text-primary/70 font-medium mb-4">🎯 Spécialités</h4>
+                <div className="space-y-4">
+                  {visibleSkills.map(({ category, level }, i) => (
+                    <SkillBar key={category.id} category={category} level={level} delay={0.2 + i * 0.08} />
+                  ))}
+                </div>
+              </div>
+            )}
           </motion.div>
         )}
 
         {/* Working hours */}
         {employee.working_hours && Object.keys(employee.working_hours).length > 0 && (
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}
             className="rounded-2xl bg-white/4 border border-white/8 backdrop-blur-xl p-5 mb-6">
             <h3 className="text-xs uppercase tracking-widest text-primary font-medium mb-3">🕐 Horaires</h3>
             <div className="space-y-2">
@@ -181,7 +257,7 @@ export default function BarberProfile() {
         )}
 
         {/* CTA */}
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.25 }}>
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }}>
           <Link to="/booking">
             <Button className="w-full h-12 rounded-2xl bg-primary text-primary-foreground font-semibold text-sm shadow-lg shadow-primary/25 hover:bg-primary/90">
               <Calendar className="w-4 h-4 mr-2" />
