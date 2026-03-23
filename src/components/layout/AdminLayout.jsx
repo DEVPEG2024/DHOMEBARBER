@@ -22,7 +22,7 @@ const allSidebarItems = [
   { path: '/admin/smart-agenda', icon: Brain, label: 'Agenda IA', perm: 'smart-agenda' },
   { path: '/admin/settings', icon: Settings, label: 'Paramètres', perm: 'settings' },
   { path: '/admin/leave', icon: CalendarDays, label: 'Congés', adminOnly: true },
-  { path: '/admin/my-leave', icon: CalendarDays, label: 'Mes Congés', barberOnly: true, perm: 'conges' },
+  { path: '/admin/my-leave', icon: CalendarDays, label: 'Mes Congés', barberOnly: true, alwaysShow: true },
   { path: '/admin/barber-accounts', icon: ShieldCheck, label: 'Comptes Barbers', adminOnly: true },
 ];
 
@@ -37,11 +37,11 @@ export default function AdminLayout() {
     if (!user || user.role === 'admin') {
       return allSidebarItems.filter(item => !item.barberOnly);
     }
-    // Barber sees only permitted pages + barberOnly items with matching perm
+    // Barber sees only permitted pages + barberOnly items
     const perms = user.permissions || [];
     return allSidebarItems.filter(item => {
       if (item.adminOnly) return false;
-      if (item.barberOnly) return perms.includes(item.perm);
+      if (item.alwaysShow) return true;
       return perms.includes(item.perm);
     });
   }, [user]);
