@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { base44 } from '@/api/base44Client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Save } from 'lucide-react';
+import { Save, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -37,7 +37,10 @@ export default function AdminSettings() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['salonSettings'] });
-      toast.success('Paramètres sauvegardés');
+      toast.success('Paramètres sauvegardés ✓');
+    },
+    onError: () => {
+      toast.error('Erreur lors de la sauvegarde');
     },
   });
 
@@ -69,8 +72,9 @@ export default function AdminSettings() {
           <p className="text-[10px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Configuration</p>
           <h1 className="font-display text-2xl font-bold">Paramètres</h1>
         </div>
-        <Button onClick={() => saveMutation.mutate(settings)} className="bg-primary text-primary-foreground hover:bg-primary/90">
-          <Save className="w-4 h-4 mr-1.5" /> Sauvegarder
+        <Button onClick={() => saveMutation.mutate(settings)} disabled={saveMutation.isPending} className="bg-primary text-primary-foreground hover:bg-primary/90">
+          {saveMutation.isPending ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <Save className="w-4 h-4 mr-1.5" />}
+          {saveMutation.isPending ? 'Sauvegarde...' : 'Sauvegarder'}
         </Button>
       </div>
 
