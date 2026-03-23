@@ -18,6 +18,9 @@ import Appointments from '@/pages/Appointments';
 import Profile from '@/pages/Profile';
 import Shop from '@/pages/Shop';
 import Login from '@/pages/Login';
+import Orders from '@/pages/Orders';
+import MyReviews from '@/pages/MyReviews';
+import UserSettings from '@/pages/Settings';
 
 // Admin pages
 import AdminDashboard from '@/pages/admin/Dashboard';
@@ -124,6 +127,9 @@ const AppRoutes = () => {
           <Route path="/booking" element={<Booking />} />
           <Route path="/shop" element={<Shop />} />
           <Route path="/appointments" element={<Appointments />} />
+          <Route path="/orders" element={<Orders />} />
+          <Route path="/reviews" element={<MyReviews />} />
+          <Route path="/settings" element={<UserSettings />} />
           <Route path="/profile" element={<Profile />} />
         </Route>
       </Route>
