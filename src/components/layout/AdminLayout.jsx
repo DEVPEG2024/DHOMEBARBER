@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Calendar, Users, Scissors, UserCircle,
-  BarChart3, Settings, Menu, X, ChevronLeft, ShoppingBag, Star, Bell, Brain, Sun, Moon
+  BarChart3, Settings, Menu, X, ChevronLeft, ShoppingBag, Star, Bell, Brain, Sun, Moon, ClipboardList
 } from 'lucide-react';
 import { useTheme } from '@/lib/ThemeContext';
 
@@ -13,6 +13,7 @@ const sidebarItems = [
   { path: '/admin/team', icon: Users, label: 'Équipe' },
   { path: '/admin/clients', icon: UserCircle, label: 'Clients' },
   { path: '/admin/products', icon: ShoppingBag, label: 'Produits' },
+  { path: '/admin/orders', icon: ClipboardList, label: 'Commandes' },
   { path: '/admin/reviews', icon: Star, label: 'Avis' },
   { path: '/admin/stats', icon: BarChart3, label: 'Statistiques' },
   { path: '/admin/notifications', icon: Bell, label: 'Notifications' },

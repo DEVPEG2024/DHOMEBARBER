@@ -30,6 +30,7 @@ import AdminServices from '@/pages/admin/AdminServices';
 import Team from '@/pages/admin/Team';
 import Clients from '@/pages/admin/Clients';
 import AdminProducts from '@/pages/admin/AdminProducts';
+import AdminOrders from '@/pages/admin/AdminOrders';
 import AdminReviews from '@/pages/admin/AdminReviews';
 import Stats from '@/pages/admin/Stats';
 import AdminSettings from '@/pages/admin/AdminSettings';
@@ -145,6 +146,7 @@ const AppRoutes = () => {
           <Route path="/admin/team" element={<Team />} />
           <Route path="/admin/clients" element={<Clients />} />
           <Route path="/admin/products" element={<AdminProducts />} />
+          <Route path="/admin/orders" element={<AdminOrders />} />
           <Route path="/admin/reviews" element={<AdminReviews />} />
           <Route path="/admin/stats" element={<Stats />} />
           <Route path="/admin/settings" element={<AdminSettings />} />
