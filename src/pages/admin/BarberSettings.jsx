@@ -78,7 +78,7 @@ function SkillSlider({ category, value, onChange }) {
   );
 }
 
-function ExperienceGauge({ value, onChange }) {
+function ExperienceGauge({ value }) {
   const getColor = (v) => {
     if (v < 25) return '#ef4444';
     if (v < 50) return '#f59e0b';
@@ -86,7 +86,7 @@ function ExperienceGauge({ value, onChange }) {
     return '#3fcf8e';
   };
   const getLabel = (v) => {
-    if (v === 0) return 'Non défini';
+    if (v === 0) return 'Aucune compétence';
     if (v < 25) return '🌱 Junior';
     if (v < 50) return '💪 Confirmé';
     if (v < 75) return '🔥 Expérimenté';
@@ -114,11 +114,11 @@ function ExperienceGauge({ value, onChange }) {
       </div>
 
       {/* Track */}
-      <div className="relative h-4 rounded-full overflow-hidden bg-secondary mb-2">
+      <div className="relative h-4 rounded-full overflow-hidden bg-secondary">
         <motion.div
           initial={false}
           animate={{ width: `${value}%` }}
-          transition={{ duration: 0.3, ease: 'easeOut' }}
+          transition={{ duration: 0.5, ease: 'easeOut' }}
           className="absolute inset-y-0 left-0 rounded-full"
           style={{
             background: `linear-gradient(90deg, #ef4444, #f59e0b, #3b82f6, #3fcf8e)`,
@@ -127,20 +127,7 @@ function ExperienceGauge({ value, onChange }) {
         />
       </div>
 
-      {/* Slider input */}
-      <input
-        type="range"
-        min="0"
-        max="100"
-        value={value}
-        onChange={(e) => onChange(parseInt(e.target.value))}
-        className="w-full h-2 appearance-none bg-transparent cursor-pointer"
-        style={{
-          accentColor: color,
-        }}
-      />
-
-      <div className="flex justify-between text-[10px] text-muted-foreground mt-1">
+      <div className="flex justify-between text-[10px] text-muted-foreground mt-2">
         <span>🌱 0</span>
         <span>💪 25</span>
         <span>🔥 50</span>
@@ -160,7 +147,6 @@ export default function BarberSettings() {
   const [showCrop, setShowCrop] = useState(false);
   const [skills, setSkills] = useState(null);
   const [bio, setBio] = useState('');
-  const [experienceLevel, setExperienceLevel] = useState(0);
   const [dirty, setDirty] = useState(false);
 
   const { data: employees = [] } = useQuery({
@@ -180,9 +166,16 @@ export default function BarberSettings() {
     if (employee && skills === null) {
       setSkills(employee.skills || []);
       setBio(employee.bio || '');
-      setExperienceLevel(employee.experience_level || 0);
     }
   }, [employee]);
+
+  // Calcul automatique du niveau d'expérience à partir des compétences
+  const computedExperience = (() => {
+    if (!skills || skills.length === 0 || skillCategories.length === 0) return 0;
+    const totalPossible = skillCategories.length * 5;
+    const totalPoints = skills.reduce((sum, s) => sum + (s.level || 0), 0);
+    return Math.round((totalPoints / totalPossible) * 100);
+  })();
 
   const updateMutation = useMutation({
     mutationFn: ({ id, data }) => base44.entities.Employee.update(id, data),
@@ -238,7 +231,7 @@ export default function BarberSettings() {
     if (!employee) return;
     updateMutation.mutate({
       id: employee.id,
-      data: { skills, bio, experience_level: experienceLevel }
+      data: { skills, bio, experience_level: computedExperience }
     }, {
       onSuccess: () => {
         toast.success('Profil sauvegardé ✨');
@@ -317,22 +310,12 @@ export default function BarberSettings() {
           />
         </motion.div>
 
-        {/* Experience Level Gauge */}
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="bg-card border border-border rounded-xl p-6">
-          <h3 className="text-sm font-semibold mb-1">🏆 Niveau d'expérience</h3>
-          <p className="text-[11px] text-muted-foreground mb-4">Ajustez votre niveau global d'expérience</p>
-          <ExperienceGauge
-            value={experienceLevel}
-            onChange={(v) => { setExperienceLevel(v); setDirty(true); }}
-          />
-        </motion.div>
-
         {/* Skills */}
         {skillCategories.length > 0 && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
+            transition={{ delay: 0.05 }}
             className="bg-card border border-border rounded-xl p-6"
           >
             <h3 className="text-sm font-semibold mb-1">🎯 Mes spécialités</h3>
@@ -356,6 +339,13 @@ export default function BarberSettings() {
             </div>
           </motion.div>
         )}
+
+        {/* Experience Level Gauge - calculé automatiquement */}
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="bg-card border border-border rounded-xl p-6">
+          <h3 className="text-sm font-semibold mb-1">🏆 Niveau d'expérience</h3>
+          <p className="text-[11px] text-muted-foreground mb-4">Calculé automatiquement selon vos compétences</p>
+          <ExperienceGauge value={computedExperience} />
+        </motion.div>
 
         {/* Account info */}
         <div className="bg-card border border-border rounded-xl p-6">
