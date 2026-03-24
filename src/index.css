@@ -126,3 +126,16 @@
 html {
   scroll-behavior: smooth;
 }
+
+/* Capacitor - Safe area insets for notch/dynamic island */
+body {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+/* Keyboard open state (set by Capacitor keyboard plugin) */
+body.keyboard-open {
+  padding-bottom: 0;
+}

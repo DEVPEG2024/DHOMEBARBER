@@ -102,13 +102,22 @@ export default function Clients() {
     if (!clientToDelete) return;
     setDeleting(true);
     try {
+      // Supprimer les rendez-vous du client
       const clientAppointments = appointments.filter(
         apt => apt.client_email === clientToDelete.email
       );
       await Promise.all(
         clientAppointments.map(apt => base44.entities.Appointment.delete(apt.id))
       );
+      // Supprimer le compte utilisateur s'il existe
+      const registeredUser = registeredUsers.find(
+        u => u.email?.toLowerCase() === clientToDelete.email?.toLowerCase()
+      );
+      if (registeredUser) {
+        await base44.entities.User.delete(registeredUser.id);
+      }
       queryClient.invalidateQueries({ queryKey: ['allAppointments'] });
+      queryClient.invalidateQueries({ queryKey: ['registeredUsers'] });
       toast.success(`Client "${clientToDelete.name || clientToDelete.email}" supprimé`);
     } catch (err) {
       toast.error('Erreur lors de la suppression du client');
@@ -121,10 +130,17 @@ export default function Clients() {
   const handleDeleteAll = async () => {
     setDeleting(true);
     try {
+      // Supprimer tous les rendez-vous
       await Promise.all(
         appointments.map(apt => base44.entities.Appointment.delete(apt.id))
       );
+      // Supprimer tous les comptes utilisateurs (sauf admins et barbers)
+      const clientUsers = registeredUsers.filter(u => u.role === 'user');
+      await Promise.all(
+        clientUsers.map(u => base44.entities.User.delete(u.id))
+      );
       queryClient.invalidateQueries({ queryKey: ['allAppointments'] });
+      queryClient.invalidateQueries({ queryKey: ['registeredUsers'] });
       toast.success(`${clients.length} client(s) supprimé(s)`);
     } catch (err) {
       toast.error('Erreur lors de la suppression des clients');

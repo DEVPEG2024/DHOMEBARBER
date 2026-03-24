@@ -2,6 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from '@/App.jsx'
 import '@/index.css'
+import { initCapacitor, isNative } from '@/lib/capacitor'
 
 const NOTIF_KEY = 'dhome_notifications';
 
@@ -23,8 +24,13 @@ function updateBadge() {
   }
 }
 
-// Register service worker for push notifications
-if ('serviceWorker' in navigator) {
+// Initialize Capacitor on native platforms
+if (isNative) {
+  initCapacitor();
+}
+
+// Register service worker for push notifications (web only)
+if (!isNative && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch(() => {});
   });
