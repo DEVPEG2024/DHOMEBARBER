@@ -21,7 +21,7 @@ const allSidebarItems = [
   { path: '/admin/cleaning', icon: Sparkles, label: 'Entretien', perm: 'cleaning' },
   { path: '/admin/my-cleaning', icon: Sparkles, label: 'Entretien', barberOnly: true, alwaysShow: true },
   { path: '/admin/smart-agenda', icon: Brain, label: 'Agenda IA', perm: 'smart-agenda' },
-  { path: '/admin/feed', icon: Newspaper, label: 'Fil d\'actu', alwaysShow: true },
+  { path: '/admin/feed', icon: Newspaper, label: 'New\'sGang', alwaysShow: true },
   { path: '/admin/settings', icon: Settings, label: 'Paramètres', perm: 'settings' },
   { path: '/admin/leave', icon: CalendarDays, label: 'Congés', adminOnly: true },
   { path: '/admin/my-leave', icon: CalendarDays, label: 'Mes Congés', barberOnly: true, alwaysShow: true },

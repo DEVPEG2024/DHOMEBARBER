@@ -3,7 +3,7 @@ import { base44 } from '@/api/base44Client';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Heart, Trash2, Loader2, Camera, MessageCircle, ChevronDown, ChevronUp } from 'lucide-react';
+import { Send, Heart, Trash2, Loader2, Camera, MessageCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
@@ -69,13 +69,24 @@ function CommentItem({ comment, currentUser, onDelete }) {
   );
 }
 
+const REACTIONS = ['❤️', '🔥', '💪', '😂', '👏', '💈'];
+
 function PostCard({ post, currentUser, onLike, onDelete, likes, comments, onComment, onDeleteComment, getAuthorPhoto }) {
   const [showComments, setShowComments] = useState(false);
+  const [showReactions, setShowReactions] = useState(false);
   const [commentText, setCommentText] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const userLiked = likes.some(l => l.post_id === post.id && l.user_email === currentUser?.email);
-  const likeCount = likes.filter(l => l.post_id === post.id).length;
+  const postLikes = likes.filter(l => l.post_id === post.id);
+  const userLike = postLikes.find(l => l.user_email === currentUser?.email);
+  const likeCount = postLikes.length;
+
+  // Group reactions by emoji
+  const reactionCounts = {};
+  postLikes.forEach(l => {
+    const r = l.reaction || '❤️';
+    reactionCounts[r] = (reactionCounts[r] || 0) + 1;
+  });
   const postComments = comments.filter(c => c.post_id === post.id);
   const commentCount = postComments.length;
   const badge = getRoleBadge(post.author_role);
@@ -130,35 +141,82 @@ function PostCard({ post, currentUser, onLike, onDelete, likes, comments, onComm
         <p className="px-4 pb-3 text-sm text-foreground leading-relaxed whitespace-pre-wrap">{post.content}</p>
       )}
 
-      {/* Image */}
+      {/* Image - 4:5 vertical format (1080x1350) */}
       {post.image_url && (
         <div className="px-4 pb-3">
-          <img src={post.image_url} alt="" className="w-full rounded-xl object-cover max-h-[400px]" />
+          <div className="relative w-full rounded-xl overflow-hidden" style={{ aspectRatio: '4/5' }}>
+            <img src={post.image_url} alt="" className="absolute inset-0 w-full h-full object-cover" />
+          </div>
+        </div>
+      )}
+
+      {/* Reaction summary */}
+      {likeCount > 0 && (
+        <div className="flex items-center gap-1 px-4 py-1.5">
+          <div className="flex -space-x-1">
+            {Object.entries(reactionCounts).slice(0, 3).map(([emoji]) => (
+              <span key={emoji} className="text-sm">{emoji}</span>
+            ))}
+          </div>
+          <span className="text-xs text-muted-foreground ml-1">{likeCount}</span>
         </div>
       )}
 
       {/* Actions */}
-      <div className="flex items-center gap-4 px-4 py-3 border-t border-border">
+      <div className="flex items-center gap-1 px-4 py-2.5 border-t border-border relative">
+        {/* Reaction picker */}
+        <AnimatePresence>
+          {showReactions && (
+            <motion.div
+              initial={{ opacity: 0, y: 10, scale: 0.9 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 10, scale: 0.9 }}
+              className="absolute bottom-full left-3 mb-2 flex gap-1 bg-card border border-border rounded-2xl px-2 py-1.5 shadow-xl"
+            >
+              {REACTIONS.map(emoji => (
+                <motion.button
+                  key={emoji}
+                  whileHover={{ scale: 1.3 }}
+                  whileTap={{ scale: 0.8 }}
+                  onClick={() => {
+                    onLike(post.id, !!userLike, emoji);
+                    setShowReactions(false);
+                  }}
+                  className={`text-xl w-9 h-9 flex items-center justify-center rounded-full hover:bg-secondary transition-colors ${
+                    userLike?.reaction === emoji ? 'bg-primary/15' : ''
+                  }`}
+                >
+                  {emoji}
+                </motion.button>
+              ))}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         <motion.button
           whileTap={{ scale: 0.85 }}
-          onClick={() => onLike(post.id, userLiked)}
-          className="flex items-center gap-1.5 transition-colors"
+          onClick={() => userLike ? onLike(post.id, true, userLike.reaction) : setShowReactions(!showReactions)}
+          onDoubleClick={() => setShowReactions(!showReactions)}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full hover:bg-secondary transition-colors"
         >
-          <Heart className={`w-5 h-5 transition-all ${userLiked ? 'text-red-500 fill-red-500' : 'text-muted-foreground'}`} />
-          <span className={`text-xs font-medium ${userLiked ? 'text-red-500' : 'text-muted-foreground'}`}>
-            {likeCount > 0 ? likeCount : ''}
+          {userLike ? (
+            <span className="text-lg">{userLike.reaction || '❤️'}</span>
+          ) : (
+            <Heart className="w-5 h-5 text-muted-foreground" />
+          )}
+          <span className={`text-xs font-medium ${userLike ? 'text-foreground' : 'text-muted-foreground'}`}>
+            {userLike ? 'Aimé' : 'J\'aime'}
           </span>
         </motion.button>
 
         <button
           onClick={() => setShowComments(!showComments)}
-          className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition-colors"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
         >
           <MessageCircle className="w-5 h-5" />
-          <span className="text-xs font-medium">{commentCount > 0 ? commentCount : ''}</span>
-          {commentCount > 0 && (
-            showComments ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />
-          )}
+          <span className="text-xs font-medium">
+            {commentCount > 0 ? `${commentCount}` : 'Commenter'}
+          </span>
         </button>
       </div>
 
@@ -292,13 +350,13 @@ export default function Feed() {
     }
   };
 
-  const handleLike = async (postId, alreadyLiked) => {
+  const handleLike = async (postId, alreadyLiked, reaction = '❤️') => {
     try {
       if (alreadyLiked) {
         const like = likes.find(l => l.post_id === postId && l.user_email === user.email);
         if (like) await base44.entities.PostLike.delete(like.id);
       } else {
-        await base44.entities.PostLike.create({ post_id: postId, user_email: user.email });
+        await base44.entities.PostLike.create({ post_id: postId, user_email: user.email, reaction });
       }
       queryClient.invalidateQueries({ queryKey: ['postLikes'] });
     } catch {}
@@ -343,7 +401,7 @@ export default function Feed() {
     <div className="max-w-lg mx-auto">
       <div className="mb-6">
         <p className="text-[10px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Communauté</p>
-        <h1 className="font-display text-2xl font-bold">Fil d'actualité</h1>
+        <h1 className="font-display text-2xl font-bold">New'sGang</h1>
       </div>
 
       {/* New post */}
@@ -371,11 +429,13 @@ export default function Feed() {
 
         {/* Image preview */}
         {imageUrl && (
-          <div className="relative mt-3 ml-[52px]">
-            <img src={imageUrl} alt="" className="rounded-xl max-h-48 object-cover" />
+          <div className="relative mt-3 ml-[52px] w-32">
+            <div className="rounded-xl overflow-hidden" style={{ aspectRatio: '4/5' }}>
+              <img src={imageUrl} alt="" className="w-full h-full object-cover" />
+            </div>
             <button
               onClick={() => setImageUrl('')}
-              className="absolute top-2 right-2 w-6 h-6 rounded-full bg-black/60 flex items-center justify-center text-white"
+              className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-black/60 flex items-center justify-center text-white text-xs"
             >
               ×
             </button>
