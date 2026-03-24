@@ -21,7 +21,6 @@ function useParallaxTilt() {
   const srx = useSpring(rotateX, springConfig);
   const sry = useSpring(rotateY, springConfig);
 
-  // Desktop only — mouse follow
   useEffect(() => {
     if (IS_MOBILE) return;
 
@@ -42,20 +41,6 @@ function useParallaxTilt() {
 
   return { x: sx, y: sy, rotateX: srx, rotateY: sry };
 }
-
-// Floating animation keyframes for mobile
-const mobileFloatAnimation = {
-  y: [0, -8, 0, 6, 0],
-  x: [0, 5, 0, -5, 0],
-  rotateY: [0, 3, 0, -3, 0],
-  rotateX: [0, -2, 0, 2, 0],
-};
-
-const mobileFloatTransition = {
-  duration: 6,
-  repeat: Infinity,
-  ease: 'easeInOut',
-};
 
 const LOGO_URL = '/logo.png';
 
@@ -85,36 +70,63 @@ export default function Home() {
       {/* Hero */}
       <div className="relative overflow-hidden">
         <div className="relative flex flex-col items-center justify-center px-5 pt-10 pb-8">
-          {/* Logo grand — floating animation on mobile, mouse parallax on desktop */}
-          {IS_MOBILE ? (
+          {/* Logo with pulse + green glow */}
+          <div className="relative mb-2">
+            {/* Green glow pulse behind logo */}
+            <motion.div
+              className="absolute inset-0 rounded-full"
+              initial={{ opacity: 0 }}
+              animate={{
+                opacity: [0.3, 0.7, 0.3],
+                scale: [0.8, 1.05, 0.8],
+              }}
+              transition={{
+                duration: 3,
+                repeat: Infinity,
+                ease: 'easeInOut',
+              }}
+              style={{
+                background: 'radial-gradient(circle, rgba(34,197,94,0.4) 0%, rgba(34,197,94,0.15) 40%, transparent 70%)',
+                filter: 'blur(30px)',
+              }}
+            />
+            {/* Second glow layer for depth */}
+            <motion.div
+              className="absolute inset-0 rounded-full"
+              animate={{
+                opacity: [0.2, 0.5, 0.2],
+                scale: [0.9, 1.15, 0.9],
+              }}
+              transition={{
+                duration: 3,
+                repeat: Infinity,
+                ease: 'easeInOut',
+                delay: 0.3,
+              }}
+              style={{
+                background: 'radial-gradient(circle, rgba(34,197,94,0.25) 0%, transparent 60%)',
+                filter: 'blur(50px)',
+              }}
+            />
+            {/* Logo */}
             <motion.img
               initial={{ opacity: 0, scale: 0.85 }}
               animate={{
                 opacity: 1,
-                scale: 1,
-                ...mobileFloatAnimation,
+                scale: [1, 1.03, 1],
               }}
               transition={{
                 opacity: { duration: 0.6 },
-                scale: { duration: 0.6 },
-                ...Object.fromEntries(
-                  Object.keys(mobileFloatAnimation).map(k => [k, mobileFloatTransition])
-                ),
+                scale: {
+                  duration: 3,
+                  repeat: Infinity,
+                  ease: 'easeInOut',
+                },
               }}
               src={LOGO_URL}
               alt="D'Home Barber"
-              className="w-72 h-72 object-contain drop-shadow-2xl mb-2"
-              style={{ perspective: 800 }}
-            />
-          ) : (
-            <motion.img
-              initial={{ opacity: 0, scale: 0.85 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ duration: 0.6 }}
-              src={LOGO_URL}
-              alt="D'Home Barber"
-              className="w-72 h-72 object-contain drop-shadow-2xl mb-2"
-              style={{
+              className="relative w-72 h-72 object-contain drop-shadow-2xl"
+              style={IS_MOBILE ? {} : {
                 x: tilt.x,
                 y: tilt.y,
                 rotateX: tilt.rotateX,
@@ -122,7 +134,7 @@ export default function Home() {
                 perspective: 800,
               }}
             />
-          )}
+          </div>
           <p className="text-sm font-light tracking-[0.3em] uppercase text-white/70 mb-4">Premium BarberShop</p>
 
           <div className="flex items-center gap-3 mb-5">
