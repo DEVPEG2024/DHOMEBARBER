@@ -261,7 +261,7 @@ export default function Home() {
 
         {/* Team / Barbers - Auto-scrolling marquee */}
         <motion.div variants={itemVariants}>
-          <SectionHeader title="Notre Équipe" subtitle="Les Barbers" />
+          <SectionHeader title="Le Gang" subtitle="Les Barbers" />
           {employees.length > 0 && (
             <div className="overflow-hidden -mx-5">
               <motion.div
