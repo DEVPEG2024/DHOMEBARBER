@@ -340,38 +340,70 @@ export default function Home() {
       >
         {/* Quick Info - Vert / Blanc / Rouge */}
         <motion.div variants={itemVariants} className="grid grid-cols-3 gap-2">
-          {[
-            { icon: Clock, label: hoursLabel.label, sub: hoursLabel.sub, href: null, iconColor: 'text-green-500', bgColor: 'bg-green-500/15', borderColor: 'border-green-500/20' },
-            { icon: Phone, label: 'Appeler', sub: '06 66 08 36 05', href: 'tel:0666083605', iconColor: 'text-white', bgColor: 'bg-white/15', borderColor: 'border-white/20' },
-            { icon: MapPin, label: 'Itinéraire', sub: 'Douvaine', href: 'https://maps.google.com/?q=3+Rue+du+Bois+Arquet+74140+Douvaine', iconColor: 'text-red-500', bgColor: 'bg-red-500/15', borderColor: 'border-red-500/20' },
-          ].map(({ icon: Icon, label, sub, href, iconColor, bgColor, borderColor }) => {
-            const content = (
-              <>
-                <div className={`w-10 h-10 rounded-2xl ${bgColor} flex items-center justify-center mx-auto mb-2 border ${borderColor}`}>
-                  <Icon className={`w-4.5 h-4.5 ${iconColor}`} />
-                </div>
-                <p className="text-xs font-semibold text-foreground">{label}</p>
-                <p className="text-[11px] text-muted-foreground mt-0.5">{sub}</p>
-              </>
-            );
-            return href ? (
-              <motion.a
-                key={label}
-                href={href}
-                target={href.startsWith('http') ? '_blank' : undefined}
-                rel={href.startsWith('http') ? 'noopener noreferrer' : undefined}
-                whileTap={{ scale: 0.93 }}
-                className="glass rounded-2xl p-3 text-center cursor-pointer active:bg-white/10 transition-colors"
-              >
-                {content}
-              </motion.a>
-            ) : (
-              <div key={label} className="glass rounded-2xl p-3 text-center">
-                {content}
-              </div>
-            );
-          })}
+          {/* Horaires - cliquable */}
+          <motion.div
+            whileTap={{ scale: 0.93 }}
+            onClick={() => setShowHours(true)}
+            className="glass rounded-2xl p-3 text-center cursor-pointer active:bg-white/10 transition-colors"
+          >
+            <div className="w-10 h-10 rounded-2xl bg-green-500/15 flex items-center justify-center mx-auto mb-2 border border-green-500/20">
+              <Clock className="w-4.5 h-4.5 text-green-500" />
+            </div>
+            <p className="text-xs font-semibold text-foreground">Horaires</p>
+            <p className="text-[11px] text-muted-foreground mt-0.5">{openDaysLabel}</p>
+          </motion.div>
+          {/* Appeler */}
+          <motion.a href="tel:0666083605" whileTap={{ scale: 0.93 }} className="glass rounded-2xl p-3 text-center cursor-pointer active:bg-white/10 transition-colors">
+            <div className="w-10 h-10 rounded-2xl bg-white/15 flex items-center justify-center mx-auto mb-2 border border-white/20">
+              <Phone className="w-4.5 h-4.5 text-white" />
+            </div>
+            <p className="text-xs font-semibold text-foreground">Appeler</p>
+            <p className="text-[11px] text-muted-foreground mt-0.5">06 66 08 36 05</p>
+          </motion.a>
+          {/* Itinéraire */}
+          <motion.a href="https://maps.google.com/?q=3+Rue+du+Bois+Arquet+74140+Douvaine" target="_blank" rel="noopener noreferrer" whileTap={{ scale: 0.93 }} className="glass rounded-2xl p-3 text-center cursor-pointer active:bg-white/10 transition-colors">
+            <div className="w-10 h-10 rounded-2xl bg-red-500/15 flex items-center justify-center mx-auto mb-2 border border-red-500/20">
+              <MapPin className="w-4.5 h-4.5 text-red-500" />
+            </div>
+            <p className="text-xs font-semibold text-foreground">Itinéraire</p>
+            <p className="text-[11px] text-muted-foreground mt-0.5">Douvaine</p>
+          </motion.a>
         </motion.div>
+
+        {/* Modal horaires */}
+        {showHours && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center px-5" onClick={() => setShowHours(false)}>
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.2 }}
+              onClick={e => e.stopPropagation()}
+              className="relative w-full max-w-sm rounded-3xl bg-card border border-border p-6 shadow-2xl"
+            >
+              <div className="flex items-center gap-3 mb-5">
+                <div className="w-10 h-10 rounded-2xl bg-green-500/15 flex items-center justify-center border border-green-500/20">
+                  <Clock className="w-5 h-5 text-green-500" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-foreground">Horaires d'ouverture</h3>
+                  <p className="text-xs text-muted-foreground">{openDaysLabel}</p>
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                {openingHours.map(({ day, hours, closed }) => (
+                  <div key={day} className={`flex items-center justify-between py-2 px-3 rounded-xl ${closed ? 'opacity-40' : 'bg-white/5'}`}>
+                    <span className="text-sm font-medium text-foreground">{day}</span>
+                    <span className={`text-sm font-semibold ${closed ? 'text-red-400' : 'text-green-400'}`}>{hours}</span>
+                  </div>
+                ))}
+              </div>
+              <button onClick={() => setShowHours(false)} className="w-full mt-5 py-3 rounded-2xl bg-white/10 text-sm font-semibold text-foreground hover:bg-white/15 transition-colors">
+                Fermer
+              </button>
+            </motion.div>
+          </div>
+        )}
 
         {/* Team / Barbers - Auto-scrolling marquee with touch support */}
         <motion.div variants={itemVariants}>
