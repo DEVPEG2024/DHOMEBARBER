@@ -352,9 +352,9 @@ export default function Feed() {
   const getAuthorPhoto = () => {
     if (user?.role === 'barber' || user?.role === 'admin') {
       const emp = employees.find(e => e.id === user?.employee_id);
-      return emp?.photo_url || '';
+      return emp?.photo_url || user?.photo_url || '';
     }
-    return '';
+    return user?.photo_url || '';
   };
 
   const createPost = async () => {
