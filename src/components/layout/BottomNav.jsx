@@ -1,10 +1,10 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Home, ShoppingBag, Calendar, Newspaper, User } from 'lucide-react';
+import { Home, ShoppingBag, Calendar, Newspaper, User, PartyPopper } from 'lucide-react';
 
 const navItems = [
   { path: '/', icon: Home, label: 'Accueil' },
-  { path: '/shop', icon: ShoppingBag, label: 'Shop' },
+  { path: '/events', icon: PartyPopper, label: 'Événements' },
   { path: '/booking', icon: Calendar, label: 'Réserver' },
   { path: '/feed', icon: Newspaper, label: "New's Gang !" },
   { path: '/profile', icon: User, label: 'Profil' },

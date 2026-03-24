@@ -385,15 +385,27 @@ export default function Agenda() {
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">Début *</label>
-                <input type="time" value={lastMinuteForm.start_time}
+                <select value={lastMinuteForm.start_time}
                   onChange={e => setLastMinuteForm(f => ({ ...f, start_time: e.target.value }))}
-                  className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm" />
+                  className="w-full bg-secondary border border-border rounded-lg px-3 py-2.5 text-sm appearance-none">
+                  <option value="">--:--</option>
+                  {Array.from({ length: 24 }, (_, h) => [0, 15, 30, 45].map(m => {
+                    const t = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+                    return <option key={t} value={t}>{t}</option>;
+                  })).flat().filter(o => o.key >= '08:00' && o.key <= '20:00')}
+                </select>
               </div>
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">Fin</label>
-                <input type="time" value={lastMinuteForm.end_time}
+                <select value={lastMinuteForm.end_time}
                   onChange={e => setLastMinuteForm(f => ({ ...f, end_time: e.target.value }))}
-                  className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm" />
+                  className="w-full bg-secondary border border-border rounded-lg px-3 py-2.5 text-sm appearance-none">
+                  <option value="">--:--</option>
+                  {Array.from({ length: 24 }, (_, h) => [0, 15, 30, 45].map(m => {
+                    const t = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+                    return <option key={t} value={t}>{t}</option>;
+                  })).flat().filter(o => o.key >= '08:00' && o.key <= '20:00')}
+                </select>
               </div>
             </div>
             <div>

@@ -26,6 +26,7 @@ import UserSettings from '@/pages/Settings';
 import ClientNotifications from '@/pages/ClientNotifications';
 import BarberProfile from '@/pages/BarberProfile';
 import Feed from '@/pages/Feed';
+import Events from '@/pages/Events';
 
 // Admin pages (lazy-loaded - only for admin/barber users)
 const AdminDashboard = React.lazy(() => import('@/pages/admin/Dashboard'));
@@ -47,6 +48,7 @@ const BarberAccounts = React.lazy(() => import('@/pages/admin/BarberAccounts'));
 const AdminLeave = React.lazy(() => import('@/pages/admin/AdminLeave'));
 const BarberLeave = React.lazy(() => import('@/pages/admin/BarberLeave'));
 const BarberSettings = React.lazy(() => import('@/pages/admin/BarberSettings'));
+const AdminEvents = React.lazy(() => import('@/pages/admin/AdminEvents'));
 
 const LazyFallback = () => (
   <div className="fixed inset-0 flex items-center justify-center bg-background">
@@ -170,6 +172,7 @@ const AppRoutes = () => {
           <Route path="/profile" element={<Profile />} />
           <Route path="/barber/:id" element={<BarberProfile />} />
           <Route path="/feed" element={<Feed />} />
+          <Route path="/events" element={<Events />} />
         </Route>
       </Route>
 
@@ -195,6 +198,7 @@ const AppRoutes = () => {
           <Route path="/admin/leave" element={<Suspense fallback={<LazyFallback />}><AdminLeave /></Suspense>} />
           <Route path="/admin/my-leave" element={<Suspense fallback={<LazyFallback />}><BarberLeave /></Suspense>} />
           <Route path="/admin/feed" element={<Feed />} />
+          <Route path="/admin/events" element={<Suspense fallback={<LazyFallback />}><AdminEvents /></Suspense>} />
           <Route path="/admin/my-settings" element={<Suspense fallback={<LazyFallback />}><BarberSettings /></Suspense>} />
         </Route>
       </Route>
