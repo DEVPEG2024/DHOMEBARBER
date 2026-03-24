@@ -2,9 +2,10 @@ import React, { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Mail, Lock, User, Phone, Eye, EyeOff, Download, Bell, CheckCircle, ArrowRight, Share, Plus } from 'lucide-react';
+import { Mail, Lock, User, Phone, Eye, EyeOff, Download, Bell, CheckCircle, ArrowRight, Share, Plus, KeyRound } from 'lucide-react';
 import { toast } from 'sonner';
 import { isPushSupported, subscribeToPush } from '@/lib/pushNotifications';
+import { base44 } from '@/api/base44Client';
 
 const LOGO_URL = '/logo.png';
 
@@ -19,6 +20,12 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [showWelcome, setShowWelcome] = useState(false);
   const [pushDone, setPushDone] = useState(false);
+
+  // Forgot password state
+  const [resetStep, setResetStep] = useState('email'); // 'email' | 'code'
+  const [resetCode, setResetCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
 
   const { login, register } = useAuth();
   const navigate = useNavigate();
@@ -76,6 +83,71 @@ export default function Login() {
     } catch (err) {
       const msg = err?.response?.data?.error || err?.data?.error || "Erreur lors de l'inscription";
       toast.error(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async (e) => {
+    e.preventDefault();
+    if (!email) {
+      toast.error('Entrez votre adresse email');
+      return;
+    }
+    setLoading(true);
+    try {
+      const serverUrl = import.meta.env.PROD ? 'https://dhomebarber-api-3aabb8313cb6.herokuapp.com' : '';
+      const appId = base44.appId || 'prod';
+      const res = await fetch(`${serverUrl}/api/apps/${appId}/auth/forgot-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success('Un code de réinitialisation a été généré. Contactez le salon pour l\'obtenir.');
+      setResetStep('code');
+    } catch (err) {
+      toast.error(err.message || 'Erreur lors de la demande');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResetPassword = async (e) => {
+    e.preventDefault();
+    if (!resetCode || !newPassword) {
+      toast.error('Remplissez tous les champs');
+      return;
+    }
+    if (newPassword.length < 6) {
+      toast.error('Le mot de passe doit contenir au moins 6 caractères');
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      toast.error('Les mots de passe ne correspondent pas');
+      return;
+    }
+    setLoading(true);
+    try {
+      const serverUrl = import.meta.env.PROD ? 'https://dhomebarber-api-3aabb8313cb6.herokuapp.com' : '';
+      const appId = base44.appId || 'prod';
+      const res = await fetch(`${serverUrl}/api/apps/${appId}/auth/reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, code: resetCode, new_password: newPassword }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success('Mot de passe réinitialisé ! Connectez-vous.');
+      setMode('login');
+      setResetStep('email');
+      setResetCode('');
+      setNewPassword('');
+      setConfirmNewPassword('');
+      setPassword('');
+    } catch (err) {
+      toast.error(err.message || 'Erreur lors de la réinitialisation');
     } finally {
       setLoading(false);
     }
@@ -238,36 +310,101 @@ export default function Login() {
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
         className="text-center mb-6">
         <h1 className="font-display text-xl font-bold text-foreground">
-          {mode === 'login' ? 'Connexion' : 'Créer un compte'}
+          {mode === 'forgot' ? 'Mot de passe oublié' : mode === 'login' ? 'Connexion' : 'Créer un compte'}
         </h1>
         <p className="text-sm text-muted-foreground mt-1">
-          {mode === 'login' ? 'Accédez à votre espace' : "Rejoignez D'Home Barber"}
+          {mode === 'forgot'
+            ? (resetStep === 'email' ? 'Entrez votre email pour recevoir un code' : 'Entrez le code et votre nouveau mot de passe')
+            : mode === 'login' ? 'Accédez à votre espace' : "Rejoignez D'Home Barber"}
         </p>
       </motion.div>
 
       <div className="w-full max-w-sm">
         {/* Tabs */}
-        <div className="flex gap-1 mb-5 p-1 rounded-2xl bg-white/5 border border-white/8">
-          {[
-            { id: 'login', label: 'Connexion' },
-            { id: 'register', label: 'Inscription' },
-          ].map(t => (
-            <button
-              key={t.id}
-              onClick={() => setMode(t.id)}
-              className={`flex-1 py-3 rounded-xl text-sm font-semibold transition-all duration-300 ${
-                mode === t.id
-                  ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/20'
-                  : 'text-muted-foreground'
-              }`}
-            >
-              {t.label}
+        {mode !== 'forgot' && (
+          <div className="flex gap-1 mb-5 p-1 rounded-2xl bg-white/5 border border-white/8">
+            {[
+              { id: 'login', label: 'Connexion' },
+              { id: 'register', label: 'Inscription' },
+            ].map(t => (
+              <button
+                key={t.id}
+                onClick={() => setMode(t.id)}
+                className={`flex-1 py-3 rounded-xl text-sm font-semibold transition-all duration-300 ${
+                  mode === t.id
+                    ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/20'
+                    : 'text-muted-foreground'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Forgot password form */}
+        {mode === 'forgot' && (
+          <motion.form
+            key="forgot"
+            initial={{ opacity: 0, x: 15 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.2 }}
+            onSubmit={resetStep === 'email' ? handleForgotPassword : handleResetPassword}
+            className="space-y-3"
+          >
+            <div className="relative">
+              <Mail className={iconClass} />
+              <input type="email" placeholder="Email *" value={email}
+                onChange={e => setEmail(e.target.value)} autoComplete="email"
+                className={inputClass} disabled={resetStep === 'code'} />
+            </div>
+
+            {resetStep === 'code' && (
+              <>
+                <div className="relative">
+                  <KeyRound className={iconClass} />
+                  <input type="text" placeholder="Code à 6 chiffres *" value={resetCode}
+                    onChange={e => setResetCode(e.target.value)} maxLength={6}
+                    className={inputClass} autoComplete="one-time-code" />
+                </div>
+                <div className="relative">
+                  <Lock className={iconClass} />
+                  <input type={showPassword ? 'text' : 'password'} placeholder="Nouveau mot de passe *"
+                    value={newPassword} onChange={e => setNewPassword(e.target.value)}
+                    className={`${inputClass} !pr-11`} />
+                  <button type="button" onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3.5 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground transition-colors">
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                <div className="relative">
+                  <Lock className={iconClass} />
+                  <input type={showPassword ? 'text' : 'password'} placeholder="Confirmer le mot de passe *"
+                    value={confirmNewPassword} onChange={e => setConfirmNewPassword(e.target.value)}
+                    className={inputClass} />
+                </div>
+              </>
+            )}
+
+            <button type="submit" disabled={loading}
+              className="w-full flex items-center justify-center gap-2 h-13 py-3.5 rounded-2xl bg-primary text-primary-foreground font-semibold text-sm shadow-lg shadow-primary/25 hover:bg-primary/90 transition-all disabled:opacity-60 mt-2">
+              {loading ? (
+                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              ) : (
+                resetStep === 'email' ? 'Envoyer le code' : 'Réinitialiser le mot de passe'
+              )}
             </button>
-          ))}
-        </div>
+
+            {resetStep === 'code' && (
+              <p className="text-center text-xs text-muted-foreground/70 mt-2">
+                Contactez le salon au <span className="text-primary font-semibold">06 66 08 36 05</span> pour obtenir votre code.
+              </p>
+            )}
+          </motion.form>
+        )}
 
         {/* Form */}
-        <motion.form
+        {mode !== 'forgot' && <motion.form
           key={mode}
           initial={{ opacity: 0, x: mode === 'login' ? -15 : 15 }}
           animate={{ opacity: 1, x: 0 }}
@@ -332,24 +469,44 @@ export default function Login() {
               mode === 'login' ? 'Se connecter' : 'Créer mon compte'
             )}
           </button>
-        </motion.form>
+        </motion.form>}
 
         {/* Footer */}
-        <p className="text-center text-sm text-muted-foreground mt-5">
-          {mode === 'login' ? (
-            <>Pas encore de compte ?{' '}
-              <button onClick={() => setMode('register')} className="text-primary font-semibold">
-                Inscrivez-vous
+        <div className="text-center mt-5 space-y-2">
+          {mode === 'forgot' ? (
+            <p className="text-sm text-muted-foreground">
+              <button onClick={() => { setMode('login'); setResetStep('email'); setResetCode(''); setNewPassword(''); setConfirmNewPassword(''); }}
+                className="text-primary font-semibold">
+                Retour à la connexion
               </button>
-            </>
+            </p>
           ) : (
-            <>Déjà un compte ?{' '}
-              <button onClick={() => setMode('login')} className="text-primary font-semibold">
-                Connectez-vous
-              </button>
+            <>
+              <p className="text-sm text-muted-foreground">
+                {mode === 'login' ? (
+                  <>Pas encore de compte ?{' '}
+                    <button onClick={() => setMode('register')} className="text-primary font-semibold">
+                      Inscrivez-vous
+                    </button>
+                  </>
+                ) : (
+                  <>Déjà un compte ?{' '}
+                    <button onClick={() => setMode('login')} className="text-primary font-semibold">
+                      Connectez-vous
+                    </button>
+                  </>
+                )}
+              </p>
+              {mode === 'login' && (
+                <p className="text-sm">
+                  <button onClick={() => setMode('forgot')} className="text-muted-foreground hover:text-primary transition-colors">
+                    Mot de passe oublié ?
+                  </button>
+                </p>
+              )}
             </>
           )}
-        </p>
+        </div>
       </div>
     </div>
   );
