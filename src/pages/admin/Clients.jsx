@@ -52,11 +52,18 @@ export default function Clients() {
     // D'abord, ajouter tous les utilisateurs inscrits
     registeredUsers.forEach(user => {
       if (!user.email) return;
+      // Pour les barbers/admins, chercher la photo dans le profil employé
+      let photo = user.photo_url || '';
+      if (user.employee_id) {
+        const emp = employees.find(e => e.id === user.employee_id);
+        if (emp?.photo_url) photo = emp.photo_url;
+      }
       map[user.email.toLowerCase()] = {
         email: user.email,
         name: user.full_name || user.email,
         phone: user.phone || '',
-        photo_url: user.photo_url || '',
+        photo_url: photo,
+        role: user.role,
         visits: 0,
         noShows: 0,
         totalSpent: 0,
@@ -92,7 +99,7 @@ export default function Clients() {
       if (!c.lastVisit || apt.date > c.lastVisit) c.lastVisit = apt.date;
     });
     return Object.values(map).sort((a, b) => (b.lastVisit || b.registeredAt || '').localeCompare(a.lastVisit || a.registeredAt || ''));
-  }, [appointments, registeredUsers]);
+  }, [appointments, registeredUsers, employees]);
 
   const filtered = clients.filter(c =>
     c.name?.toLowerCase().includes(search.toLowerCase()) ||
