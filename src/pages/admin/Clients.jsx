@@ -56,6 +56,7 @@ export default function Clients() {
         email: user.email,
         name: user.full_name || user.email,
         phone: user.phone || '',
+        photo_url: user.photo_url || '',
         visits: 0,
         noShows: 0,
         totalSpent: 0,
@@ -181,7 +182,6 @@ export default function Clients() {
       setNewClient({ name: '', email: '', phone: '' });
       setShowAddClient(false);
     } catch (err) {
-      console.error('Erreur ajout client:', err);
       toast.error('Erreur lors de l\'ajout du client');
     } finally {
       setSaving(false);
@@ -352,8 +352,12 @@ export default function Clients() {
             className="bg-card border border-border rounded-xl p-4"
           >
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-                <span className="text-sm font-bold text-primary">{client.name?.charAt(0) || '?'}</span>
+              <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                {client.photo_url ? (
+                  <img src={client.photo_url} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  <span className="text-sm font-bold text-primary">{client.name?.charAt(0) || '?'}</span>
+                )}
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold truncate">{client.name || client.email}</p>
