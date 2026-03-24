@@ -335,35 +335,45 @@ export default function BarberSettings() {
             <Clock className="w-4 h-4" /> Mes horaires
           </h3>
           <p className="text-[11px] text-muted-foreground mb-4">Définissez vos jours et heures de travail</p>
-          <div className="space-y-3">
+          <div className="space-y-2">
             {DAYS.map(day => {
               const dayData = workingHours?.[day] || defaultHours[day];
               const isOpen = !dayData?.closed;
               return (
-                <div key={day} className="flex items-center gap-3">
-                  <span className="w-20 text-xs text-muted-foreground font-medium">{DAY_LABELS[day]}</span>
-                  <Switch
-                    checked={isOpen}
-                    onCheckedChange={v => updateHours(day, 'closed', !v)}
-                  />
-                  {isOpen ? (
-                    <div className="flex items-center gap-2">
+                <div
+                  key={day}
+                  className={`rounded-lg px-3 py-2.5 transition-colors ${isOpen ? 'bg-secondary/50' : 'bg-secondary/20'}`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <Switch
+                        checked={isOpen}
+                        onCheckedChange={v => updateHours(day, 'closed', !v)}
+                      />
+                      <span className={`text-sm font-medium ${isOpen ? 'text-foreground' : 'text-muted-foreground'}`}>
+                        {DAY_LABELS[day]}
+                      </span>
+                    </div>
+                    {!isOpen && (
+                      <span className="text-xs text-muted-foreground/60 italic">Repos</span>
+                    )}
+                  </div>
+                  {isOpen && (
+                    <div className="flex items-center gap-2 mt-2 ml-[52px]">
                       <Input
                         type="time"
                         value={dayData?.start || '09:00'}
                         onChange={e => updateHours(day, 'start', e.target.value)}
-                        className="w-[110px] h-8 text-xs bg-secondary border-border"
+                        className="flex-1 h-9 text-sm text-center bg-background border-border font-medium"
                       />
-                      <span className="text-xs text-muted-foreground">—</span>
+                      <span className="text-muted-foreground text-xs">→</span>
                       <Input
                         type="time"
                         value={dayData?.end || '19:00'}
                         onChange={e => updateHours(day, 'end', e.target.value)}
-                        className="w-[110px] h-8 text-xs bg-secondary border-border"
+                        className="flex-1 h-9 text-sm text-center bg-background border-border font-medium"
                       />
                     </div>
-                  ) : (
-                    <span className="text-xs text-muted-foreground italic">Fermé</span>
                   )}
                 </div>
               );
