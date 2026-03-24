@@ -1,10 +1,12 @@
-import React from 'react';
+import React, { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { motion } from 'framer-motion';
-import { Calendar, Star, ShoppingBag, Settings, LogOut, ChevronRight, Shield, Scissors, Bell } from 'lucide-react';
+import { Calendar, Star, ShoppingBag, Settings, LogOut, ChevronRight, Shield, Scissors, Bell, Camera } from 'lucide-react';
+import { toast } from 'sonner';
+import ImageCropDialog from '@/components/shared/ImageCropDialog';
 
 const menuItems = [
   { icon: Calendar, label: 'Mes Rendez-vous', path: '/appointments', desc: 'Historique & prochains RDV' },
@@ -15,7 +17,35 @@ const menuItems = [
 ];
 
 export default function Profile() {
-  const { user, logout } = useAuth();
+  const { user, logout, refreshUser } = useAuth();
+  const queryClient = useQueryClient();
+  const fileInputRef = useRef(null);
+  const [cropImage, setCropImage] = useState(null);
+  const [uploading, setUploading] = useState(false);
+
+  const handlePhotoSelect = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setCropImage(reader.result);
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handleCropComplete = async (croppedFile) => {
+    setCropImage(null);
+    setUploading(true);
+    try {
+      const { file_url } = await base44.integrations.Core.UploadFile({ file: croppedFile });
+      await base44.entities.User.update(user.id, { photo_url: file_url });
+      if (refreshUser) await refreshUser();
+      toast.success('Photo de profil mise à jour');
+    } catch (err) {
+      toast.error('Erreur lors de la mise à jour de la photo');
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const { data: appointments = [] } = useQuery({
     queryKey: ['myAppointments', user?.email],
@@ -41,13 +71,40 @@ export default function Profile() {
         <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="text-center mb-8">
           {/* Avatar */}
           <div className="relative inline-block mb-4">
-            <div className="w-24 h-24 rounded-3xl bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/20 flex items-center justify-center mx-auto shadow-2xl shadow-primary/10">
-              <span className="text-3xl font-bold text-primary font-display">{initials}</span>
-            </div>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="relative w-24 h-24 rounded-3xl overflow-hidden border border-primary/20 shadow-2xl shadow-primary/10 group"
+              disabled={uploading}
+            >
+              {user?.photo_url ? (
+                <img src={user.photo_url} alt="Photo de profil" className="w-full h-full object-cover" />
+              ) : (
+                <div className="w-full h-full bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center">
+                  <span className="text-3xl font-bold text-primary font-display">{initials}</span>
+                </div>
+              )}
+              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                <Camera className="w-6 h-6 text-white" />
+              </div>
+              {uploading && (
+                <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                  <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                </div>
+              )}
+            </button>
             <div className="absolute -bottom-1 -right-1 w-7 h-7 rounded-xl bg-primary flex items-center justify-center shadow-lg shadow-primary/30">
-              <Scissors className="w-3.5 h-3.5 text-primary-foreground" />
+              <Camera className="w-3.5 h-3.5 text-primary-foreground" />
             </div>
+            <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoSelect} />
           </div>
+
+          {/* Crop dialog */}
+          <ImageCropDialog
+            open={!!cropImage}
+            imageSrc={cropImage}
+            onClose={() => setCropImage(null)}
+            onCropComplete={handleCropComplete}
+          />
 
           <h1 className="font-display text-2xl font-bold text-foreground">{user?.full_name || 'Chargement...'}</h1>
           <p className="text-xs text-muted-foreground mt-1">{user?.email}</p>

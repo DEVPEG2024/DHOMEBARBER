@@ -56,6 +56,13 @@ export const AuthProvider = ({ children }) => {
     return newUser;
   }, []);
 
+  const refreshUser = useCallback(async () => {
+    try {
+      const fullUser = await base44.auth.me();
+      setUser(fullUser);
+    } catch {}
+  }, []);
+
   const logout = useCallback(() => {
     localStorage.removeItem('base44_access_token');
     localStorage.removeItem('token');
@@ -73,6 +80,7 @@ export const AuthProvider = ({ children }) => {
       login,
       register,
       logout,
+      refreshUser,
     }}>
       {children}
     </AuthContext.Provider>
