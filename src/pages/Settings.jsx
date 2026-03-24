@@ -1,15 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/lib/AuthContext';
-import { useTheme } from '@/lib/ThemeContext';
 import { isPushSupported, isSubscribed, subscribeToPush, unsubscribeFromPush } from '@/lib/pushNotifications';
 import { motion } from 'framer-motion';
-import { User, Mail, Phone, Sun, Moon, Bell, Shield, ChevronRight } from 'lucide-react';
+import { User, Mail, Phone, Bell, Shield, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
 
 export default function Settings() {
   const { user } = useAuth();
-  const { theme, toggleTheme } = useTheme();
   const [pushEnabled, setPushEnabled] = useState(false);
   const [pushLoading, setPushLoading] = useState(false);
   const pushSupported = isPushSupported();
@@ -92,22 +90,6 @@ export default function Settings() {
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
           className="rounded-2xl border border-white/8 bg-white/4 backdrop-blur-xl overflow-hidden mb-4">
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 pt-4 pb-2">Préférences</p>
-
-          {/* Theme toggle */}
-          <button onClick={toggleTheme} className="flex items-center justify-between w-full px-4 py-3.5 hover:bg-white/5 transition-colors border-b border-white/6">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
-                {theme === 'dark' ? <Moon className="w-4 h-4 text-primary" /> : <Sun className="w-4 h-4 text-primary" />}
-              </div>
-              <div className="text-left">
-                <p className="text-sm font-semibold text-foreground">Apparence</p>
-                <p className="text-[11px] text-muted-foreground">{theme === 'dark' ? 'Mode sombre' : 'Mode clair'}</p>
-              </div>
-            </div>
-            <div className={`w-11 h-6 rounded-full transition-colors relative ${theme === 'dark' ? 'bg-primary' : 'bg-muted'}`}>
-              <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${theme === 'dark' ? 'translate-x-5' : 'translate-x-0.5'}`} />
-            </div>
-          </button>
 
           {/* Notifications toggle */}
           <button
