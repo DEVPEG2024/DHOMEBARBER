@@ -1,20 +1,8 @@
-const API_BASE = import.meta.env.PROD
-  ? 'https://dhomebarber-api-3aabb8313cb6.herokuapp.com'
-  : '';
-
-function getAppId() {
-  return localStorage.getItem('base44_app_id') || import.meta.env.VITE_BASE44_APP_ID || 'dhomebarber';
-}
-
-function getAuthHeaders() {
-  const token = localStorage.getItem('base44_access_token') || localStorage.getItem('token');
-  return token ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
-}
+import { apiRequest, apiUrl } from '@/api/base44Client';
 
 // Get VAPID public key from backend
 export async function getVapidPublicKey() {
-  const res = await fetch(`${API_BASE}/api/apps/${getAppId()}/push/vapid-key`);
-  const data = await res.json();
+  const data = await apiRequest('GET', apiUrl('/push/vapid-key'));
   return data.publicKey;
 }
 
@@ -54,13 +42,7 @@ export async function subscribeToPush() {
   });
 
   // Send subscription to backend
-  const res = await fetch(`${API_BASE}/api/apps/${getAppId()}/push/subscribe`, {
-    method: 'POST',
-    headers: getAuthHeaders(),
-    body: JSON.stringify(subscription.toJSON()),
-  });
-
-  if (!res.ok) throw new Error('Erreur lors de l\'enregistrement');
+  await apiRequest('POST', apiUrl('/push/subscribe'), subscription.toJSON());
   return true;
 }
 
@@ -73,12 +55,11 @@ export async function unsubscribeFromPush() {
 
   if (subscription) {
     // Notify backend
-    await fetch(`${API_BASE}/api/apps/${getAppId()}/push/unsubscribe`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ endpoint: subscription.endpoint }),
-    }).catch(() => {});
-
+    try {
+      await apiRequest('POST', apiUrl('/push/unsubscribe'), { endpoint: subscription.endpoint });
+    } catch {
+      // Ignore unsubscribe errors
+    }
     await subscription.unsubscribe();
   }
 }

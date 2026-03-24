@@ -1,6 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { format } from 'date-fns';
-import { Check, X, AlertTriangle, Coffee, Trash2 } from 'lucide-react';
+import { Coffee } from 'lucide-react';
 import { getServiceColor } from '@/utils/serviceColors';
 import { useQueryClient } from '@tanstack/react-query';
 import AppointmentDetailModal from './AppointmentDetailModal';
@@ -215,10 +214,8 @@ export default function DayView({ appointments, employees, employeeFilter, onSta
       const s = String(t.start_date).slice(0, 10);
       const e = String(t.end_date).slice(0, 10);
       const match = String(t.employee_id) === String(empId) && d >= s && d <= e;
-      if (match) console.log('[DAYVIEW] MATCH congé:', t.employee_name, s, '->', e, 'pour date:', d);
       return match;
     });
-    console.log('[DAYVIEW] isOnLeave empId=', empId, 'date=', date, 'timeOffs reçus=', timeOffs.length, 'result=', result);
     return result;
   };
 

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { base44 } from '@/api/base44Client';
+import { base44, apiRequest, API_BASE } from '@/api/base44Client';
 import { motion } from 'framer-motion';
 import { ShieldCheck, Plus, Trash2, Eye, EyeOff, KeyRound, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -12,10 +12,6 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-
-const API_BASE = import.meta.env.PROD
-  ? 'https://dhomebarber-api-3aabb8313cb6.herokuapp.com'
-  : '';
 
 const ALL_PERMISSIONS = [
   { key: 'dashboard', label: 'Dashboard' },
@@ -32,24 +28,8 @@ const ALL_PERMISSIONS = [
   { key: 'settings', label: 'Paramètres' },
 ];
 
-function getToken() {
-  return localStorage.getItem('base44_access_token') || localStorage.getItem('token') || '';
-}
-
-async function apiCall(method, path, body) {
-  const res = await fetch(`${API_BASE}/api/apps/null${path}`, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${getToken()}`,
-    },
-    ...(body ? { body: JSON.stringify(body) } : {}),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || 'Erreur serveur');
-  }
-  return res.json();
+function apiCall(method, path, body) {
+  return apiRequest(method, `${API_BASE}${path}`, body);
 }
 
 export default function BarberAccounts() {

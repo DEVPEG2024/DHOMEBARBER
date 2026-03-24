@@ -1,7 +1,7 @@
 import React from 'react';
 import { format, addDays, subDays, addWeeks, subWeeks, addMonths, subMonths, startOfWeek } from 'date-fns';
 import { fr } from 'date-fns/locale';
-import { ChevronLeft, ChevronRight, Download, Calendar } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 export default function AgendaToolbar({ view, setView, currentDate, setCurrentDate, onExport }) {

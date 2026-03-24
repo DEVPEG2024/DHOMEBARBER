@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { Mail, Lock, User, Phone, Eye, EyeOff, Download, Bell, CheckCircle, ArrowRight, Share, Plus, KeyRound } from 'lucide-react';
 import { toast } from 'sonner';
 import { isPushSupported, subscribeToPush } from '@/lib/pushNotifications';
-import { base44 } from '@/api/base44Client';
+import { API_SERVER_URL, resolvedAppId } from '@/api/base44Client';
 
 const LOGO_URL = '/logo.png';
 
@@ -67,8 +67,8 @@ export default function Login() {
       toast.error('Remplissez les champs obligatoires');
       return;
     }
-    if (password.length < 6) {
-      toast.error('Le mot de passe doit contenir au moins 6 caractères');
+    if (password.length < 8) {
+      toast.error('Le mot de passe doit contenir au moins 8 caractères');
       return;
     }
     if (password !== confirmPassword) {
@@ -96,9 +96,7 @@ export default function Login() {
     }
     setLoading(true);
     try {
-      const serverUrl = import.meta.env.PROD ? 'https://dhomebarber-api-3aabb8313cb6.herokuapp.com' : '';
-      const appId = base44.appId || 'prod';
-      const res = await fetch(`${serverUrl}/api/apps/${appId}/auth/forgot-password`, {
+      const res = await fetch(`${API_SERVER_URL}/api/apps/${resolvedAppId}/auth/forgot-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email }),
@@ -120,8 +118,8 @@ export default function Login() {
       toast.error('Remplissez tous les champs');
       return;
     }
-    if (newPassword.length < 6) {
-      toast.error('Le mot de passe doit contenir au moins 6 caractères');
+    if (newPassword.length < 8) {
+      toast.error('Le mot de passe doit contenir au moins 8 caractères');
       return;
     }
     if (newPassword !== confirmNewPassword) {
@@ -130,9 +128,7 @@ export default function Login() {
     }
     setLoading(true);
     try {
-      const serverUrl = import.meta.env.PROD ? 'https://dhomebarber-api-3aabb8313cb6.herokuapp.com' : '';
-      const appId = base44.appId || 'prod';
-      const res = await fetch(`${serverUrl}/api/apps/${appId}/auth/reset-password`, {
+      const res = await fetch(`${API_SERVER_URL}/api/apps/${resolvedAppId}/auth/reset-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, code: resetCode, new_password: newPassword }),

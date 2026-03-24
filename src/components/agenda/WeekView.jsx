@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { format, startOfWeek, addDays, isSameDay } from 'date-fns';
 import { fr } from 'date-fns/locale';
-import { Check, X, AlertTriangle, Coffee, Trash2 } from 'lucide-react';
+import { Coffee } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import AppointmentDetailModal from './AppointmentDetailModal';
 
@@ -298,7 +298,6 @@ export default function WeekView({ currentDate, appointments, employees, onStatu
                     const onLeaveEmps = employees.filter(emp =>
                       timeOffs.some(t => String(t.employee_id) === String(emp.id) && dateStr >= String(t.start_date).slice(0,10) && dateStr <= String(t.end_date).slice(0,10))
                     );
-                    if (dateStr === format(days[0], 'yyyy-MM-dd')) console.log('[WEEKVIEW] date=', dateStr, 'timeOffs=', timeOffs.length, 'onLeaveEmps=', onLeaveEmps.map(e => e.name), 'filter=', employeeFilter);
                     // If filtering one barber and they're on leave, block the whole column
                     if (employeeFilter !== 'all' && onLeaveEmps.some(e => String(e.id) === String(employeeFilter))) {
                       return (

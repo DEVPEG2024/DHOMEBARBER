@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { base44 } from '@/api/base44Client';
+import { base44, apiRequest, apiUrl } from '@/api/base44Client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { Plus, Pencil, Trash2, Sparkles, ChevronLeft, ChevronRight, Bell, Check, RefreshCw, History, ChevronDown, ChevronUp } from 'lucide-react';
@@ -13,18 +13,6 @@ import { toast } from 'sonner';
 import { format, startOfWeek, addDays } from 'date-fns';
 import { fr } from 'date-fns/locale';
 
-const API_BASE = import.meta.env.PROD
-  ? 'https://dhomebarber-api-3aabb8313cb6.herokuapp.com'
-  : '';
-
-function getAppId() {
-  return localStorage.getItem('base44_app_id') || import.meta.env.VITE_BASE44_APP_ID || 'dhomebarber';
-}
-
-function getAuthHeaders() {
-  const token = localStorage.getItem('base44_access_token') || localStorage.getItem('token');
-  return token ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
-}
 
 const DAY_LABELS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
 
@@ -61,13 +49,7 @@ export default function Cleaning() {
 
   const { data: history = [] } = useQuery({
     queryKey: ['cleaningHistory'],
-    queryFn: async () => {
-      const res = await fetch(`${API_BASE}/api/apps/${getAppId()}/cleaning/history`, {
-        headers: getAuthHeaders(),
-      });
-      if (!res.ok) throw new Error('Erreur');
-      return res.json();
-    },
+    queryFn: () => apiRequest('GET', apiUrl('/cleaning/history')),
     enabled: showHistory,
   });
 
@@ -97,15 +79,7 @@ export default function Cleaning() {
   });
 
   const toggleDone = useMutation({
-    mutationFn: async ({ id, status }) => {
-      const res = await fetch(`${API_BASE}/api/apps/${getAppId()}/cleaning/schedule/${id}/toggle`, {
-        method: 'PATCH',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ status }),
-      });
-      if (!res.ok) throw new Error('Erreur');
-      return res.json();
-    },
+    mutationFn: ({ id, status }) => apiRequest('PATCH', apiUrl(`/cleaning/schedule/${id}/toggle`), { status }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['cleaningSchedule'] });
       queryClient.invalidateQueries({ queryKey: ['cleaningHistory'] });
@@ -116,12 +90,7 @@ export default function Cleaning() {
   const handleGenerate = async () => {
     setGenerating(true);
     try {
-      const res = await fetch(`${API_BASE}/api/apps/${getAppId()}/cleaning/generate-schedule`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ weekStart }),
-      });
-      const data = await res.json();
+      const data = await apiRequest('POST', apiUrl('/cleaning/generate-schedule'), { weekStart });
       queryClient.invalidateQueries({ queryKey: ['cleaningSchedule'] });
       toast.success(`Planning généré : ${data.count || 0} affectations`);
     } catch {
@@ -134,11 +103,7 @@ export default function Cleaning() {
   const handleNotify = async () => {
     setNotifying(true);
     try {
-      const res = await fetch(`${API_BASE}/api/apps/${getAppId()}/cleaning/notify-today`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-      });
-      const data = await res.json();
+      const data = await apiRequest('POST', apiUrl('/cleaning/notify-today'));
       toast.success(`Notifications envoyées à ${data.employees || 0} barber(s)`);
     } catch {
       toast.error('Erreur lors de l\'envoi');

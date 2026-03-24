@@ -8,6 +8,7 @@ import { useAuth } from '@/lib/AuthContext';
 
 const BARBER_COLORS = ['#3fcf8e','#60a5fa','#f59e0b','#a78bfa','#f472b6','#34d399','#fb923c','#38bdf8','#e879f9','#4ade80'];
 
+import { apiRequest, apiUrl } from '@/api/base44Client';
 import AgendaToolbar from '@/components/agenda/AgendaToolbar';
 import DayView from '@/components/agenda/DayView';
 import WeekView from '@/components/agenda/WeekView';
@@ -28,6 +29,9 @@ export default function Agenda() {
   const [employeeFilter, setEmployeeFilter] = useState('all');
   const [selectedBreak, setSelectedBreak] = useState(null);
   const [pendingBreak, setPendingBreak] = useState(null); // { start_time, end_time, date } waiting for barber selection
+  const [lastMinuteDialog, setLastMinuteDialog] = useState(false);
+  const [lastMinuteForm, setLastMinuteForm] = useState({ date: '', start_time: '', end_time: '', employee_id: '' });
+  const [sendingLastMinute, setSendingLastMinute] = useState(false);
   const queryClient = useQueryClient();
 
   // Auto-filter barber's agenda to their own employee
@@ -68,7 +72,6 @@ export default function Agenda() {
   // Only approved time offs block the agenda
   const approvedTimeOffs = useMemo(() => {
     const result = timeOffs.filter(t => t.status === 'approved' || (!t.status));
-    console.log('[AGENDA DEBUG] timeOffs bruts:', timeOffs.length, '| approuvés:', result.length, '| data:', result.map(t => `${t.employee_name} ${t.start_date}-${t.end_date} status=${t.status}`));
     return result;
   }, [timeOffs]);
 
@@ -99,8 +102,7 @@ export default function Agenda() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['agendaAppointments'] });
     },
-    onError: (err) => {
-      console.error('Break creation error:', err);
+    onError: () => {
       toast.error('Erreur lors de la création de la pause');
     },
   });
@@ -191,7 +193,6 @@ export default function Agenda() {
         created++;
       } catch (err) {
         errors++;
-        console.error(`Failed to create break for ${date}:`, err);
       }
     }
 
@@ -219,6 +220,31 @@ export default function Agenda() {
   const handleMonthDayClick = (day) => {
     setCurrentDate(day);
     setView('day');
+  };
+
+  const handleSendLastMinute = async () => {
+    const { date, start_time, end_time, employee_id } = lastMinuteForm;
+    if (!date || !start_time) {
+      toast.error('Date et heure de début requises');
+      return;
+    }
+    setSendingLastMinute(true);
+    try {
+      const emp = employees.find(e => e.id === employee_id);
+      const result = await apiRequest('POST', apiUrl('/last-minute'), {
+        date,
+        start_time,
+        end_time,
+        employee_name: emp?.name,
+      });
+      toast.success(`Notification envoyée à ${result.sent} client(s)`);
+      setLastMinuteDialog(false);
+      setLastMinuteForm({ date: '', start_time: '', end_time: '', employee_id: '' });
+    } catch {
+      toast.error('Erreur lors de l\'envoi');
+    } finally {
+      setSendingLastMinute(false);
+    }
   };
 
   const realAppointmentCount = filteredAppointments.filter(a => a.status !== 'break').length;
@@ -252,6 +278,17 @@ export default function Agenda() {
           </button>
         ))}
         <span className="text-xs text-muted-foreground ml-auto">{realAppointmentCount} rdv</span>
+        {user?.role === 'admin' && (
+          <button
+            onClick={() => {
+              setLastMinuteForm({ date: format(currentDate, 'yyyy-MM-dd'), start_time: '', end_time: '', employee_id: employeeFilter !== 'all' ? employeeFilter : '' });
+              setLastMinuteDialog(true);
+            }}
+            className="px-3 py-1 text-xs rounded-full bg-orange-500/15 text-orange-400 border border-orange-500/30 hover:bg-orange-500/25 transition-all font-semibold"
+          >
+            Last Minute
+          </button>
+        )}
       </div>
 
       {view === 'day' && (
@@ -321,6 +358,65 @@ export default function Agenda() {
               className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-dashed border-border hover:border-primary/50 hover:bg-primary/5 transition-all text-sm text-muted-foreground"
             >
               Tous les barbers
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Last Minute notification dialog */}
+      <Dialog open={lastMinuteDialog} onOpenChange={setLastMinuteDialog}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-sm flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-orange-400 animate-pulse" />
+              Notification Last Minute
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-xs text-muted-foreground mb-3">
+            Envoyez une notification push à tous les clients pour les informer d'un créneau disponible.
+          </p>
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Date</label>
+              <input type="date" value={lastMinuteForm.date}
+                onChange={e => setLastMinuteForm(f => ({ ...f, date: e.target.value }))}
+                className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm" />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Début *</label>
+                <input type="time" value={lastMinuteForm.start_time}
+                  onChange={e => setLastMinuteForm(f => ({ ...f, start_time: e.target.value }))}
+                  className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Fin</label>
+                <input type="time" value={lastMinuteForm.end_time}
+                  onChange={e => setLastMinuteForm(f => ({ ...f, end_time: e.target.value }))}
+                  className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm" />
+              </div>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Barber (optionnel)</label>
+              <select value={lastMinuteForm.employee_id}
+                onChange={e => setLastMinuteForm(f => ({ ...f, employee_id: e.target.value }))}
+                className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm">
+                <option value="">Tous les barbers</option>
+                {employees.map(emp => (
+                  <option key={emp.id} value={emp.id}>{emp.name}</option>
+                ))}
+              </select>
+            </div>
+            <button
+              onClick={handleSendLastMinute}
+              disabled={sendingLastMinute || !lastMinuteForm.start_time}
+              className="w-full py-3 rounded-xl bg-orange-500 text-white font-semibold text-sm hover:bg-orange-600 disabled:opacity-50 transition-all flex items-center justify-center gap-2"
+            >
+              {sendingLastMinute ? (
+                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              ) : (
+                'Envoyer la notification'
+              )}
             </button>
           </div>
         </DialogContent>

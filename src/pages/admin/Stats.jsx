@@ -1,10 +1,8 @@
 import React, { useMemo } from 'react';
 import { base44 } from '@/api/base44Client';
 import { useQuery } from '@tanstack/react-query';
-import { format, subDays } from 'date-fns';
-import { fr } from 'date-fns/locale';
-import { TrendingUp, Calendar, Users, Scissors, AlertTriangle, Target } from 'lucide-react';
-import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import { TrendingUp, Calendar, Users, AlertTriangle, Target } from 'lucide-react';
+import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
 const COLORS = ['hsl(38 65% 50%)', 'hsl(30 40% 35%)', 'hsl(25 30% 25%)', 'hsl(35 50% 60%)', 'hsl(20 45% 45%)'];
 

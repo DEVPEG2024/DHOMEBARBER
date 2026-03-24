@@ -1,6 +1,5 @@
 import React from 'react';
 import { format, startOfMonth, endOfMonth, startOfWeek, addDays, isSameDay, isSameMonth } from 'date-fns';
-import { fr } from 'date-fns/locale';
 
 const statusDot = {
   pending: 'bg-yellow-400',

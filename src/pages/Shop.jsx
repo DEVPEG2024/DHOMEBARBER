@@ -128,7 +128,6 @@ export default function Shop() {
       setNotes('');
       setOrderSuccess(true);
     } catch (err) {
-      console.error('Erreur commande:', err);
       toast.error('Erreur lors de la commande');
     } finally {
       setOrdering(false);

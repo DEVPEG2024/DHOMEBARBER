@@ -4,12 +4,14 @@ import { base44 } from '@/api/base44Client';
 import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import {
-  Calendar, Users, TrendingUp, Clock, AlertTriangle, CheckCircle,
-  CreditCard, Banknote, Euro, Percent, Star, UserCheck, ArrowUpRight, ArrowDownRight, Coffee, Heart, ShoppingBag
+  Calendar, TrendingUp, Clock, AlertTriangle, CheckCircle,
+  CreditCard, Banknote, Euro, Star, UserCheck, ArrowUpRight, ArrowDownRight, Coffee, Heart, ShoppingBag
 } from 'lucide-react';
-import { format, subDays, startOfWeek, addDays } from 'date-fns';
+import { format, subDays } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { exportToCSV } from '@/utils/exportCSV';
 
 function StatCard({ title, value, subtitle, icon: Icon, trend, color = 'primary', onClick }) {
   const isUp = trend > 0;
@@ -54,6 +56,9 @@ function MiniCard({ label, value, icon: Icon, color }) {
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
+  const [showExport, setShowExport] = React.useState(false);
+  const [exportAmount, setExportAmount] = React.useState('');
+  const [exportMonth, setExportMonth] = React.useState(format(new Date(), 'yyyy-MM'));
   const today = format(new Date(), 'yyyy-MM-dd');
   const yesterday = format(subDays(new Date(), 1), 'yyyy-MM-dd');
   const monthPrefix = format(new Date(), 'yyyy-MM');
@@ -186,12 +191,93 @@ export default function AdminDashboard() {
   // Breaks today
   const breaksToday = allAppointments.filter(a => a.date === today && a.status === 'break');
 
+  const handleExportComptable = () => {
+    const targetAmount = parseFloat(exportAmount);
+    if (!targetAmount || targetAmount <= 0) return;
+
+    // Get paid appointments for the selected month
+    const monthAppts = realAppts.filter(a => a.date?.startsWith(exportMonth) && isPaid(a));
+
+    // Build rows: prestations + products until we reach targetAmount
+    const rows = [];
+    let remaining = targetAmount;
+
+    for (const apt of monthAppts) {
+      if (remaining <= 0) break;
+
+      // Add services
+      if (apt.services?.length > 0) {
+        for (const svc of apt.services) {
+          if (remaining <= 0) break;
+          const price = Math.min(svc.price || 0, remaining);
+          if (price > 0) {
+            rows.push({
+              date: apt.date,
+              type: 'Prestation',
+              designation: svc.name || 'Prestation',
+              client: apt.client_name || '',
+              barber: apt.employee_name || '',
+              paiement: apt.payment_method === 'cb' ? 'CB' : apt.payment_method === 'especes' ? 'Espèces' : '',
+              montant: price.toFixed(2),
+            });
+            remaining -= price;
+          }
+        }
+      } else {
+        // No service detail, use total_price
+        const price = Math.min(apt.total_price || 0, remaining);
+        if (price > 0) {
+          rows.push({
+            date: apt.date,
+            type: 'Prestation',
+            designation: 'Prestation',
+            client: apt.client_name || '',
+            barber: apt.employee_name || '',
+            paiement: apt.payment_method === 'cb' ? 'CB' : apt.payment_method === 'especes' ? 'Espèces' : '',
+            montant: price.toFixed(2),
+          });
+          remaining -= price;
+        }
+      }
+
+      // Add product if any
+      if (apt.product_sold && apt.product_price > 0 && remaining > 0) {
+        const price = Math.min(apt.product_price, remaining);
+        rows.push({
+          date: apt.date,
+          type: 'Produit',
+          designation: apt.product_sold,
+          client: apt.client_name || '',
+          barber: apt.employee_name || '',
+          paiement: apt.payment_method === 'cb' ? 'CB' : apt.payment_method === 'especes' ? 'Espèces' : '',
+          montant: price.toFixed(2),
+        });
+        remaining -= price;
+      }
+    }
+
+    if (rows.length === 0) return;
+
+    // Add total row
+    const totalExported = rows.reduce((s, r) => s + parseFloat(r.montant), 0);
+    rows.push({ date: '', type: '', designation: 'TOTAL', client: '', barber: '', paiement: '', montant: totalExported.toFixed(2) });
+
+    exportToCSV(rows, `export-comptable-${exportMonth}-${targetAmount}EUR`);
+    setShowExport(false);
+  };
+
   return (
     <div className="min-w-0">
       <div className="mb-6">
         <p className="text-[11px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Tableau de bord</p>
         <h1 className="font-display text-2xl font-bold">Ciao le gang ! 🇮🇹🇵🇹</h1>
         <p className="text-sm text-muted-foreground mt-1">{format(new Date(), 'EEEE d MMMM yyyy', { locale: fr })}</p>
+        <button
+          onClick={() => setShowExport(true)}
+          className="mt-2 px-4 py-2 text-xs rounded-xl bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-all font-semibold"
+        >
+          Export comptable
+        </button>
       </div>
 
       {/* Main Stats Row */}
@@ -467,6 +553,46 @@ export default function AdminDashboard() {
           </div>
         )}
       </div>
+
+      {/* Export comptable dialog */}
+      <Dialog open={showExport} onOpenChange={setShowExport}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-sm">Export comptable</DialogTitle>
+          </DialogHeader>
+          <p className="text-xs text-muted-foreground mb-3">
+            Exportez un relevé de prestations et produits pour un montant donné.
+          </p>
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Mois</label>
+              <input type="month" value={exportMonth}
+                onChange={e => setExportMonth(e.target.value)}
+                className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Montant cible (€) *</label>
+              <input type="number" step="0.01" min="0" placeholder="Ex: 2500"
+                value={exportAmount}
+                onChange={e => setExportAmount(e.target.value)}
+                className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm" />
+            </div>
+            <div className="bg-secondary/50 rounded-lg p-3 text-xs text-muted-foreground">
+              <p>L'export contiendra des prestations et produits du mois sélectionné jusqu'à atteindre le montant demandé.</p>
+              <p className="mt-1 font-medium text-foreground">
+                CA du mois sélectionné : {realAppts.filter(a => a.date?.startsWith(exportMonth) && isPaid(a)).reduce((s, a) => s + getTotal(a), 0).toFixed(2)}€
+              </p>
+            </div>
+            <button
+              onClick={handleExportComptable}
+              disabled={!exportAmount || parseFloat(exportAmount) <= 0}
+              className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 disabled:opacity-50 transition-all"
+            >
+              Exporter en CSV
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
