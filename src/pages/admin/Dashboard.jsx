@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import {
   Calendar, TrendingUp, Clock, AlertTriangle, CheckCircle,
-  CreditCard, Banknote, Euro, Star, UserCheck, ArrowUpRight, ArrowDownRight, Coffee, Heart, ShoppingBag
+  CreditCard, Banknote, Euro, Star, UserCheck, ArrowUpRight, ArrowDownRight, Coffee, Heart, ShoppingBag, Zap
 } from 'lucide-react';
 import { format, subDays } from 'date-fns';
 import { fr } from 'date-fns/locale';
@@ -73,8 +73,19 @@ export default function AdminDashboard() {
     queryFn: () => api.entities.Employee.filter({ is_active: true }),
   });
 
-  // Filter out breaks for stats
-  const realAppts = useMemo(() => allAppointments.filter(a => a.status !== 'break'), [allAppointments]);
+  // Filter out breaks and last_minute for regular stats
+  const realAppts = useMemo(() => allAppointments.filter(a => a.status !== 'break' && a.status !== 'last_minute'), [allAppointments]);
+
+  // Last Minute stats
+  const lastMinuteAppts = useMemo(() => allAppointments.filter(a => a.status === 'last_minute'), [allAppointments]);
+  const lastMinuteToday = lastMinuteAppts.filter(a => a.date === today);
+  const lastMinuteMonth = lastMinuteAppts.filter(a => a.date?.startsWith(monthPrefix));
+  // Last Minute who got converted to completed (client_name changed from 'Last Minute')
+  const lastMinuteCompleted = useMemo(() => allAppointments.filter(a =>
+    a.internal_notes?.includes?.('last_minute') || (a.status === 'completed' && a.internal_notes?.includes?.('last_minute'))
+  ), [allAppointments]);
+  const lastMinuteCompletedMonth = lastMinuteCompleted.filter(a => a.date?.startsWith(monthPrefix));
+  const lastMinuteRevenueMonth = lastMinuteCompletedMonth.reduce((sum, a) => sum + (a.grand_total || a.total_price || 0), 0);
 
   // Helper: consider an appointment as "paid/done" if payment_status is 'paid' OR status is 'completed'
   const isPaid = (a) => a.payment_status === 'paid' || a.status === 'completed';
@@ -319,6 +330,19 @@ export default function AdminDashboard() {
           <MiniCard label="Espèces aujourd'hui" value={`${todayCash}€`} icon={Banknote} color="#4ade80" />
           <MiniCard label="CB ce mois" value={`${monthCB}€`} icon={CreditCard} color="#60a5fa" />
           <MiniCard label="Espèces ce mois" value={`${monthCash}€`} icon={Banknote} color="#4ade80" />
+        </div>
+      </div>
+
+      {/* Last Minute */}
+      <div className="bg-card border border-orange-500/20 rounded-xl p-4 mb-4">
+        <h3 className="text-xs font-semibold text-orange-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+          <Zap className="w-3.5 h-3.5" /> Last Minute
+        </h3>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <MiniCard label="Créneaux aujourd'hui" value={lastMinuteToday.length} icon={Zap} color="#f97316" />
+          <MiniCard label="Créneaux ce mois" value={lastMinuteMonth.length} icon={Zap} color="#f97316" />
+          <MiniCard label="Convertis ce mois" value={lastMinuteCompletedMonth.length} icon={CheckCircle} color="#f97316" />
+          <MiniCard label="CA Last Minute" value={`${lastMinuteRevenueMonth}€`} icon={Euro} color="#f97316" />
         </div>
       </div>
 
