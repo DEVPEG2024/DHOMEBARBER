@@ -1,6 +1,6 @@
 import React from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { base44 } from '@/api/base44Client';
+import { api } from '@/api/apiClient';
 import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { ChevronLeft, Scissors, Calendar, User } from 'lucide-react';
@@ -112,7 +112,7 @@ export default function BarberProfile() {
   const { data: employee, isLoading } = useQuery({
     queryKey: ['employee', id],
     queryFn: async () => {
-      const all = await base44.entities.Employee.filter({ is_active: true }, 'sort_order', 100);
+      const all = await api.entities.Employee.filter({ is_active: true }, 'sort_order', 100);
       return all.find(e => e.id === id) || null;
     },
     enabled: !!id,
@@ -120,7 +120,7 @@ export default function BarberProfile() {
 
   const { data: skillCategories = [] } = useQuery({
     queryKey: ['skillCategories'],
-    queryFn: () => base44.entities.SkillCategory.list('sort_order', 100),
+    queryFn: () => api.entities.SkillCategory.list('sort_order', 100),
   });
 
   if (isLoading) {

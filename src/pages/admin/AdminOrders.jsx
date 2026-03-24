@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { base44 } from '@/api/base44Client';
+import { api } from '@/api/apiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { Package, Clock, CheckCircle, XCircle, Truck, ShoppingBag, Trash2 } from 'lucide-react';
@@ -24,11 +24,11 @@ export default function AdminOrders() {
 
   const { data: orders = [] } = useQuery({
     queryKey: ['adminOrders'],
-    queryFn: () => base44.entities.Order.list('-created_date', 200),
+    queryFn: () => api.entities.Order.list('-created_date', 200),
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, status }) => base44.entities.Order.update(id, { status }),
+    mutationFn: ({ id, status }) => api.entities.Order.update(id, { status }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['adminOrders'] });
       toast.success('Statut mis à jour');
@@ -37,7 +37,7 @@ export default function AdminOrders() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id) => base44.entities.Order.delete(id),
+    mutationFn: (id) => api.entities.Order.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['adminOrders'] });
       toast.success('Commande supprimée');

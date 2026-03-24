@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { base44, apiRequest, apiUrl } from '@/api/base44Client';
+import { api, apiRequest, apiUrl } from '@/api/apiClient';
 import { useQuery } from '@tanstack/react-query';
 import { Send, Users, User, Bell, CheckCircle, Smartphone, Mail } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -21,12 +21,12 @@ export default function Notifications() {
 
   const { data: appointments = [] } = useQuery({
     queryKey: ['appointments'],
-    queryFn: () => base44.entities.Appointment.list('-created_date', 200),
+    queryFn: () => api.entities.Appointment.list('-created_date', 200),
   });
 
   const { data: registeredUsers = [] } = useQuery({
     queryKey: ['registeredUsers'],
-    queryFn: () => base44.entities.User.list('-created_at', 1000),
+    queryFn: () => api.entities.User.list('-created_at', 1000),
   });
 
   const clients = React.useMemo(() => {
@@ -89,7 +89,7 @@ export default function Notifications() {
       let emailCount = 0;
       for (const client of targets) {
         try {
-          await base44.integrations.Core.SendEmail({
+          await api.integrations.Core.SendEmail({
             to: client.email,
             subject,
             body: `Bonjour ${client.name || ''},\n\n${message}\n\n— L'équipe D'Home Barber`,

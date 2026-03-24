@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { base44 } from '@/api/base44Client';
+import { api } from '@/api/apiClient';
 import { useAuth } from '@/lib/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -29,13 +29,13 @@ export default function Appointments() {
 
   const { data: appointments = [], isLoading } = useQuery({
     queryKey: ['myAppointments', user?.email],
-    queryFn: () => base44.entities.Appointment.filter({ client_email: user.email }, '-date', 100),
+    queryFn: () => api.entities.Appointment.filter({ client_email: user.email }, '-date', 100),
     enabled: !!user?.email,
     refetchInterval: 15000, // Auto-refresh toutes les 15s
   });
 
   const cancelMutation = useMutation({
-    mutationFn: (id) => base44.entities.Appointment.update(id, { status: 'cancelled' }),
+    mutationFn: (id) => api.entities.Appointment.update(id, { status: 'cancelled' }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['myAppointments'] });
       toast.success('Rendez-vous annulé');

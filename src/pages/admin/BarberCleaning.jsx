@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { base44, apiRequest, apiUrl } from '@/api/base44Client';
+import { api, apiRequest, apiUrl } from '@/api/apiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { motion } from 'framer-motion';
@@ -25,7 +25,7 @@ export default function BarberCleaning() {
 
   const { data: allSchedule = [] } = useQuery({
     queryKey: ['cleaningSchedule', weekStart],
-    queryFn: () => base44.entities.CleaningSchedule.filter({ week_start: weekStart }, 'date', 500),
+    queryFn: () => api.entities.CleaningSchedule.filter({ week_start: weekStart }, 'date', 500),
   });
 
   // Filter only this barber's tasks

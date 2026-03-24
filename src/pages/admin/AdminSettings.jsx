@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { base44 } from '@/api/base44Client';
+import { api } from '@/api/apiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { Save, Loader2, Plus, Trash2, Pencil, X, Check, GripVertical } from 'lucide-react';
@@ -23,18 +23,18 @@ export default function AdminSettings() {
 
   const { data: allSettings = [] } = useQuery({
     queryKey: ['salonSettings'],
-    queryFn: () => base44.entities.SalonSettings.list('-created_date', 1),
+    queryFn: () => api.entities.SalonSettings.list('-created_date', 1),
   });
 
   const { data: skillCategories = [] } = useQuery({
     queryKey: ['skillCategories'],
-    queryFn: () => base44.entities.SkillCategory.list('sort_order', 100),
+    queryFn: () => api.entities.SkillCategory.list('sort_order', 100),
   });
 
   const [editingSkill, setEditingSkill] = useState(null);
 
   const addSkillMutation = useMutation({
-    mutationFn: (data) => base44.entities.SkillCategory.create(data),
+    mutationFn: (data) => api.entities.SkillCategory.create(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['skillCategories'] });
       setNewSkill({ name: '', emoji: '✂️', color: '#3fcf8e' });
@@ -43,7 +43,7 @@ export default function AdminSettings() {
   });
 
   const updateSkillMutation = useMutation({
-    mutationFn: ({ id, data }) => base44.entities.SkillCategory.update(id, data),
+    mutationFn: ({ id, data }) => api.entities.SkillCategory.update(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['skillCategories'] });
       setEditingSkill(null);
@@ -52,7 +52,7 @@ export default function AdminSettings() {
   });
 
   const deleteSkillMutation = useMutation({
-    mutationFn: (id) => base44.entities.SkillCategory.delete(id),
+    mutationFn: (id) => api.entities.SkillCategory.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['skillCategories'] });
       toast.success('Compétence supprimée');
@@ -76,7 +76,7 @@ export default function AdminSettings() {
     try {
       await Promise.all(
         reordered.map((cat, i) =>
-          base44.entities.SkillCategory.update(cat.id, { sort_order: i })
+          api.entities.SkillCategory.update(cat.id, { sort_order: i })
         )
       );
       queryClient.invalidateQueries({ queryKey: ['skillCategories'] });
@@ -96,9 +96,9 @@ export default function AdminSettings() {
     mutationFn: (data) => {
       if (data.id) {
         const { id, ...rest } = data;
-        return base44.entities.SalonSettings.update(id, rest);
+        return api.entities.SalonSettings.update(id, rest);
       }
-      return base44.entities.SalonSettings.create(data);
+      return api.entities.SalonSettings.create(data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['salonSettings'] });

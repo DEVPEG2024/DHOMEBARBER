@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '@/lib/AuthContext';
-import { base44 } from '@/api/base44Client';
+import { api } from '@/api/apiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { Star, MessageSquare, ExternalLink } from 'lucide-react';
@@ -30,12 +30,12 @@ export default function MyReviews() {
 
   const { data: reviews = [], isLoading } = useQuery({
     queryKey: ['myReviews', user?.email],
-    queryFn: () => base44.entities.Review.filter({ client_email: user?.email }, '-created_date', 50),
+    queryFn: () => api.entities.Review.filter({ client_email: user?.email }, '-created_date', 50),
     enabled: !!user?.email,
   });
 
   const createReview = useMutation({
-    mutationFn: (data) => base44.entities.Review.create(data),
+    mutationFn: (data) => api.entities.Review.create(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['myReviews'] });
       toast.success('Merci pour votre avis !');

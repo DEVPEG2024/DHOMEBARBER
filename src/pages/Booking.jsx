@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { base44 } from '@/api/base44Client';
+import { api } from '@/api/apiClient';
 import { useAuth } from '@/lib/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -44,17 +44,17 @@ export default function Booking() {
 
   const { data: services = [] } = useQuery({
     queryKey: ['services'],
-    queryFn: () => base44.entities.Service.filter({ is_active: true }, 'sort_order', 100),
+    queryFn: () => api.entities.Service.filter({ is_active: true }, 'sort_order', 100),
   });
 
   const { data: employees = [] } = useQuery({
     queryKey: ['employees'],
-    queryFn: () => base44.entities.Employee.filter({ is_active: true }, 'sort_order', 50),
+    queryFn: () => api.entities.Employee.filter({ is_active: true }, 'sort_order', 50),
   });
 
   const { data: timeOffs = [] } = useQuery({
     queryKey: ['timeOffs'],
-    queryFn: () => base44.entities.TimeOff.list('-start_date', 200),
+    queryFn: () => api.entities.TimeOff.list('-start_date', 200),
     refetchOnMount: 'always',
   });
 
@@ -62,7 +62,7 @@ export default function Booking() {
     queryKey: ['appointments-confirmed', selectedDate, selectedEmployee?.id],
     queryFn: () => {
       if (!selectedDate || !selectedEmployee) return [];
-      return base44.entities.Appointment.filter({
+      return api.entities.Appointment.filter({
         date: format(selectedDate, 'yyyy-MM-dd'),
         employee_id: selectedEmployee.id,
         status: 'confirmed'
@@ -75,7 +75,7 @@ export default function Booking() {
     queryKey: ['appointments-breaks', selectedDate, selectedEmployee?.id],
     queryFn: () => {
       if (!selectedDate || !selectedEmployee) return [];
-      return base44.entities.Appointment.filter({
+      return api.entities.Appointment.filter({
         date: format(selectedDate, 'yyyy-MM-dd'),
         employee_id: selectedEmployee.id,
         status: 'break'
@@ -149,7 +149,7 @@ export default function Booking() {
       const [sh, sm] = selectedTime.split(':').map(Number);
       const endMin = sh * 60 + sm + totalDuration;
       const endTime = `${String(Math.floor(endMin / 60)).padStart(2, '0')}:${String(endMin % 60).padStart(2, '0')}`;
-      return base44.entities.Appointment.create({
+      return api.entities.Appointment.create({
         client_email: user.email,
         client_name: user.full_name || user.name || '',
         employee_id: selectedEmployee.id,

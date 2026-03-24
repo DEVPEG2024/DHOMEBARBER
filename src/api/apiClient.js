@@ -1,18 +1,18 @@
 /**
- * Custom API client — drop-in replacement for @base44/sdk.
+ * D'Home Barber API client.
  *
- * Exposes the same interface used across the app:
- *   base44.entities.<Entity>.list(sort, limit)
- *   base44.entities.<Entity>.filter(query, sort, limit)
- *   base44.entities.<Entity>.create(data)
- *   base44.entities.<Entity>.update(id, data)
- *   base44.entities.<Entity>.delete(id)
- *   base44.auth.me()
- *   base44.auth.loginViaEmailPassword(email, password)
- *   base44.auth.register(data)
- *   base44.auth.setToken(token)
- *   base44.integrations.Core.UploadFile({ file })
- *   base44.integrations.Core.SendEmail(data)
+ * Exposes the interface used across the app:
+ *   api.entities.<Entity>.list(sort, limit)
+ *   api.entities.<Entity>.filter(query, sort, limit)
+ *   api.entities.<Entity>.create(data)
+ *   api.entities.<Entity>.update(id, data)
+ *   api.entities.<Entity>.delete(id)
+ *   api.auth.me()
+ *   api.auth.loginViaEmailPassword(email, password)
+ *   api.auth.register(data)
+ *   api.auth.setToken(token)
+ *   api.integrations.Core.UploadFile({ file })
+ *   api.integrations.Core.SendEmail(data)
  */
 
 export const resolvedAppId = 'prod';
@@ -186,7 +186,7 @@ export function apiUrl(path) {
 }
 
 // ── Exported client ──────────────────────────────────────────────────
-export const base44 = {
+export const api = {
   entities: entitiesProxy,
   auth,
   integrations,

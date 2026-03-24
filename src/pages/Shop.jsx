@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { base44 } from '@/api/base44Client';
+import { api } from '@/api/apiClient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { motion, AnimatePresence, useScroll, useTransform } from 'framer-motion';
@@ -68,7 +68,7 @@ export default function Shop() {
 
   const { data: products = [] } = useQuery({
     queryKey: ['products'],
-    queryFn: () => base44.entities.Product.filter({ is_active: true }, 'name', 100),
+    queryFn: () => api.entities.Product.filter({ is_active: true }, 'name', 100),
   });
 
   const filtered = activeCategory === 'all'
@@ -113,7 +113,7 @@ export default function Shop() {
         };
       });
 
-      await base44.entities.Order.create({
+      await api.entities.Order.create({
         client_email: user?.email || '',
         client_name: user?.full_name || user?.name || '',
         client_phone: user?.phone || '',

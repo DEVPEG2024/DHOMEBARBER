@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { base44 } from '@/api/base44Client';
+import { api } from '@/api/apiClient';
 import { useQuery } from '@tanstack/react-query';
 import { TrendingUp, Calendar, Users, AlertTriangle, Target } from 'lucide-react';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
@@ -26,12 +26,12 @@ function StatBox({ title, value, sub, icon: Icon }) {
 export default function Stats() {
   const { data: appointments = [] } = useQuery({
     queryKey: ['allAppointments'],
-    queryFn: () => base44.entities.Appointment.list('-date', 2000),
+    queryFn: () => api.entities.Appointment.list('-date', 2000),
   });
 
   const { data: employees = [] } = useQuery({
     queryKey: ['employees'],
-    queryFn: () => base44.entities.Employee.filter({ is_active: true }),
+    queryFn: () => api.entities.Employee.filter({ is_active: true }),
   });
 
   const stats = useMemo(() => {

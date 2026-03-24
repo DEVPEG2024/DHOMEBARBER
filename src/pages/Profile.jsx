@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { base44 } from '@/api/base44Client';
+import { api } from '@/api/apiClient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { motion } from 'framer-motion';
@@ -36,8 +36,8 @@ export default function Profile() {
     setCropImage(null);
     setUploading(true);
     try {
-      const { file_url } = await base44.integrations.Core.UploadFile({ file: croppedFile });
-      await base44.entities.User.update(user.id, { photo_url: file_url });
+      const { file_url } = await api.integrations.Core.UploadFile({ file: croppedFile });
+      await api.entities.User.update(user.id, { photo_url: file_url });
       if (refreshUser) await refreshUser();
       toast.success('Photo de profil mise à jour');
     } catch (err) {
@@ -49,7 +49,7 @@ export default function Profile() {
 
   const { data: appointments = [] } = useQuery({
     queryKey: ['myAppointments', user?.email],
-    queryFn: () => base44.entities.Appointment.filter({ client_email: user?.email }, '-date', 100),
+    queryFn: () => api.entities.Appointment.filter({ client_email: user?.email }, '-date', 100),
     enabled: !!user,
   });
 

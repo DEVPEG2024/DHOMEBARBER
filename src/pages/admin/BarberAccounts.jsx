@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { base44, apiRequest, API_BASE } from '@/api/base44Client';
+import { api, apiRequest, API_BASE } from '@/api/apiClient';
 import { motion } from 'framer-motion';
 import { ShieldCheck, Plus, Trash2, Eye, EyeOff, KeyRound, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -51,7 +51,7 @@ export default function BarberAccounts() {
 
   const { data: employees = [] } = useQuery({
     queryKey: ['employees'],
-    queryFn: () => base44.entities.Employee.filter({ is_active: true }),
+    queryFn: () => api.entities.Employee.filter({ is_active: true }),
   });
 
   // Employees without an account yet

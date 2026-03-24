@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useRef } from 'react';
-import { base44 } from '@/api/base44Client';
+import { api } from '@/api/apiClient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { UserPlus, AlertTriangle, Download, Upload, Trash2 } from 'lucide-react';
@@ -33,17 +33,17 @@ export default function Clients() {
 
   const { data: appointments = [] } = useQuery({
     queryKey: ['allAppointments'],
-    queryFn: () => base44.entities.Appointment.list('-date', 1000),
+    queryFn: () => api.entities.Appointment.list('-date', 1000),
   });
 
   const { data: employees = [] } = useQuery({
     queryKey: ['employees'],
-    queryFn: () => base44.entities.Employee.filter({ is_active: true }),
+    queryFn: () => api.entities.Employee.filter({ is_active: true }),
   });
 
   const { data: registeredUsers = [] } = useQuery({
     queryKey: ['registeredUsers'],
-    queryFn: () => base44.entities.User.list('-created_at', 1000),
+    queryFn: () => api.entities.User.list('-created_at', 1000),
   });
 
   const clients = useMemo(() => {
@@ -115,14 +115,14 @@ export default function Clients() {
         apt => apt.client_email === clientToDelete.email
       );
       await Promise.all(
-        clientAppointments.map(apt => base44.entities.Appointment.delete(apt.id))
+        clientAppointments.map(apt => api.entities.Appointment.delete(apt.id))
       );
       // Supprimer le compte utilisateur s'il existe
       const registeredUser = registeredUsers.find(
         u => u.email?.toLowerCase() === clientToDelete.email?.toLowerCase()
       );
       if (registeredUser) {
-        await base44.entities.User.delete(registeredUser.id);
+        await api.entities.User.delete(registeredUser.id);
       }
       queryClient.invalidateQueries({ queryKey: ['allAppointments'] });
       queryClient.invalidateQueries({ queryKey: ['registeredUsers'] });
@@ -140,12 +140,12 @@ export default function Clients() {
     try {
       // Supprimer tous les rendez-vous
       await Promise.all(
-        appointments.map(apt => base44.entities.Appointment.delete(apt.id))
+        appointments.map(apt => api.entities.Appointment.delete(apt.id))
       );
       // Supprimer tous les comptes utilisateurs (sauf admins et barbers)
       const clientUsers = registeredUsers.filter(u => u.role === 'user');
       await Promise.all(
-        clientUsers.map(u => base44.entities.User.delete(u.id))
+        clientUsers.map(u => api.entities.User.delete(u.id))
       );
       queryClient.invalidateQueries({ queryKey: ['allAppointments'] });
       queryClient.invalidateQueries({ queryKey: ['registeredUsers'] });
@@ -170,7 +170,7 @@ export default function Clients() {
     setSaving(true);
     try {
       const emp = employees[0] || {};
-      await base44.entities.Appointment.create({
+      await api.entities.Appointment.create({
         client_name: newClient.name.trim(),
         client_email: newClient.email.trim(),
         client_phone: newClient.phone.trim(),
@@ -273,7 +273,7 @@ export default function Clients() {
         // Create a placeholder appointment for each new client so they appear in the list
         await Promise.all(
           newClients.map(c =>
-            base44.entities.Appointment.create({
+            api.entities.Appointment.create({
               client_name: c.nom || c.name || '',
               client_email: c.email,
               client_phone: c.telephone || c.phone || '',

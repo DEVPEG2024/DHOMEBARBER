@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { base44 } from '@/api/base44Client';
+import { api } from '@/api/apiClient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Package, AlertTriangle, Save, Search, Plus, Trash2, ShoppingBag, Scissors, Upload, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -40,7 +40,7 @@ export default function AdminStock() {
 
   const { data: products = [] } = useQuery({
     queryKey: ['products'],
-    queryFn: () => base44.entities.Product.list('name', 200),
+    queryFn: () => api.entities.Product.list('name', 200),
   });
 
   const activeProducts = products.filter(p => p.is_active);
@@ -91,7 +91,7 @@ export default function AdminStock() {
         if (data.ref !== undefined) update.ref = data.ref;
         if (data.critical_stock !== undefined) update.critical_stock = parseInt(data.critical_stock) || 0;
         if (Object.keys(update).length > 0) {
-          await base44.entities.Product.update(id, update);
+          await api.entities.Product.update(id, update);
         }
       }
       queryClient.invalidateQueries({ queryKey: ['products'] });
@@ -111,7 +111,7 @@ export default function AdminStock() {
       if (criticals.length > 0) {
         const names = criticals.slice(0, 5).map(p => p.name).join(', ');
         const serverUrl = import.meta.env.PROD ? 'https://dhomebarber-api-3aabb8313cb6.herokuapp.com' : '';
-        const appId = base44.appId || 'prod';
+        const appId = 'prod';
         const token = localStorage.getItem('base44_access_token') || localStorage.getItem('token');
         try {
           await fetch(`${serverUrl}/api/apps/${appId}/push/send`, {
@@ -138,7 +138,7 @@ export default function AdminStock() {
       return;
     }
     try {
-      await base44.entities.Product.create({
+      await api.entities.Product.create({
         ...newProduct,
         stock_type: tab,
         is_active: true,
@@ -158,7 +158,7 @@ export default function AdminStock() {
   const handleDelete = async () => {
     if (!productToDelete) return;
     try {
-      await base44.entities.Product.delete(productToDelete.id);
+      await api.entities.Product.delete(productToDelete.id);
       queryClient.invalidateQueries({ queryKey: ['products'] });
       setProductToDelete(null);
       toast.success('Produit supprimé');
@@ -172,7 +172,7 @@ export default function AdminStock() {
     if (!file) return;
     setUploading(true);
     try {
-      const { file_url } = await base44.integrations.Core.UploadFile({ file });
+      const { file_url } = await api.integrations.Core.UploadFile({ file });
       setNewProduct(prev => ({ ...prev, image_url: file_url }));
     } catch {
       toast.error("Erreur lors de l'upload");

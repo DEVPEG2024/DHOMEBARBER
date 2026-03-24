@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { format, startOfWeek, addDays, isSameDay } from 'date-fns';
 import { fr } from 'date-fns/locale';
-import { Coffee } from 'lucide-react';
+import { Coffee, Zap } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import AppointmentDetailModal from './AppointmentDetailModal';
 
@@ -103,6 +103,32 @@ function BreakBlock({ apt, onClick }) {
         <p className="text-[10px] font-bold text-slate-400 truncate">{apt.start_time} - {apt.end_time}</p>
       </div>
       {height > 36 && <p className="text-[9px] text-slate-400 px-2">Pause</p>}
+    </div>
+  );
+}
+
+function LastMinuteBlock({ apt, onClick }) {
+  const startMin = timeToMinutes(apt.start_time) - START_HOUR * 60;
+  const endMin = timeToMinutes(apt.end_time || apt.start_time) - START_HOUR * 60;
+  const top = (startMin / 60) * HOUR_HEIGHT;
+  const height = Math.max(((endMin - startMin) / 60) * HOUR_HEIGHT, 28);
+
+  return (
+    <div
+      onClick={e => { e.stopPropagation(); onClick(apt); }}
+      className="absolute rounded-lg overflow-hidden cursor-pointer group transition-all hover:z-30 hover:shadow-xl hover:ring-2 hover:ring-orange-400/40"
+      style={{
+        top, height,
+        background: 'repeating-linear-gradient(135deg, rgba(249,115,22,0.18), rgba(249,115,22,0.18) 4px, rgba(249,115,22,0.10) 4px, rgba(249,115,22,0.10) 8px)',
+        borderLeft: '3px solid #f97316',
+        zIndex: 10,
+      }}
+    >
+      <div className="px-2 py-1 flex items-center gap-1">
+        <Zap className="w-3 h-3 text-orange-400 shrink-0" />
+        <p className="text-[10px] font-bold text-orange-400 truncate">{apt.start_time} - {apt.end_time || apt.start_time}</p>
+      </div>
+      {height > 36 && <p className="text-[9px] text-orange-400 font-semibold px-2">Last Minute</p>}
     </div>
   );
 }
@@ -274,8 +300,9 @@ export default function WeekView({ currentDate, appointments, employees, onStatu
             {/* Day columns */}
             {days.map(day => {
               const dateStr = format(day, 'yyyy-MM-dd');
-              const dayApts = appointments.filter(a => a.date === dateStr && a.status !== 'break');
+              const dayApts = appointments.filter(a => a.date === dateStr && a.status !== 'break' && a.status !== 'last_minute');
               const dayBreaks = appointments.filter(a => a.date === dateStr && a.status === 'break');
+              const dayLastMinutes = appointments.filter(a => a.date === dateStr && a.status === 'last_minute');
               const isToday = isSameDay(day, new Date());
               const aptMeta = computeColumns(dayApts);
 
@@ -333,6 +360,13 @@ export default function WeekView({ currentDate, appointments, employees, onStatu
                   {dayBreaks.map(apt => (
                     <div key={apt.id} data-block className="absolute left-1 right-1" style={{ top: 0, bottom: 0, pointerEvents: 'auto' }}>
                       <BreakBlock apt={apt} onClick={onBreakClick} />
+                    </div>
+                  ))}
+
+                  {/* Last Minute blocks */}
+                  {dayLastMinutes.map(apt => (
+                    <div key={apt.id} data-block className="absolute left-1 right-1" style={{ top: 0, bottom: 0, pointerEvents: 'auto' }}>
+                      <LastMinuteBlock apt={apt} onClick={setSelected} />
                     </div>
                   ))}
 

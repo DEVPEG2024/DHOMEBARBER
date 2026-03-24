@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { base44 } from '@/api/base44Client';
+import { api } from '@/api/apiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Eye, EyeOff, MessageSquare, Star, ExternalLink, MapPin, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -16,11 +16,11 @@ export default function AdminReviews() {
 
   const { data: reviews = [] } = useQuery({
     queryKey: ['allReviews'],
-    queryFn: () => base44.entities.Review.list('-created_date', 200),
+    queryFn: () => api.entities.Review.list('-created_date', 200),
   });
 
   const toggleVisibility = useMutation({
-    mutationFn: (review) => base44.entities.Review.update(review.id, { is_visible: !review.is_visible }),
+    mutationFn: (review) => api.entities.Review.update(review.id, { is_visible: !review.is_visible }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['allReviews'] });
       toast.success('Visibilité mise à jour');
@@ -28,7 +28,7 @@ export default function AdminReviews() {
   });
 
   const deleteReview = useMutation({
-    mutationFn: (id) => base44.entities.Review.delete(id),
+    mutationFn: (id) => api.entities.Review.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['allReviews'] });
       toast.success('Avis supprimé');

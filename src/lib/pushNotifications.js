@@ -1,4 +1,4 @@
-import { apiRequest, apiUrl } from '@/api/base44Client';
+import { apiRequest, apiUrl } from '@/api/apiClient';
 
 // Get VAPID public key from backend
 export async function getVapidPublicKey() {

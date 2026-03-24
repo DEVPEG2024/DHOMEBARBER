@@ -1,5 +1,5 @@
 import React, { createContext, useState, useContext, useEffect, useCallback } from 'react';
-import { base44 } from '@/api/base44Client';
+import { api } from '@/api/apiClient';
 
 const AuthContext = createContext();
 
@@ -22,7 +22,7 @@ export const AuthProvider = ({ children }) => {
         return;
       }
 
-      const currentUser = await base44.auth.me();
+      const currentUser = await api.auth.me();
       setUser(currentUser);
       setIsAuthenticated(true);
     } catch {
@@ -37,19 +37,19 @@ export const AuthProvider = ({ children }) => {
   };
 
   const login = useCallback(async (email, password) => {
-    await base44.auth.loginViaEmailPassword(email, password);
+    await api.auth.loginViaEmailPassword(email, password);
     // Fetch full user with permissions from /me endpoint
-    const fullUser = await base44.auth.me();
+    const fullUser = await api.auth.me();
     setUser(fullUser);
     setIsAuthenticated(true);
     return fullUser;
   }, []);
 
   const register = useCallback(async ({ email, password, full_name, phone }) => {
-    const result = await base44.auth.register({ email, password, full_name, phone });
+    const result = await api.auth.register({ email, password, full_name, phone });
     const { access_token, user: newUser } = result;
     if (access_token) {
-      base44.auth.setToken(access_token);
+      api.auth.setToken(access_token);
     }
     setUser(newUser);
     setIsAuthenticated(true);
@@ -58,7 +58,7 @@ export const AuthProvider = ({ children }) => {
 
   const refreshUser = useCallback(async () => {
     try {
-      const fullUser = await base44.auth.me();
+      const fullUser = await api.auth.me();
       setUser(fullUser);
     } catch {}
   }, []);

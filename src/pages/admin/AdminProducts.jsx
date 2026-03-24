@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { base44 } from '@/api/base44Client';
+import { api } from '@/api/apiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Pencil, Trash2, Package, Upload, X, Percent } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -27,16 +27,16 @@ export default function AdminProducts() {
 
   const { data: products = [] } = useQuery({
     queryKey: ['products'],
-    queryFn: () => base44.entities.Product.list('name', 200),
+    queryFn: () => api.entities.Product.list('name', 200),
   });
 
   const saveMutation = useMutation({
     mutationFn: (data) => {
       if (data.id) {
         const { id, ...rest } = data;
-        return base44.entities.Product.update(id, rest);
+        return api.entities.Product.update(id, rest);
       }
-      return base44.entities.Product.create(data);
+      return api.entities.Product.create(data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['products'] });
@@ -46,7 +46,7 @@ export default function AdminProducts() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id) => base44.entities.Product.delete(id),
+    mutationFn: (id) => api.entities.Product.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['products'] });
       toast.success('Produit supprimé');
@@ -60,7 +60,7 @@ export default function AdminProducts() {
       const multiplier = priceDirection === 'increase' ? 1 + percent / 100 : 1 - percent / 100;
       for (const product of products) {
         const newPrice = Math.round(product.price * multiplier * 100) / 100;
-        await base44.entities.Product.update(product.id, { price: newPrice });
+        await api.entities.Product.update(product.id, { price: newPrice });
       }
     },
     onSuccess: () => {
@@ -84,7 +84,7 @@ export default function AdminProducts() {
     if (!file) return;
     setUploading(true);
     try {
-      const { file_url } = await base44.integrations.Core.UploadFile({ file });
+      const { file_url } = await api.integrations.Core.UploadFile({ file });
       setEditProduct(prev => ({ ...prev, image_url: file_url }));
       toast.success('Photo ajoutée');
     } catch {

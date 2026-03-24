@@ -5,7 +5,7 @@ import { motion } from 'framer-motion';
 import { Mail, Lock, User, Phone, Eye, EyeOff, Download, Bell, CheckCircle, ArrowRight, Share, Plus, KeyRound } from 'lucide-react';
 import { toast } from 'sonner';
 import { isPushSupported, subscribeToPush } from '@/lib/pushNotifications';
-import { API_SERVER_URL, resolvedAppId } from '@/api/base44Client';
+import { API_SERVER_URL, resolvedAppId } from '@/api/apiClient';
 
 const LOGO_URL = '/logo.png';
 

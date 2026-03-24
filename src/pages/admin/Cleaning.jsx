@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { base44, apiRequest, apiUrl } from '@/api/base44Client';
+import { api, apiRequest, apiUrl } from '@/api/apiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { Plus, Pencil, Trash2, Sparkles, ChevronLeft, ChevronRight, Bell, Check, RefreshCw, History, ChevronDown, ChevronUp } from 'lucide-react';
@@ -34,17 +34,17 @@ export default function Cleaning() {
   // Queries
   const { data: tasks = [] } = useQuery({
     queryKey: ['cleaningTasks'],
-    queryFn: () => base44.entities.CleaningTask.list('sort_order', 50),
+    queryFn: () => api.entities.CleaningTask.list('sort_order', 50),
   });
 
   const { data: schedule = [] } = useQuery({
     queryKey: ['cleaningSchedule', weekStart],
-    queryFn: () => base44.entities.CleaningSchedule.filter({ week_start: weekStart }, 'date', 500),
+    queryFn: () => api.entities.CleaningSchedule.filter({ week_start: weekStart }, 'date', 500),
   });
 
   const { data: employees = [] } = useQuery({
     queryKey: ['employees'],
-    queryFn: () => base44.entities.Employee.filter({ is_active: true }),
+    queryFn: () => api.entities.Employee.filter({ is_active: true }),
   });
 
   const { data: history = [] } = useQuery({
@@ -58,9 +58,9 @@ export default function Cleaning() {
     mutationFn: (data) => {
       if (data.id) {
         const { id, ...rest } = data;
-        return base44.entities.CleaningTask.update(id, rest);
+        return api.entities.CleaningTask.update(id, rest);
       }
-      return base44.entities.CleaningTask.create(data);
+      return api.entities.CleaningTask.create(data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['cleaningTasks'] });
@@ -71,7 +71,7 @@ export default function Cleaning() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id) => base44.entities.CleaningTask.delete(id),
+    mutationFn: (id) => api.entities.CleaningTask.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['cleaningTasks'] });
       toast.success('Tâche supprimée');

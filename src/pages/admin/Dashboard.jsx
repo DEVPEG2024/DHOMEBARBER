@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { base44 } from '@/api/base44Client';
+import { api } from '@/api/apiClient';
 import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import {
@@ -65,12 +65,12 @@ export default function AdminDashboard() {
 
   const { data: allAppointments = [] } = useQuery({
     queryKey: ['adminAppointments'],
-    queryFn: () => base44.entities.Appointment.list('-date', 1000),
+    queryFn: () => api.entities.Appointment.list('-date', 1000),
   });
 
   const { data: employees = [] } = useQuery({
     queryKey: ['employees'],
-    queryFn: () => base44.entities.Employee.filter({ is_active: true }),
+    queryFn: () => api.entities.Employee.filter({ is_active: true }),
   });
 
   // Filter out breaks for stats

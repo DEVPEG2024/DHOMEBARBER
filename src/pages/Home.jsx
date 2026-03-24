@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { base44 } from '@/api/base44Client';
+import { api } from '@/api/apiClient';
 import { useQuery } from '@tanstack/react-query';
 import { MapPin, Clock, Phone, Star, ArrowRight, Scissors } from 'lucide-react';
 import { motion, useMotionValue, useSpring } from 'framer-motion';
@@ -48,17 +48,17 @@ export default function Home() {
   const tilt = useParallaxTilt();
   const { data: services = [] } = useQuery({
     queryKey: ['services'],
-    queryFn: () => base44.entities.Service.filter({ is_active: true }, 'sort_order', 50),
+    queryFn: () => api.entities.Service.filter({ is_active: true }, 'sort_order', 50),
   });
 
   const { data: employees = [] } = useQuery({
     queryKey: ['employees'],
-    queryFn: () => base44.entities.Employee.filter({ is_active: true }, 'sort_order', 50),
+    queryFn: () => api.entities.Employee.filter({ is_active: true }, 'sort_order', 50),
   });
 
   const { data: reviews = [] } = useQuery({
     queryKey: ['reviews'],
-    queryFn: () => base44.entities.Review.filter({ is_visible: true }, '-created_date', 5),
+    queryFn: () => api.entities.Review.filter({ is_visible: true }, '-created_date', 5),
   });
 
   const avgRating = reviews.length > 0

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { base44 } from '@/api/base44Client';
+import { api } from '@/api/apiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { motion } from 'framer-motion';
@@ -42,17 +42,17 @@ export default function Events() {
 
   const { data: employees = [] } = useQuery({
     queryKey: ['employees'],
-    queryFn: () => base44.entities.Employee.filter({ is_active: true }, 'sort_order', 50),
+    queryFn: () => api.entities.Employee.filter({ is_active: true }, 'sort_order', 50),
   });
 
   const { data: myEvents = [] } = useQuery({
     queryKey: ['myEvents', user?.email],
-    queryFn: () => base44.entities.Event.filter({ client_email: user?.email }, '-created_at', 20),
+    queryFn: () => api.entities.Event.filter({ client_email: user?.email }, '-created_at', 20),
     enabled: !!user?.email,
   });
 
   const createEvent = useMutation({
-    mutationFn: (data) => base44.entities.Event.create(data),
+    mutationFn: (data) => api.entities.Event.create(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['myEvents'] });
       toast.success('Demande envoyée ! Nous vous recontacterons rapidement.');

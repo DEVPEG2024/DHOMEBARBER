@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { base44 } from '@/api/base44Client';
+import { api } from '@/api/apiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { format, addDays, startOfWeek, endOfWeek, eachDayOfInterval, isSameDay, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
@@ -27,23 +27,23 @@ export default function SmartAgenda() {
 
   const { data: appointments = [] } = useQuery({
     queryKey: ['allAppointments'],
-    queryFn: () => base44.entities.Appointment.list('-date', 500),
+    queryFn: () => api.entities.Appointment.list('-date', 500),
   });
 
   const { data: employees = [] } = useQuery({
     queryKey: ['employees'],
-    queryFn: () => base44.entities.Employee.filter({ is_active: true }),
+    queryFn: () => api.entities.Employee.filter({ is_active: true }),
   });
 
   const { data: timeOffs = [] } = useQuery({
     queryKey: ['timeOffs'],
-    queryFn: () => base44.entities.TimeOff.list('-start_date', 100),
+    queryFn: () => api.entities.TimeOff.list('-start_date', 100),
   });
 
   const addTimeOff = useMutation({
     mutationFn: (data) => {
       const emp = employees.find(e => e.id === data.employee_id);
-      return base44.entities.TimeOff.create({ ...data, employee_name: emp?.name, status: 'approved' });
+      return api.entities.TimeOff.create({ ...data, employee_name: emp?.name, status: 'approved' });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['timeOffs'] });
@@ -54,7 +54,7 @@ export default function SmartAgenda() {
   });
 
   const deleteTimeOff = useMutation({
-    mutationFn: (id) => base44.entities.TimeOff.delete(id),
+    mutationFn: (id) => api.entities.TimeOff.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['timeOffs'] });
       toast.success('Congé supprimé');

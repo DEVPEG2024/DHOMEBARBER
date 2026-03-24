@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { base44 } from '@/api/base44Client';
+import { api } from '@/api/apiClient';
 import { useQuery } from '@tanstack/react-query';
 import { motion, AnimatePresence, useScroll, useTransform } from 'framer-motion';
 import { ArrowRight, Scissors } from 'lucide-react';
@@ -57,7 +57,7 @@ export default function Services() {
     queryKey: ['serviceCategories'],
     queryFn: async () => {
       try {
-        return await base44.entities.ServiceCategory.filter({ is_active: true }, 'sort_order', 50);
+        return await api.entities.ServiceCategory.filter({ is_active: true }, 'sort_order', 50);
       } catch {
         return [];
       }
@@ -66,7 +66,7 @@ export default function Services() {
 
   const { data: services = [] } = useQuery({
     queryKey: ['services'],
-    queryFn: () => base44.entities.Service.filter({ is_active: true }, 'sort_order', 100),
+    queryFn: () => api.entities.Service.filter({ is_active: true }, 'sort_order', 100),
   });
 
   const filtered = activeCategory === 'all'

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { base44 } from '@/api/base44Client';
+import { api } from '@/api/apiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { Camera, LogOut, Loader2, User, Save, Clock } from 'lucide-react';
@@ -161,12 +161,12 @@ export default function BarberSettings() {
 
   const { data: employees = [] } = useQuery({
     queryKey: ['employees'],
-    queryFn: () => base44.entities.Employee.list('-created_at', 100),
+    queryFn: () => api.entities.Employee.list('-created_at', 100),
   });
 
   const { data: skillCategories = [] } = useQuery({
     queryKey: ['skillCategories'],
-    queryFn: () => base44.entities.SkillCategory.list('sort_order', 100),
+    queryFn: () => api.entities.SkillCategory.list('sort_order', 100),
   });
 
   const employee = employees.find(e => e.id === user?.employee_id);
@@ -189,7 +189,7 @@ export default function BarberSettings() {
   })();
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }) => base44.entities.Employee.update(id, data),
+    mutationFn: ({ id, data }) => api.entities.Employee.update(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['employees'] });
     },
@@ -211,7 +211,7 @@ export default function BarberSettings() {
     if (!employee) return;
     setUploading(true);
     try {
-      const { file_url } = await base44.integrations.Core.UploadFile({ file: croppedFile });
+      const { file_url } = await api.integrations.Core.UploadFile({ file: croppedFile });
       updateMutation.mutate({ id: employee.id, data: { photo_url: file_url } }, {
         onSuccess: () => toast.success('Photo mise à jour'),
       });

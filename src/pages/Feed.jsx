@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { base44 } from '@/api/base44Client';
+import { api } from '@/api/apiClient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { motion, AnimatePresence, useScroll, useTransform } from 'framer-motion';
@@ -331,22 +331,22 @@ export default function Feed() {
 
   const { data: posts = [], isLoading } = useQuery({
     queryKey: ['posts'],
-    queryFn: () => base44.entities.Post.list('-created_at', 100),
+    queryFn: () => api.entities.Post.list('-created_at', 100),
   });
 
   const { data: likes = [] } = useQuery({
     queryKey: ['postLikes'],
-    queryFn: () => base44.entities.PostLike.list('-created_at', 500),
+    queryFn: () => api.entities.PostLike.list('-created_at', 500),
   });
 
   const { data: comments = [] } = useQuery({
     queryKey: ['postComments'],
-    queryFn: () => base44.entities.PostComment.list('created_at', 500),
+    queryFn: () => api.entities.PostComment.list('created_at', 500),
   });
 
   const { data: employees = [] } = useQuery({
     queryKey: ['employees'],
-    queryFn: () => base44.entities.Employee.filter({ is_active: true }, 'sort_order', 50),
+    queryFn: () => api.entities.Employee.filter({ is_active: true }, 'sort_order', 50),
   });
 
   const getAuthorPhoto = () => {
@@ -361,7 +361,7 @@ export default function Feed() {
     if (!content.trim() && !imageUrl) return;
     setPosting(true);
     try {
-      await base44.entities.Post.create({
+      await api.entities.Post.create({
         author_email: user.email,
         author_name: user.full_name || user.email,
         author_role: user.role || 'user',
@@ -385,7 +385,7 @@ export default function Feed() {
     if (!file) return;
     setUploading(true);
     try {
-      const { file_url } = await base44.integrations.Core.UploadFile({ file });
+      const { file_url } = await api.integrations.Core.UploadFile({ file });
       setImageUrl(file_url);
     } catch {
       toast.error("Erreur lors de l'upload");
@@ -398,9 +398,9 @@ export default function Feed() {
     try {
       if (alreadyLiked) {
         const like = likes.find(l => l.post_id === postId && l.user_email === user.email);
-        if (like) await base44.entities.PostLike.delete(like.id);
+        if (like) await api.entities.PostLike.delete(like.id);
       } else {
-        await base44.entities.PostLike.create({ post_id: postId, user_email: user.email, reaction });
+        await api.entities.PostLike.create({ post_id: postId, user_email: user.email, reaction });
       }
       queryClient.invalidateQueries({ queryKey: ['postLikes'] });
     } catch {}
@@ -408,7 +408,7 @@ export default function Feed() {
 
   const handleComment = async (postId, text) => {
     try {
-      await base44.entities.PostComment.create({
+      await api.entities.PostComment.create({
         post_id: postId,
         author_email: user.email,
         author_name: user.full_name || user.email,
@@ -424,7 +424,7 @@ export default function Feed() {
 
   const handleDeleteComment = async (commentId) => {
     try {
-      await base44.entities.PostComment.delete(commentId);
+      await api.entities.PostComment.delete(commentId);
       queryClient.invalidateQueries({ queryKey: ['postComments'] });
     } catch {
       toast.error('Erreur lors de la suppression');
@@ -433,7 +433,7 @@ export default function Feed() {
 
   const handleDelete = async (postId) => {
     try {
-      await base44.entities.Post.delete(postId);
+      await api.entities.Post.delete(postId);
       queryClient.invalidateQueries({ queryKey: ['posts'] });
       toast.success('Publication supprimée');
     } catch {

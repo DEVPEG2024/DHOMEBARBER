@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { base44 } from '@/api/base44Client';
+import { api } from '@/api/apiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Pencil, Trash2, Mail, Upload } from 'lucide-react';
 import ImageCropDialog from '@/components/shared/ImageCropDialog';
@@ -29,16 +29,16 @@ export default function Team() {
 
   const { data: employees = [] } = useQuery({
     queryKey: ['employees'],
-    queryFn: () => base44.entities.Employee.list('sort_order', 50),
+    queryFn: () => api.entities.Employee.list('sort_order', 50),
   });
 
   const saveMutation = useMutation({
     mutationFn: (data) => {
       if (data.id) {
         const { id, ...rest } = data;
-        return base44.entities.Employee.update(id, rest);
+        return api.entities.Employee.update(id, rest);
       }
-      return base44.entities.Employee.create(data);
+      return api.entities.Employee.create(data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['employees'] });
@@ -51,7 +51,7 @@ export default function Team() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id) => base44.entities.Employee.delete(id),
+    mutationFn: (id) => api.entities.Employee.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['employees'] });
       toast.success('Collaborateur supprimé');
@@ -239,7 +239,7 @@ export default function Team() {
         imageSrc={cropSrc}
         onCropComplete={async (croppedFile) => {
           try {
-            const { file_url } = await base44.integrations.Core.UploadFile({ file: croppedFile });
+            const { file_url } = await api.integrations.Core.UploadFile({ file: croppedFile });
             setEditEmployee(prev => ({ ...prev, photo_url: file_url }));
           } catch {
             toast.error('Erreur lors de l\'upload de la photo');

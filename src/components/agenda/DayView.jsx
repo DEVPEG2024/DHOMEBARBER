@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { Coffee } from 'lucide-react';
+import { Coffee, Zap } from 'lucide-react';
 import { getServiceColor } from '@/utils/serviceColors';
 import { useQueryClient } from '@tanstack/react-query';
 import AppointmentDetailModal from './AppointmentDetailModal';
@@ -18,6 +18,7 @@ const statusStyle = {
   cancelled: { border: '#f87171', bg: 'rgba(248,113,113,0.15)', opacity: 0.6 },
   no_show: { border: '#ef4444', bg: 'rgba(239,68,68,0.15)' },
   break: { border: '#94a3b8', bg: 'rgba(148,163,184,0.25)' },
+  last_minute: { border: '#f97316', bg: 'rgba(249,115,22,0.25)' },
 };
 
 function timeToMinutes(t) {
@@ -75,6 +76,32 @@ function BreakBlock({ apt, onClick }) {
         <p className="text-[10px] font-bold text-slate-400">{apt.start_time} - {apt.end_time}</p>
       </div>
       {height > 32 && <p className="text-[10px] text-slate-400 font-medium">Pause</p>}
+    </div>
+  );
+}
+
+function LastMinuteBlock({ apt, onClick }) {
+  const startMin = timeToMinutes(apt.start_time) - START_HOUR * 60;
+  const endMin = timeToMinutes(apt.end_time || apt.start_time) - START_HOUR * 60;
+  const top = (startMin / 60) * HOUR_HEIGHT;
+  const height = Math.max(((endMin - startMin) / 60) * HOUR_HEIGHT, 36);
+
+  return (
+    <div
+      onClick={e => { e.stopPropagation(); onClick(apt); }}
+      className="absolute left-1 right-1 rounded-lg px-2.5 py-1 overflow-hidden cursor-pointer group transition-all hover:z-20 hover:shadow-lg hover:ring-2 hover:ring-orange-400/40"
+      style={{
+        top, height,
+        background: 'repeating-linear-gradient(135deg, rgba(249,115,22,0.18), rgba(249,115,22,0.18) 4px, rgba(249,115,22,0.10) 4px, rgba(249,115,22,0.10) 8px)',
+        borderLeft: '4px solid #f97316',
+        zIndex: 10,
+      }}
+    >
+      <div className="flex items-center gap-1">
+        <Zap className="w-3 h-3 text-orange-400" />
+        <p className="text-[10px] font-bold text-orange-400">{apt.start_time} - {apt.end_time || apt.start_time}</p>
+      </div>
+      {height > 32 && <p className="text-[10px] text-orange-400 font-semibold">Last Minute</p>}
     </div>
   );
 }
@@ -245,6 +272,10 @@ export default function DayView({ appointments, employees, employeeFilter, onSta
           apt.status === 'break' ? (
             <div key={apt.id} data-block>
               <BreakBlock apt={apt} onClick={onBreakClick} />
+            </div>
+          ) : apt.status === 'last_minute' ? (
+            <div key={apt.id} data-block>
+              <LastMinuteBlock apt={apt} onClick={setSelected} />
             </div>
           ) : (
             <div key={apt.id} data-block>

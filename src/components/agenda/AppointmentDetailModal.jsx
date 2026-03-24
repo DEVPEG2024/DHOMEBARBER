@@ -2,7 +2,7 @@ import React, { useReducer } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Clock, User, Phone, Mail, Scissors, CreditCard, FileText, Calendar, Banknote, CheckCircle, Heart, ShoppingBag, ChevronDown, Check, BadgeCheck, X, AlertTriangle, Trash2 } from 'lucide-react';
 import { getServiceColor } from '@/utils/serviceColors';
-import { base44 } from '@/api/base44Client';
+import { api } from '@/api/apiClient';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
@@ -39,7 +39,7 @@ function ModalInner({ appointment, onUpdate, onDelete }) {
 
   const { data: products = [] } = useQuery({
     queryKey: ['products'],
-    queryFn: () => base44.entities.Product.filter({ is_active: true }, 'name', 100),
+    queryFn: () => api.entities.Product.filter({ is_active: true }, 'name', 100),
   });
 
   const status = statusLabel[appointment.status] || statusLabel.confirmed;
@@ -53,7 +53,7 @@ function ModalInner({ appointment, onUpdate, onDelete }) {
   const handleValidate = async () => {
     dispatch({ type: 'SAVING', value: true });
     try {
-      await base44.entities.Appointment.update(appointment.id, {
+      await api.entities.Appointment.update(appointment.id, {
         payment_method: state.paymentMethod,
         payment_status: 'paid',
         status: 'completed',
@@ -334,7 +334,7 @@ function ModalInner({ appointment, onUpdate, onDelete }) {
                 onClick={async () => {
                   dispatch({ type: 'SAVING', value: true });
                   try {
-                    await base44.entities.Appointment.update(appointment.id, { status: 'cancelled' });
+                    await api.entities.Appointment.update(appointment.id, { status: 'cancelled' });
                     toast.success('Rendez-vous annulé');
                     onUpdate?.();
                   } catch (e) {
@@ -353,7 +353,7 @@ function ModalInner({ appointment, onUpdate, onDelete }) {
                 onClick={async () => {
                   dispatch({ type: 'SAVING', value: true });
                   try {
-                    await base44.entities.Appointment.update(appointment.id, { status: 'no_show' });
+                    await api.entities.Appointment.update(appointment.id, { status: 'no_show' });
                     toast.success('Marqué absent');
                     onUpdate?.();
                   } catch (e) {
@@ -393,7 +393,7 @@ function ModalInner({ appointment, onUpdate, onDelete }) {
           if (!window.confirm('Supprimer définitivement ce rendez-vous ?')) return;
           dispatch({ type: 'SAVING', value: true });
           try {
-            await base44.entities.Appointment.delete(appointment.id);
+            await api.entities.Appointment.delete(appointment.id);
             toast.success('Rendez-vous supprimé');
             onDelete?.();
           } catch {

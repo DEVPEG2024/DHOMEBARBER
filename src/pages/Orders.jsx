@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAuth } from '@/lib/AuthContext';
-import { base44 } from '@/api/base44Client';
+import { api } from '@/api/apiClient';
 import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { ShoppingBag, Package } from 'lucide-react';
@@ -21,7 +21,7 @@ export default function Orders() {
 
   const { data: orders = [], isLoading } = useQuery({
     queryKey: ['myOrders', user?.email],
-    queryFn: () => base44.entities.Order.filter({ client_email: user?.email }, '-created_date', 100),
+    queryFn: () => api.entities.Order.filter({ client_email: user?.email }, '-created_date', 100),
     enabled: !!user?.email,
     refetchInterval: 10000, // Auto-refresh toutes les 10s
   });

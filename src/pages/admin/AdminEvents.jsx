@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { base44 } from '@/api/base44Client';
+import { api } from '@/api/apiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { PartyPopper, CheckCircle, XCircle, Clock, Users, Calendar, Trash2, MessageSquare, Euro } from 'lucide-react';
@@ -37,11 +37,11 @@ export default function AdminEvents() {
 
   const { data: events = [] } = useQuery({
     queryKey: ['adminEvents'],
-    queryFn: () => base44.entities.Event.list('-created_at', 200),
+    queryFn: () => api.entities.Event.list('-created_at', 200),
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }) => base44.entities.Event.update(id, data),
+    mutationFn: ({ id, data }) => api.entities.Event.update(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['adminEvents'] });
       setEditingId(null);
@@ -50,7 +50,7 @@ export default function AdminEvents() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id) => base44.entities.Event.delete(id),
+    mutationFn: (id) => api.entities.Event.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['adminEvents'] });
       toast.success('Demande supprimée');

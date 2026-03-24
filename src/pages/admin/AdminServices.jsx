@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { base44 } from '@/api/base44Client';
+import { api } from '@/api/apiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Pencil, Trash2, Clock, Upload, AlertTriangle, FileText, Download } from 'lucide-react';
 import { exportToCSV } from '@/utils/exportCSV';
@@ -24,14 +24,14 @@ export default function AdminServices() {
 
   const { data: services = [] } = useQuery({
     queryKey: ['services'],
-    queryFn: () => base44.entities.Service.list('sort_order', 200),
+    queryFn: () => api.entities.Service.list('sort_order', 200),
   });
 
   const { data: categories = [] } = useQuery({
     queryKey: ['serviceCategories'],
     queryFn: async () => {
       try {
-        return await base44.entities.ServiceCategory.list('sort_order', 50);
+        return await api.entities.ServiceCategory.list('sort_order', 50);
       } catch {
         return [];
       }
@@ -42,9 +42,9 @@ export default function AdminServices() {
     mutationFn: (data) => {
       if (data.id) {
         const { id, ...rest } = data;
-        return base44.entities.Service.update(id, rest);
+        return api.entities.Service.update(id, rest);
       }
-      return base44.entities.Service.create(data);
+      return api.entities.Service.create(data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['services'] });
@@ -55,7 +55,7 @@ export default function AdminServices() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id) => base44.entities.Service.delete(id),
+    mutationFn: (id) => api.entities.Service.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['services'] });
       toast.success('Prestation supprimée');
@@ -65,7 +65,7 @@ export default function AdminServices() {
   const deleteAllMutation = useMutation({
     mutationFn: async () => {
       for (const s of services) {
-        await base44.entities.Service.delete(s.id);
+        await api.entities.Service.delete(s.id);
       }
     },
     onSuccess: () => {
@@ -108,7 +108,7 @@ export default function AdminServices() {
     setImporting(true);
     try {
       for (const row of importPreview) {
-        await base44.entities.Service.create(row);
+        await api.entities.Service.create(row);
       }
       queryClient.invalidateQueries({ queryKey: ['services'] });
       setShowImportDialog(false);

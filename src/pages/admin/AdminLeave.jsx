@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { base44, apiRequest, apiUrl } from '@/api/base44Client';
+import { api, apiRequest, apiUrl } from '@/api/apiClient';
 import { motion } from 'framer-motion';
 import { CalendarDays, CheckCircle, XCircle, Clock, Trash2 } from 'lucide-react';
 
@@ -34,7 +34,7 @@ export default function AdminLeave() {
 
   const { data: timeOffs = [], isLoading } = useQuery({
     queryKey: ['timeOffs'],
-    queryFn: () => base44.entities.TimeOff.list('-start_date', 200),
+    queryFn: () => api.entities.TimeOff.list('-start_date', 200),
   });
 
   const filtered = useMemo(() => {
@@ -61,7 +61,7 @@ export default function AdminLeave() {
   const handleDelete = async () => {
     if (!leaveToDelete) return;
     try {
-      await base44.entities.TimeOff.delete(leaveToDelete.id);
+      await api.entities.TimeOff.delete(leaveToDelete.id);
       queryClient.invalidateQueries({ queryKey: ['timeOffs'] });
       toast.success('Congé supprimé');
     } catch (err) {

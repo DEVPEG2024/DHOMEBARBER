@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { base44 } from '@/api/base44Client';
+import { api } from '@/api/apiClient';
 import { useAuth } from '@/lib/AuthContext';
 import { motion } from 'framer-motion';
 import { CalendarDays, Plus, Clock, CheckCircle, XCircle, Loader2 } from 'lucide-react';
@@ -36,7 +36,7 @@ export default function BarberLeave() {
   // Fetch employee info to get name
   const { data: employees = [] } = useQuery({
     queryKey: ['employees'],
-    queryFn: () => base44.entities.Employee.filter({ is_active: true }),
+    queryFn: () => api.entities.Employee.filter({ is_active: true }),
   });
 
   const myEmployee = employees.find(e => e.id === employeeId);
@@ -44,7 +44,7 @@ export default function BarberLeave() {
   // Fetch my leave requests
   const { data: allTimeOffs = [] } = useQuery({
     queryKey: ['timeOffs'],
-    queryFn: () => base44.entities.TimeOff.list('-start_date', 200),
+    queryFn: () => api.entities.TimeOff.list('-start_date', 200),
   });
 
   const myLeaves = allTimeOffs.filter(t => t.employee_id === employeeId);
@@ -60,7 +60,7 @@ export default function BarberLeave() {
     }
     setSaving(true);
     try {
-      await base44.entities.TimeOff.create({
+      await api.entities.TimeOff.create({
         employee_id: employeeId,
         employee_name: myEmployee?.name || user?.full_name || '',
         start_date: form.start_date,

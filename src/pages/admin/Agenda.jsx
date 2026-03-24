@@ -231,13 +231,31 @@ export default function Agenda() {
     setSendingLastMinute(true);
     try {
       const emp = employees.find(e => e.id === employee_id);
+
+      // Créer un créneau bloqué "last_minute" sur l'agenda
+      await api.entities.Appointment.create({
+        client_name: 'Last Minute',
+        client_email: '',
+        client_phone: '',
+        employee_id: employee_id || employees[0]?.id || null,
+        employee_name: emp?.name || employees[0]?.name || '',
+        date,
+        start_time,
+        end_time: end_time || start_time,
+        status: 'last_minute',
+        services: [],
+        total_price: 0,
+      });
+
       const result = await apiRequest('POST', apiUrl('/last-minute'), {
         date,
         start_time,
         end_time,
         employee_name: emp?.name,
       });
-      toast.success(`Notification envoyée à ${result.sent} client(s)`);
+
+      queryClient.invalidateQueries({ queryKey: ['agendaAppointments'] });
+      toast.success(`Notification envoyée à ${result.sent} client(s) · Créneau bloqué`);
       setLastMinuteDialog(false);
       setLastMinuteForm({ date: '', start_time: '', end_time: '', employee_id: '' });
     } catch {
@@ -247,7 +265,7 @@ export default function Agenda() {
     }
   };
 
-  const realAppointmentCount = filteredAppointments.filter(a => a.status !== 'break').length;
+  const realAppointmentCount = filteredAppointments.filter(a => a.status !== 'break' && a.status !== 'last_minute').length;
 
   return (
     <div className="flex flex-col h-full">
