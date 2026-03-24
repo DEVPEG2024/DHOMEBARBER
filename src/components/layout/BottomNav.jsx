@@ -5,7 +5,7 @@ import { useTheme } from '@/lib/ThemeContext';
 
 const navItems = [
   { path: '/', icon: Home, label: 'Accueil' },
-  { path: '/services', icon: Scissors, label: 'Services' },
+  { path: '/shop', icon: ShoppingBag, label: 'Shop' },
   { path: '/booking', icon: Calendar, label: 'Réserver' },
   { path: '/feed', icon: Newspaper, label: 'Actus' },
   { path: '/profile', icon: User, label: 'Profil' },
