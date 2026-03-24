@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Outlet, Link, useLocation, Navigate } from 'react-router-dom';
 import {
   LayoutDashboard, Calendar, Users, Scissors, UserCircle,
-  BarChart3, Settings, Menu, X, ChevronLeft, ShoppingBag, Star, Bell, Brain, Sun, Moon, ClipboardList, ShieldCheck, Sparkles, CalendarDays, Newspaper, Warehouse, GripVertical
+  BarChart3, Settings, Menu, X, ChevronLeft, ShoppingBag, Star, Bell, Brain, Sun, Moon, ClipboardList, ShieldCheck, Sparkles, CalendarDays, Newspaper, Warehouse
 } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { useTheme } from '@/lib/ThemeContext';
@@ -149,10 +149,13 @@ export default function AdminLayout() {
                 {sidebarItems.map((item, index) => (
                   <Draggable key={item.path} draggableId={item.path} index={index}>
                     {(provided, snapshot) => (
-                      <div
+                      <Link
                         ref={provided.innerRef}
                         {...provided.draggableProps}
-                        className={`flex items-center rounded-lg text-sm font-medium transition-all duration-200 ${
+                        {...provided.dragHandleProps}
+                        to={item.path}
+                        onClick={() => setSidebarOpen(false)}
+                        className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
                           snapshot.isDragging
                             ? 'bg-primary/15 text-primary shadow-lg shadow-primary/10 ring-1 ring-primary/20'
                             : isActive(item)
@@ -160,21 +163,9 @@ export default function AdminLayout() {
                               : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
                         }`}
                       >
-                        <div
-                          {...provided.dragHandleProps}
-                          className="pl-1.5 pr-0 py-2.5 cursor-grab active:cursor-grabbing opacity-30 hover:opacity-70 transition-opacity"
-                        >
-                          <GripVertical className="w-3.5 h-3.5" />
-                        </div>
-                        <Link
-                          to={item.path}
-                          onClick={() => setSidebarOpen(false)}
-                          className="flex items-center gap-3 flex-1 pr-3 py-2.5"
-                        >
-                          <item.icon className="w-4 h-4 shrink-0" />
-                          {item.label}
-                        </Link>
-                      </div>
+                        <item.icon className="w-4 h-4 shrink-0" />
+                        {item.label}
+                      </Link>
                     )}
                   </Draggable>
                 ))}
