@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import { useQuery } from '@tanstack/react-query';
@@ -7,9 +7,40 @@ import { motion } from 'framer-motion';
 import SectionHeader from '@/components/shared/SectionHeader';
 import StarRating from '@/components/shared/StarRating';
 
+function useParallaxTilt(maxTilt = 20) {
+  const [tilt, setTilt] = useState({ x: 0, y: 0 });
+
+  const handleOrientation = useCallback((e) => {
+    const x = Math.max(-maxTilt, Math.min(maxTilt, e.gamma || 0));
+    const y = Math.max(-maxTilt, Math.min(maxTilt, e.beta ? e.beta - 40 : 0));
+    setTilt({ x: (x / maxTilt) * 15, y: (y / maxTilt) * 15 });
+  }, [maxTilt]);
+
+  const handleMouse = useCallback((e) => {
+    const cx = window.innerWidth / 2;
+    const cy = window.innerHeight / 2;
+    const x = ((e.clientX - cx) / cx) * 15;
+    const y = ((e.clientY - cy) / cy) * 15;
+    setTilt({ x, y });
+  }, []);
+
+  useEffect(() => {
+    if (window.DeviceOrientationEvent) {
+      window.addEventListener('deviceorientation', handleOrientation, true);
+      return () => window.removeEventListener('deviceorientation', handleOrientation, true);
+    } else {
+      window.addEventListener('mousemove', handleMouse);
+      return () => window.removeEventListener('mousemove', handleMouse);
+    }
+  }, [handleOrientation, handleMouse]);
+
+  return tilt;
+}
+
 const LOGO_URL = '/logo.png';
 
 export default function Home() {
+  const tilt = useParallaxTilt();
   const { data: services = [] } = useQuery({
     queryKey: ['services'],
     queryFn: () => base44.entities.Service.filter({ is_active: true }, 'sort_order', 50),
@@ -37,11 +68,19 @@ export default function Home() {
           {/* Logo grand */}
           <motion.img
             initial={{ opacity: 0, scale: 0.85 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.6 }}
+            animate={{
+              opacity: 1,
+              scale: 1,
+              x: tilt.x,
+              y: tilt.y,
+              rotateY: tilt.x * 0.5,
+              rotateX: -tilt.y * 0.5,
+            }}
+            transition={{ type: 'spring', stiffness: 100, damping: 20 }}
             src={LOGO_URL}
             alt="D'Home Barber"
             className="w-72 h-72 object-contain drop-shadow-2xl mb-2"
+            style={{ perspective: 800 }}
           />
           <p className="text-sm font-light tracking-[0.3em] uppercase text-white/70 mb-4">Premium BarberShop</p>
 
