@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import { base44 } from '@/api/base44Client';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useScroll, useTransform } from 'framer-motion';
 import { Send, Heart, Trash2, Loader2, Camera, MessageCircle, Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -66,6 +66,31 @@ function CommentItem({ comment, currentUser, onDelete }) {
         </div>
       </div>
     </motion.div>
+  );
+}
+
+function GlassCard({ children }) {
+  const ref = useRef(null);
+  const { scrollYProgress } = useScroll({
+    target: ref,
+    offset: ['start end', 'end start'],
+  });
+  const x = useTransform(scrollYProgress, [0, 0.5, 1], [-30, 15, -20]);
+  const opacity = useTransform(scrollYProgress, [0, 0.4, 0.6, 1], [0, 0.6, 0.6, 0]);
+
+  return (
+    <div ref={ref} className="relative">
+      <motion.div
+        className="absolute -bottom-3 left-4 right-4 h-16 rounded-2xl blur-xl pointer-events-none"
+        style={{
+          x,
+          opacity,
+          background: 'linear-gradient(135deg, rgba(34,197,94,0.15) 0%, rgba(16,185,129,0.1) 50%, rgba(34,197,94,0.08) 100%)',
+          backdropFilter: 'blur(8px)',
+        }}
+      />
+      <div className="relative">{children}</div>
+    </div>
   );
 }
 
@@ -519,21 +544,22 @@ export default function Feed() {
           <p className="text-xs text-muted-foreground/60 mt-1">Soyez le premier à publier !</p>
         </div>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-6">
           <AnimatePresence>
             {posts.map(post => (
-              <PostCard
-                key={post.id}
-                post={post}
-                currentUser={user}
-                likes={likes}
-                comments={comments}
-                onLike={handleLike}
-                onComment={handleComment}
-                onDelete={handleDelete}
-                onDeleteComment={handleDeleteComment}
-                getAuthorPhoto={getAuthorPhoto}
-              />
+              <GlassCard key={post.id}>
+                <PostCard
+                  post={post}
+                  currentUser={user}
+                  likes={likes}
+                  comments={comments}
+                  onLike={handleLike}
+                  onComment={handleComment}
+                  onDelete={handleDelete}
+                  onDeleteComment={handleDeleteComment}
+                  getAuthorPhoto={getAuthorPhoto}
+                />
+              </GlassCard>
             ))}
           </AnimatePresence>
         </div>
