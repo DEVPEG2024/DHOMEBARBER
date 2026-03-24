@@ -1,13 +1,13 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Home, Scissors, Calendar, ShoppingBag, User, Sun, Moon } from 'lucide-react';
+import { Home, Scissors, Calendar, Newspaper, User, Sun, Moon } from 'lucide-react';
 import { useTheme } from '@/lib/ThemeContext';
 
 const navItems = [
   { path: '/', icon: Home, label: 'Accueil' },
   { path: '/services', icon: Scissors, label: 'Services' },
   { path: '/booking', icon: Calendar, label: 'Réserver' },
-  { path: '/shop', icon: ShoppingBag, label: 'Boutique' },
+  { path: '/feed', icon: Newspaper, label: 'Actus' },
   { path: '/profile', icon: User, label: 'Profil' },
 ];
 

@@ -1,0 +1,287 @@
+import React, { useState, useRef } from 'react';
+import { base44 } from '@/api/base44Client';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useAuth } from '@/lib/AuthContext';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Image, Send, Heart, Trash2, Loader2, Camera, MessageCircle } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import { toast } from 'sonner';
+
+function timeAgo(dateStr) {
+  const now = new Date();
+  const date = new Date(dateStr);
+  const diff = Math.floor((now - date) / 1000);
+  if (diff < 60) return "À l'instant";
+  if (diff < 3600) return `${Math.floor(diff / 60)} min`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
+  if (diff < 604800) return `${Math.floor(diff / 86400)}j`;
+  return date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+}
+
+function getRoleBadge(role) {
+  if (role === 'admin') return { label: 'Admin', color: '#ef4444' };
+  if (role === 'barber') return { label: 'Barber', color: '#3fcf8e' };
+  return null;
+}
+
+function PostCard({ post, currentUser, onLike, onDelete, likes }) {
+  const userLiked = likes.some(l => l.post_id === post.id && l.user_email === currentUser?.email);
+  const likeCount = likes.filter(l => l.post_id === post.id).length;
+  const badge = getRoleBadge(post.author_role);
+  const initials = post.author_name?.split(' ').map(n => n[0]).join('').slice(0, 2) || '?';
+  const isOwner = currentUser?.email === post.author_email || currentUser?.role === 'admin';
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 15 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -10 }}
+      className="bg-card border border-border rounded-2xl overflow-hidden"
+    >
+      {/* Header */}
+      <div className="flex items-center gap-3 p-4 pb-2">
+        <div className="w-10 h-10 rounded-full overflow-hidden bg-secondary border border-border flex items-center justify-center flex-shrink-0">
+          {post.author_photo_url ? (
+            <img src={post.author_photo_url} alt="" className="w-full h-full object-cover" />
+          ) : (
+            <span className="text-sm font-bold text-muted-foreground">{initials}</span>
+          )}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-semibold text-foreground truncate">{post.author_name}</p>
+            {badge && (
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ backgroundColor: badge.color + '20', color: badge.color }}>
+                {badge.label}
+              </span>
+            )}
+          </div>
+          <p className="text-[11px] text-muted-foreground">{timeAgo(post.created_at)}</p>
+        </div>
+        {isOwner && (
+          <button onClick={() => onDelete(post.id)} className="text-muted-foreground/40 hover:text-red-400 transition-colors">
+            <Trash2 className="w-4 h-4" />
+          </button>
+        )}
+      </div>
+
+      {/* Content */}
+      {post.content && (
+        <p className="px-4 pb-3 text-sm text-foreground leading-relaxed whitespace-pre-wrap">{post.content}</p>
+      )}
+
+      {/* Image */}
+      {post.image_url && (
+        <div className="px-4 pb-3">
+          <img src={post.image_url} alt="" className="w-full rounded-xl object-cover max-h-[400px]" />
+        </div>
+      )}
+
+      {/* Actions */}
+      <div className="flex items-center gap-4 px-4 py-3 border-t border-border">
+        <motion.button
+          whileTap={{ scale: 0.85 }}
+          onClick={() => onLike(post.id, userLiked)}
+          className="flex items-center gap-1.5 transition-colors"
+        >
+          <Heart
+            className={`w-5 h-5 transition-all ${userLiked ? 'text-red-500 fill-red-500' : 'text-muted-foreground'}`}
+          />
+          <span className={`text-xs font-medium ${userLiked ? 'text-red-500' : 'text-muted-foreground'}`}>
+            {likeCount > 0 ? likeCount : ''}
+          </span>
+        </motion.button>
+      </div>
+    </motion.div>
+  );
+}
+
+export default function Feed() {
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const [content, setContent] = useState('');
+  const [imageUrl, setImageUrl] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [posting, setPosting] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const { data: posts = [], isLoading } = useQuery({
+    queryKey: ['posts'],
+    queryFn: () => base44.entities.Post.list('-created_at', 100),
+  });
+
+  const { data: likes = [] } = useQuery({
+    queryKey: ['postLikes'],
+    queryFn: () => base44.entities.PostLike.list('-created_at', 500),
+  });
+
+  const { data: employees = [] } = useQuery({
+    queryKey: ['employees'],
+    queryFn: () => base44.entities.Employee.filter({ is_active: true }, 'sort_order', 50),
+  });
+
+  const getAuthorPhoto = () => {
+    if (user?.role === 'barber' || user?.role === 'admin') {
+      const emp = employees.find(e => e.id === user?.employee_id);
+      return emp?.photo_url || '';
+    }
+    return '';
+  };
+
+  const createPost = async () => {
+    if (!content.trim() && !imageUrl) return;
+    setPosting(true);
+    try {
+      await base44.entities.Post.create({
+        author_email: user.email,
+        author_name: user.full_name || user.email,
+        author_role: user.role || 'user',
+        author_photo_url: getAuthorPhoto(),
+        content: content.trim(),
+        image_url: imageUrl || null,
+      });
+      setContent('');
+      setImageUrl('');
+      queryClient.invalidateQueries({ queryKey: ['posts'] });
+      toast.success('Publication envoyée 🎉');
+    } catch {
+      toast.error('Erreur lors de la publication');
+    } finally {
+      setPosting(false);
+    }
+  };
+
+  const handleImageUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const { file_url } = await base44.integrations.Core.UploadFile({ file });
+      setImageUrl(file_url);
+    } catch {
+      toast.error("Erreur lors de l'upload");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleLike = async (postId, alreadyLiked) => {
+    try {
+      if (alreadyLiked) {
+        const like = likes.find(l => l.post_id === postId && l.user_email === user.email);
+        if (like) await base44.entities.PostLike.delete(like.id);
+      } else {
+        await base44.entities.PostLike.create({ post_id: postId, user_email: user.email });
+      }
+      queryClient.invalidateQueries({ queryKey: ['postLikes'] });
+    } catch {}
+  };
+
+  const handleDelete = async (postId) => {
+    try {
+      await base44.entities.Post.delete(postId);
+      queryClient.invalidateQueries({ queryKey: ['posts'] });
+      toast.success('Publication supprimée');
+    } catch {
+      toast.error('Erreur lors de la suppression');
+    }
+  };
+
+  return (
+    <div className="max-w-lg mx-auto">
+      <div className="mb-6">
+        <p className="text-[10px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Communauté</p>
+        <h1 className="font-display text-2xl font-bold">Fil d'actualité</h1>
+      </div>
+
+      {/* New post */}
+      <div className="bg-card border border-border rounded-2xl p-4 mb-6">
+        <div className="flex gap-3">
+          <div className="w-10 h-10 rounded-full bg-secondary border border-border flex items-center justify-center flex-shrink-0 overflow-hidden">
+            {getAuthorPhoto() ? (
+              <img src={getAuthorPhoto()} alt="" className="w-full h-full object-cover" />
+            ) : (
+              <span className="text-sm font-bold text-muted-foreground">
+                {user?.full_name?.charAt(0) || '?'}
+              </span>
+            )}
+          </div>
+          <div className="flex-1">
+            <Textarea
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              placeholder="Quoi de neuf ? Partagez un moment, une photo..."
+              className="bg-secondary/50 border-border text-sm resize-none min-h-[60px]"
+              rows={2}
+            />
+          </div>
+        </div>
+
+        {/* Image preview */}
+        {imageUrl && (
+          <div className="relative mt-3 ml-[52px]">
+            <img src={imageUrl} alt="" className="rounded-xl max-h-48 object-cover" />
+            <button
+              onClick={() => setImageUrl('')}
+              className="absolute top-2 right-2 w-6 h-6 rounded-full bg-black/60 flex items-center justify-center text-white"
+            >
+              ×
+            </button>
+          </div>
+        )}
+
+        <div className="flex items-center justify-between mt-3 ml-[52px]">
+          <div className="flex gap-2">
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary transition-colors"
+            >
+              {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Camera className="w-4 h-4" />}
+              Photo
+            </button>
+            <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
+          </div>
+          <Button
+            onClick={createPost}
+            disabled={posting || (!content.trim() && !imageUrl)}
+            size="sm"
+            className="bg-primary text-primary-foreground text-xs rounded-full px-4"
+          >
+            {posting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5 mr-1" />}
+            Publier
+          </Button>
+        </div>
+      </div>
+
+      {/* Posts */}
+      {isLoading ? (
+        <div className="flex justify-center py-12">
+          <Loader2 className="w-6 h-6 animate-spin text-primary" />
+        </div>
+      ) : posts.length === 0 ? (
+        <div className="text-center py-16">
+          <MessageCircle className="w-12 h-12 text-muted-foreground/20 mx-auto mb-3" />
+          <p className="text-sm text-muted-foreground">Aucune publication pour le moment</p>
+          <p className="text-xs text-muted-foreground/60 mt-1">Soyez le premier à publier !</p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <AnimatePresence>
+            {posts.map(post => (
+              <PostCard
+                key={post.id}
+                post={post}
+                currentUser={user}
+                likes={likes}
+                onLike={handleLike}
+                onDelete={handleDelete}
+              />
+            ))}
+          </AnimatePresence>
+        </div>
+      )}
+    </div>
+  );
+}

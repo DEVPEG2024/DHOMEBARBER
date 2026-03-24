@@ -23,6 +23,7 @@ import MyReviews from '@/pages/MyReviews';
 import UserSettings from '@/pages/Settings';
 import ClientNotifications from '@/pages/ClientNotifications';
 import BarberProfile from '@/pages/BarberProfile';
+import Feed from '@/pages/Feed';
 
 // Admin pages
 import AdminDashboard from '@/pages/admin/Dashboard';
@@ -150,6 +151,7 @@ const AppRoutes = () => {
           <Route path="/notifications" element={<ClientNotifications />} />
           <Route path="/profile" element={<Profile />} />
           <Route path="/barber/:id" element={<BarberProfile />} />
+          <Route path="/feed" element={<Feed />} />
         </Route>
       </Route>
 
@@ -173,6 +175,7 @@ const AppRoutes = () => {
           <Route path="/admin/barber-accounts" element={<BarberAccounts />} />
           <Route path="/admin/leave" element={<AdminLeave />} />
           <Route path="/admin/my-leave" element={<BarberLeave />} />
+          <Route path="/admin/feed" element={<Feed />} />
           <Route path="/admin/my-settings" element={<BarberSettings />} />
         </Route>
       </Route>
