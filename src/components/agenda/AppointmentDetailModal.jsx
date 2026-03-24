@@ -12,6 +12,7 @@ const statusLabel = {
   completed: { label: 'Terminé', color: 'bg-primary/20 text-primary border-primary/50' },
   cancelled: { label: 'Annulé', color: 'bg-red-500/10 text-red-400 border-red-400/30' },
   no_show: { label: 'No-show', color: 'bg-red-500/15 text-red-400 border-red-500/50' },
+  last_minute: { label: 'Last Minute', color: 'bg-orange-500/20 text-orange-300 border-orange-400/50' },
 };
 
 const initialState = (apt) => ({
@@ -57,6 +58,7 @@ function ModalInner({ appointment, onUpdate, onDelete }) {
     ? allUsers.filter(u => u.full_name?.toLowerCase().includes(clientSearch.toLowerCase()) || u.email?.toLowerCase().includes(clientSearch.toLowerCase()))
     : [];
 
+  const isLastMinute = appointment.status === 'last_minute';
   const status = statusLabel[appointment.status] || statusLabel.confirmed;
   const isCompleted = appointment.status === 'completed';
   const tipValue = isCompleted ? (appointment.tip || 0) : (parseFloat(state.tip) || 0);
@@ -68,7 +70,7 @@ function ModalInner({ appointment, onUpdate, onDelete }) {
   const handleValidate = async () => {
     dispatch({ type: 'SAVING', value: true });
     try {
-      await api.entities.Appointment.update(appointment.id, {
+      const updateData = {
         payment_method: state.paymentMethod,
         payment_status: 'paid',
         status: 'completed',
@@ -77,7 +79,17 @@ function ModalInner({ appointment, onUpdate, onDelete }) {
         product_sold: state.productSold,
         product_price: prodValue,
         grand_total: grandTotal,
-      });
+      };
+      // For last_minute walk-ins: include manually entered client info
+      if (isLastMinute || !appointment.client_email) {
+        if (state.clientName && state.clientName !== 'Last Minute') {
+          updateData.client_name = state.clientName;
+        }
+        if (state.clientPhone) {
+          updateData.client_phone = state.clientPhone;
+        }
+      }
+      await api.entities.Appointment.update(appointment.id, updateData);
       toast.success('Prestation validée !');
       onUpdate?.();
     } catch (e) {
@@ -120,11 +132,16 @@ function ModalInner({ appointment, onUpdate, onDelete }) {
                   onClick={async () => {
                     dispatch({ type: 'SAVING', value: true });
                     try {
-                      await api.entities.Appointment.update(appointment.id, {
+                      const updateData = {
                         client_name: u.full_name || u.email,
                         client_email: u.email,
                         client_phone: u.phone || '',
-                      });
+                      };
+                      // If last_minute, change status to confirmed to prevent auto-expire
+                      if (appointment.status === 'last_minute') {
+                        updateData.status = 'confirmed';
+                      }
+                      await api.entities.Appointment.update(appointment.id, updateData);
                       setAssignedClient({ name: u.full_name || u.email, email: u.email, phone: u.phone || '' });
                       toast.success(`Client ${u.full_name || u.email} assigné`);
                       setClientSearch('');
@@ -145,6 +162,27 @@ function ModalInner({ appointment, onUpdate, onDelete }) {
           {clientSearch.length >= 2 && filteredUsers.length === 0 && (
             <p className="text-[11px] text-muted-foreground text-center py-1">Aucun client trouvé</p>
           )}
+          {/* Walk-in: manual name/phone for last minute */}
+          {isLastMinute && (
+            <div className="space-y-2 pt-1 border-t border-border/50">
+              <p className="text-[11px] text-muted-foreground font-medium">Ou saisir manuellement (walk-in) :</p>
+              <input
+                type="text"
+                placeholder="Nom du client"
+                value={state.clientName === 'Last Minute' ? '' : state.clientName}
+                onChange={e => dispatch({ type: 'SET', field: 'clientName', value: e.target.value })}
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-primary/40"
+              />
+              <input
+                type="tel"
+                placeholder="Téléphone (optionnel)"
+                value={state.clientPhone}
+                onChange={e => dispatch({ type: 'SET', field: 'clientPhone', value: e.target.value })}
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-primary/40"
+              />
+            </div>
+          )}
+
           {/* No one took the last minute slot */}
           <button
             onClick={async () => {

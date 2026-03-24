@@ -265,7 +265,7 @@ export default function Agenda() {
     }
   };
 
-  // Auto-expire last minute slots when end_time has passed and no client took it
+  // Auto-expire last minute slots when end_time has passed (+15 min buffer) and no client took it
   useEffect(() => {
     if (!appointments.length) return;
     const now = new Date();
@@ -275,7 +275,8 @@ export default function Agenda() {
     const expired = appointments.filter(a =>
       a.status === 'last_minute' &&
       !a.client_email &&
-      (a.date < todayStr || (a.date === todayStr && timeToMinutes(a.end_time || a.start_time) <= nowMinutes))
+      a.client_name === 'Last Minute' &&
+      (a.date < todayStr || (a.date === todayStr && timeToMinutes(a.end_time || a.start_time) + 15 <= nowMinutes))
     );
 
     if (expired.length === 0) return;
