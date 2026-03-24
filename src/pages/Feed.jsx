@@ -75,21 +75,23 @@ function GlassCard({ children }) {
     target: ref,
     offset: ['start end', 'end start'],
   });
-  const x = useTransform(scrollYProgress, [0, 0.5, 1], [-30, 15, -20]);
-  const opacity = useTransform(scrollYProgress, [0, 0.4, 0.6, 1], [0, 0.6, 0.6, 0]);
+  const x = useTransform(scrollYProgress, [0, 0.5, 1], [-20, 20, -20]);
+  const scale = useTransform(scrollYProgress, [0, 0.5, 1], [0.8, 1.1, 0.8]);
+  const opacity = useTransform(scrollYProgress, [0, 0.3, 0.5, 0.7, 1], [0, 0.7, 1, 0.7, 0]);
 
   return (
     <div ref={ref} className="relative">
       <motion.div
-        className="absolute -bottom-3 left-4 right-4 h-16 rounded-2xl blur-xl pointer-events-none"
+        className="absolute -bottom-2 inset-x-6 h-12 rounded-3xl pointer-events-none"
         style={{
           x,
+          scale,
           opacity,
-          background: 'linear-gradient(135deg, rgba(34,197,94,0.15) 0%, rgba(16,185,129,0.1) 50%, rgba(34,197,94,0.08) 100%)',
-          backdropFilter: 'blur(8px)',
+          background: 'radial-gradient(ellipse at center, rgba(34,197,94,0.35) 0%, rgba(16,185,129,0.2) 40%, transparent 70%)',
+          filter: 'blur(16px)',
         }}
       />
-      <div className="relative">{children}</div>
+      <div className="relative z-10">{children}</div>
     </div>
   );
 }
