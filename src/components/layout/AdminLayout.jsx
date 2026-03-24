@@ -1,11 +1,14 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Outlet, Link, useLocation, Navigate } from 'react-router-dom';
 import {
   LayoutDashboard, Calendar, Users, Scissors, UserCircle,
-  BarChart3, Settings, Menu, X, ChevronLeft, ShoppingBag, Star, Bell, Brain, Sun, Moon, ClipboardList, ShieldCheck, Sparkles, CalendarDays, Newspaper, Warehouse
+  BarChart3, Settings, Menu, X, ChevronLeft, ShoppingBag, Star, Bell, Brain, Sun, Moon, ClipboardList, ShieldCheck, Sparkles, CalendarDays, Newspaper, Warehouse, GripVertical
 } from 'lucide-react';
+import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { useTheme } from '@/lib/ThemeContext';
 import { useAuth } from '@/lib/AuthContext';
+
+const STORAGE_KEY = 'admin_sidebar_order';
 
 const allSidebarItems = [
   { path: '/admin', icon: LayoutDashboard, label: 'Dashboard', exact: true, perm: 'dashboard' },
@@ -30,18 +33,32 @@ const allSidebarItems = [
   { path: '/admin/barber-accounts', icon: ShieldCheck, label: 'Comptes Barbers', adminOnly: true },
 ];
 
+function reorderByPaths(items, savedPaths) {
+  if (!savedPaths || savedPaths.length === 0) return items;
+  const map = {};
+  items.forEach(item => { map[item.path] = item; });
+  const ordered = [];
+  savedPaths.forEach(path => {
+    if (map[path]) {
+      ordered.push(map[path]);
+      delete map[path];
+    }
+  });
+  // Append any new items not in saved order
+  Object.values(map).forEach(item => ordered.push(item));
+  return ordered;
+}
+
 export default function AdminLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
   const { theme, toggleTheme } = useTheme();
   const { user } = useAuth();
 
-  const sidebarItems = useMemo(() => {
-    // Admin sees everything except barberOnly items
+  const filteredItems = useMemo(() => {
     if (!user || user.role === 'admin') {
       return allSidebarItems.filter(item => !item.barberOnly);
     }
-    // Barber sees: alwaysShow items + barberOnly items + permitted items
     const perms = user.permissions || [];
     return allSidebarItems.filter(item => {
       if (item.adminOnly) return false;
@@ -50,7 +67,31 @@ export default function AdminLayout() {
     });
   }, [user]);
 
-  // Barber route protection: redirect immediately without rendering layout
+  const [sidebarItems, setSidebarItems] = useState(filteredItems);
+
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
+      if (saved) {
+        setSidebarItems(reorderByPaths(filteredItems, saved));
+      } else {
+        setSidebarItems(filteredItems);
+      }
+    } catch {
+      setSidebarItems(filteredItems);
+    }
+  }, [filteredItems]);
+
+  const handleDragEnd = useCallback((result) => {
+    if (!result.destination) return;
+    const items = Array.from(sidebarItems);
+    const [moved] = items.splice(result.source.index, 1);
+    items.splice(result.destination.index, 0, moved);
+    setSidebarItems(items);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(items.map(i => i.path)));
+  }, [sidebarItems]);
+
+  // Barber route protection
   const isBarber = user?.role === 'barber';
   if (isBarber) {
     const currentPath = location.pathname;
@@ -96,24 +137,52 @@ export default function AdminLayout() {
           </button>
         </div>
 
-        {/* Nav */}
-        <nav className="flex-1 overflow-y-auto p-2.5 space-y-0.5">
-          {sidebarItems.map((item) => (
-            <Link
-              key={item.path}
-              to={item.path}
-              onClick={() => setSidebarOpen(false)}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
-                isActive(item)
-                  ? 'bg-primary/10 text-primary'
-                  : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
-              }`}
-            >
-              <item.icon className="w-4 h-4 shrink-0" />
-              {item.label}
-            </Link>
-          ))}
-        </nav>
+        {/* Nav with drag & drop */}
+        <DragDropContext onDragEnd={handleDragEnd}>
+          <Droppable droppableId="sidebar">
+            {(provided) => (
+              <nav
+                className="flex-1 overflow-y-auto p-2.5 space-y-0.5"
+                ref={provided.innerRef}
+                {...provided.droppableProps}
+              >
+                {sidebarItems.map((item, index) => (
+                  <Draggable key={item.path} draggableId={item.path} index={index}>
+                    {(provided, snapshot) => (
+                      <div
+                        ref={provided.innerRef}
+                        {...provided.draggableProps}
+                        className={`flex items-center rounded-lg text-sm font-medium transition-all duration-200 ${
+                          snapshot.isDragging
+                            ? 'bg-primary/15 text-primary shadow-lg shadow-primary/10 ring-1 ring-primary/20'
+                            : isActive(item)
+                              ? 'bg-primary/10 text-primary'
+                              : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
+                        }`}
+                      >
+                        <div
+                          {...provided.dragHandleProps}
+                          className="pl-1.5 pr-0 py-2.5 cursor-grab active:cursor-grabbing opacity-30 hover:opacity-70 transition-opacity"
+                        >
+                          <GripVertical className="w-3.5 h-3.5" />
+                        </div>
+                        <Link
+                          to={item.path}
+                          onClick={() => setSidebarOpen(false)}
+                          className="flex items-center gap-3 flex-1 pr-3 py-2.5"
+                        >
+                          <item.icon className="w-4 h-4 shrink-0" />
+                          {item.label}
+                        </Link>
+                      </div>
+                    )}
+                  </Draggable>
+                ))}
+                {provided.placeholder}
+              </nav>
+            )}
+          </Droppable>
+        </DragDropContext>
 
         {/* Bottom */}
         <div className="p-2.5 border-t border-border space-y-0.5 shrink-0">
