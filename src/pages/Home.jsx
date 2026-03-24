@@ -137,11 +137,11 @@ export default function Home() {
           <p className="text-sm font-light tracking-[0.3em] uppercase text-white/70 mb-4">Premium BarberShop</p>
 
           <div className="flex items-center gap-3 mb-5">
-            <div className="flex items-center gap-1.5 backdrop-blur-xl bg-white/10 border border-white/15 rounded-full px-3 py-1.5">
+            <Link to="/reviews" className="flex items-center gap-1.5 backdrop-blur-xl bg-white/10 border border-white/15 rounded-full px-3 py-1.5 active:scale-95 transition-transform">
               <Star className="w-3.5 h-3.5 text-primary fill-primary" />
               <span className="text-white font-bold text-sm">{avgRating}</span>
               <span className="text-white/50 text-xs">({reviews.length})</span>
-            </div>
+            </Link>
             <div className="flex items-center gap-1.5 text-white/60 text-xs">
               <MapPin className="w-3.5 h-3.5" />
               Douvaine
