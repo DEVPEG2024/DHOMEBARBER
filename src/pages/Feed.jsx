@@ -445,7 +445,7 @@ export default function Feed() {
     <div className="max-w-lg mx-auto">
       <div className="mb-6">
         <p className="text-[10px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Communauté</p>
-        <h1 className="font-display text-2xl font-bold">New'sGang</h1>
+        <h1 className="font-sans text-2xl font-bold">Ca dit quoi le Gang ?</h1>
       </div>
 
       {/* Floating publish button */}
