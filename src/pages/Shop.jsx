@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { base44 } from '@/api/base44Client';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useScroll, useTransform } from 'framer-motion';
 import { ShoppingBag, Plus, Minus, ShoppingCart, X, Trash2, Store, CheckCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -17,6 +17,44 @@ const categoryLabels = {
   skincare: 'Soin visage',
   other: 'Autre',
 };
+
+function GlassCard({ children }) {
+  const ref = useRef(null);
+  const { scrollYProgress } = useScroll({
+    target: ref,
+    offset: ['start end', 'end start'],
+  });
+  const x1 = useTransform(scrollYProgress, [0, 0.5, 1], [-20, 15, -20]);
+  const x2 = useTransform(scrollYProgress, [0, 0.5, 1], [15, -12, 15]);
+  const scale = useTransform(scrollYProgress, [0, 0.5, 1], [0.7, 1.15, 0.7]);
+  const opacity = useTransform(scrollYProgress, [0, 0.25, 0.5, 0.75, 1], [0, 0.9, 1, 0.9, 0]);
+
+  return (
+    <div ref={ref} className="relative">
+      <motion.div
+        className="absolute -bottom-3 inset-x-1 h-14 rounded-2xl pointer-events-none"
+        style={{
+          x: x1,
+          scale,
+          opacity,
+          background: 'radial-gradient(ellipse at 40% 50%, rgba(34,197,94,0.5) 0%, rgba(16,185,129,0.3) 35%, transparent 75%)',
+          filter: 'blur(16px)',
+        }}
+      />
+      <motion.div
+        className="absolute -bottom-2 inset-x-3 h-10 rounded-2xl pointer-events-none"
+        style={{
+          x: x2,
+          scale,
+          opacity,
+          background: 'radial-gradient(ellipse at 60% 50%, rgba(52,211,153,0.4) 0%, rgba(16,185,129,0.2) 40%, transparent 70%)',
+          filter: 'blur(12px)',
+        }}
+      />
+      <div className="relative z-10">{children}</div>
+    </div>
+  );
+}
 
 export default function Shop() {
   const [cart, setCart] = useState({});
@@ -131,54 +169,55 @@ export default function Shop() {
       </div>
 
       {/* Products Grid */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 gap-4">
         {filtered.map((product, i) => (
-          <motion.div
-            key={product.id}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.05 }}
-            className="bg-card border border-border rounded-xl overflow-hidden"
-          >
-            <div className="aspect-square bg-white relative">
-              {product.image_url ? (
-                <img src={product.image_url} alt={product.name} className="w-full h-full object-contain" />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center">
-                  <ShoppingBag className="w-8 h-8 text-muted-foreground/30" />
-                </div>
-              )}
-              {product.brand && (
-                <Badge className="absolute top-2 left-2 bg-card/80 text-foreground text-[9px] border-none backdrop-blur-sm">
-                  {product.brand}
-                </Badge>
-              )}
-            </div>
-            <div className="p-3">
-              <h3 className="text-sm font-semibold line-clamp-1">{product.name}</h3>
-              {product.description && (
-                <p className="text-[11px] text-muted-foreground line-clamp-2 mt-0.5">{product.description}</p>
-              )}
-              <div className="flex items-center justify-between mt-2">
-                <span className="text-sm font-bold text-primary">{product.price}€</span>
-                {cart[product.id] ? (
-                  <div className="flex items-center gap-2.5">
-                    <button onClick={() => updateCart(product.id, -1)} className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center active:scale-95">
-                      <Minus className="w-3.5 h-3.5" />
-                    </button>
-                    <span className="text-sm font-bold w-4 text-center">{cart[product.id]}</span>
-                    <button onClick={() => updateCart(product.id, 1)} className="w-8 h-8 rounded-full bg-primary flex items-center justify-center active:scale-95">
-                      <Plus className="w-3.5 h-3.5 text-primary-foreground" />
-                    </button>
-                  </div>
+          <GlassCard key={product.id}>
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: i * 0.05 }}
+              className="bg-card border border-border rounded-xl overflow-hidden"
+            >
+              <div className="aspect-square bg-white relative">
+                {product.image_url ? (
+                  <img src={product.image_url} alt={product.name} className="w-full h-full object-contain" />
                 ) : (
-                  <button onClick={() => updateCart(product.id, 1)} className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center hover:bg-primary/20 transition-colors active:scale-95">
-                    <Plus className="w-4 h-4 text-primary" />
-                  </button>
+                  <div className="w-full h-full flex items-center justify-center">
+                    <ShoppingBag className="w-8 h-8 text-muted-foreground/30" />
+                  </div>
+                )}
+                {product.brand && (
+                  <Badge className="absolute top-2 left-2 bg-card/80 text-foreground text-[9px] border-none backdrop-blur-sm">
+                    {product.brand}
+                  </Badge>
                 )}
               </div>
-            </div>
-          </motion.div>
+              <div className="p-3">
+                <h3 className="text-sm font-semibold line-clamp-1">{product.name}</h3>
+                {product.description && (
+                  <p className="text-[11px] text-muted-foreground line-clamp-2 mt-0.5">{product.description}</p>
+                )}
+                <div className="flex items-center justify-between mt-2">
+                  <span className="text-sm font-bold text-primary">{product.price}€</span>
+                  {cart[product.id] ? (
+                    <div className="flex items-center gap-2.5">
+                      <button onClick={() => updateCart(product.id, -1)} className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center active:scale-95">
+                        <Minus className="w-3.5 h-3.5" />
+                      </button>
+                      <span className="text-sm font-bold w-4 text-center">{cart[product.id]}</span>
+                      <button onClick={() => updateCart(product.id, 1)} className="w-8 h-8 rounded-full bg-primary flex items-center justify-center active:scale-95">
+                        <Plus className="w-3.5 h-3.5 text-primary-foreground" />
+                      </button>
+                    </div>
+                  ) : (
+                    <button onClick={() => updateCart(product.id, 1)} className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center hover:bg-primary/20 transition-colors active:scale-95">
+                      <Plus className="w-4 h-4 text-primary" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          </GlassCard>
         ))}
       </div>
 
