@@ -1,3 +1,4 @@
+import React, { Suspense } from 'react';
 import { Toaster } from "@/components/ui/toaster"
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClientInstance } from '@/lib/query-client'
@@ -5,12 +6,13 @@ import { BrowserRouter as Router, Route, Routes, Navigate, Outlet, useLocation }
 import PageNotFound from './lib/PageNotFound';
 import { AuthProvider, useAuth } from '@/lib/AuthContext';
 import { ThemeProvider } from '@/lib/ThemeContext';
+import ErrorBoundary from '@/components/ErrorBoundary';
 
 // Layouts
 import ClientLayout from '@/components/layout/ClientLayout';
 import AdminLayout from '@/components/layout/AdminLayout';
 
-// Client pages
+// Client pages (loaded eagerly - main user flow)
 import Home from '@/pages/Home';
 import Services from '@/pages/Services';
 import Booking from '@/pages/Booking';
@@ -25,25 +27,32 @@ import ClientNotifications from '@/pages/ClientNotifications';
 import BarberProfile from '@/pages/BarberProfile';
 import Feed from '@/pages/Feed';
 
-// Admin pages
-import AdminDashboard from '@/pages/admin/Dashboard';
-import Agenda from '@/pages/admin/Agenda';
-import AdminServices from '@/pages/admin/AdminServices';
-import Team from '@/pages/admin/Team';
-import Clients from '@/pages/admin/Clients';
-import AdminProducts from '@/pages/admin/AdminProducts';
-import AdminOrders from '@/pages/admin/AdminOrders';
-import AdminReviews from '@/pages/admin/AdminReviews';
-import Stats from '@/pages/admin/Stats';
-import AdminSettings from '@/pages/admin/AdminSettings';
-import Notifications from '@/pages/admin/Notifications';
-import SmartAgenda from '@/pages/admin/SmartAgenda';
-import Cleaning from '@/pages/admin/Cleaning';
-import BarberCleaning from '@/pages/admin/BarberCleaning';
-import BarberAccounts from '@/pages/admin/BarberAccounts';
-import AdminLeave from '@/pages/admin/AdminLeave';
-import BarberLeave from '@/pages/admin/BarberLeave';
-import BarberSettings from '@/pages/admin/BarberSettings';
+// Admin pages (lazy-loaded - only for admin/barber users)
+const AdminDashboard = React.lazy(() => import('@/pages/admin/Dashboard'));
+const Agenda = React.lazy(() => import('@/pages/admin/Agenda'));
+const AdminServices = React.lazy(() => import('@/pages/admin/AdminServices'));
+const Team = React.lazy(() => import('@/pages/admin/Team'));
+const Clients = React.lazy(() => import('@/pages/admin/Clients'));
+const AdminProducts = React.lazy(() => import('@/pages/admin/AdminProducts'));
+const AdminStock = React.lazy(() => import('@/pages/admin/AdminStock'));
+const AdminOrders = React.lazy(() => import('@/pages/admin/AdminOrders'));
+const AdminReviews = React.lazy(() => import('@/pages/admin/AdminReviews'));
+const Stats = React.lazy(() => import('@/pages/admin/Stats'));
+const AdminSettings = React.lazy(() => import('@/pages/admin/AdminSettings'));
+const Notifications = React.lazy(() => import('@/pages/admin/Notifications'));
+const SmartAgenda = React.lazy(() => import('@/pages/admin/SmartAgenda'));
+const Cleaning = React.lazy(() => import('@/pages/admin/Cleaning'));
+const BarberCleaning = React.lazy(() => import('@/pages/admin/BarberCleaning'));
+const BarberAccounts = React.lazy(() => import('@/pages/admin/BarberAccounts'));
+const AdminLeave = React.lazy(() => import('@/pages/admin/AdminLeave'));
+const BarberLeave = React.lazy(() => import('@/pages/admin/BarberLeave'));
+const BarberSettings = React.lazy(() => import('@/pages/admin/BarberSettings'));
+
+const LazyFallback = () => (
+  <div className="fixed inset-0 flex items-center justify-center bg-background">
+    <div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+  </div>
+);
 
 // Route guard: requires authentication (client routes only)
 function RequireAuth() {
@@ -164,28 +173,29 @@ const AppRoutes = () => {
         </Route>
       </Route>
 
-      {/* Admin routes - require admin role */}
+      {/* Admin routes - require admin role (lazy-loaded) */}
       <Route element={<RequireAdmin />}>
         <Route element={<AdminLayout />}>
-          <Route path="/admin" element={<AdminDashboard />} />
-          <Route path="/admin/agenda" element={<Agenda />} />
-          <Route path="/admin/services" element={<AdminServices />} />
-          <Route path="/admin/team" element={<Team />} />
-          <Route path="/admin/clients" element={<Clients />} />
-          <Route path="/admin/products" element={<AdminProducts />} />
-          <Route path="/admin/orders" element={<AdminOrders />} />
-          <Route path="/admin/reviews" element={<AdminReviews />} />
-          <Route path="/admin/stats" element={<Stats />} />
-          <Route path="/admin/settings" element={<AdminSettings />} />
-          <Route path="/admin/notifications" element={<Notifications />} />
-          <Route path="/admin/cleaning" element={<Cleaning />} />
-          <Route path="/admin/my-cleaning" element={<BarberCleaning />} />
-          <Route path="/admin/smart-agenda" element={<SmartAgenda />} />
-          <Route path="/admin/barber-accounts" element={<BarberAccounts />} />
-          <Route path="/admin/leave" element={<AdminLeave />} />
-          <Route path="/admin/my-leave" element={<BarberLeave />} />
+          <Route path="/admin" element={<Suspense fallback={<LazyFallback />}><AdminDashboard /></Suspense>} />
+          <Route path="/admin/agenda" element={<Suspense fallback={<LazyFallback />}><Agenda /></Suspense>} />
+          <Route path="/admin/services" element={<Suspense fallback={<LazyFallback />}><AdminServices /></Suspense>} />
+          <Route path="/admin/team" element={<Suspense fallback={<LazyFallback />}><Team /></Suspense>} />
+          <Route path="/admin/clients" element={<Suspense fallback={<LazyFallback />}><Clients /></Suspense>} />
+          <Route path="/admin/products" element={<Suspense fallback={<LazyFallback />}><AdminProducts /></Suspense>} />
+          <Route path="/admin/stock" element={<Suspense fallback={<LazyFallback />}><AdminStock /></Suspense>} />
+          <Route path="/admin/orders" element={<Suspense fallback={<LazyFallback />}><AdminOrders /></Suspense>} />
+          <Route path="/admin/reviews" element={<Suspense fallback={<LazyFallback />}><AdminReviews /></Suspense>} />
+          <Route path="/admin/stats" element={<Suspense fallback={<LazyFallback />}><Stats /></Suspense>} />
+          <Route path="/admin/settings" element={<Suspense fallback={<LazyFallback />}><AdminSettings /></Suspense>} />
+          <Route path="/admin/notifications" element={<Suspense fallback={<LazyFallback />}><Notifications /></Suspense>} />
+          <Route path="/admin/cleaning" element={<Suspense fallback={<LazyFallback />}><Cleaning /></Suspense>} />
+          <Route path="/admin/my-cleaning" element={<Suspense fallback={<LazyFallback />}><BarberCleaning /></Suspense>} />
+          <Route path="/admin/smart-agenda" element={<Suspense fallback={<LazyFallback />}><SmartAgenda /></Suspense>} />
+          <Route path="/admin/barber-accounts" element={<Suspense fallback={<LazyFallback />}><BarberAccounts /></Suspense>} />
+          <Route path="/admin/leave" element={<Suspense fallback={<LazyFallback />}><AdminLeave /></Suspense>} />
+          <Route path="/admin/my-leave" element={<Suspense fallback={<LazyFallback />}><BarberLeave /></Suspense>} />
           <Route path="/admin/feed" element={<Feed />} />
-          <Route path="/admin/my-settings" element={<BarberSettings />} />
+          <Route path="/admin/my-settings" element={<Suspense fallback={<LazyFallback />}><BarberSettings /></Suspense>} />
         </Route>
       </Route>
 
@@ -196,16 +206,18 @@ const AppRoutes = () => {
 
 function App() {
   return (
-    <ThemeProvider>
-      <AuthProvider>
-        <QueryClientProvider client={queryClientInstance}>
-          <Router>
-            <AppRoutes />
-          </Router>
-          <Toaster />
-        </QueryClientProvider>
-      </AuthProvider>
-    </ThemeProvider>
+    <ErrorBoundary>
+      <ThemeProvider>
+        <AuthProvider>
+          <QueryClientProvider client={queryClientInstance}>
+            <Router>
+              <AppRoutes />
+            </Router>
+            <Toaster />
+          </QueryClientProvider>
+        </AuthProvider>
+      </ThemeProvider>
+    </ErrorBoundary>
   )
 }
 

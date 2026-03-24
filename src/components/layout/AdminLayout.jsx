@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Outlet, Link, useLocation, Navigate } from 'react-router-dom';
 import {
   LayoutDashboard, Calendar, Users, Scissors, UserCircle,
-  BarChart3, Settings, Menu, X, ChevronLeft, ShoppingBag, Star, Bell, Brain, Sun, Moon, ClipboardList, ShieldCheck, Sparkles, CalendarDays, Newspaper
+  BarChart3, Settings, Menu, X, ChevronLeft, ShoppingBag, Star, Bell, Brain, Sun, Moon, ClipboardList, ShieldCheck, Sparkles, CalendarDays, Newspaper, Warehouse
 } from 'lucide-react';
 import { useTheme } from '@/lib/ThemeContext';
 import { useAuth } from '@/lib/AuthContext';
@@ -14,6 +14,7 @@ const allSidebarItems = [
   { path: '/admin/team', icon: Users, label: 'Équipe', perm: 'team' },
   { path: '/admin/clients', icon: UserCircle, label: 'Clients', perm: 'clients' },
   { path: '/admin/products', icon: ShoppingBag, label: 'Produits', perm: 'products' },
+  { path: '/admin/stock', icon: Warehouse, label: 'Stock Produits', perm: 'products' },
   { path: '/admin/orders', icon: ClipboardList, label: 'Commandes', perm: 'orders' },
   { path: '/admin/reviews', icon: Star, label: 'Avis', perm: 'reviews' },
   { path: '/admin/stats', icon: BarChart3, label: 'Statistiques', perm: 'stats' },
