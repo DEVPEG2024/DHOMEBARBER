@@ -81,11 +81,37 @@ export default function Home() {
     queryFn: () => api.entities.Post.list('-created_at', 1),
   });
 
+  const { data: settingsData = [] } = useQuery({
+    queryKey: ['salonSettings'],
+    queryFn: () => api.entities.SalonSettings.list(),
+  });
+
   const latestPost = posts[0] || null;
+  const settings = settingsData[0] || null;
 
   const avgRating = reviews.length > 0
     ? (reviews.reduce((sum, r) => sum + (r.rating || 0), 0) / reviews.length).toFixed(1)
     : '5.0';
+
+  // Build opening hours label from salon settings
+  const hoursLabel = (() => {
+    const oh = settings?.opening_hours;
+    if (!oh) return { label: 'Lun - Sam', sub: '9h30 - 19h' };
+    const dayNames = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+    const dayLabels = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
+    const openDays = dayNames.map((d, i) => ({ name: d, label: dayLabels[i], ...oh[d] })).filter(d => !d.closed);
+    if (openDays.length === 0) return { label: 'Fermé', sub: '' };
+    const fmt = (t) => { const [h, m] = t.split(':'); return m === '00' ? `${parseInt(h)}h` : `${parseInt(h)}h${m}`; };
+    const first = openDays[0].label;
+    const last = openDays[openDays.length - 1].label;
+    const label = first === last ? first : `${first} - ${last}`;
+    const opens = [...new Set(openDays.map(d => d.open))].sort();
+    const closes = [...new Set(openDays.map(d => d.close))].sort();
+    const sub = opens.length === 1 && closes.length === 1
+      ? `${fmt(opens[0])} - ${fmt(closes[0])}`
+      : `${fmt(opens[0])} - ${fmt(closes[closes.length - 1])}`;
+    return { label, sub };
+  })();
 
   return (
     <div className="min-h-screen">
@@ -227,7 +253,7 @@ export default function Home() {
         {/* Quick Info - Vert / Blanc / Rouge */}
         <motion.div variants={itemVariants} className="grid grid-cols-3 gap-2">
           {[
-            { icon: Clock, label: 'Mar - Sam', sub: '9h - 20h', href: null, iconColor: 'text-green-500', bgColor: 'bg-green-500/15', borderColor: 'border-green-500/20' },
+            { icon: Clock, label: hoursLabel.label, sub: hoursLabel.sub, href: null, iconColor: 'text-green-500', bgColor: 'bg-green-500/15', borderColor: 'border-green-500/20' },
             { icon: Phone, label: 'Appeler', sub: '06 66 08 36 05', href: 'tel:0666083605', iconColor: 'text-white', bgColor: 'bg-white/15', borderColor: 'border-white/20' },
             { icon: MapPin, label: 'Itinéraire', sub: 'Douvaine', href: 'https://maps.google.com/?q=3+Rue+du+Bois+Arquet+74140+Douvaine', iconColor: 'text-red-500', bgColor: 'bg-red-500/15', borderColor: 'border-red-500/20' },
           ].map(({ icon: Icon, label, sub, href, iconColor, bgColor, borderColor }) => {
