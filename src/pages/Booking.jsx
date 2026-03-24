@@ -41,6 +41,7 @@ export default function Booking() {
 
   const urlParams = new URLSearchParams(window.location.search);
   const preSelectedIds = urlParams.get('services')?.split(',') || [];
+  const preSelectedBarberId = urlParams.get('barber') || null;
 
   const { data: services = [] } = useQuery({
     queryKey: ['services'],
@@ -92,6 +93,16 @@ export default function Booking() {
       if (preSelected.length > 0) setSelectedServices(preSelected);
     }
   }, [services]);
+
+  // Pre-select barber from URL param and skip barber step
+  React.useEffect(() => {
+    if (preSelectedBarberId && employees.length > 0 && !selectedEmployee) {
+      const barber = employees.find(e => e.id === preSelectedBarberId);
+      if (barber) {
+        setSelectedEmployee(barber);
+      }
+    }
+  }, [employees, preSelectedBarberId]);
 
   const totalDuration = selectedServices.reduce((sum, s) => sum + (s.duration || 0), 0);
   const totalPrice = selectedServices.reduce((sum, s) => sum + (s.price || 0), 0);
@@ -201,6 +212,7 @@ export default function Booking() {
           {/* Step indicators */}
           <div className="flex items-center gap-2 mb-6">
             {STEPS.map((_, i) => {
+              if (i === 1 && preSelectedBarberId) return null;
               const Icon = STEP_ICONS[i];
               return (
                 <React.Fragment key={i}>
@@ -215,7 +227,7 @@ export default function Booking() {
                       <Icon className={`w-3.5 h-3.5 ${i === step ? 'text-primary' : 'text-muted-foreground/40'}`} />
                     )}
                   </div>
-                  {i < STEPS.length - 1 && (
+                  {i < STEPS.length - 1 && !(i === 0 && preSelectedBarberId) && (
                     <div className={`flex-1 h-px transition-colors duration-300 ${i < step ? 'bg-primary' : 'bg-white/10'}`} />
                   )}
                 </React.Fragment>
@@ -224,7 +236,7 @@ export default function Booking() {
           </div>
 
           <h1 className="font-display text-2xl font-bold text-foreground">{STEP_LABELS[step]}</h1>
-          <p className="text-xs text-muted-foreground mt-1">Étape {step + 1} sur {STEPS.length}</p>
+          <p className="text-xs text-muted-foreground mt-1">Étape {step + 1} sur {STEPS.length}{preSelectedBarberId && selectedEmployee ? ` · avec ${selectedEmployee.name}` : ''}</p>
         </div>
 
         <AnimatePresence mode="wait">
@@ -378,13 +390,13 @@ export default function Booking() {
         {/* Navigation */}
         <div className="flex gap-3 mt-8 pb-6">
           {step > 0 && (
-            <button onClick={() => setStep(s => s - 1)}
+            <button onClick={() => setStep(s => (s === 2 && preSelectedBarberId) ? 0 : s - 1)}
               className="flex items-center gap-2 px-5 h-12 rounded-2xl backdrop-blur-xl bg-white/5 border border-white/10 text-sm font-medium text-foreground hover:bg-white/10 transition-all">
               <ChevronLeft className="w-4 h-4" /> Retour
             </button>
           )}
           {step < 3 ? (
-            <button onClick={() => setStep(s => s + 1)} disabled={!canNext()}
+            <button onClick={() => setStep(s => (s === 0 && preSelectedBarberId) ? 2 : s + 1)} disabled={!canNext()}
               className={`flex-1 flex items-center justify-center gap-2 h-12 rounded-2xl text-sm font-semibold transition-all duration-300 ${
                 canNext()
                   ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/25 hover:bg-primary/90'

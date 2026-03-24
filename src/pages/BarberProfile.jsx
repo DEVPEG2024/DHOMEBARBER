@@ -248,7 +248,7 @@ export default function BarberProfile() {
 
         {/* CTA */}
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }}>
-          <Link to="/booking">
+          <Link to={`/booking?barber=${employee.id}`}>
             <Button className="w-full h-12 rounded-2xl bg-primary text-primary-foreground font-semibold text-sm shadow-lg shadow-primary/25 hover:bg-primary/90">
               <Calendar className="w-4 h-4 mr-2" />
               Prendre rendez-vous avec {employee.name}
