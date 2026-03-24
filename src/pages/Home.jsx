@@ -160,7 +160,7 @@ export default function Home() {
           {/* Social Media */}
           <div className="flex items-center gap-3 mt-4">
             <motion.a
-              href="https://www.instagram.com/dhomebarber"
+              href="https://www.instagram.com/dhomebarber_74"
               target="_blank"
               rel="noopener noreferrer"
               whileTap={{ scale: 0.9 }}
