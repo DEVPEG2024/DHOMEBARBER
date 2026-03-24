@@ -40,6 +40,7 @@ function reducer(state, action) {
 function ModalInner({ appointment, onUpdate, onDelete }) {
   const [state, dispatch] = useReducer(reducer, appointment, initialState);
   const [clientSearch, setClientSearch] = React.useState('');
+  const [assignedClient, setAssignedClient] = React.useState(null);
 
   const { data: products = [] } = useQuery({
     queryKey: ['products'],
@@ -99,7 +100,7 @@ function ModalInner({ appointment, onUpdate, onDelete }) {
       </div>
 
       {/* Client info */}
-      {!isCompleted && !appointment.client_email ? (
+      {!isCompleted && !appointment.client_email && !assignedClient ? (
         <div className="bg-secondary rounded-xl p-3 space-y-2 relative">
           <div className="flex items-center gap-2">
             <User className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
@@ -124,9 +125,9 @@ function ModalInner({ appointment, onUpdate, onDelete }) {
                         client_email: u.email,
                         client_phone: u.phone || '',
                       });
+                      setAssignedClient({ name: u.full_name || u.email, email: u.email, phone: u.phone || '' });
                       toast.success(`Client ${u.full_name || u.email} assigné`);
                       setClientSearch('');
-                      onUpdate?.();
                     } catch {
                       toast.error('Erreur');
                     } finally {
@@ -149,18 +150,18 @@ function ModalInner({ appointment, onUpdate, onDelete }) {
         <div className="bg-secondary rounded-xl p-3 space-y-2">
           <div className="flex items-center gap-2">
             <User className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-            <span className="text-sm font-semibold">{appointment.client_name}</span>
+            <span className="text-sm font-semibold">{assignedClient?.name || appointment.client_name}</span>
           </div>
-          {appointment.client_email && (
+          {(assignedClient?.email || appointment.client_email) && (
             <div className="flex items-center gap-2">
               <Mail className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-              <span className="text-xs text-muted-foreground">{appointment.client_email}</span>
+              <span className="text-xs text-muted-foreground">{assignedClient?.email || appointment.client_email}</span>
             </div>
           )}
-          {appointment.client_phone && (
+          {(assignedClient?.phone || appointment.client_phone) && (
             <div className="flex items-center gap-2">
               <Phone className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-              <span className="text-xs text-muted-foreground">{appointment.client_phone}</span>
+              <span className="text-xs text-muted-foreground">{assignedClient?.phone || appointment.client_phone}</span>
             </div>
           )}
         </div>
