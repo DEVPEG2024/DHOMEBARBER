@@ -75,20 +75,43 @@ function GlassCard({ children }) {
     target: ref,
     offset: ['start end', 'end start'],
   });
-  const x = useTransform(scrollYProgress, [0, 0.5, 1], [-20, 20, -20]);
-  const scale = useTransform(scrollYProgress, [0, 0.5, 1], [0.8, 1.1, 0.8]);
-  const opacity = useTransform(scrollYProgress, [0, 0.3, 0.5, 0.7, 1], [0, 0.7, 1, 0.7, 0]);
+  const x1 = useTransform(scrollYProgress, [0, 0.5, 1], [-40, 30, -40]);
+  const x2 = useTransform(scrollYProgress, [0, 0.5, 1], [30, -25, 30]);
+  const scale = useTransform(scrollYProgress, [0, 0.5, 1], [0.7, 1.2, 0.7]);
+  const opacity = useTransform(scrollYProgress, [0, 0.25, 0.5, 0.75, 1], [0, 0.9, 1, 0.9, 0]);
+  const rotate = useTransform(scrollYProgress, [0, 0.5, 1], [-3, 2, -3]);
 
   return (
-    <div ref={ref} className="relative">
+    <div ref={ref} className="relative py-1">
+      {/* Primary glow - large green */}
       <motion.div
-        className="absolute -bottom-2 inset-x-6 h-12 rounded-3xl pointer-events-none"
+        className="absolute -bottom-4 inset-x-2 h-20 rounded-3xl pointer-events-none"
         style={{
-          x,
+          x: x1,
           scale,
           opacity,
-          background: 'radial-gradient(ellipse at center, rgba(34,197,94,0.35) 0%, rgba(16,185,129,0.2) 40%, transparent 70%)',
-          filter: 'blur(16px)',
+          rotate,
+          background: 'radial-gradient(ellipse at 40% 50%, rgba(34,197,94,0.5) 0%, rgba(16,185,129,0.3) 35%, rgba(5,150,105,0.15) 60%, transparent 80%)',
+          filter: 'blur(20px)',
+        }}
+      />
+      {/* Secondary glow - emerald accent offset */}
+      <motion.div
+        className="absolute -bottom-3 inset-x-8 h-14 rounded-3xl pointer-events-none"
+        style={{
+          x: x2,
+          scale,
+          opacity,
+          background: 'radial-gradient(ellipse at 60% 50%, rgba(52,211,153,0.45) 0%, rgba(16,185,129,0.25) 40%, transparent 75%)',
+          filter: 'blur(14px)',
+        }}
+      />
+      {/* Subtle border glow on the card itself */}
+      <motion.div
+        className="absolute inset-0 rounded-2xl pointer-events-none"
+        style={{
+          opacity: useTransform(scrollYProgress, [0, 0.4, 0.6, 1], [0, 0.4, 0.4, 0]),
+          boxShadow: '0 0 20px 2px rgba(34,197,94,0.15), inset 0 0 20px 0 rgba(34,197,94,0.03)',
         }}
       />
       <div className="relative z-10">{children}</div>
