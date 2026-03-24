@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { base44 } from '@/api/base44Client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Eye, EyeOff, MessageSquare, Star, ExternalLink, RefreshCw, MapPin } from 'lucide-react';
+import { Eye, EyeOff, MessageSquare, Star, ExternalLink, MapPin, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import StarRating from '@/components/shared/StarRating';
@@ -24,6 +24,14 @@ export default function AdminReviews() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['allReviews'] });
       toast.success('Visibilité mise à jour');
+    },
+  });
+
+  const deleteReview = useMutation({
+    mutationFn: (id) => base44.entities.Review.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['allReviews'] });
+      toast.success('Avis supprimé');
     },
   });
 
@@ -120,10 +128,16 @@ export default function AdminReviews() {
                       {review.employee_name && ` · ${review.employee_name}`}
                     </p>
                   </div>
-                  <Button variant="ghost" size="icon" className="h-8 w-8"
-                    onClick={() => toggleVisibility.mutate(review)}>
-                    {review.is_visible ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4 text-muted-foreground" />}
-                  </Button>
+                  <div className="flex gap-1">
+                    <Button variant="ghost" size="icon" className="h-8 w-8"
+                      onClick={() => toggleVisibility.mutate(review)}>
+                      {review.is_visible ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4 text-muted-foreground" />}
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-red-500"
+                      onClick={() => { if (confirm('Supprimer cet avis ?')) deleteReview.mutate(review.id); }}>
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
                 </div>
                 {review.comment && (
                   <p className="text-xs text-muted-foreground leading-relaxed mt-2">{review.comment}</p>
