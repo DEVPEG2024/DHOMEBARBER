@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { base44 } from '@/api/base44Client';
+import { api } from '@/api/apiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { format, startOfWeek, endOfMonth, addDays } from 'date-fns';
 import { exportToCSV } from '@/utils/exportCSV';
@@ -8,7 +8,7 @@ import { useAuth } from '@/lib/AuthContext';
 
 const BARBER_COLORS = ['#3fcf8e','#60a5fa','#f59e0b','#a78bfa','#f472b6','#34d399','#fb923c','#38bdf8','#e879f9','#4ade80'];
 
-import { apiRequest, apiUrl } from '@/api/base44Client';
+import { apiRequest, apiUrl } from '@/api/apiClient';
 import AgendaToolbar from '@/components/agenda/AgendaToolbar';
 import DayView from '@/components/agenda/DayView';
 import WeekView from '@/components/agenda/WeekView';
@@ -54,17 +54,17 @@ export default function Agenda() {
 
   const { data: appointments = [] } = useQuery({
     queryKey: ['agendaAppointments', queryStart, queryEnd],
-    queryFn: () => base44.entities.Appointment.list('start_time', 500),
+    queryFn: () => api.entities.Appointment.list('start_time', 500),
   });
 
   const { data: rawEmployees = [] } = useQuery({
     queryKey: ['employees'],
-    queryFn: () => base44.entities.Employee.filter({ is_active: true }),
+    queryFn: () => api.entities.Employee.filter({ is_active: true }),
   });
 
   const { data: timeOffs = [] } = useQuery({
     queryKey: ['timeOffs'],
-    queryFn: () => base44.entities.TimeOff.list('-start_date', 200),
+    queryFn: () => api.entities.TimeOff.list('-start_date', 200),
     refetchOnMount: 'always',
     refetchInterval: 30000,
   });
@@ -90,7 +90,7 @@ export default function Agenda() {
   }, [appointments, queryStart, queryEnd, employeeFilter]);
 
   const updateStatus = useMutation({
-    mutationFn: ({ id, status }) => base44.entities.Appointment.update(id, { status }),
+    mutationFn: ({ id, status }) => api.entities.Appointment.update(id, { status }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['agendaAppointments'] });
       toast.success('Statut mis à jour');
@@ -98,7 +98,7 @@ export default function Agenda() {
   });
 
   const createBreak = useMutation({
-    mutationFn: (breakData) => base44.entities.Appointment.create(breakData),
+    mutationFn: (breakData) => api.entities.Appointment.create(breakData),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['agendaAppointments'] });
     },
@@ -108,7 +108,7 @@ export default function Agenda() {
   });
 
   const deleteBreak = useMutation({
-    mutationFn: (id) => base44.entities.Appointment.delete(id),
+    mutationFn: (id) => api.entities.Appointment.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['agendaAppointments'] });
       toast.success('Pause supprimée');
@@ -161,7 +161,7 @@ export default function Agenda() {
     if (!pendingBreak || employees.length === 0) return;
     Promise.all(
       employees.map(emp =>
-        base44.entities.Appointment.create(
+        api.entities.Appointment.create(
           buildBreakPayload(pendingBreak.start_time, pendingBreak.end_time, emp.id, pendingBreak.date)
         )
       )
@@ -187,7 +187,7 @@ export default function Agenda() {
 
     for (const date of dates) {
       try {
-        await base44.entities.Appointment.create(
+        await api.entities.Appointment.create(
           buildBreakPayload(start_time, end_time, employee_id, date)
         );
         created++;
