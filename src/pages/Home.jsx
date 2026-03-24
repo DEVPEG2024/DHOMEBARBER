@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '@/api/apiClient';
 import { useQuery } from '@tanstack/react-query';
@@ -54,7 +54,96 @@ const itemVariants = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: 'easeOut' } },
 };
 
+function BarberMarquee({ employees }) {
+  const scrollRef = useRef(null);
+  const autoScrollRef = useRef(null);
+  const touchActiveRef = useRef(false);
+  const resumeTimerRef = useRef(null);
+
+  const startAutoScroll = useCallback(() => {
+    if (autoScrollRef.current) return;
+    autoScrollRef.current = setInterval(() => {
+      const el = scrollRef.current;
+      if (!el || touchActiveRef.current) return;
+      el.scrollLeft += 1;
+      // Loop back seamlessly when reaching halfway (duplicate content)
+      const half = el.scrollWidth / 2;
+      if (el.scrollLeft >= half) {
+        el.scrollLeft -= half;
+      }
+    }, 20);
+  }, []);
+
+  const stopAutoScroll = useCallback(() => {
+    if (autoScrollRef.current) {
+      clearInterval(autoScrollRef.current);
+      autoScrollRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    startAutoScroll();
+    return () => {
+      stopAutoScroll();
+      if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current);
+    };
+  }, [startAutoScroll, stopAutoScroll]);
+
+  const handleTouchStart = () => {
+    touchActiveRef.current = true;
+    stopAutoScroll();
+    if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current);
+  };
+
+  const handleTouchEnd = () => {
+    touchActiveRef.current = false;
+    resumeTimerRef.current = setTimeout(() => {
+      startAutoScroll();
+    }, 2000);
+  };
+
+  const doubled = [...employees, ...employees];
+
+  return (
+    <div
+      ref={scrollRef}
+      className="flex gap-3 px-5 -mx-5 overflow-x-auto scrollbar-hide"
+      style={{ WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+      onMouseDown={handleTouchStart}
+      onMouseUp={handleTouchEnd}
+      onMouseLeave={handleTouchEnd}
+    >
+      {doubled.map((emp, i) => (
+        <Link key={`${emp.id}-${i}`} to={`/barber/${emp.id}`} className="shrink-0">
+          <motion.div
+            whileTap={{ scale: 0.95 }}
+            className="relative w-28 cursor-pointer group"
+          >
+            <div className="w-28 h-32 rounded-2xl overflow-hidden glass border border-white/10 mb-2 relative">
+              {emp.photo_url ? (
+                <img src={emp.photo_url} alt={emp.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center text-2xl font-bold text-muted-foreground bg-gradient-to-br from-primary/10 to-primary/5">
+                  {emp.name?.charAt(0)}
+                </div>
+              )}
+              <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+              <div className="absolute bottom-2 left-2 right-2">
+                <p className="text-xs font-bold text-white drop-shadow-lg">{emp.name}</p>
+                <p className="text-[10px] text-white/70">{emp.title || 'Barber'}</p>
+              </div>
+            </div>
+          </motion.div>
+        </Link>
+      ))}
+    </div>
+  );
+}
+
 export default function Home() {
+  const [showHours, setShowHours] = useState(false);
   const tilt = useParallaxTilt();
   const { data: services = [] } = useQuery({
     queryKey: ['services'],
@@ -93,24 +182,23 @@ export default function Home() {
     ? (reviews.reduce((sum, r) => sum + (r.rating || 0), 0) / reviews.length).toFixed(1)
     : '5.0';
 
-  // Build opening hours label from salon settings
-  const hoursLabel = (() => {
+  // Build opening hours data from salon settings
+  const openingHours = (() => {
     const oh = settings?.opening_hours;
-    if (!oh) return { label: 'Lun - Sam', sub: '9h30 - 19h' };
     const dayNames = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
-    const dayLabels = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
-    const openDays = dayNames.map((d, i) => ({ name: d, label: dayLabels[i], ...oh[d] })).filter(d => !d.closed);
-    if (openDays.length === 0) return { label: 'Fermé', sub: '' };
+    const dayLabels = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
     const fmt = (t) => { const [h, m] = t.split(':'); return m === '00' ? `${parseInt(h)}h` : `${parseInt(h)}h${m}`; };
-    const first = openDays[0].label;
-    const last = openDays[openDays.length - 1].label;
-    const label = first === last ? first : `${first} - ${last}`;
-    const opens = [...new Set(openDays.map(d => d.open))].sort();
-    const closes = [...new Set(openDays.map(d => d.close))].sort();
-    const sub = opens.length === 1 && closes.length === 1
-      ? `${fmt(opens[0])} - ${fmt(closes[0])}`
-      : `${fmt(opens[0])} - ${fmt(closes[closes.length - 1])}`;
-    return { label, sub };
+    if (!oh) return dayLabels.map(l => ({ day: l, hours: '-', closed: true }));
+    return dayNames.map((d, i) => {
+      const info = oh[d];
+      if (!info || info.closed) return { day: dayLabels[i], hours: 'Fermé', closed: true };
+      return { day: dayLabels[i], hours: `${fmt(info.open)} - ${fmt(info.close)}`, closed: false };
+    });
+  })();
+  const openDaysLabel = (() => {
+    const open = openingHours.filter(d => !d.closed);
+    if (open.length === 0) return 'Fermé';
+    return `Du ${open[0].day} au ${open[open.length - 1].day}`;
   })();
 
   return (
@@ -285,48 +373,11 @@ export default function Home() {
           })}
         </motion.div>
 
-        {/* Team / Barbers - Auto-scrolling marquee */}
+        {/* Team / Barbers - Auto-scrolling marquee with touch support */}
         <motion.div variants={itemVariants}>
           <SectionHeader title="Le Gang" subtitle="Les Barbers" />
           {employees.length > 0 && (
-            <div className="overflow-hidden -mx-5">
-              <motion.div
-                className="flex gap-3 px-5 w-max"
-                animate={{ x: ['0%', '-50%'] }}
-                transition={{
-                  x: {
-                    duration: employees.length * 4,
-                    repeat: Infinity,
-                    ease: 'linear',
-                  },
-                }}
-              >
-                {/* Double the list for seamless loop */}
-                {[...employees, ...employees].map((emp, i) => (
-                  <Link key={`${emp.id}-${i}`} to={`/barber/${emp.id}`} className="shrink-0">
-                    <motion.div
-                      whileTap={{ scale: 0.95 }}
-                      className="relative w-28 cursor-pointer group"
-                    >
-                      <div className="w-28 h-32 rounded-2xl overflow-hidden glass border border-white/10 mb-2 relative">
-                        {emp.photo_url ? (
-                          <img src={emp.photo_url} alt={emp.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center text-2xl font-bold text-muted-foreground bg-gradient-to-br from-primary/10 to-primary/5">
-                            {emp.name?.charAt(0)}
-                          </div>
-                        )}
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
-                        <div className="absolute bottom-2 left-2 right-2">
-                          <p className="text-xs font-bold text-white drop-shadow-lg">{emp.name}</p>
-                          <p className="text-[10px] text-white/70">{emp.title || 'Barber'}</p>
-                        </div>
-                      </div>
-                    </motion.div>
-                  </Link>
-                ))}
-              </motion.div>
-            </div>
+            <BarberMarquee employees={employees} />
           )}
         </motion.div>
 
