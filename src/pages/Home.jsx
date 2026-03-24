@@ -288,11 +288,11 @@ export default function Home() {
                     whileTap={{ scale: 0.97 }}
                     className="glass rounded-2xl overflow-hidden cursor-pointer">
                     {product.image_url ? (
-                      <div className="w-full aspect-square bg-white/5">
-                        <img src={product.image_url} alt={product.name} className="w-full h-full object-cover" />
+                      <div className="w-full aspect-square bg-white rounded-t-2xl">
+                        <img src={product.image_url} alt={product.name} className="w-full h-full object-contain p-2" />
                       </div>
                     ) : (
-                      <div className="w-full aspect-square bg-white/5 flex items-center justify-center">
+                      <div className="w-full aspect-square bg-white rounded-t-2xl flex items-center justify-center">
                         <ShoppingBag className="w-8 h-8 text-muted-foreground/30" />
                       </div>
                     )}
