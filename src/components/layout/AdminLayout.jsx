@@ -141,6 +141,11 @@ export default function AdminLayout() {
             <Menu className="w-5 h-5" />
           </button>
           <span className="ml-2 font-display text-sm font-semibold text-primary flex-1 truncate">D'HOME BARBER</span>
+          {!isBarber && (
+            <Link to="/" className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-secondary transition-colors">
+              <ChevronLeft className="w-4 h-4" />
+            </Link>
+          )}
           <button className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-secondary transition-colors"
             onClick={toggleTheme}>
             {theme === 'dark' ? <Sun className="w-4 h-4 text-yellow-400" /> : <Moon className="w-4 h-4" />}

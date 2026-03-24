@@ -70,11 +70,7 @@ function RequireAuth() {
     return <Navigate to={permToPath[firstPerm] || '/admin/my-cleaning'} replace />;
   }
 
-  // Redirect admins to admin interface
-  if (user?.role === 'admin') {
-    return <Navigate to="/admin" replace />;
-  }
-
+  // Admin can browse client pages freely (e.g. "Retour au salon")
   return <Outlet />;
 }
 
