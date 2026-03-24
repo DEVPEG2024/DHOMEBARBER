@@ -164,9 +164,15 @@ export default function DayView({ appointments, employees, employeeFilter, onSta
   const [dragging, setDragging] = useState(null);
   const dragStartPos = useRef(null);
   const hasDragged = useRef(false);
+  const longPressTimer = useRef(null);
+  const longPressActive = useRef(false);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = (8 - START_HOUR) * HOUR_HEIGHT;
+  }, []);
+
+  useEffect(() => {
+    return () => { clearTimeout(longPressTimer.current); };
   }, []);
 
   const filtered = employeeFilter === 'all'
@@ -180,7 +186,6 @@ export default function DayView({ appointments, employees, employeeFilter, onSta
   const showCols = cols.length > 1;
 
   const handlePointerStart = useCallback((e, colEmpId, colElement) => {
-    // Support both mouse and touch
     const isTouch = e.type === 'touchstart';
     if (!isTouch && e.button !== 0) return;
     if ((e.target || e.srcElement).closest('[data-block]')) return;
@@ -191,6 +196,7 @@ export default function DayView({ appointments, employees, employeeFilter, onSta
 
     dragStartPos.current = { x: clientX, y: clientY };
     hasDragged.current = false;
+    longPressActive.current = false;
 
     const getPos = (ev) => {
       if (ev.touches) return { x: ev.touches[0].clientX, y: ev.touches[0].clientY };
@@ -201,8 +207,20 @@ export default function DayView({ appointments, employees, employeeFilter, onSta
       const pos = getPos(ev);
       const dx = pos.x - dragStartPos.current.x;
       const dy = pos.y - dragStartPos.current.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
 
-      if (!hasDragged.current && Math.sqrt(dx * dx + dy * dy) < DRAG_THRESHOLD) return;
+      // On touch, cancel long-press if finger moves before activation
+      if (isTouch && !longPressActive.current) {
+        if (dist > DRAG_THRESHOLD) {
+          // User is scrolling — cancel everything
+          clearTimeout(longPressTimer.current);
+          longPressTimer.current = null;
+          cleanup();
+        }
+        return;
+      }
+
+      if (!hasDragged.current && dist < DRAG_THRESHOLD) return;
       hasDragged.current = true;
       if (isTouch) ev.preventDefault();
 
@@ -211,14 +229,14 @@ export default function DayView({ appointments, employees, employeeFilter, onSta
     };
 
     const handleEnd = () => {
-      window.removeEventListener('mousemove', handleMove);
-      window.removeEventListener('mouseup', handleEnd);
-      window.removeEventListener('touchmove', handleMove);
-      window.removeEventListener('touchend', handleEnd);
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+      cleanup();
 
       const didDrag = hasDragged.current;
       dragStartPos.current = null;
       hasDragged.current = false;
+      longPressActive.current = false;
 
       setDragging(prev => {
         if (prev && didDrag) {
@@ -236,10 +254,31 @@ export default function DayView({ appointments, employees, employeeFilter, onSta
       });
     };
 
+    const cleanup = () => {
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleEnd);
+      window.removeEventListener('touchmove', handleMove);
+      window.removeEventListener('touchend', handleEnd);
+    };
+
     window.addEventListener('mousemove', handleMove);
     window.addEventListener('mouseup', handleEnd);
     window.addEventListener('touchmove', handleMove, { passive: false });
     window.addEventListener('touchend', handleEnd);
+
+    // On touch: require 1-second long-press before activating drag mode
+    if (isTouch) {
+      longPressTimer.current = setTimeout(() => {
+        longPressActive.current = true;
+        // Vibrate to signal activation
+        if (navigator.vibrate) navigator.vibrate(50);
+        // Show initial drag preview at touch position
+        setDragging({ startMin: minutes, currentMin: minutes, colEmpId });
+      }, 1000);
+    } else {
+      // Mouse: activate immediately (desktop)
+      longPressActive.current = true;
+    }
   }, [onCreateBreak]);
 
   const renderDragPreview = (colEmpId) => {

@@ -188,12 +188,18 @@ export default function WeekView({ currentDate, appointments, employees, onStatu
   const [dragging, setDragging] = useState(null);
   const dragStartPos = useRef(null);
   const hasDragged = useRef(false);
+  const longPressTimer = useRef(null);
+  const longPressActive = useRef(false);
 
   const weekStart = startOfWeek(currentDate, { weekStartsOn: 1 });
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = (8 - START_HOUR) * HOUR_HEIGHT;
+  }, []);
+
+  useEffect(() => {
+    return () => { clearTimeout(longPressTimer.current); };
   }, []);
 
   const getEmpColor = (empId) => employees.find(e => e.id === empId)?.color || '#3fcf8e';
@@ -209,6 +215,7 @@ export default function WeekView({ currentDate, appointments, employees, onStatu
 
     dragStartPos.current = { x: clientX, y: clientY };
     hasDragged.current = false;
+    longPressActive.current = false;
 
     const getPos = (ev) => {
       if (ev.touches) return { x: ev.touches[0].clientX, y: ev.touches[0].clientY };
@@ -219,8 +226,19 @@ export default function WeekView({ currentDate, appointments, employees, onStatu
       const pos = getPos(ev);
       const dx = pos.x - dragStartPos.current.x;
       const dy = pos.y - dragStartPos.current.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
 
-      if (!hasDragged.current && Math.sqrt(dx * dx + dy * dy) < DRAG_THRESHOLD) return;
+      // On touch, cancel long-press if finger moves before activation
+      if (isTouch && !longPressActive.current) {
+        if (dist > DRAG_THRESHOLD) {
+          clearTimeout(longPressTimer.current);
+          longPressTimer.current = null;
+          cleanup();
+        }
+        return;
+      }
+
+      if (!hasDragged.current && dist < DRAG_THRESHOLD) return;
       hasDragged.current = true;
       if (isTouch) ev.preventDefault();
 
@@ -229,14 +247,14 @@ export default function WeekView({ currentDate, appointments, employees, onStatu
     };
 
     const handleEnd = () => {
-      window.removeEventListener('mousemove', handleMove);
-      window.removeEventListener('mouseup', handleEnd);
-      window.removeEventListener('touchmove', handleMove);
-      window.removeEventListener('touchend', handleEnd);
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+      cleanup();
 
       const didDrag = hasDragged.current;
       dragStartPos.current = null;
       hasDragged.current = false;
+      longPressActive.current = false;
 
       setDragging(prev => {
         if (prev && didDrag) {
@@ -255,11 +273,29 @@ export default function WeekView({ currentDate, appointments, employees, onStatu
       });
     };
 
+    const cleanup = () => {
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleEnd);
+      window.removeEventListener('touchmove', handleMove);
+      window.removeEventListener('touchend', handleEnd);
+    };
+
     window.addEventListener('mousemove', handleMove);
     window.addEventListener('mouseup', handleEnd);
     window.addEventListener('touchmove', handleMove, { passive: false });
     window.addEventListener('touchend', handleEnd);
-  }, [onCreateBreak]);
+
+    // On touch: require 1-second long-press before activating drag mode
+    if (isTouch) {
+      longPressTimer.current = setTimeout(() => {
+        longPressActive.current = true;
+        if (navigator.vibrate) navigator.vibrate(50);
+        setDragging({ startMin: minutes, currentMin: minutes, dateStr });
+      }, 1000);
+    } else {
+      longPressActive.current = true;
+    }
+  }, [onCreateBreak, employeeFilter]);
 
   return (
     <>
