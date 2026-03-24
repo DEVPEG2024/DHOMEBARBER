@@ -2,12 +2,21 @@ import React, { useState, useRef, useEffect } from 'react';
 import { base44 } from '@/api/base44Client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
-import { Camera, LogOut, Loader2, User, Save } from 'lucide-react';
+import { Camera, LogOut, Loader2, User, Save, Clock } from 'lucide-react';
 import ImageCropDialog from '@/components/shared/ImageCropDialog';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { Switch } from '@/components/ui/switch';
+import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
+
+const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+const DAY_LABELS = { monday: 'Lundi', tuesday: 'Mardi', wednesday: 'Mercredi', thursday: 'Jeudi', friday: 'Vendredi', saturday: 'Samedi', sunday: 'Dimanche' };
+const defaultHours = DAYS.reduce((acc, d) => ({
+  ...acc,
+  [d]: d === 'sunday' ? { start: '09:00', end: '19:00', closed: true } : { start: '09:00', end: '19:00', closed: false }
+}), {});
 
 function SkillSlider({ category, value, onChange }) {
   const level = value || 0;
@@ -147,6 +156,7 @@ export default function BarberSettings() {
   const [showCrop, setShowCrop] = useState(false);
   const [skills, setSkills] = useState(null);
   const [bio, setBio] = useState('');
+  const [workingHours, setWorkingHours] = useState(null);
   const [dirty, setDirty] = useState(false);
 
   const { data: employees = [] } = useQuery({
@@ -166,6 +176,7 @@ export default function BarberSettings() {
     if (employee && skills === null) {
       setSkills(employee.skills || []);
       setBio(employee.bio || '');
+      setWorkingHours(employee.working_hours || defaultHours);
     }
   }, [employee]);
 
@@ -216,6 +227,14 @@ export default function BarberSettings() {
     return s?.level || 0;
   };
 
+  const updateHours = (day, field, value) => {
+    setDirty(true);
+    setWorkingHours(prev => ({
+      ...prev,
+      [day]: { ...prev?.[day], [field]: value }
+    }));
+  };
+
   const setSkillLevel = (categoryId, level) => {
     setDirty(true);
     setSkills(prev => {
@@ -231,7 +250,7 @@ export default function BarberSettings() {
     if (!employee) return;
     updateMutation.mutate({
       id: employee.id,
-      data: { skills, bio, experience_level: computedExperience }
+      data: { skills, bio, experience_level: computedExperience, working_hours: workingHours }
     }, {
       onSuccess: () => {
         toast.success('Profil sauvegardé ✨');
@@ -308,6 +327,48 @@ export default function BarberSettings() {
             className="bg-secondary border-border text-sm"
             rows={4}
           />
+        </motion.div>
+
+        {/* Working Hours */}
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="bg-card border border-border rounded-xl p-6">
+          <h3 className="text-sm font-semibold mb-1 flex items-center gap-2">
+            <Clock className="w-4 h-4" /> Mes horaires
+          </h3>
+          <p className="text-[11px] text-muted-foreground mb-4">Définissez vos jours et heures de travail</p>
+          <div className="space-y-3">
+            {DAYS.map(day => {
+              const dayData = workingHours?.[day] || defaultHours[day];
+              const isOpen = !dayData?.closed;
+              return (
+                <div key={day} className="flex items-center gap-3">
+                  <span className="w-20 text-xs text-muted-foreground font-medium">{DAY_LABELS[day]}</span>
+                  <Switch
+                    checked={isOpen}
+                    onCheckedChange={v => updateHours(day, 'closed', !v)}
+                  />
+                  {isOpen ? (
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="time"
+                        value={dayData?.start || '09:00'}
+                        onChange={e => updateHours(day, 'start', e.target.value)}
+                        className="w-[110px] h-8 text-xs bg-secondary border-border"
+                      />
+                      <span className="text-xs text-muted-foreground">—</span>
+                      <Input
+                        type="time"
+                        value={dayData?.end || '19:00'}
+                        onChange={e => updateHours(day, 'end', e.target.value)}
+                        className="w-[110px] h-8 text-xs bg-secondary border-border"
+                      />
+                    </div>
+                  ) : (
+                    <span className="text-xs text-muted-foreground italic">Fermé</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </motion.div>
 
         {/* Skills */}
