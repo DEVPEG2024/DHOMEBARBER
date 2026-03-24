@@ -13,6 +13,17 @@ export default function EmployeeCard({ employee, onClick, selected }) {
   };
 
   return (
+    <div className="relative group">
+      {/* Green glow effect underneath */}
+      <div
+        className={`absolute -bottom-2 left-1/2 -translate-x-1/2 w-3/4 h-8 rounded-full transition-opacity duration-500 ${
+          selected ? 'opacity-60' : 'opacity-25 group-hover:opacity-40'
+        }`}
+        style={{
+          background: 'radial-gradient(ellipse, rgba(34,197,94,0.5) 0%, rgba(34,197,94,0.15) 50%, transparent 80%)',
+          filter: 'blur(12px)',
+        }}
+      />
     <motion.div
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
@@ -90,5 +101,6 @@ export default function EmployeeCard({ employee, onClick, selected }) {
         </motion.div>
       )}
     </motion.div>
+    </div>
   );
 }
