@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Home, Scissors, Calendar, Newspaper, User, Sun, Moon } from 'lucide-react';
+import { Home, ShoppingBag, Calendar, Newspaper, User, Sun, Moon } from 'lucide-react';
 import { useTheme } from '@/lib/ThemeContext';
 
 const navItems = [
