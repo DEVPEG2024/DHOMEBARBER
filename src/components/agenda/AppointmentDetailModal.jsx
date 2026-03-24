@@ -22,6 +22,9 @@ const initialState = (apt) => ({
   selectedProductId: '',
   productPrice: apt.product_price ? String(apt.product_price) : '',
   productSold: apt.product_sold || '',
+  clientName: apt.client_name || '',
+  clientEmail: apt.client_email || '',
+  clientPhone: apt.client_phone || '',
 });
 
 function reducer(state, action) {
@@ -53,7 +56,7 @@ function ModalInner({ appointment, onUpdate, onDelete }) {
   const handleValidate = async () => {
     dispatch({ type: 'SAVING', value: true });
     try {
-      await api.entities.Appointment.update(appointment.id, {
+      const updateData = {
         payment_method: state.paymentMethod,
         payment_status: 'paid',
         status: 'completed',
@@ -62,7 +65,14 @@ function ModalInner({ appointment, onUpdate, onDelete }) {
         product_sold: state.productSold,
         product_price: prodValue,
         grand_total: grandTotal,
-      });
+      };
+      // Include client info if it was edited
+      if (state.clientName && state.clientName !== appointment.client_name) {
+        updateData.client_name = state.clientName;
+        updateData.client_email = state.clientEmail;
+        updateData.client_phone = state.clientPhone;
+      }
+      await api.entities.Appointment.update(appointment.id, updateData);
       toast.success('Prestation validée !');
       onUpdate?.();
     } catch (e) {
@@ -84,25 +94,85 @@ function ModalInner({ appointment, onUpdate, onDelete }) {
         </span>
       </div>
 
-      {/* Client info */}
-      <div className="bg-secondary rounded-xl p-3 space-y-2">
-        <div className="flex items-center gap-2">
-          <User className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-          <span className="text-sm font-semibold">{appointment.client_name}</span>
-        </div>
-        {appointment.client_email && (
+      {/* Client info - editable if no real client */}
+      {!isCompleted && !appointment.client_email ? (
+        <div className="bg-secondary rounded-xl p-3 space-y-2">
+          <p className="text-[11px] text-muted-foreground font-medium mb-1">Assigner un client</p>
+          <div className="flex items-center gap-2">
+            <User className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+            <input
+              type="text"
+              placeholder="Nom du client *"
+              value={state.clientName}
+              onChange={e => dispatch({ type: 'SET', field: 'clientName', value: e.target.value })}
+              className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-primary/40"
+            />
+          </div>
           <div className="flex items-center gap-2">
             <Mail className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-            <span className="text-xs text-muted-foreground">{appointment.client_email}</span>
+            <input
+              type="email"
+              placeholder="Email"
+              value={state.clientEmail}
+              onChange={e => dispatch({ type: 'SET', field: 'clientEmail', value: e.target.value })}
+              className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-primary/40"
+            />
           </div>
-        )}
-        {appointment.client_phone && (
           <div className="flex items-center gap-2">
             <Phone className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-            <span className="text-xs text-muted-foreground">{appointment.client_phone}</span>
+            <input
+              type="tel"
+              placeholder="Téléphone"
+              value={state.clientPhone}
+              onChange={e => dispatch({ type: 'SET', field: 'clientPhone', value: e.target.value })}
+              className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-primary/40"
+            />
           </div>
-        )}
-      </div>
+          {state.clientName && state.clientName !== appointment.client_name && (
+            <button
+              onClick={async () => {
+                dispatch({ type: 'SAVING', value: true });
+                try {
+                  await api.entities.Appointment.update(appointment.id, {
+                    client_name: state.clientName,
+                    client_email: state.clientEmail,
+                    client_phone: state.clientPhone,
+                  });
+                  toast.success('Client assigné');
+                  onUpdate?.();
+                } catch {
+                  toast.error('Erreur');
+                } finally {
+                  dispatch({ type: 'SAVING', value: false });
+                }
+              }}
+              disabled={state.saving}
+              className="w-full py-2 rounded-lg bg-primary/15 text-primary text-xs font-semibold hover:bg-primary/25 transition-all disabled:opacity-50"
+            >
+              Assigner ce client
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="bg-secondary rounded-xl p-3 space-y-2">
+          <div className="flex items-center gap-2">
+            <User className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+            <span className="text-sm font-semibold">{appointment.client_name}</span>
+          </div>
+          {appointment.client_email && (
+            <div className="flex items-center gap-2">
+              <Mail className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+              <span className="text-xs text-muted-foreground">{appointment.client_email}</span>
+            </div>
+          )}
+          {appointment.client_phone && (
+            <div className="flex items-center gap-2">
+              <Phone className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+              <span className="text-xs text-muted-foreground">{appointment.client_phone}</span>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Barber */}
       {appointment.employee_name && (
