@@ -1,10 +1,52 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import { useQuery } from '@tanstack/react-query';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useScroll, useTransform } from 'framer-motion';
 import { ArrowRight, Scissors } from 'lucide-react';
 import ServiceCard from '@/components/shared/ServiceCard';
+
+function GlassCard({ children }) {
+  const ref = useRef(null);
+  const { scrollYProgress } = useScroll({
+    target: ref,
+    offset: ['start end', 'end start'],
+  });
+  const x1 = useTransform(scrollYProgress, [0, 0.5, 1], [-40, 30, -40]);
+  const x2 = useTransform(scrollYProgress, [0, 0.5, 1], [30, -25, 30]);
+  const scale = useTransform(scrollYProgress, [0, 0.5, 1], [0.7, 1.2, 0.7]);
+  const opacity = useTransform(scrollYProgress, [0, 0.25, 0.5, 0.75, 1], [0, 0.9, 1, 0.9, 0]);
+  const rotate = useTransform(scrollYProgress, [0, 0.5, 1], [-3, 2, -3]);
+
+  return (
+    <div ref={ref} className="relative py-1">
+      <motion.div
+        className="absolute -bottom-4 inset-x-2 h-20 rounded-3xl pointer-events-none"
+        style={{
+          x: x1, scale, opacity, rotate,
+          background: 'radial-gradient(ellipse at 40% 50%, rgba(34,197,94,0.5) 0%, rgba(16,185,129,0.3) 35%, rgba(5,150,105,0.15) 60%, transparent 80%)',
+          filter: 'blur(20px)',
+        }}
+      />
+      <motion.div
+        className="absolute -bottom-3 inset-x-8 h-14 rounded-3xl pointer-events-none"
+        style={{
+          x: x2, scale, opacity,
+          background: 'radial-gradient(ellipse at 60% 50%, rgba(52,211,153,0.45) 0%, rgba(16,185,129,0.25) 40%, transparent 75%)',
+          filter: 'blur(14px)',
+        }}
+      />
+      <motion.div
+        className="absolute inset-0 rounded-2xl pointer-events-none"
+        style={{
+          opacity: useTransform(scrollYProgress, [0, 0.4, 0.6, 1], [0, 0.4, 0.4, 0]),
+          boxShadow: '0 0 20px 2px rgba(34,197,94,0.15), inset 0 0 20px 0 rgba(34,197,94,0.03)',
+        }}
+      />
+      <div className="relative z-10">{children}</div>
+    </div>
+  );
+}
 
 export default function Services() {
   const [activeCategory, setActiveCategory] = useState('all');
@@ -85,22 +127,23 @@ export default function Services() {
         </div>
 
         {/* Services List */}
-        <motion.div className="space-y-3">
+        <motion.div className="space-y-4">
           <AnimatePresence>
             {filtered.map((service, i) => (
-              <motion.div
-                key={service.id}
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -8 }}
-                transition={{ delay: i * 0.04 }}
-              >
-                <ServiceCard
-                  service={service}
-                  selected={!!selectedServices.find(s => s.id === service.id)}
-                  onClick={toggleService}
-                />
-              </motion.div>
+              <GlassCard key={service.id}>
+                <motion.div
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
+                  transition={{ delay: i * 0.04 }}
+                >
+                  <ServiceCard
+                    service={service}
+                    selected={!!selectedServices.find(s => s.id === service.id)}
+                    onClick={toggleService}
+                  />
+                </motion.div>
+              </GlassCard>
             ))}
           </AnimatePresence>
         </motion.div>
