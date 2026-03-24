@@ -1,6 +1,6 @@
 import React, { useReducer } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Clock, User, Phone, Mail, Scissors, CreditCard, FileText, Calendar, Banknote, CheckCircle, Heart, ShoppingBag, ChevronDown, Check, BadgeCheck, X, AlertTriangle, Trash2 } from 'lucide-react';
+import { Clock, User, Phone, Mail, Scissors, CreditCard, FileText, Calendar, Banknote, CheckCircle, Heart, ShoppingBag, ChevronDown, Check, BadgeCheck, X, AlertTriangle, Trash2, UserX } from 'lucide-react';
 import { getServiceColor } from '@/utils/serviceColors';
 import { api } from '@/api/apiClient';
 import { useQuery } from '@tanstack/react-query';
@@ -145,6 +145,29 @@ function ModalInner({ appointment, onUpdate, onDelete }) {
           {clientSearch.length >= 2 && filteredUsers.length === 0 && (
             <p className="text-[11px] text-muted-foreground text-center py-1">Aucun client trouvé</p>
           )}
+          {/* No one took the last minute slot */}
+          <button
+            onClick={async () => {
+              dispatch({ type: 'SAVING', value: true });
+              try {
+                await api.entities.Appointment.update(appointment.id, {
+                  status: 'no_show',
+                  cancellation_reason: 'Personne n\'a pris le créneau last minute',
+                });
+                toast.success('Créneau marqué comme non pris');
+                onUpdate?.();
+              } catch {
+                toast.error('Erreur');
+              } finally {
+                dispatch({ type: 'SAVING', value: false });
+              }
+            }}
+            disabled={state.saving}
+            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-medium bg-orange-500/10 border border-orange-500/20 text-orange-400 hover:bg-orange-500/20 transition-all disabled:opacity-60"
+          >
+            <UserX className="w-3.5 h-3.5" />
+            Personne n'a pris le créneau
+          </button>
         </div>
       ) : (
         <div className="bg-secondary rounded-xl p-3 space-y-2">

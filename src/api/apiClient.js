@@ -16,9 +16,7 @@
  */
 
 export const resolvedAppId = 'prod';
-export const API_SERVER_URL = import.meta.env.PROD
-  ? 'https://dhomebarber-api-3aabb8313cb6.herokuapp.com'
-  : '';
+export const API_SERVER_URL = 'https://dhomebarber-api-3aabb8313cb6.herokuapp.com';
 
 const API_BASE = `${API_SERVER_URL}/api/apps/${resolvedAppId}`;
 

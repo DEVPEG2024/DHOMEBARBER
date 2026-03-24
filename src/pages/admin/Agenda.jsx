@@ -265,6 +265,33 @@ export default function Agenda() {
     }
   };
 
+  // Auto-expire last minute slots when end_time has passed and no client took it
+  useEffect(() => {
+    if (!appointments.length) return;
+    const now = new Date();
+    const todayStr = format(now, 'yyyy-MM-dd');
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+
+    const expired = appointments.filter(a =>
+      a.status === 'last_minute' &&
+      !a.client_email &&
+      (a.date < todayStr || (a.date === todayStr && timeToMinutes(a.end_time || a.start_time) <= nowMinutes))
+    );
+
+    if (expired.length === 0) return;
+
+    Promise.all(
+      expired.map(a =>
+        api.entities.Appointment.update(a.id, {
+          status: 'no_show',
+          cancellation_reason: 'Personne n\'a pris le créneau last minute',
+        })
+      )
+    ).then(() => {
+      queryClient.invalidateQueries({ queryKey: ['agendaAppointments'] });
+    });
+  }, [appointments, queryClient]);
+
   const realAppointmentCount = filteredAppointments.filter(a => a.status !== 'break' && a.status !== 'last_minute').length;
 
   return (
