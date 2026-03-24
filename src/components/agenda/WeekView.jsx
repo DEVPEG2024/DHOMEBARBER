@@ -198,29 +198,41 @@ export default function WeekView({ currentDate, appointments, employees, onStatu
 
   const getEmpColor = (empId) => employees.find(e => e.id === empId)?.color || '#3fcf8e';
 
-  const handleMouseDown = useCallback((e, dateStr, colElement) => {
-    if (e.button !== 0) return;
-    if (e.target.closest('[data-block]')) return;
+  const handlePointerStart = useCallback((e, dateStr, colElement) => {
+    const isTouch = e.type === 'touchstart';
+    if (!isTouch && e.button !== 0) return;
+    if ((e.target || e.srcElement).closest('[data-block]')) return;
 
-    const minutes = clampMinutes(yToMinutes(e.clientY, colElement));
+    const clientY = isTouch ? e.touches[0].clientY : e.clientY;
+    const clientX = isTouch ? e.touches[0].clientX : e.clientX;
+    const minutes = clampMinutes(yToMinutes(clientY, colElement));
 
-    dragStartPos.current = { x: e.clientX, y: e.clientY };
+    dragStartPos.current = { x: clientX, y: clientY };
     hasDragged.current = false;
 
-    const handleMouseMove = (ev) => {
-      const dx = ev.clientX - dragStartPos.current.x;
-      const dy = ev.clientY - dragStartPos.current.y;
+    const getPos = (ev) => {
+      if (ev.touches) return { x: ev.touches[0].clientX, y: ev.touches[0].clientY };
+      return { x: ev.clientX, y: ev.clientY };
+    };
+
+    const handleMove = (ev) => {
+      const pos = getPos(ev);
+      const dx = pos.x - dragStartPos.current.x;
+      const dy = pos.y - dragStartPos.current.y;
 
       if (!hasDragged.current && Math.sqrt(dx * dx + dy * dy) < DRAG_THRESHOLD) return;
       hasDragged.current = true;
+      if (isTouch) ev.preventDefault();
 
-      const m = clampMinutes(yToMinutes(ev.clientY, colElement));
+      const m = clampMinutes(yToMinutes(pos.y, colElement));
       setDragging({ startMin: minutes, currentMin: m, dateStr });
     };
 
-    const handleMouseUp = () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
+    const handleEnd = () => {
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleEnd);
+      window.removeEventListener('touchmove', handleMove);
+      window.removeEventListener('touchend', handleEnd);
 
       const didDrag = hasDragged.current;
       dragStartPos.current = null;
@@ -243,8 +255,10 @@ export default function WeekView({ currentDate, appointments, employees, onStatu
       });
     };
 
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleEnd);
+    window.addEventListener('touchmove', handleMove, { passive: false });
+    window.addEventListener('touchend', handleEnd);
   }, [onCreateBreak]);
 
   return (
@@ -311,7 +325,8 @@ export default function WeekView({ currentDate, appointments, employees, onStatu
                   key={dateStr}
                   className={`flex-1 relative border-l border-foreground/15 select-none cursor-crosshair ${isToday ? 'bg-primary/[0.02]' : ''}`}
                   style={{ minWidth: 0 }}
-                  onMouseDown={e => handleMouseDown(e, dateStr, e.currentTarget)}
+                  onMouseDown={e => handlePointerStart(e, dateStr, e.currentTarget)}
+                  onTouchStart={e => handlePointerStart(e, dateStr, e.currentTarget)}
                 >
                   {/* Hour lines + half-hour lines */}
                   {Array.from({ length: TOTAL_HOURS }).map((_, i) => (

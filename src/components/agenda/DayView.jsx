@@ -179,29 +179,42 @@ export default function DayView({ appointments, employees, employeeFilter, onSta
 
   const showCols = cols.length > 1;
 
-  const handleMouseDown = useCallback((e, colEmpId, colElement) => {
-    if (e.button !== 0) return;
-    if (e.target.closest('[data-block]')) return;
+  const handlePointerStart = useCallback((e, colEmpId, colElement) => {
+    // Support both mouse and touch
+    const isTouch = e.type === 'touchstart';
+    if (!isTouch && e.button !== 0) return;
+    if ((e.target || e.srcElement).closest('[data-block]')) return;
 
-    const minutes = clampMinutes(yToMinutes(e.clientY, colElement));
+    const clientY = isTouch ? e.touches[0].clientY : e.clientY;
+    const clientX = isTouch ? e.touches[0].clientX : e.clientX;
+    const minutes = clampMinutes(yToMinutes(clientY, colElement));
 
-    dragStartPos.current = { x: e.clientX, y: e.clientY };
+    dragStartPos.current = { x: clientX, y: clientY };
     hasDragged.current = false;
 
-    const handleMouseMove = (ev) => {
-      const dx = ev.clientX - dragStartPos.current.x;
-      const dy = ev.clientY - dragStartPos.current.y;
+    const getPos = (ev) => {
+      if (ev.touches) return { x: ev.touches[0].clientX, y: ev.touches[0].clientY };
+      return { x: ev.clientX, y: ev.clientY };
+    };
+
+    const handleMove = (ev) => {
+      const pos = getPos(ev);
+      const dx = pos.x - dragStartPos.current.x;
+      const dy = pos.y - dragStartPos.current.y;
 
       if (!hasDragged.current && Math.sqrt(dx * dx + dy * dy) < DRAG_THRESHOLD) return;
       hasDragged.current = true;
+      if (isTouch) ev.preventDefault();
 
-      const m = clampMinutes(yToMinutes(ev.clientY, colElement));
+      const m = clampMinutes(yToMinutes(pos.y, colElement));
       setDragging({ startMin: minutes, currentMin: m, colEmpId });
     };
 
-    const handleMouseUp = () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
+    const handleEnd = () => {
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleEnd);
+      window.removeEventListener('touchmove', handleMove);
+      window.removeEventListener('touchend', handleEnd);
 
       const didDrag = hasDragged.current;
       dragStartPos.current = null;
@@ -223,8 +236,10 @@ export default function DayView({ appointments, employees, employeeFilter, onSta
       });
     };
 
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleEnd);
+    window.addEventListener('touchmove', handleMove, { passive: false });
+    window.addEventListener('touchend', handleEnd);
   }, [onCreateBreak]);
 
   const renderDragPreview = (colEmpId) => {
@@ -323,14 +338,16 @@ export default function DayView({ appointments, employees, employeeFilter, onSta
               <div
                 key={emp.id}
                 className="flex-1 relative border-l border-foreground/15 select-none cursor-crosshair"
-                onMouseDown={e => handleMouseDown(e, emp.id, e.currentTarget)}
+                onMouseDown={e => handlePointerStart(e, emp.id, e.currentTarget)}
+                onTouchStart={e => handlePointerStart(e, emp.id, e.currentTarget)}
               >
                 {renderColumn(emp.id, emp.color, appointments.filter(a => a.employee_id === emp.id))}
               </div>
             )) : (
               <div
                 className="flex-1 relative border-l border-foreground/15 select-none cursor-crosshair"
-                onMouseDown={e => handleMouseDown(e, employeeFilter, e.currentTarget)}
+                onMouseDown={e => handlePointerStart(e, employeeFilter, e.currentTarget)}
+                onTouchStart={e => handlePointerStart(e, employeeFilter, e.currentTarget)}
               >
                 {renderColumn(employeeFilter, cols[0]?.color, filtered)}
               </div>
