@@ -3,7 +3,7 @@ import { base44 } from '@/api/base44Client';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Heart, Trash2, Loader2, Camera, MessageCircle } from 'lucide-react';
+import { Send, Heart, Trash2, Loader2, Camera, MessageCircle, Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
@@ -283,6 +283,7 @@ export default function Feed() {
   const [imageUrl, setImageUrl] = useState('');
   const [uploading, setUploading] = useState(false);
   const [posting, setPosting] = useState(false);
+  const [showComposer, setShowComposer] = useState(false);
   const fileInputRef = useRef(null);
 
   const { data: posts = [], isLoading } = useQuery({
@@ -404,67 +405,107 @@ export default function Feed() {
         <h1 className="font-display text-2xl font-bold">New'sGang</h1>
       </div>
 
-      {/* New post */}
-      <div className="bg-card border border-border rounded-2xl p-4 mb-6">
-        <div className="flex gap-3">
-          <div className="w-10 h-10 rounded-full bg-secondary border border-border flex items-center justify-center flex-shrink-0 overflow-hidden">
-            {getAuthorPhoto() ? (
-              <img src={getAuthorPhoto()} alt="" className="w-full h-full object-cover" />
-            ) : (
-              <span className="text-sm font-bold text-muted-foreground">
-                {user?.full_name?.charAt(0) || '?'}
-              </span>
-            )}
-          </div>
-          <div className="flex-1">
-            <Textarea
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              placeholder="Quoi de neuf ? Partagez un moment, une photo..."
-              className="bg-secondary/50 border-border text-sm resize-none min-h-[60px]"
-              rows={2}
+      {/* Floating publish button */}
+      <motion.button
+        onClick={() => setShowComposer(true)}
+        className="fixed bottom-24 right-5 z-50 w-14 h-14 rounded-full bg-green-500 text-white shadow-lg shadow-green-500/30 flex items-center justify-center"
+        animate={{ boxShadow: ['0 0 0 0 rgba(34,197,94,0.4)', '0 0 0 12px rgba(34,197,94,0)', '0 0 0 0 rgba(34,197,94,0.4)'] }}
+        transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+        whileTap={{ scale: 0.9 }}
+      >
+        <Plus className="w-6 h-6" />
+      </motion.button>
+
+      {/* Composer drawer */}
+      <AnimatePresence>
+        {showComposer && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[60] bg-black/60"
+              onClick={() => setShowComposer(false)}
             />
-          </div>
-        </div>
-
-        {/* Image preview */}
-        {imageUrl && (
-          <div className="relative mt-3 ml-[52px] w-32">
-            <div className="rounded-xl overflow-hidden" style={{ aspectRatio: '4/5' }}>
-              <img src={imageUrl} alt="" className="w-full h-full object-cover" />
-            </div>
-            <button
-              onClick={() => setImageUrl('')}
-              className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-black/60 flex items-center justify-center text-white text-xs"
+            <motion.div
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              className="fixed inset-x-0 bottom-0 z-[60] rounded-t-2xl border-t border-border bg-background p-5"
             >
-              ×
-            </button>
-          </div>
+              <div className="flex justify-center mb-3">
+                <div className="w-10 h-1 rounded-full bg-muted" />
+              </div>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-display text-base font-bold">Nouvelle publication</h3>
+                <button onClick={() => setShowComposer(false)} className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="flex gap-3">
+                <div className="w-10 h-10 rounded-full bg-secondary border border-border flex items-center justify-center flex-shrink-0 overflow-hidden">
+                  {getAuthorPhoto() ? (
+                    <img src={getAuthorPhoto()} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <span className="text-sm font-bold text-muted-foreground">
+                      {user?.full_name?.charAt(0) || '?'}
+                    </span>
+                  )}
+                </div>
+                <div className="flex-1">
+                  <Textarea
+                    value={content}
+                    onChange={(e) => setContent(e.target.value)}
+                    placeholder="Quoi de neuf ? Partagez un moment, une photo..."
+                    className="bg-secondary/50 border-border text-sm resize-none min-h-[80px]"
+                    rows={3}
+                    autoFocus
+                  />
+                </div>
+              </div>
+
+              {imageUrl && (
+                <div className="relative mt-3 ml-[52px] w-32">
+                  <div className="rounded-xl overflow-hidden" style={{ aspectRatio: '4/5' }}>
+                    <img src={imageUrl} alt="" className="w-full h-full object-cover" />
+                  </div>
+                  <button
+                    onClick={() => setImageUrl('')}
+                    className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-black/60 flex items-center justify-center text-white text-xs"
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between mt-4 ml-[52px]">
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading}
+                    className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary transition-colors"
+                  >
+                    {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Camera className="w-4 h-4" />}
+                    Photo
+                  </button>
+                  <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
+                </div>
+                <Button
+                  onClick={async () => { await createPost(); setShowComposer(false); }}
+                  disabled={posting || (!content.trim() && !imageUrl)}
+                  size="sm"
+                  className="bg-primary text-primary-foreground text-xs rounded-full px-4"
+                >
+                  {posting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5 mr-1" />}
+                  Publier
+                </Button>
+              </div>
+            </motion.div>
+          </>
         )}
-
-        <div className="flex items-center justify-between mt-3 ml-[52px]">
-          <div className="flex gap-2">
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading}
-              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary transition-colors"
-            >
-              {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Camera className="w-4 h-4" />}
-              Photo
-            </button>
-            <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
-          </div>
-          <Button
-            onClick={createPost}
-            disabled={posting || (!content.trim() && !imageUrl)}
-            size="sm"
-            className="bg-primary text-primary-foreground text-xs rounded-full px-4"
-          >
-            {posting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5 mr-1" />}
-            Publier
-          </Button>
-        </div>
-      </div>
+      </AnimatePresence>
 
       {/* Posts */}
       {isLoading ? (
