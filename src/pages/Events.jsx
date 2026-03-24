@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { api } from '@/api/apiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { motion } from 'framer-motion';
-import { PartyPopper, Calendar, Clock, Users, MessageSquare, Send, CheckCircle, Sparkles } from 'lucide-react';
+import { PartyPopper, Calendar, Clock, Users, MessageSquare, Send, CheckCircle, Sparkles, Ban } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
@@ -51,6 +51,37 @@ export default function Events() {
     enabled: !!user?.email,
   });
 
+  // Fetch all confirmed events to block taken slots
+  const { data: confirmedEvents = [] } = useQuery({
+    queryKey: ['confirmedEvents'],
+    queryFn: () => api.entities.Event.filter({ status: 'confirmed' }, '-date', 200),
+  });
+
+  // Determine which time slots are blocked for the selected date
+  const blockedSlots = useMemo(() => {
+    if (!form.date) return new Set();
+    const eventsOnDate = confirmedEvents.filter(e => String(e.date).slice(0, 10) === form.date);
+    const blocked = new Set();
+    for (const ev of eventsOnDate) {
+      if (ev.time_slot === 'full_day') {
+        blocked.add('morning');
+        blocked.add('afternoon');
+        blocked.add('full_day');
+      } else if (ev.time_slot === 'morning') {
+        blocked.add('morning');
+        blocked.add('full_day');
+      } else if (ev.time_slot === 'afternoon') {
+        blocked.add('afternoon');
+        blocked.add('full_day');
+      }
+    }
+    // If both morning and afternoon are taken, full_day is also blocked
+    if (blocked.has('morning') && blocked.has('afternoon')) {
+      blocked.add('full_day');
+    }
+    return blocked;
+  }, [form.date, confirmedEvents]);
+
   const createEvent = useMutation({
     mutationFn: (data) => api.entities.Event.create(data),
     onSuccess: () => {
@@ -62,10 +93,22 @@ export default function Events() {
     onError: () => toast.error('Erreur lors de l\'envoi'),
   });
 
+  // Reset time_slot if it becomes blocked when date changes
+  React.useEffect(() => {
+    if (blockedSlots.has(form.time_slot)) {
+      const firstAvailable = TIME_SLOTS.find(s => !blockedSlots.has(s.id));
+      setForm(f => ({ ...f, time_slot: firstAvailable?.id || '' }));
+    }
+  }, [form.date, blockedSlots]);
+
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!form.event_type || !form.date) {
       toast.error('Type d\'événement et date requis');
+      return;
+    }
+    if (blockedSlots.has(form.time_slot)) {
+      toast.error('Ce créneau est déjà réservé pour cette date');
       return;
     }
     createEvent.mutate({
@@ -180,21 +223,45 @@ export default function Events() {
               Créneau
             </label>
             <div className="space-y-2">
-              {TIME_SLOTS.map(slot => (
-                <button
-                  key={slot.id}
-                  type="button"
-                  onClick={() => setForm(f => ({ ...f, time_slot: slot.id }))}
-                  className={`w-full text-left px-4 py-3 rounded-xl border text-sm transition-all ${
-                    form.time_slot === slot.id
-                      ? 'border-primary bg-primary/10 font-semibold'
-                      : 'border-border hover:border-primary/30'
-                  }`}
-                >
-                  {slot.label}
-                </button>
-              ))}
+              {TIME_SLOTS.map(slot => {
+                const isBlocked = blockedSlots.has(slot.id);
+                return (
+                  <button
+                    key={slot.id}
+                    type="button"
+                    disabled={isBlocked}
+                    onClick={() => !isBlocked && setForm(f => ({ ...f, time_slot: slot.id }))}
+                    className={`w-full text-left px-4 py-3 rounded-xl border text-sm transition-all ${
+                      isBlocked
+                        ? 'border-border bg-muted/50 text-muted-foreground/50 cursor-not-allowed line-through'
+                        : form.time_slot === slot.id
+                          ? 'border-primary bg-primary/10 font-semibold'
+                          : 'border-border hover:border-primary/30'
+                    }`}
+                  >
+                    <span className="flex items-center justify-between">
+                      {slot.label}
+                      {isBlocked && (
+                        <span className="flex items-center gap-1 text-[11px] text-red-400 font-medium no-underline">
+                          <Ban className="w-3 h-3" />
+                          Réservé
+                        </span>
+                      )}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
+            {blockedSlots.size > 0 && blockedSlots.size < 3 && (
+              <p className="text-[11px] text-muted-foreground mt-1.5">
+                Certains créneaux sont déjà réservés pour cette date.
+              </p>
+            )}
+            {blockedSlots.size >= 3 && (
+              <p className="text-[11px] text-red-400 mt-1.5">
+                Tous les créneaux sont pris pour cette date. Veuillez choisir une autre date.
+              </p>
+            )}
           </div>
 
           {/* Guest count */}
