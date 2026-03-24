@@ -20,71 +20,96 @@ function useParallaxTilt(maxTilt = 20) {
   const sry = useSpring(rotateY, springConfig);
 
   const hasGyro = useRef(false);
+  const gyroPermissionRequested = useRef(false);
 
   useEffect(() => {
-    let gyroCleanup = null;
-    let mouseCleanup = null;
+    const cleanups = [];
 
+    const applyTilt = (nx, ny) => {
+      x.set(nx);
+      y.set(ny);
+      rotateY.set(nx * 0.6);
+      rotateX.set(-ny * 0.6);
+    };
+
+    // --- Gyroscope handler ---
     const handleOrientation = (e) => {
       if (e.gamma === null && e.beta === null) return;
       hasGyro.current = true;
       const gx = Math.max(-maxTilt, Math.min(maxTilt, e.gamma || 0));
       const gy = Math.max(-maxTilt, Math.min(maxTilt, e.beta ? e.beta - 40 : 0));
-      const nx = (gx / maxTilt) * 18;
-      const ny = (gy / maxTilt) * 18;
-      x.set(nx);
-      y.set(ny);
-      rotateY.set(nx * 0.6);
-      rotateX.set(-ny * 0.6);
+      applyTilt((gx / maxTilt) * 18, (gy / maxTilt) * 18);
     };
 
+    // --- Touch handler (fallback for mobile without gyro) ---
+    const handleTouch = (e) => {
+      if (hasGyro.current) return;
+      const touch = e.touches[0];
+      if (!touch) return;
+      const cx = window.innerWidth / 2;
+      const cy = window.innerHeight / 3;
+      const nx = ((touch.clientX - cx) / cx) * 18;
+      const ny = ((touch.clientY - cy) / cy) * 12;
+      applyTilt(nx, ny);
+    };
+
+    const handleTouchEnd = () => {
+      if (hasGyro.current) return;
+      applyTilt(0, 0);
+    };
+
+    // --- Mouse handler (desktop) ---
     const handleMouse = (e) => {
       if (hasGyro.current) return;
       const cx = window.innerWidth / 2;
       const cy = window.innerHeight / 2;
-      const nx = ((e.clientX - cx) / cx) * 18;
-      const ny = ((e.clientY - cy) / cy) * 18;
-      x.set(nx);
-      y.set(ny);
-      rotateY.set(nx * 0.6);
-      rotateX.set(-ny * 0.6);
+      applyTilt(((e.clientX - cx) / cx) * 18, ((e.clientY - cy) / cy) * 18);
     };
 
-    // Try requesting gyroscope permission on iOS 13+
     const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    const DOE = /** @type {any} */ (typeof DeviceOrientationEvent !== 'undefined' ? DeviceOrientationEvent : null);
 
-    const DOE = /** @type {any} */ (DeviceOrientationEvent);
-    if (isMobile && typeof DOE !== 'undefined' && typeof DOE.requestPermission === 'function') {
-      // iOS 13+ — permission needed, we'll request on first tap
+    if (isMobile && DOE && typeof DOE.requestPermission === 'function') {
+      // iOS 13+ — request permission on first tap anywhere
       const requestPermission = async () => {
+        if (gyroPermissionRequested.current) return;
+        gyroPermissionRequested.current = true;
         try {
           const permission = await DOE.requestPermission();
           if (permission === 'granted') {
             window.addEventListener('deviceorientation', handleOrientation, true);
-            gyroCleanup = () => window.removeEventListener('deviceorientation', handleOrientation, true);
+            cleanups.push(() => window.removeEventListener('deviceorientation', handleOrientation, true));
           }
-        } catch (err) {
-          // Permission denied, fall through to mouse
+        } catch (_) {
+          // denied — touch fallback still active
         }
-        window.removeEventListener('click', requestPermission, true);
+        document.removeEventListener('touchstart', requestPermission, true);
       };
-      // Auto-request on first user interaction
-      window.addEventListener('click', requestPermission, true);
-      gyroCleanup = () => window.removeEventListener('click', requestPermission, true);
-    } else if (isMobile) {
-      // Android or older iOS — no permission needed
+      document.addEventListener('touchstart', requestPermission, true);
+      cleanups.push(() => document.removeEventListener('touchstart', requestPermission, true));
+    } else if (isMobile && DOE) {
+      // Android — no permission needed
       window.addEventListener('deviceorientation', handleOrientation, true);
-      gyroCleanup = () => window.removeEventListener('deviceorientation', handleOrientation, true);
+      cleanups.push(() => window.removeEventListener('deviceorientation', handleOrientation, true));
     }
 
-    // Always add mouse listener as fallback (hasGyro flag prevents conflict)
-    window.addEventListener('mousemove', handleMouse);
-    mouseCleanup = () => window.removeEventListener('mousemove', handleMouse);
+    // Touch fallback (works on all mobile, even without gyro permission)
+    if (isMobile) {
+      document.addEventListener('touchmove', handleTouch, { passive: true });
+      document.addEventListener('touchend', handleTouchEnd);
+      cleanups.push(
+        () => document.removeEventListener('touchmove', handleTouch),
+        () => document.removeEventListener('touchend', handleTouchEnd)
+      );
+    }
 
-    return () => {
-      gyroCleanup?.();
-      mouseCleanup?.();
-    };
+    // Mouse (desktop)
+    if (!isMobile) {
+      window.addEventListener('mousemove', handleMouse);
+      cleanups.push(() => window.removeEventListener('mousemove', handleMouse));
+    }
+
+    return () => cleanups.forEach(fn => fn());
   }, [maxTilt, x, y, rotateX, rotateY]);
 
   return { x: sx, y: sy, rotateX: srx, rotateY: sry };
