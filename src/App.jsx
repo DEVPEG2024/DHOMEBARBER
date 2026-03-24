@@ -45,9 +45,9 @@ import AdminLeave from '@/pages/admin/AdminLeave';
 import BarberLeave from '@/pages/admin/BarberLeave';
 import BarberSettings from '@/pages/admin/BarberSettings';
 
-// Route guard: requires authentication
+// Route guard: requires authentication (client routes only)
 function RequireAuth() {
-  const { isAuthenticated, isLoadingAuth } = useAuth();
+  const { user, isAuthenticated, isLoadingAuth } = useAuth();
   const location = useLocation();
 
   if (isLoadingAuth) {
@@ -60,6 +60,19 @@ function RequireAuth() {
 
   if (!isAuthenticated) {
     return <Navigate to={`/login?redirect=${encodeURIComponent(location.pathname)}`} replace />;
+  }
+
+  // Redirect barbers to admin interface
+  if (user?.role === 'barber') {
+    const perms = user.permissions || [];
+    const permToPath = { agenda: '/admin/agenda', dashboard: '/admin', services: '/admin/services', clients: '/admin/clients' };
+    const firstPerm = perms[0];
+    return <Navigate to={permToPath[firstPerm] || '/admin/my-cleaning'} replace />;
+  }
+
+  // Redirect admins to admin interface
+  if (user?.role === 'admin') {
+    return <Navigate to="/admin" replace />;
   }
 
   return <Outlet />;
