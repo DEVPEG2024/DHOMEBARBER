@@ -1,40 +1,93 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import { useQuery } from '@tanstack/react-query';
 import { MapPin, Clock, Phone, Star, ArrowRight, Scissors } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { motion, useMotionValue, useSpring } from 'framer-motion';
 import SectionHeader from '@/components/shared/SectionHeader';
 import StarRating from '@/components/shared/StarRating';
 
 function useParallaxTilt(maxTilt = 20) {
-  const [tilt, setTilt] = useState({ x: 0, y: 0 });
+  const x = useMotionValue(0);
+  const y = useMotionValue(0);
+  const rotateX = useMotionValue(0);
+  const rotateY = useMotionValue(0);
 
-  const handleOrientation = useCallback((e) => {
-    const x = Math.max(-maxTilt, Math.min(maxTilt, e.gamma || 0));
-    const y = Math.max(-maxTilt, Math.min(maxTilt, e.beta ? e.beta - 40 : 0));
-    setTilt({ x: (x / maxTilt) * 15, y: (y / maxTilt) * 15 });
-  }, [maxTilt]);
+  const springConfig = { stiffness: 150, damping: 20, mass: 0.5 };
+  const sx = useSpring(x, springConfig);
+  const sy = useSpring(y, springConfig);
+  const srx = useSpring(rotateX, springConfig);
+  const sry = useSpring(rotateY, springConfig);
 
-  const handleMouse = useCallback((e) => {
-    const cx = window.innerWidth / 2;
-    const cy = window.innerHeight / 2;
-    const x = ((e.clientX - cx) / cx) * 15;
-    const y = ((e.clientY - cy) / cy) * 15;
-    setTilt({ x, y });
-  }, []);
+  const hasGyro = useRef(false);
 
   useEffect(() => {
-    if (window.DeviceOrientationEvent) {
-      window.addEventListener('deviceorientation', handleOrientation, true);
-      return () => window.removeEventListener('deviceorientation', handleOrientation, true);
-    } else {
-      window.addEventListener('mousemove', handleMouse);
-      return () => window.removeEventListener('mousemove', handleMouse);
-    }
-  }, [handleOrientation, handleMouse]);
+    let gyroCleanup = null;
+    let mouseCleanup = null;
 
-  return tilt;
+    const handleOrientation = (e) => {
+      if (e.gamma === null && e.beta === null) return;
+      hasGyro.current = true;
+      const gx = Math.max(-maxTilt, Math.min(maxTilt, e.gamma || 0));
+      const gy = Math.max(-maxTilt, Math.min(maxTilt, e.beta ? e.beta - 40 : 0));
+      const nx = (gx / maxTilt) * 18;
+      const ny = (gy / maxTilt) * 18;
+      x.set(nx);
+      y.set(ny);
+      rotateY.set(nx * 0.6);
+      rotateX.set(-ny * 0.6);
+    };
+
+    const handleMouse = (e) => {
+      if (hasGyro.current) return;
+      const cx = window.innerWidth / 2;
+      const cy = window.innerHeight / 2;
+      const nx = ((e.clientX - cx) / cx) * 18;
+      const ny = ((e.clientY - cy) / cy) * 18;
+      x.set(nx);
+      y.set(ny);
+      rotateY.set(nx * 0.6);
+      rotateX.set(-ny * 0.6);
+    };
+
+    // Try requesting gyroscope permission on iOS 13+
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+    const DOE = /** @type {any} */ (DeviceOrientationEvent);
+    if (isMobile && typeof DOE !== 'undefined' && typeof DOE.requestPermission === 'function') {
+      // iOS 13+ — permission needed, we'll request on first tap
+      const requestPermission = async () => {
+        try {
+          const permission = await DOE.requestPermission();
+          if (permission === 'granted') {
+            window.addEventListener('deviceorientation', handleOrientation, true);
+            gyroCleanup = () => window.removeEventListener('deviceorientation', handleOrientation, true);
+          }
+        } catch (err) {
+          // Permission denied, fall through to mouse
+        }
+        window.removeEventListener('click', requestPermission, true);
+      };
+      // Auto-request on first user interaction
+      window.addEventListener('click', requestPermission, true);
+      gyroCleanup = () => window.removeEventListener('click', requestPermission, true);
+    } else if (isMobile) {
+      // Android or older iOS — no permission needed
+      window.addEventListener('deviceorientation', handleOrientation, true);
+      gyroCleanup = () => window.removeEventListener('deviceorientation', handleOrientation, true);
+    }
+
+    // Always add mouse listener as fallback (hasGyro flag prevents conflict)
+    window.addEventListener('mousemove', handleMouse);
+    mouseCleanup = () => window.removeEventListener('mousemove', handleMouse);
+
+    return () => {
+      gyroCleanup?.();
+      mouseCleanup?.();
+    };
+  }, [maxTilt, x, y, rotateX, rotateY]);
+
+  return { x: sx, y: sy, rotateX: srx, rotateY: sry };
 }
 
 const LOGO_URL = '/logo.png';
@@ -68,19 +121,18 @@ export default function Home() {
           {/* Logo grand */}
           <motion.img
             initial={{ opacity: 0, scale: 0.85 }}
-            animate={{
-              opacity: 1,
-              scale: 1,
-              x: tilt.x,
-              y: tilt.y,
-              rotateY: tilt.x * 0.5,
-              rotateX: -tilt.y * 0.5,
-            }}
-            transition={{ type: 'spring', stiffness: 100, damping: 20 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.6 }}
             src={LOGO_URL}
             alt="D'Home Barber"
             className="w-72 h-72 object-contain drop-shadow-2xl mb-2"
-            style={{ perspective: 800 }}
+            style={{
+              x: tilt.x,
+              y: tilt.y,
+              rotateX: tilt.rotateX,
+              rotateY: tilt.rotateY,
+              perspective: 800,
+            }}
           />
           <p className="text-sm font-light tracking-[0.3em] uppercase text-white/70 mb-4">Premium BarberShop</p>
 
