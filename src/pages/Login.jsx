@@ -105,7 +105,7 @@ export default function Login() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      toast.success('Un code de réinitialisation a été généré. Contactez le salon pour l\'obtenir.');
+      toast.success('Si un compte existe avec cet email, un code vous a été envoyé.');
       setResetStep('code');
     } catch (err) {
       toast.error(err.message || 'Erreur lors de la demande');
@@ -397,7 +397,7 @@ export default function Login() {
 
             {resetStep === 'code' && (
               <p className="text-center text-xs text-muted-foreground/70 mt-2">
-                Contactez le salon au <span className="text-primary font-semibold">06 66 08 36 05</span> pour obtenir votre code.
+                Un code à 6 chiffres a été envoyé à votre adresse email. Vérifiez aussi vos spams.
               </p>
             )}
           </motion.form>
