@@ -39,11 +39,22 @@ function reducer(state, action) {
 
 function ModalInner({ appointment, onUpdate, onDelete }) {
   const [state, dispatch] = useReducer(reducer, appointment, initialState);
+  const [clientSearch, setClientSearch] = React.useState('');
 
   const { data: products = [] } = useQuery({
     queryKey: ['products'],
     queryFn: () => api.entities.Product.filter({ is_active: true }, 'name', 100),
   });
+
+  const { data: allUsers = [] } = useQuery({
+    queryKey: ['allUsersForSearch'],
+    queryFn: () => api.entities.User.list('full_name', 1000),
+    enabled: !appointment.client_email && appointment.status !== 'completed',
+  });
+
+  const filteredUsers = clientSearch.length >= 2
+    ? allUsers.filter(u => u.full_name?.toLowerCase().includes(clientSearch.toLowerCase()) || u.email?.toLowerCase().includes(clientSearch.toLowerCase()))
+    : [];
 
   const status = statusLabel[appointment.status] || statusLabel.confirmed;
   const isCompleted = appointment.status === 'completed';
@@ -56,7 +67,7 @@ function ModalInner({ appointment, onUpdate, onDelete }) {
   const handleValidate = async () => {
     dispatch({ type: 'SAVING', value: true });
     try {
-      const updateData = {
+      await api.entities.Appointment.update(appointment.id, {
         payment_method: state.paymentMethod,
         payment_status: 'paid',
         status: 'completed',
@@ -65,14 +76,7 @@ function ModalInner({ appointment, onUpdate, onDelete }) {
         product_sold: state.productSold,
         product_price: prodValue,
         grand_total: grandTotal,
-      };
-      // Include client info if it was edited
-      if (state.clientName && state.clientName !== appointment.client_name) {
-        updateData.client_name = state.clientName;
-        updateData.client_email = state.clientEmail;
-        updateData.client_phone = state.clientPhone;
-      }
-      await api.entities.Appointment.update(appointment.id, updateData);
+      });
       toast.success('Prestation validée !');
       onUpdate?.();
     } catch (e) {
@@ -94,63 +98,51 @@ function ModalInner({ appointment, onUpdate, onDelete }) {
         </span>
       </div>
 
-      {/* Client info - editable if no real client */}
+      {/* Client info */}
       {!isCompleted && !appointment.client_email ? (
-        <div className="bg-secondary rounded-xl p-3 space-y-2">
-          <p className="text-[11px] text-muted-foreground font-medium mb-1">Assigner un client</p>
+        <div className="bg-secondary rounded-xl p-3 space-y-2 relative">
           <div className="flex items-center gap-2">
             <User className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
             <input
               type="text"
-              placeholder="Nom du client *"
-              value={state.clientName}
-              onChange={e => dispatch({ type: 'SET', field: 'clientName', value: e.target.value })}
+              placeholder="Rechercher un client..."
+              value={clientSearch}
+              onChange={e => setClientSearch(e.target.value)}
               className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-primary/40"
             />
           </div>
-          <div className="flex items-center gap-2">
-            <Mail className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-            <input
-              type="email"
-              placeholder="Email"
-              value={state.clientEmail}
-              onChange={e => dispatch({ type: 'SET', field: 'clientEmail', value: e.target.value })}
-              className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-primary/40"
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            <Phone className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-            <input
-              type="tel"
-              placeholder="Téléphone"
-              value={state.clientPhone}
-              onChange={e => dispatch({ type: 'SET', field: 'clientPhone', value: e.target.value })}
-              className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-primary/40"
-            />
-          </div>
-          {state.clientName && state.clientName !== appointment.client_name && (
-            <button
-              onClick={async () => {
-                dispatch({ type: 'SAVING', value: true });
-                try {
-                  await api.entities.Appointment.update(appointment.id, {
-                    client_name: state.clientName,
-                    client_email: state.clientEmail,
-                    client_phone: state.clientPhone,
-                  });
-                  toast.success('Client assigné');
-                  onUpdate?.();
-                } catch {
-                  toast.error('Erreur');
-                } finally {
-                  dispatch({ type: 'SAVING', value: false });
-                }
-              }}
-              disabled={state.saving}
-              className="w-full py-2 rounded-lg bg-primary/15 text-primary text-xs font-semibold hover:bg-primary/25 transition-all disabled:opacity-50"
-            >
-              Assigner ce client
-            </button>
+          {filteredUsers.length > 0 && (
+            <div className="max-h-36 overflow-y-auto rounded-lg border border-border bg-card">
+              {filteredUsers.slice(0, 8).map(u => (
+                <button
+                  key={u.id}
+                  onClick={async () => {
+                    dispatch({ type: 'SAVING', value: true });
+                    try {
+                      await api.entities.Appointment.update(appointment.id, {
+                        client_name: u.full_name || u.email,
+                        client_email: u.email,
+                        client_phone: u.phone || '',
+                      });
+                      toast.success(`Client ${u.full_name || u.email} assigné`);
+                      setClientSearch('');
+                      onUpdate?.();
+                    } catch {
+                      toast.error('Erreur');
+                    } finally {
+                      dispatch({ type: 'SAVING', value: false });
+                    }
+                  }}
+                  className="w-full text-left px-3 py-2 text-xs hover:bg-primary/10 transition-colors border-b border-border/50 last:border-0"
+                >
+                  <span className="font-semibold text-foreground">{u.full_name || u.email}</span>
+                  {u.phone && <span className="text-muted-foreground ml-2">{u.phone}</span>}
+                </button>
+              ))}
+            </div>
+          )}
+          {clientSearch.length >= 2 && filteredUsers.length === 0 && (
+            <p className="text-[11px] text-muted-foreground text-center py-1">Aucun client trouvé</p>
           )}
         </div>
       ) : (
