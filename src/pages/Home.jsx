@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '@/api/apiClient';
 import { useQuery } from '@tanstack/react-query';
@@ -224,17 +224,17 @@ export default function Home() {
         animate="visible"
         className="max-w-lg mx-auto px-5 py-6 space-y-8"
       >
-        {/* Quick Info - Cards redesigned */}
+        {/* Quick Info - Vert / Blanc / Rouge */}
         <motion.div variants={itemVariants} className="grid grid-cols-3 gap-2">
           {[
-            { icon: Clock, label: 'Mar - Sam', sub: '9h - 20h', href: null, gradient: 'from-blue-500/20 to-blue-600/5' },
-            { icon: Phone, label: 'Appeler', sub: '06 66 08 36 05', href: 'tel:0666083605', gradient: 'from-green-500/20 to-green-600/5' },
-            { icon: MapPin, label: 'Itinéraire', sub: 'Douvaine', href: 'https://maps.google.com/?q=3+Rue+du+Bois+Arquet+74140+Douvaine', gradient: 'from-orange-500/20 to-orange-600/5' },
-          ].map(({ icon: Icon, label, sub, href, gradient }) => {
+            { icon: Clock, label: 'Mar - Sam', sub: '9h - 20h', href: null, iconColor: 'text-green-500', bgColor: 'bg-green-500/15', borderColor: 'border-green-500/20' },
+            { icon: Phone, label: 'Appeler', sub: '06 66 08 36 05', href: 'tel:0666083605', iconColor: 'text-white', bgColor: 'bg-white/15', borderColor: 'border-white/20' },
+            { icon: MapPin, label: 'Itinéraire', sub: 'Douvaine', href: 'https://maps.google.com/?q=3+Rue+du+Bois+Arquet+74140+Douvaine', iconColor: 'text-red-500', bgColor: 'bg-red-500/15', borderColor: 'border-red-500/20' },
+          ].map(({ icon: Icon, label, sub, href, iconColor, bgColor, borderColor }) => {
             const content = (
               <>
-                <div className={`w-10 h-10 rounded-2xl bg-gradient-to-br ${gradient} flex items-center justify-center mx-auto mb-2 border border-white/10`}>
-                  <Icon className="w-4.5 h-4.5 text-primary" />
+                <div className={`w-10 h-10 rounded-2xl ${bgColor} flex items-center justify-center mx-auto mb-2 border ${borderColor}`}>
+                  <Icon className={`w-4.5 h-4.5 ${iconColor}`} />
                 </div>
                 <p className="text-xs font-semibold text-foreground">{label}</p>
                 <p className="text-[11px] text-muted-foreground mt-0.5">{sub}</p>
@@ -259,38 +259,49 @@ export default function Home() {
           })}
         </motion.div>
 
-        {/* Team / Barbers - Redesigned with bigger cards */}
+        {/* Team / Barbers - Auto-scrolling marquee */}
         <motion.div variants={itemVariants}>
           <SectionHeader title="Notre Équipe" subtitle="Les Barbers" />
-          <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1 snap-x snap-mandatory scrollbar-hide">
-            {employees.map((emp, i) => (
-              <Link key={emp.id} to={`/barber/${emp.id}`} className="snap-start shrink-0">
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.9 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ delay: i * 0.07 }}
-                  whileTap={{ scale: 0.95 }}
-                  className="relative w-28 cursor-pointer group"
-                >
-                  <div className="w-28 h-32 rounded-2xl overflow-hidden glass border border-white/10 mb-2 relative">
-                    {emp.photo_url ? (
-                      <img src={emp.photo_url} alt={emp.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-2xl font-bold text-muted-foreground bg-gradient-to-br from-primary/10 to-primary/5">
-                        {emp.name?.charAt(0)}
+          {employees.length > 0 && (
+            <div className="overflow-hidden -mx-5">
+              <motion.div
+                className="flex gap-3 px-5 w-max"
+                animate={{ x: ['0%', '-50%'] }}
+                transition={{
+                  x: {
+                    duration: employees.length * 4,
+                    repeat: Infinity,
+                    ease: 'linear',
+                  },
+                }}
+              >
+                {/* Double the list for seamless loop */}
+                {[...employees, ...employees].map((emp, i) => (
+                  <Link key={`${emp.id}-${i}`} to={`/barber/${emp.id}`} className="shrink-0">
+                    <motion.div
+                      whileTap={{ scale: 0.95 }}
+                      className="relative w-28 cursor-pointer group"
+                    >
+                      <div className="w-28 h-32 rounded-2xl overflow-hidden glass border border-white/10 mb-2 relative">
+                        {emp.photo_url ? (
+                          <img src={emp.photo_url} alt={emp.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-2xl font-bold text-muted-foreground bg-gradient-to-br from-primary/10 to-primary/5">
+                            {emp.name?.charAt(0)}
+                          </div>
+                        )}
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+                        <div className="absolute bottom-2 left-2 right-2">
+                          <p className="text-xs font-bold text-white drop-shadow-lg">{emp.name}</p>
+                          <p className="text-[10px] text-white/70">{emp.title || 'Barber'}</p>
+                        </div>
                       </div>
-                    )}
-                    {/* Gradient overlay */}
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
-                    <div className="absolute bottom-2 left-2 right-2">
-                      <p className="text-xs font-bold text-white drop-shadow-lg">{emp.name}</p>
-                      <p className="text-[10px] text-white/70">{emp.title || 'Barber'}</p>
-                    </div>
-                  </div>
-                </motion.div>
-              </Link>
-            ))}
-          </div>
+                    </motion.div>
+                  </Link>
+                ))}
+              </motion.div>
+            </div>
+          )}
         </motion.div>
 
         {/* News Gang - Now right after barbers */}
