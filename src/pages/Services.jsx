@@ -17,6 +17,7 @@ function GlassCard({ children }) {
   const scale = useTransform(scrollYProgress, [0, 0.5, 1], [0.7, 1.2, 0.7]);
   const opacity = useTransform(scrollYProgress, [0, 0.25, 0.5, 0.75, 1], [0, 0.9, 1, 0.9, 0]);
   const rotate = useTransform(scrollYProgress, [0, 0.5, 1], [-3, 2, -3]);
+  const glowOpacity = useTransform(scrollYProgress, [0, 0.4, 0.6, 1], [0, 0.4, 0.4, 0]);
 
   return (
     <div ref={ref} className="relative py-1">
@@ -39,7 +40,7 @@ function GlassCard({ children }) {
       <motion.div
         className="absolute inset-0 rounded-2xl pointer-events-none"
         style={{
-          opacity: useTransform(scrollYProgress, [0, 0.4, 0.6, 1], [0, 0.4, 0.4, 0]),
+          opacity: glowOpacity,
           boxShadow: '0 0 20px 2px rgba(34,197,94,0.15), inset 0 0 20px 0 rgba(34,197,94,0.03)',
         }}
       />
