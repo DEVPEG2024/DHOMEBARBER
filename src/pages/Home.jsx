@@ -2,7 +2,7 @@ import React, { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '@/api/apiClient';
 import { useQuery } from '@tanstack/react-query';
-import { MapPin, Clock, Phone, Star, ArrowRight, Scissors } from 'lucide-react';
+import { MapPin, Clock, Phone, Star, ArrowRight, Scissors, ShoppingBag, Newspaper } from 'lucide-react';
 import { motion, useMotionValue, useSpring } from 'framer-motion';
 import SectionHeader from '@/components/shared/SectionHeader';
 import StarRating from '@/components/shared/StarRating';
@@ -60,6 +60,18 @@ export default function Home() {
     queryKey: ['reviews'],
     queryFn: () => api.entities.Review.filter({ is_visible: true }, '-created_date', 5),
   });
+
+  const { data: products = [] } = useQuery({
+    queryKey: ['products'],
+    queryFn: () => api.entities.Product.filter({ is_active: true }, 'name', 50),
+  });
+
+  const { data: posts = [] } = useQuery({
+    queryKey: ['latestPost'],
+    queryFn: () => api.entities.Post.list('-created_at', 1),
+  });
+
+  const latestPost = posts[0] || null;
 
   const avgRating = reviews.length > 0
     ? (reviews.reduce((sum, r) => sum + (r.rating || 0), 0) / reviews.length).toFixed(1)
@@ -222,24 +234,7 @@ export default function Home() {
           })}
         </motion.div>
 
-        {/* Services Preview */}
-        <div>
-          <SectionHeader title="Nos Prestations" subtitle="Services" linkTo="/services" />
-          <div className="space-y-2.5">
-            {services.slice(0, 4).map((service, i) => (
-              <motion.div key={service.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
-                className="glass rounded-2xl px-4 py-3.5 flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-semibold text-foreground">{service.name}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">{service.duration} min</p>
-                </div>
-                <span className="text-sm font-bold text-primary">{service.price}€</span>
-              </motion.div>
-            ))}
-          </div>
-        </div>
-
-        {/* Team Preview */}
+        {/* Team / Barbers */}
         <div>
           <SectionHeader title="Notre Équipe" subtitle="Les Barbers" />
           <div className="grid grid-cols-5 gap-2">
@@ -265,10 +260,91 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Reviews */}
+        {/* Services / Prestations */}
+        <div>
+          <SectionHeader title="Nos Prestations" subtitle="Services" linkTo="/services" />
+          <div className="space-y-2.5">
+            {services.slice(0, 4).map((service, i) => (
+              <motion.div key={service.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
+                className="glass rounded-2xl px-4 py-3.5 flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-foreground">{service.name}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{service.duration} min</p>
+                </div>
+                <span className="text-sm font-bold text-primary">{service.price}€</span>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+
+        {/* Shop / Produits */}
+        {products.length > 0 && (
+          <div>
+            <SectionHeader title="Notre Boutique" subtitle="Shop" linkTo="/shop" />
+            <div className="grid grid-cols-2 gap-2.5">
+              {products.slice(0, 4).map((product, i) => (
+                <Link key={product.id} to="/shop">
+                  <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
+                    whileTap={{ scale: 0.97 }}
+                    className="glass rounded-2xl overflow-hidden cursor-pointer">
+                    {product.image_url ? (
+                      <div className="w-full aspect-square bg-white/5">
+                        <img src={product.image_url} alt={product.name} className="w-full h-full object-cover" />
+                      </div>
+                    ) : (
+                      <div className="w-full aspect-square bg-white/5 flex items-center justify-center">
+                        <ShoppingBag className="w-8 h-8 text-muted-foreground/30" />
+                      </div>
+                    )}
+                    <div className="p-3">
+                      <p className="text-xs font-semibold text-foreground truncate">{product.name}</p>
+                      {product.brand && <p className="text-[11px] text-muted-foreground truncate">{product.brand}</p>}
+                      <p className="text-sm font-bold text-primary mt-1">{product.price}€</p>
+                    </div>
+                  </motion.div>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Latest Post / News Gang */}
+        {latestPost && (
+          <div>
+            <SectionHeader title="News Gang" subtitle="Dernière actu" linkTo="/feed" />
+            <Link to="/feed">
+              <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                whileTap={{ scale: 0.98 }}
+                className="glass rounded-2xl overflow-hidden cursor-pointer">
+                {latestPost.image_url && (
+                  <div className="w-full aspect-video bg-white/5">
+                    <img src={latestPost.image_url} alt="" className="w-full h-full object-cover" />
+                  </div>
+                )}
+                <div className="p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Newspaper className="w-3.5 h-3.5 text-primary" />
+                    <span className="text-[11px] text-muted-foreground">
+                      {latestPost.created_at ? new Date(latestPost.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' }) : ''}
+                    </span>
+                    {latestPost.author_name && (
+                      <span className="text-[11px] font-medium text-foreground/70">· {latestPost.author_name}</span>
+                    )}
+                  </div>
+                  <p className="text-sm text-foreground leading-relaxed line-clamp-3">{latestPost.content}</p>
+                  <span className="inline-flex items-center gap-1 text-xs text-primary font-medium mt-3">
+                    Voir le feed <ArrowRight className="w-3 h-3" />
+                  </span>
+                </div>
+              </motion.div>
+            </Link>
+          </div>
+        )}
+
+        {/* Reviews / Avis */}
         {reviews.length > 0 && (
           <div>
-            <SectionHeader title="Avis Clients" subtitle="Témoignages" />
+            <SectionHeader title="Avis Clients" subtitle="Témoignages" linkTo="/reviews" />
             <div className="space-y-2.5">
               {reviews.slice(0, 3).map((review, i) => (
                 <motion.div key={review.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.07 }}
