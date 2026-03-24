@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { base44 } from '@/api/base44Client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Pencil, Trash2, Mail, Upload } from 'lucide-react';
+import ImageCropDialog from '@/components/shared/ImageCropDialog';
 import { Button } from '@/components/ui/button';
 
 const BARBER_COLORS = ['#3fcf8e','#60a5fa','#f59e0b','#a78bfa','#f472b6','#34d399','#fb923c','#38bdf8','#e879f9','#4ade80'];
@@ -23,6 +24,8 @@ const defaultHours = DAYS.reduce((acc, d) => ({
 export default function Team() {
   const [editEmployee, setEditEmployee] = useState(null);
   const [showDialog, setShowDialog] = useState(false);
+  const [cropSrc, setCropSrc] = useState(null);
+  const [showCrop, setShowCrop] = useState(false);
   const queryClient = useQueryClient();
 
   const { data: employees = [] } = useQuery({
@@ -145,15 +148,13 @@ export default function Team() {
                   )}
                 </div>
                 <label className="cursor-pointer">
-                  <input type="file" accept="image/*" className="hidden" onChange={async (e) => {
+                  <input type="file" accept="image/*" className="hidden" onChange={(e) => {
                     const file = e.target.files[0];
                     if (!file) return;
-                    try {
-                      const { file_url } = await base44.integrations.Core.UploadFile({ file });
-                      setEditEmployee(prev => ({ ...prev, photo_url: file_url }));
-                    } catch {
-                      toast.error('Erreur lors de l\'upload de la photo');
-                    }
+                    const reader = new FileReader();
+                    reader.onload = () => { setCropSrc(reader.result); setShowCrop(true); };
+                    reader.readAsDataURL(file);
+                    e.target.value = '';
                   }} />
                   <span className="flex items-center gap-1.5 text-xs text-primary border border-primary/30 bg-primary/5 hover:bg-primary/10 px-3 py-1.5 rounded-lg transition-all cursor-pointer">
                     <Upload className="w-3 h-3" /> Changer la photo
@@ -232,6 +233,20 @@ export default function Team() {
           )}
         </DialogContent>
       </Dialog>
+
+      <ImageCropDialog
+        open={showCrop}
+        onOpenChange={setShowCrop}
+        imageSrc={cropSrc}
+        onCropComplete={async (croppedFile) => {
+          try {
+            const { file_url } = await base44.integrations.Core.UploadFile({ file: croppedFile });
+            setEditEmployee(prev => ({ ...prev, photo_url: file_url }));
+          } catch {
+            toast.error('Erreur lors de l\'upload de la photo');
+          }
+        }}
+      />
     </div>
   );
 }

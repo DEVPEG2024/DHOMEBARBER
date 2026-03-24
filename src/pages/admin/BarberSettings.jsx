@@ -3,6 +3,7 @@ import { base44 } from '@/api/base44Client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { Camera, LogOut, Loader2, User, Save } from 'lucide-react';
+import ImageCropDialog from '@/components/shared/ImageCropDialog';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -155,6 +156,8 @@ export default function BarberSettings() {
   const queryClient = useQueryClient();
   const fileInputRef = useRef(null);
   const [uploading, setUploading] = useState(false);
+  const [cropSrc, setCropSrc] = useState(null);
+  const [showCrop, setShowCrop] = useState(false);
   const [skills, setSkills] = useState(null);
   const [bio, setBio] = useState('');
   const [experienceLevel, setExperienceLevel] = useState(0);
@@ -191,12 +194,20 @@ export default function BarberSettings() {
     },
   });
 
-  const handlePhotoUpload = async (e) => {
+  const handlePhotoUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file || !employee) return;
+    const reader = new FileReader();
+    reader.onload = () => { setCropSrc(reader.result); setShowCrop(true); };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handleCroppedPhoto = async (croppedFile) => {
+    if (!employee) return;
     setUploading(true);
     try {
-      const { file_url } = await base44.integrations.Core.UploadFile({ file });
+      const { file_url } = await base44.integrations.Core.UploadFile({ file: croppedFile });
       updateMutation.mutate({ id: employee.id, data: { photo_url: file_url } }, {
         onSuccess: () => toast.success('Photo mise à jour'),
       });
@@ -375,6 +386,13 @@ export default function BarberSettings() {
           Déconnexion
         </Button>
       </div>
+
+      <ImageCropDialog
+        open={showCrop}
+        onOpenChange={setShowCrop}
+        imageSrc={cropSrc}
+        onCropComplete={handleCroppedPhoto}
+      />
     </div>
   );
 }
