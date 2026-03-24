@@ -1,11 +1,12 @@
 import React, { useState, useRef } from 'react';
 import { base44 } from '@/api/base44Client';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Image, Send, Heart, Trash2, Loader2, Camera, MessageCircle } from 'lucide-react';
+import { Send, Heart, Trash2, Loader2, Camera, MessageCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
 
 function timeAgo(dateStr) {
@@ -25,12 +26,70 @@ function getRoleBadge(role) {
   return null;
 }
 
-function PostCard({ post, currentUser, onLike, onDelete, likes }) {
+function CommentItem({ comment, currentUser, onDelete }) {
+  const badge = getRoleBadge(comment.author_role);
+  const initials = comment.author_name?.split(' ').map(n => n[0]).join('').slice(0, 2) || '?';
+  const isOwner = currentUser?.email === comment.author_email || currentUser?.role === 'admin';
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 5 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="flex gap-2.5"
+    >
+      <div className="w-7 h-7 rounded-full overflow-hidden bg-secondary border border-border flex items-center justify-center flex-shrink-0">
+        {comment.author_photo_url ? (
+          <img src={comment.author_photo_url} alt="" className="w-full h-full object-cover" />
+        ) : (
+          <span className="text-[10px] font-bold text-muted-foreground">{initials}</span>
+        )}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="bg-secondary/50 rounded-xl px-3 py-2">
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs font-semibold text-foreground">{comment.author_name}</span>
+            {badge && (
+              <span className="text-[9px] font-bold px-1 py-0.5 rounded-full" style={{ backgroundColor: badge.color + '20', color: badge.color }}>
+                {badge.label}
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-foreground/80 mt-0.5 whitespace-pre-wrap">{comment.content}</p>
+        </div>
+        <div className="flex items-center gap-3 mt-1 px-1">
+          <span className="text-[10px] text-muted-foreground">{timeAgo(comment.created_at)}</span>
+          {isOwner && (
+            <button onClick={() => onDelete(comment.id)} className="text-[10px] text-muted-foreground hover:text-red-400 transition-colors">
+              Supprimer
+            </button>
+          )}
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+function PostCard({ post, currentUser, onLike, onDelete, likes, comments, onComment, onDeleteComment, getAuthorPhoto }) {
+  const [showComments, setShowComments] = useState(false);
+  const [commentText, setCommentText] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
   const userLiked = likes.some(l => l.post_id === post.id && l.user_email === currentUser?.email);
   const likeCount = likes.filter(l => l.post_id === post.id).length;
+  const postComments = comments.filter(c => c.post_id === post.id);
+  const commentCount = postComments.length;
   const badge = getRoleBadge(post.author_role);
   const initials = post.author_name?.split(' ').map(n => n[0]).join('').slice(0, 2) || '?';
   const isOwner = currentUser?.email === post.author_email || currentUser?.role === 'admin';
+
+  const handleSubmitComment = async () => {
+    if (!commentText.trim()) return;
+    setSubmitting(true);
+    await onComment(post.id, commentText.trim());
+    setCommentText('');
+    setSubmitting(false);
+    setShowComments(true);
+  };
 
   return (
     <motion.div
@@ -85,12 +144,74 @@ function PostCard({ post, currentUser, onLike, onDelete, likes }) {
           onClick={() => onLike(post.id, userLiked)}
           className="flex items-center gap-1.5 transition-colors"
         >
-          <Heart
-            className={`w-5 h-5 transition-all ${userLiked ? 'text-red-500 fill-red-500' : 'text-muted-foreground'}`}
-          />
+          <Heart className={`w-5 h-5 transition-all ${userLiked ? 'text-red-500 fill-red-500' : 'text-muted-foreground'}`} />
           <span className={`text-xs font-medium ${userLiked ? 'text-red-500' : 'text-muted-foreground'}`}>
             {likeCount > 0 ? likeCount : ''}
           </span>
+        </motion.button>
+
+        <button
+          onClick={() => setShowComments(!showComments)}
+          className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <MessageCircle className="w-5 h-5" />
+          <span className="text-xs font-medium">{commentCount > 0 ? commentCount : ''}</span>
+          {commentCount > 0 && (
+            showComments ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />
+          )}
+        </button>
+      </div>
+
+      {/* Comments section */}
+      <AnimatePresence>
+        {showComments && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden"
+          >
+            <div className="px-4 pb-4 space-y-3 border-t border-border pt-3">
+              {/* Comment list */}
+              {postComments.map(comment => (
+                <CommentItem
+                  key={comment.id}
+                  comment={comment}
+                  currentUser={currentUser}
+                  onDelete={onDeleteComment}
+                />
+              ))}
+              {postComments.length === 0 && (
+                <p className="text-xs text-muted-foreground text-center py-2">Aucun commentaire</p>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Comment input - always visible */}
+      <div className="flex items-center gap-2 px-4 py-3 border-t border-border">
+        <div className="w-7 h-7 rounded-full overflow-hidden bg-secondary border border-border flex items-center justify-center flex-shrink-0">
+          {getAuthorPhoto() ? (
+            <img src={getAuthorPhoto()} alt="" className="w-full h-full object-cover" />
+          ) : (
+            <span className="text-[10px] font-bold text-muted-foreground">{currentUser?.full_name?.charAt(0) || '?'}</span>
+          )}
+        </div>
+        <Input
+          value={commentText}
+          onChange={(e) => setCommentText(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmitComment(); } }}
+          placeholder="Écrire un commentaire..."
+          className="bg-secondary/50 border-border text-xs h-8 flex-1"
+        />
+        <motion.button
+          whileTap={{ scale: 0.85 }}
+          onClick={handleSubmitComment}
+          disabled={submitting || !commentText.trim()}
+          className="text-primary disabled:text-muted-foreground/30 transition-colors"
+        >
+          {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
         </motion.button>
       </div>
     </motion.div>
@@ -114,6 +235,11 @@ export default function Feed() {
   const { data: likes = [] } = useQuery({
     queryKey: ['postLikes'],
     queryFn: () => base44.entities.PostLike.list('-created_at', 500),
+  });
+
+  const { data: comments = [] } = useQuery({
+    queryKey: ['postComments'],
+    queryFn: () => base44.entities.PostComment.list('created_at', 500),
   });
 
   const { data: employees = [] } = useQuery({
@@ -176,6 +302,31 @@ export default function Feed() {
       }
       queryClient.invalidateQueries({ queryKey: ['postLikes'] });
     } catch {}
+  };
+
+  const handleComment = async (postId, text) => {
+    try {
+      await base44.entities.PostComment.create({
+        post_id: postId,
+        author_email: user.email,
+        author_name: user.full_name || user.email,
+        author_role: user.role || 'user',
+        author_photo_url: getAuthorPhoto(),
+        content: text,
+      });
+      queryClient.invalidateQueries({ queryKey: ['postComments'] });
+    } catch {
+      toast.error('Erreur lors du commentaire');
+    }
+  };
+
+  const handleDeleteComment = async (commentId) => {
+    try {
+      await base44.entities.PostComment.delete(commentId);
+      queryClient.invalidateQueries({ queryKey: ['postComments'] });
+    } catch {
+      toast.error('Erreur lors de la suppression');
+    }
   };
 
   const handleDelete = async (postId) => {
@@ -275,8 +426,12 @@ export default function Feed() {
                 post={post}
                 currentUser={user}
                 likes={likes}
+                comments={comments}
                 onLike={handleLike}
+                onComment={handleComment}
                 onDelete={handleDelete}
+                onDeleteComment={handleDeleteComment}
+                getAuthorPhoto={getAuthorPhoto}
               />
             ))}
           </AnimatePresence>
