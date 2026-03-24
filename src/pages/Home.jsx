@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import { useQuery } from '@tanstack/react-query';
@@ -7,113 +7,55 @@ import { motion, useMotionValue, useSpring } from 'framer-motion';
 import SectionHeader from '@/components/shared/SectionHeader';
 import StarRating from '@/components/shared/StarRating';
 
-function useParallaxTilt(maxTilt = 20) {
+const IS_MOBILE = typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+function useParallaxTilt() {
   const x = useMotionValue(0);
   const y = useMotionValue(0);
   const rotateX = useMotionValue(0);
   const rotateY = useMotionValue(0);
 
-  const springConfig = { stiffness: 150, damping: 20, mass: 0.5 };
+  const springConfig = { stiffness: 120, damping: 18, mass: 0.8 };
   const sx = useSpring(x, springConfig);
   const sy = useSpring(y, springConfig);
   const srx = useSpring(rotateX, springConfig);
   const sry = useSpring(rotateY, springConfig);
 
-  const hasGyro = useRef(false);
-  const gyroPermissionRequested = useRef(false);
-
+  // Desktop only — mouse follow
   useEffect(() => {
-    const cleanups = [];
+    if (IS_MOBILE) return;
 
-    const applyTilt = (nx, ny) => {
-      x.set(nx);
-      y.set(ny);
-      rotateY.set(nx * 0.6);
-      rotateX.set(-ny * 0.6);
-    };
-
-    // --- Gyroscope handler ---
-    const handleOrientation = (e) => {
-      if (e.gamma === null && e.beta === null) return;
-      hasGyro.current = true;
-      const gx = Math.max(-maxTilt, Math.min(maxTilt, e.gamma || 0));
-      const gy = Math.max(-maxTilt, Math.min(maxTilt, e.beta ? e.beta - 40 : 0));
-      applyTilt((gx / maxTilt) * 18, (gy / maxTilt) * 18);
-    };
-
-    // --- Touch handler (fallback for mobile without gyro) ---
-    const handleTouch = (e) => {
-      if (hasGyro.current) return;
-      const touch = e.touches[0];
-      if (!touch) return;
-      const cx = window.innerWidth / 2;
-      const cy = window.innerHeight / 3;
-      const nx = ((touch.clientX - cx) / cx) * 18;
-      const ny = ((touch.clientY - cy) / cy) * 12;
-      applyTilt(nx, ny);
-    };
-
-    const handleTouchEnd = () => {
-      if (hasGyro.current) return;
-      applyTilt(0, 0);
-    };
-
-    // --- Mouse handler (desktop) ---
     const handleMouse = (e) => {
-      if (hasGyro.current) return;
       const cx = window.innerWidth / 2;
       const cy = window.innerHeight / 2;
-      applyTilt(((e.clientX - cx) / cx) * 18, ((e.clientY - cy) / cy) * 18);
+      const nx = ((e.clientX - cx) / cx) * 15;
+      const ny = ((e.clientY - cy) / cy) * 15;
+      x.set(nx);
+      y.set(ny);
+      rotateY.set(nx * 0.5);
+      rotateX.set(-ny * 0.5);
     };
 
-    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-    const DOE = /** @type {any} */ (typeof DeviceOrientationEvent !== 'undefined' ? DeviceOrientationEvent : null);
-
-    if (isMobile && DOE && typeof DOE.requestPermission === 'function') {
-      // iOS 13+ — request permission on first tap anywhere
-      const requestPermission = async () => {
-        if (gyroPermissionRequested.current) return;
-        gyroPermissionRequested.current = true;
-        try {
-          const permission = await DOE.requestPermission();
-          if (permission === 'granted') {
-            window.addEventListener('deviceorientation', handleOrientation, true);
-            cleanups.push(() => window.removeEventListener('deviceorientation', handleOrientation, true));
-          }
-        } catch (_) {
-          // denied — touch fallback still active
-        }
-        document.removeEventListener('touchstart', requestPermission, true);
-      };
-      document.addEventListener('touchstart', requestPermission, true);
-      cleanups.push(() => document.removeEventListener('touchstart', requestPermission, true));
-    } else if (isMobile && DOE) {
-      // Android — no permission needed
-      window.addEventListener('deviceorientation', handleOrientation, true);
-      cleanups.push(() => window.removeEventListener('deviceorientation', handleOrientation, true));
-    }
-
-    // Touch fallback (works on all mobile, even without gyro permission)
-    if (isMobile) {
-      document.addEventListener('touchmove', handleTouch, { passive: true });
-      document.addEventListener('touchend', handleTouchEnd);
-      cleanups.push(
-        () => document.removeEventListener('touchmove', handleTouch),
-        () => document.removeEventListener('touchend', handleTouchEnd)
-      );
-    }
-
-    // Mouse (desktop)
-    if (!isMobile) {
-      window.addEventListener('mousemove', handleMouse);
-      cleanups.push(() => window.removeEventListener('mousemove', handleMouse));
-    }
-
-    return () => cleanups.forEach(fn => fn());
-  }, [maxTilt, x, y, rotateX, rotateY]);
+    window.addEventListener('mousemove', handleMouse);
+    return () => window.removeEventListener('mousemove', handleMouse);
+  }, [x, y, rotateX, rotateY]);
 
   return { x: sx, y: sy, rotateX: srx, rotateY: sry };
 }
+
+// Floating animation keyframes for mobile
+const mobileFloatAnimation = {
+  y: [0, -8, 0, 6, 0],
+  x: [0, 5, 0, -5, 0],
+  rotateY: [0, 3, 0, -3, 0],
+  rotateX: [0, -2, 0, 2, 0],
+};
+
+const mobileFloatTransition = {
+  duration: 6,
+  repeat: Infinity,
+  ease: 'easeInOut',
+};
 
 const LOGO_URL = '/logo.png';
 
@@ -143,22 +85,44 @@ export default function Home() {
       {/* Hero */}
       <div className="relative overflow-hidden">
         <div className="relative flex flex-col items-center justify-center px-5 pt-10 pb-8">
-          {/* Logo grand */}
-          <motion.img
-            initial={{ opacity: 0, scale: 0.85 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.6 }}
-            src={LOGO_URL}
-            alt="D'Home Barber"
-            className="w-72 h-72 object-contain drop-shadow-2xl mb-2"
-            style={{
-              x: tilt.x,
-              y: tilt.y,
-              rotateX: tilt.rotateX,
-              rotateY: tilt.rotateY,
-              perspective: 800,
-            }}
-          />
+          {/* Logo grand — floating animation on mobile, mouse parallax on desktop */}
+          {IS_MOBILE ? (
+            <motion.img
+              initial={{ opacity: 0, scale: 0.85 }}
+              animate={{
+                opacity: 1,
+                scale: 1,
+                ...mobileFloatAnimation,
+              }}
+              transition={{
+                opacity: { duration: 0.6 },
+                scale: { duration: 0.6 },
+                ...Object.fromEntries(
+                  Object.keys(mobileFloatAnimation).map(k => [k, mobileFloatTransition])
+                ),
+              }}
+              src={LOGO_URL}
+              alt="D'Home Barber"
+              className="w-72 h-72 object-contain drop-shadow-2xl mb-2"
+              style={{ perspective: 800 }}
+            />
+          ) : (
+            <motion.img
+              initial={{ opacity: 0, scale: 0.85 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.6 }}
+              src={LOGO_URL}
+              alt="D'Home Barber"
+              className="w-72 h-72 object-contain drop-shadow-2xl mb-2"
+              style={{
+                x: tilt.x,
+                y: tilt.y,
+                rotateX: tilt.rotateX,
+                rotateY: tilt.rotateY,
+                perspective: 800,
+              }}
+            />
+          )}
           <p className="text-sm font-light tracking-[0.3em] uppercase text-white/70 mb-4">Premium BarberShop</p>
 
           <div className="flex items-center gap-3 mb-5">
