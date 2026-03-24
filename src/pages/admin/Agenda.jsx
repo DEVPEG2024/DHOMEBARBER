@@ -296,17 +296,20 @@ export default function Agenda() {
           </button>
         ))}
         <span className="text-xs text-muted-foreground ml-auto">{realAppointmentCount} rdv</span>
-        {user?.role === 'admin' && (
-          <button
-            onClick={() => {
-              setLastMinuteForm({ date: format(currentDate, 'yyyy-MM-dd'), start_time: '', end_time: '', employee_id: employeeFilter !== 'all' ? employeeFilter : '' });
-              setLastMinuteDialog(true);
-            }}
-            className="px-3 py-1 text-xs rounded-full bg-orange-500/15 text-orange-400 border border-orange-500/30 hover:bg-orange-500/25 transition-all font-semibold"
-          >
-            Last Minute
-          </button>
-        )}
+        <button
+          onClick={() => {
+            setLastMinuteForm({
+              date: format(currentDate, 'yyyy-MM-dd'),
+              start_time: '',
+              end_time: '',
+              employee_id: user?.role === 'barber' ? user?.employee_id : (employeeFilter !== 'all' ? employeeFilter : ''),
+            });
+            setLastMinuteDialog(true);
+          }}
+          className="px-3 py-1 text-xs rounded-full bg-orange-500/15 text-orange-400 border border-orange-500/30 hover:bg-orange-500/25 transition-all font-semibold"
+        >
+          Last Minute
+        </button>
       </div>
 
       {view === 'day' && (
