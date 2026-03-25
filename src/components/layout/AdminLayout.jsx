@@ -1,54 +1,66 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Outlet, Link, useLocation, Navigate } from 'react-router-dom';
 import {
   LayoutDashboard, Calendar, Users, Scissors, UserCircle,
   BarChart3, Settings, Menu, X, ChevronLeft, ShoppingBag, Star, Bell, Brain, Sun, Moon, ClipboardList, ShieldCheck, Sparkles, CalendarDays, Newspaper, Warehouse, PartyPopper, LogOut, Gift
 } from 'lucide-react';
-import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { useTheme } from '@/lib/ThemeContext';
 import { useAuth } from '@/lib/AuthContext';
 
-const STORAGE_KEY = 'admin_sidebar_order';
-
+// Items sans catégorie = en haut du menu
 const allSidebarItems = [
+  // --- En haut, sans catégorie ---
   { path: '/admin', icon: LayoutDashboard, label: 'Dashboard', exact: true, perm: 'dashboard' },
   { path: '/admin/agenda', icon: Calendar, label: 'Agenda', perm: 'agenda' },
-  { path: '/admin/services', icon: Scissors, label: 'Prestations', perm: 'services' },
-  { path: '/admin/team', icon: Users, label: 'Équipe', perm: 'team' },
-  { path: '/admin/clients', icon: UserCircle, label: 'Clients', perm: 'clients' },
-  { path: '/admin/products', icon: ShoppingBag, label: 'Produits', perm: 'products' },
-  { path: '/admin/stock', icon: Warehouse, label: 'Stock Produits', perm: 'products' },
-  { path: '/admin/orders', icon: ClipboardList, label: 'Commandes', perm: 'orders' },
-  { path: '/admin/reviews', icon: Star, label: 'Avis', perm: 'reviews' },
-  { path: '/admin/stats', icon: BarChart3, label: 'Statistiques', perm: 'stats' },
-  { path: '/admin/notifications', icon: Bell, label: 'Notifications', perm: 'notifications' },
-  { path: '/admin/cleaning', icon: Sparkles, label: 'Entretien', perm: 'cleaning' },
-  { path: '/admin/my-cleaning', icon: Sparkles, label: 'Entretien', barberOnly: true, alwaysShow: true },
   { path: '/admin/smart-agenda', icon: Brain, label: 'Agenda IA', perm: 'smart-agenda' },
-  { path: '/admin/feed', icon: Newspaper, label: 'New\'sGang', alwaysShow: true },
-  { path: '/admin/settings', icon: Settings, label: 'Paramètres', perm: 'settings' },
-  { path: '/admin/leave', icon: CalendarDays, label: 'Congés', adminOnly: true },
-  { path: '/admin/my-leave', icon: CalendarDays, label: 'Mes Congés', barberOnly: true, alwaysShow: true },
-  { path: '/admin/my-settings', icon: Settings, label: 'Paramètres', barberOnly: true, alwaysShow: true },
-  { path: '/admin/events', icon: PartyPopper, label: 'Événements', adminOnly: true },
-  { path: '/admin/gift-cards', icon: Gift, label: 'Cartes Cadeau', adminOnly: true },
-  { path: '/admin/barber-accounts', icon: ShieldCheck, label: 'Comptes Barbers', adminOnly: true },
+
+  // --- Clients ---
+  { path: '/admin/clients', icon: UserCircle, label: 'Clients', perm: 'clients', category: 'Clients' },
+  { path: '/admin/reviews', icon: Star, label: 'Avis', perm: 'reviews', category: 'Clients' },
+  { path: '/admin/notifications', icon: Bell, label: 'Notifications', perm: 'notifications', category: 'Clients' },
+
+  // --- Commerce ---
+  { path: '/admin/services', icon: Scissors, label: 'Prestations', perm: 'services', category: 'Commerce' },
+  { path: '/admin/products', icon: ShoppingBag, label: 'Produits', perm: 'products', category: 'Commerce' },
+  { path: '/admin/stock', icon: Warehouse, label: 'Stock Produits', perm: 'products', category: 'Commerce' },
+  { path: '/admin/orders', icon: ClipboardList, label: 'Commandes', perm: 'orders', category: 'Commerce' },
+  { path: '/admin/gift-cards', icon: Gift, label: 'Cartes Cadeau', adminOnly: true, category: 'Commerce' },
+
+  // --- Équipe ---
+  { path: '/admin/team', icon: Users, label: 'Équipe', perm: 'team', category: 'Équipe' },
+  { path: '/admin/barber-accounts', icon: ShieldCheck, label: 'Comptes Barbers', adminOnly: true, category: 'Équipe' },
+  { path: '/admin/leave', icon: CalendarDays, label: 'Congés', adminOnly: true, category: 'Équipe' },
+  { path: '/admin/cleaning', icon: Sparkles, label: 'Entretien', perm: 'cleaning', category: 'Équipe' },
+
+  // --- Barber only (Mon espace) ---
+  { path: '/admin/my-cleaning', icon: Sparkles, label: 'Entretien', barberOnly: true, alwaysShow: true, category: 'Mon espace' },
+  { path: '/admin/my-leave', icon: CalendarDays, label: 'Mes Congés', barberOnly: true, alwaysShow: true, category: 'Mon espace' },
+  { path: '/admin/my-settings', icon: Settings, label: 'Paramètres', barberOnly: true, alwaysShow: true, category: 'Mon espace' },
+
+  // --- Analyse ---
+  { path: '/admin/stats', icon: BarChart3, label: 'Statistiques', perm: 'stats', category: 'Analyse' },
+
+  // --- Divers ---
+  { path: '/admin/feed', icon: Newspaper, label: 'New\'sGang', alwaysShow: true, category: 'Divers' },
+  { path: '/admin/events', icon: PartyPopper, label: 'Événements', adminOnly: true, category: 'Divers' },
+  { path: '/admin/settings', icon: Settings, label: 'Paramètres', perm: 'settings', category: 'Divers' },
 ];
 
-function reorderByPaths(items, savedPaths) {
-  if (!savedPaths || savedPaths.length === 0) return items;
-  const map = {};
-  items.forEach(item => { map[item.path] = item; });
-  const ordered = [];
-  savedPaths.forEach(path => {
-    if (map[path]) {
-      ordered.push(map[path]);
-      delete map[path];
-    }
-  });
-  // Append any new items not in saved order
-  Object.values(map).forEach(item => ordered.push(item));
-  return ordered;
+function NavLink({ item, isActive, onClick }) {
+  return (
+    <Link
+      to={item.path}
+      onClick={onClick}
+      className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+        isActive
+          ? 'bg-primary/10 text-primary'
+          : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
+      }`}
+    >
+      <item.icon className="w-4 h-4 shrink-0" />
+      {item.label}
+    </Link>
+  );
 }
 
 export default function AdminLayout() {
@@ -57,7 +69,7 @@ export default function AdminLayout() {
   const { theme, toggleTheme } = useTheme();
   const { user, logout } = useAuth();
 
-  const filteredItems = useMemo(() => {
+  const sidebarItems = useMemo(() => {
     if (!user || user.role === 'admin') {
       return allSidebarItems.filter(item => !item.barberOnly);
     }
@@ -69,28 +81,19 @@ export default function AdminLayout() {
     });
   }, [user]);
 
-  const [sidebarItems, setSidebarItems] = useState(filteredItems);
-
-  useEffect(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-      if (saved) {
-        setSidebarItems(reorderByPaths(filteredItems, saved));
+  // Group items: top-level (no category) + grouped by category
+  const { topItems, categories } = useMemo(() => {
+    const top = [];
+    const catMap = new Map();
+    sidebarItems.forEach(item => {
+      if (!item.category) {
+        top.push(item);
       } else {
-        setSidebarItems(filteredItems);
+        if (!catMap.has(item.category)) catMap.set(item.category, []);
+        catMap.get(item.category).push(item);
       }
-    } catch {
-      setSidebarItems(filteredItems);
-    }
-  }, [filteredItems]);
-
-  const handleDragEnd = useCallback((result) => {
-    if (!result.destination) return;
-    const items = Array.from(sidebarItems);
-    const [moved] = items.splice(result.source.index, 1);
-    items.splice(result.destination.index, 0, moved);
-    setSidebarItems(items);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(items.map(i => i.path)));
+    });
+    return { topItems: top, categories: [...catMap.entries()] };
   }, [sidebarItems]);
 
   // Barber route protection
@@ -139,43 +142,27 @@ export default function AdminLayout() {
           </button>
         </div>
 
-        {/* Nav with drag & drop */}
-        <DragDropContext onDragEnd={handleDragEnd}>
-          <Droppable droppableId="sidebar">
-            {(provided) => (
-              <nav
-                className="flex-1 overflow-y-auto p-2.5 space-y-0.5"
-                ref={provided.innerRef}
-                {...provided.droppableProps}
-              >
-                {sidebarItems.map((item, index) => (
-                  <Draggable key={item.path} draggableId={item.path} index={index}>
-                    {(provided, snapshot) => (
-                      <Link
-                        ref={provided.innerRef}
-                        {...provided.draggableProps}
-                        {...provided.dragHandleProps}
-                        to={item.path}
-                        onClick={() => setSidebarOpen(false)}
-                        className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
-                          snapshot.isDragging
-                            ? 'bg-primary/15 text-primary shadow-lg shadow-primary/10 ring-1 ring-primary/20'
-                            : isActive(item)
-                              ? 'bg-primary/10 text-primary'
-                              : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
-                        }`}
-                      >
-                        <item.icon className="w-4 h-4 shrink-0" />
-                        {item.label}
-                      </Link>
-                    )}
-                  </Draggable>
+        {/* Nav */}
+        <nav className="flex-1 overflow-y-auto p-2.5">
+          {/* Top items (Dashboard, Agenda) — sans catégorie */}
+          <div className="space-y-0.5 mb-1">
+            {topItems.map(item => (
+              <NavLink key={item.path} item={item} isActive={isActive(item)} onClick={() => setSidebarOpen(false)} />
+            ))}
+          </div>
+
+          {/* Grouped by category */}
+          {categories.map(([catName, items]) => (
+            <div key={catName} className="mt-3">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-muted-foreground/60 px-3 mb-1">{catName}</p>
+              <div className="space-y-0.5">
+                {items.map(item => (
+                  <NavLink key={item.path} item={item} isActive={isActive(item)} onClick={() => setSidebarOpen(false)} />
                 ))}
-                {provided.placeholder}
-              </nav>
-            )}
-          </Droppable>
-        </DragDropContext>
+              </div>
+            </div>
+          ))}
+        </nav>
 
         {/* Bottom */}
         <div className="p-2.5 border-t border-border space-y-0.5 shrink-0">
