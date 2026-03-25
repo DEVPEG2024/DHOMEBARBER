@@ -1,6 +1,6 @@
 import React, { useReducer } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Clock, User, Phone, Mail, Scissors, CreditCard, FileText, Calendar, Banknote, CheckCircle, Heart, ShoppingBag, ChevronDown, Check, BadgeCheck, X, AlertTriangle, Trash2, UserX } from 'lucide-react';
+import { Clock, User, Phone, Mail, Scissors, CreditCard, FileText, Calendar, Banknote, CheckCircle, Heart, ShoppingBag, ChevronDown, Check, BadgeCheck, X, AlertTriangle, Trash2, UserX, Gift } from 'lucide-react';
 import { getServiceColor } from '@/utils/serviceColors';
 import { api } from '@/api/apiClient';
 import { useQuery } from '@tanstack/react-query';
@@ -353,8 +353,8 @@ function ModalInner({ appointment, onUpdate, onDelete }) {
             <div className="flex items-center justify-between text-[10px] text-muted-foreground">
               <span>{appointment.total_duration} min</span>
               <span className="flex items-center gap-1">
-                {appointment.payment_method === 'cb' ? <CreditCard className="w-3 h-3" /> : <Banknote className="w-3 h-3" />}
-                {appointment.payment_method === 'cb' ? 'CB' : 'Espèces'}
+                {appointment.payment_method === 'cb' ? <CreditCard className="w-3 h-3" /> : appointment.payment_method === 'carte_cadeau' ? <Gift className="w-3 h-3" /> : <Banknote className="w-3 h-3" />}
+                {appointment.payment_method === 'cb' ? 'CB' : appointment.payment_method === 'carte_cadeau' ? 'Carte cadeau' : 'Espèces'}
               </span>
             </div>
           </div>
@@ -472,31 +472,26 @@ function ModalInner({ appointment, onUpdate, onDelete }) {
             {/* Payment method selector */}
             <div>
               <p className="text-xs text-muted-foreground mb-2">Mode de paiement</p>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  onClick={() => dispatch({ type: 'SET', field: 'paymentMethod', value: 'cb' })}
-                  className={`flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 ${
-                    state.paymentMethod === 'cb'
-                      ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/25'
-                      : 'bg-white/5 border border-white/10 text-foreground hover:bg-white/10'
-                  }`}
-                >
-                  <CreditCard className="w-4 h-4" />
-                  CB
-                  {state.paymentMethod === 'cb' && <CheckCircle className="w-3.5 h-3.5" />}
-                </button>
-                <button
-                  onClick={() => dispatch({ type: 'SET', field: 'paymentMethod', value: 'especes' })}
-                  className={`flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 ${
-                    state.paymentMethod === 'especes'
-                      ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/25'
-                      : 'bg-white/5 border border-white/10 text-foreground hover:bg-white/10'
-                  }`}
-                >
-                  <Banknote className="w-4 h-4" />
-                  Espèces
-                  {state.paymentMethod === 'especes' && <CheckCircle className="w-3.5 h-3.5" />}
-                </button>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { value: 'cb', label: 'CB', icon: CreditCard },
+                  { value: 'especes', label: 'Espèces', icon: Banknote },
+                  { value: 'carte_cadeau', label: 'Carte cadeau', icon: Gift },
+                ].map(pm => (
+                  <button
+                    key={pm.value}
+                    onClick={() => dispatch({ type: 'SET', field: 'paymentMethod', value: pm.value })}
+                    className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-medium transition-all duration-200 ${
+                      state.paymentMethod === pm.value
+                        ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/25'
+                        : 'bg-white/5 border border-white/10 text-foreground hover:bg-white/10'
+                    }`}
+                  >
+                    <pm.icon className="w-3.5 h-3.5" />
+                    {pm.label}
+                    {state.paymentMethod === pm.value && <CheckCircle className="w-3 h-3" />}
+                  </button>
+                ))}
               </div>
             </div>
           </div>
