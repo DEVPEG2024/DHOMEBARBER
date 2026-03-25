@@ -447,14 +447,43 @@ export default function AdminGiftCards() {
   const [search, setSearch] = useState('');
   const [selectedCard, setSelectedCard] = useState(null);
   const [showScanner, setShowScanner] = useState(false);
+  const [pendingScanCode, setPendingScanCode] = useState(null);
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   const { data: giftCards = [], isLoading } = useQuery({
     queryKey: ['adminGiftCards'],
     queryFn: () => api.entities.GiftCard.list('-created_at', 200),
   });
 
-  // Handle QR scan: ?scan=DHB-XXXX-XXXX
+  // Resolve a scanned code: find in loaded cards or refetch
+  const resolveScanCode = useCallback(async (code) => {
+    // Try in current data first
+    let card = giftCards.find(c => c.code === code);
+    if (card) {
+      setSelectedCard(card);
+      setPendingScanCode(null);
+      return;
+    }
+    // Data might be stale — refetch and retry
+    setPendingScanCode(code);
+    await queryClient.invalidateQueries({ queryKey: ['adminGiftCards'] });
+  }, [giftCards, queryClient]);
+
+  // When data refreshes and we have a pending code, resolve it
+  useEffect(() => {
+    if (!pendingScanCode || isLoading) return;
+    const card = giftCards.find(c => c.code === pendingScanCode);
+    if (card) {
+      setSelectedCard(card);
+      setPendingScanCode(null);
+    } else if (giftCards.length > 0) {
+      toast({ title: 'Carte introuvable', description: `Aucune carte avec le code ${pendingScanCode}`, variant: 'destructive' });
+      setPendingScanCode(null);
+    }
+  }, [giftCards, isLoading, pendingScanCode, toast]);
+
+  // Handle QR scan from URL: ?scan=DHB-XXXX-XXXX
   useEffect(() => {
     const scanCode = searchParams.get('scan');
     if (scanCode && giftCards.length > 0) {
@@ -616,6 +645,17 @@ export default function AdminGiftCards() {
         </div>
       )}
 
+      {/* Scan loading overlay */}
+      {pendingScanCode && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-card rounded-3xl border border-border p-8 text-center shadow-2xl">
+            <div className="w-8 h-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin mx-auto mb-3" />
+            <p className="text-sm font-semibold text-foreground">Recherche de la carte...</p>
+            <p className="text-xs text-muted-foreground mt-1 font-mono">{pendingScanCode}</p>
+          </div>
+        </div>
+      )}
+
       {/* Modals */}
       <AnimatePresence>
         {selectedCard && <ValidateModal card={selectedCard} onClose={() => setSelectedCard(null)} />}
@@ -626,12 +666,7 @@ export default function AdminGiftCards() {
             onClose={() => setShowScanner(false)}
             onScanned={(code) => {
               setShowScanner(false);
-              const card = giftCards.find(c => c.code === code);
-              if (card) {
-                setSelectedCard(card);
-              } else {
-                toast({ title: 'Carte introuvable', description: `Aucune carte avec le code ${code}`, variant: 'destructive' });
-              }
+              resolveScanCode(code);
             }}
           />
         )}
