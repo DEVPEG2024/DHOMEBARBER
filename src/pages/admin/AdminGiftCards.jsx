@@ -4,8 +4,9 @@ import { api } from '@/api/apiClient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Gift, CheckCircle2, XCircle, Clock, Search, X, Ban, CreditCard, Banknote, Minus, ScanLine, Camera, Trash2 } from 'lucide-react';
+import { Gift, CheckCircle2, XCircle, Clock, Search, X, Ban, CreditCard, Banknote, Minus, ScanLine, Camera, Trash2, AlertTriangle } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
+import jsQR from 'jsqr';
 
 const STATUS_CONFIG = {
   pending: { label: 'En attente', color: 'text-amber-400', bg: 'bg-amber-500/15 border-amber-500/20', icon: Clock },
@@ -22,6 +23,7 @@ function ValidateModal({ card, onClose, onValidated }) {
   const [loading, setLoading] = useState(false);
   const [deductAmount, setDeductAmount] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmReject, setConfirmReject] = useState(false);
   const currentBalance = card.remaining_balance != null ? card.remaining_balance : card.amount;
 
   const handleValidate = async () => {
@@ -206,13 +208,23 @@ function ValidateModal({ card, onClose, onValidated }) {
               </button>
             </div>
             <div className="grid grid-cols-2 gap-2 pt-1">
-              <button
-                onClick={handleReject}
-                disabled={loading}
-                className="flex items-center justify-center gap-2 py-3 rounded-2xl bg-red-500/10 text-red-400 text-sm font-semibold hover:bg-red-500/20 transition-colors disabled:opacity-50"
-              >
-                <Ban className="w-4 h-4" /> Rejeter
-              </button>
+              {!confirmReject ? (
+                <button
+                  onClick={() => setConfirmReject(true)}
+                  disabled={loading}
+                  className="flex items-center justify-center gap-2 py-3 rounded-2xl bg-red-500/10 text-red-400 text-sm font-semibold hover:bg-red-500/20 transition-colors disabled:opacity-50"
+                >
+                  <Ban className="w-4 h-4" /> Rejeter
+                </button>
+              ) : (
+                <button
+                  onClick={handleReject}
+                  disabled={loading}
+                  className="flex items-center justify-center gap-2 py-3 rounded-2xl bg-red-500 text-white text-sm font-semibold hover:bg-red-600 transition-colors disabled:opacity-50 animate-pulse"
+                >
+                  <AlertTriangle className="w-4 h-4" /> Confirmer
+                </button>
+              )}
               <button
                 onClick={handleValidate}
                 disabled={loading || !paymentMethod}
@@ -306,9 +318,10 @@ function extractCodeFromQR(value) {
   return null;
 }
 
-// QR Scanner using device camera
+// QR Scanner using device camera + jsQR (cross-browser: iOS, Android, desktop)
 function QRScannerModal({ onClose, onScanned }) {
   const videoRef = useRef(null);
+  const canvasRef = useRef(null);
   const streamRef = useRef(null);
   const onScannedRef = useRef(onScanned);
   onScannedRef.current = onScanned;
@@ -326,10 +339,9 @@ function QRScannerModal({ onClose, onScanned }) {
 
   useEffect(() => {
     let cancelled = false;
-    let intervalId;
+    let rafId;
 
     const start = async () => {
-      // Check camera support
       if (!navigator.mediaDevices?.getUserMedia) {
         setCameraError(true);
         return;
@@ -337,7 +349,7 @@ function QRScannerModal({ onClose, onScanned }) {
 
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: 'environment' } },
+          video: { facingMode: { ideal: 'environment' }, width: { ideal: 640 }, height: { ideal: 480 } },
         });
         if (cancelled) { stream.getTracks().forEach(t => t.stop()); return; }
 
@@ -348,26 +360,36 @@ function QRScannerModal({ onClose, onScanned }) {
         await video.play();
         setCameraReady(true);
 
-        // BarcodeDetector (Chrome Android, desktop Chrome/Edge)
-        if ('BarcodeDetector' in window) {
-          const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
-          intervalId = setInterval(async () => {
-            if (cancelled || !video || video.readyState < 2 || !video.videoWidth) return;
-            try {
-              const barcodes = await detector.detect(video);
-              for (const bc of barcodes) {
-                const code = extractCodeFromQR(bc.rawValue);
-                if (code) {
-                  clearInterval(intervalId);
-                  stopCamera();
-                  onScannedRef.current(code);
-                  return;
-                }
-              }
-            } catch (_) {}
-          }, 300);
-        }
-        // No BarcodeDetector (iOS Safari, Firefox) → camera shown but manual input required
+        // Scan loop using jsQR (works on ALL browsers including iOS Safari)
+        const canvas = canvasRef.current;
+        const ctx = canvas?.getContext('2d', { willReadFrequently: true });
+
+        const scan = () => {
+          if (cancelled || !video || video.readyState < 2 || !ctx) {
+            rafId = requestAnimationFrame(scan);
+            return;
+          }
+
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          ctx.drawImage(video, 0, 0);
+
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const qr = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' });
+
+          if (qr && qr.data) {
+            const code = extractCodeFromQR(qr.data);
+            if (code) {
+              stopCamera();
+              onScannedRef.current(code);
+              return;
+            }
+          }
+
+          rafId = requestAnimationFrame(scan);
+        };
+
+        rafId = requestAnimationFrame(scan);
       } catch (err) {
         console.error('Camera error:', err);
         if (!cancelled) setCameraError(true);
@@ -377,7 +399,7 @@ function QRScannerModal({ onClose, onScanned }) {
     start();
     return () => {
       cancelled = true;
-      if (intervalId) clearInterval(intervalId);
+      if (rafId) cancelAnimationFrame(rafId);
       stopCamera();
     };
   }, [stopCamera]);
@@ -393,8 +415,6 @@ function QRScannerModal({ onClose, onScanned }) {
   };
 
   const handleClose = () => { stopCamera(); onClose(); };
-
-  const hasBarcodeDetector = typeof window !== 'undefined' && 'BarcodeDetector' in window;
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center px-4 pb-4" onClick={handleClose}>
@@ -414,6 +434,9 @@ function QRScannerModal({ onClose, onScanned }) {
           <Camera className="w-5 h-5 text-primary" />
           <h3 className="text-base font-bold text-foreground">Scanner une carte</h3>
         </div>
+
+        {/* Hidden canvas for jsQR processing */}
+        <canvas ref={canvasRef} className="hidden" />
 
         {/* Camera preview */}
         {!cameraError && (
@@ -445,9 +468,7 @@ function QRScannerModal({ onClose, onScanned }) {
         <p className="text-xs text-muted-foreground text-center mb-3">
           {cameraError
             ? 'Caméra non disponible. Entrez le code manuellement.'
-            : !hasBarcodeDetector
-              ? 'Scan auto non supporté sur ce navigateur. Entrez le code ci-dessous.'
-              : 'Pointez la caméra vers le QR code'}
+            : 'Pointez la caméra vers le QR code de la carte'}
         </p>
 
         {/* Manual input (always visible) */}

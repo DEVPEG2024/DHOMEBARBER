@@ -11,15 +11,6 @@ import jsPDF from 'jspdf';
 
 const LOGO_URL = '/logo.png';
 
-function generateCode() {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let code = 'DHB-';
-  for (let i = 0; i < 4; i++) code += chars[Math.floor(Math.random() * chars.length)];
-  code += '-';
-  for (let i = 0; i < 4; i++) code += chars[Math.floor(Math.random() * chars.length)];
-  return code;
-}
-
 const STATUS_CONFIG = {
   pending: { label: 'En attente', color: 'text-amber-400', bg: 'bg-amber-500/15 border-amber-500/20', icon: Clock },
   validated: { label: 'Validée', color: 'text-green-400', bg: 'bg-green-500/15 border-green-500/20', icon: CheckCircle2 },
@@ -51,10 +42,18 @@ function GiftCardVisual({ card, cardRef, compact = false }) {
       {/* Gold/premium border effect */}
       <div className="absolute inset-[1px] rounded-3xl border border-white/10" />
 
-      {/* INVALIDE watermark for pending cards */}
-      {!isValid && card.status !== undefined && (
+      {/* Watermark for pending/expired cards */}
+      {(card.status === 'pending' || card.status === 'expired') && (
         <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
-          <p className="text-5xl font-black text-red-500/30 -rotate-12 tracking-widest select-none">INVALIDE</p>
+          <p className="text-5xl font-black text-red-500/30 -rotate-12 tracking-widest select-none">
+            {card.status === 'pending' ? 'EN ATTENTE' : 'EXPIRÉE'}
+          </p>
+        </div>
+      )}
+      {/* ÉPUISÉE watermark for used cards */}
+      {card.status === 'used' && (
+        <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
+          <p className="text-5xl font-black text-blue-500/25 -rotate-12 tracking-widest select-none">ÉPUISÉE</p>
         </div>
       )}
 
@@ -116,8 +115,8 @@ function GiftCardBack({ card, backRef }) {
         </div>
         <p className="text-[10px] text-white/40 uppercase tracking-[0.2em] mb-1">Scanner pour utiliser</p>
         <p className="text-xs text-white/60 font-mono">{card.code}</p>
-        {card.status === 'validated' && (
-          <p className="text-sm font-bold text-primary mt-2">Solde: {balance}€</p>
+        {(card.status === 'validated' || card.status === 'used') && (
+          <p className={`text-sm font-bold mt-2 ${balance > 0 ? 'text-primary' : 'text-muted-foreground'}`}>Solde: {balance}€</p>
         )}
         {card.recipient_message && (
           <p className="text-[10px] text-white/30 mt-2 text-center italic line-clamp-2 max-w-[200px]">"{card.recipient_message}"</p>
@@ -151,19 +150,13 @@ function CreateGiftCardModal({ onClose, onCreated }) {
 
     setLoading(true);
     try {
-      const validUntil = new Date();
-      validUntil.setFullYear(validUntil.getFullYear() + 1);
-
       await api.entities.GiftCard.create({
-        code: generateCode(),
         amount: Number(amount),
         sender_name: user?.full_name || '',
         sender_email: user?.email || '',
         sender_phone: user?.phone || '',
         recipient_name: recipientName.trim(),
         recipient_message: message.trim(),
-        status: 'pending',
-        valid_until: validUntil.toISOString().split('T')[0],
       });
 
       toast({ title: 'Carte cadeau créée !', description: 'Rendez-vous au salon pour régler et activer votre carte.' });
@@ -385,7 +378,7 @@ function GiftCardDetailModal({ card, onClose }) {
             <span className="text-muted-foreground">Montant initial</span>
             <span className="font-bold text-primary">{card.amount}€</span>
           </div>
-          {card.status === 'validated' && (
+          {(card.status === 'validated' || card.status === 'used') && card.valid_until && (
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">Validité</span>
               <span className="text-foreground">{new Date(card.valid_until).toLocaleDateString('fr-FR')}</span>
