@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '@/api/apiClient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Gift, CheckCircle2, XCircle, Clock, Search, X, Ban, CreditCard, Banknote, Minus } from 'lucide-react';
+import { Gift, CheckCircle2, XCircle, Clock, Search, X, Ban, CreditCard, Banknote, Minus, ScanLine, Camera } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 
 const STATUS_CONFIG = {
@@ -104,14 +104,14 @@ function ValidateModal({ card, onClose, onValidated }) {
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.9 }}
         onClick={e => e.stopPropagation()}
-        className="relative w-full max-w-md rounded-3xl bg-card border border-border p-6 shadow-2xl"
+        className="relative w-full max-w-md max-h-[90vh] overflow-y-auto rounded-3xl bg-card border border-border p-6 shadow-2xl"
       >
-        <button onClick={onClose} className="absolute top-4 right-4 w-8 h-8 rounded-full flex items-center justify-center hover:bg-secondary">
+        <button onClick={onClose} className="absolute top-4 right-4 w-8 h-8 rounded-full flex items-center justify-center hover:bg-secondary z-10">
           <X className="w-4 h-4" />
         </button>
 
         {/* Card preview */}
-        <div className="relative overflow-hidden rounded-2xl mb-5" style={{ aspectRatio: '1.6/1' }}>
+        <div className="relative overflow-hidden rounded-2xl mb-4" style={{ aspectRatio: '1.6/1' }}>
           <div className="absolute inset-0 bg-gradient-to-br from-[#1a1a1a] via-[#111] to-[#0a0a0a]" />
           <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-primary/20 to-transparent rounded-bl-full" />
           <div className="absolute inset-[1px] rounded-2xl border border-white/10" />
@@ -250,11 +250,161 @@ function ValidateModal({ card, onClose, onValidated }) {
   );
 }
 
+// QR Scanner using device camera
+function QRScannerModal({ onClose, onScanned }) {
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const streamRef = useRef(null);
+  const scanningRef = useRef(true);
+  const [error, setError] = useState(null);
+  const { toast } = useToast();
+
+  const stopCamera = useCallback(() => {
+    scanningRef.current = false;
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop());
+      streamRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    let animId;
+
+    const startCamera = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } },
+        });
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play();
+        }
+
+        // Scan loop using BarcodeDetector if available, otherwise manual code input
+        if ('BarcodeDetector' in window) {
+          const detector = new BarcodeDetector({ formats: ['qr_code'] });
+          const scan = async () => {
+            if (!scanningRef.current || !videoRef.current) return;
+            try {
+              const barcodes = await detector.detect(videoRef.current);
+              if (barcodes.length > 0) {
+                const value = barcodes[0].rawValue;
+                // Extract code from URL or direct code
+                const match = value.match(/scan=([A-Z0-9-]+)/);
+                const code = match ? match[1] : value;
+                if (code.startsWith('DHB-')) {
+                  stopCamera();
+                  onScanned(code);
+                  return;
+                }
+              }
+            } catch (_) {}
+            animId = requestAnimationFrame(scan);
+          };
+          // Wait for video to be ready
+          videoRef.current.onloadeddata = () => { animId = requestAnimationFrame(scan); };
+        } else {
+          setError('manual');
+        }
+      } catch (err) {
+        console.error('Camera error:', err);
+        setError('manual');
+      }
+    };
+
+    startCamera();
+    return () => {
+      stopCamera();
+      if (animId) cancelAnimationFrame(animId);
+    };
+  }, [onScanned, stopCamera]);
+
+  const [manualCode, setManualCode] = useState('');
+
+  const handleManualSubmit = () => {
+    const code = manualCode.trim().toUpperCase();
+    if (code.startsWith('DHB-')) {
+      stopCamera();
+      onScanned(code);
+    } else {
+      toast({ title: 'Code invalide', description: 'Le code doit commencer par DHB-', variant: 'destructive' });
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" onClick={() => { stopCamera(); onClose(); }}>
+      <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
+      <motion.div
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.9 }}
+        onClick={e => e.stopPropagation()}
+        className="relative w-full max-w-sm rounded-3xl bg-card border border-border p-5 shadow-2xl"
+      >
+        <button onClick={() => { stopCamera(); onClose(); }} className="absolute top-3 right-3 w-8 h-8 rounded-full flex items-center justify-center hover:bg-secondary z-10">
+          <X className="w-4 h-4" />
+        </button>
+
+        <div className="flex items-center gap-2 mb-4">
+          <Camera className="w-5 h-5 text-primary" />
+          <h3 className="text-base font-bold text-foreground">Scanner une carte</h3>
+        </div>
+
+        {error !== 'manual' ? (
+          <div className="relative rounded-2xl overflow-hidden bg-black aspect-square mb-4">
+            <video ref={videoRef} className="w-full h-full object-cover" playsInline muted />
+            {/* Scan overlay */}
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="w-48 h-48 border-2 border-primary rounded-2xl relative">
+                <div className="absolute top-0 left-0 w-6 h-6 border-t-4 border-l-4 border-primary rounded-tl-lg" />
+                <div className="absolute top-0 right-0 w-6 h-6 border-t-4 border-r-4 border-primary rounded-tr-lg" />
+                <div className="absolute bottom-0 left-0 w-6 h-6 border-b-4 border-l-4 border-primary rounded-bl-lg" />
+                <div className="absolute bottom-0 right-0 w-6 h-6 border-b-4 border-r-4 border-primary rounded-br-lg" />
+                <motion.div
+                  className="absolute left-2 right-2 h-0.5 bg-primary/80"
+                  animate={{ top: ['10%', '90%', '10%'] }}
+                  transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+                />
+              </div>
+            </div>
+            <canvas ref={canvasRef} className="hidden" />
+          </div>
+        ) : null}
+
+        <p className="text-xs text-muted-foreground text-center mb-3">
+          {error === 'manual' ? 'Caméra non disponible. Entrez le code manuellement.' : 'Pointez la caméra vers le QR code de la carte'}
+        </p>
+
+        {/* Manual fallback */}
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={manualCode}
+            onChange={e => setManualCode(e.target.value.toUpperCase())}
+            placeholder="DHB-XXXX-XXXX"
+            className="flex-1 px-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-foreground text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary/50"
+            onKeyDown={e => e.key === 'Enter' && handleManualSubmit()}
+          />
+          <button
+            onClick={handleManualSubmit}
+            className="shrink-0 px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold"
+          >
+            OK
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
 export default function AdminGiftCards() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [selectedCard, setSelectedCard] = useState(null);
+  const [showScanner, setShowScanner] = useState(false);
+  const { toast } = useToast();
 
   const { data: giftCards = [], isLoading } = useQuery({
     queryKey: ['adminGiftCards'],
@@ -313,6 +463,14 @@ export default function AdminGiftCards() {
           </h1>
           <p className="text-xs text-muted-foreground mt-0.5">Gestion et validation des cartes cadeau</p>
         </div>
+        <motion.button
+          whileTap={{ scale: 0.95 }}
+          onClick={() => setShowScanner(true)}
+          className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-primary text-primary-foreground text-sm font-semibold shadow-lg shadow-primary/25"
+        >
+          <ScanLine className="w-4 h-4" />
+          Scanner
+        </motion.button>
       </div>
 
       {/* Stats */}
@@ -415,9 +573,25 @@ export default function AdminGiftCards() {
         </div>
       )}
 
-      {/* Modal */}
+      {/* Modals */}
       <AnimatePresence>
         {selectedCard && <ValidateModal card={selectedCard} onClose={() => setSelectedCard(null)} />}
+      </AnimatePresence>
+      <AnimatePresence>
+        {showScanner && (
+          <QRScannerModal
+            onClose={() => setShowScanner(false)}
+            onScanned={(code) => {
+              setShowScanner(false);
+              const card = giftCards.find(c => c.code === code);
+              if (card) {
+                setSelectedCard(card);
+              } else {
+                toast({ title: 'Carte introuvable', description: `Aucune carte avec le code ${code}`, variant: 'destructive' });
+              }
+            }}
+          />
+        )}
       </AnimatePresence>
     </div>
   );
