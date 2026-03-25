@@ -42,6 +42,7 @@ function ModalInner({ appointment, onUpdate, onDelete }) {
   const [state, dispatch] = useReducer(reducer, appointment, initialState);
   const [clientSearch, setClientSearch] = React.useState('');
   const [assignedClient, setAssignedClient] = React.useState(null);
+  const isLastMinute = appointment.status === 'last_minute';
 
   const { data: products = [] } = useQuery({
     queryKey: ['products'],
@@ -66,7 +67,6 @@ function ModalInner({ appointment, onUpdate, onDelete }) {
     ? allUsers.filter(u => u.full_name?.toLowerCase().includes(clientSearch.toLowerCase()) || u.email?.toLowerCase().includes(clientSearch.toLowerCase()))
     : [];
 
-  const isLastMinute = appointment.status === 'last_minute';
   const status = statusLabel[appointment.status] || statusLabel.confirmed;
   const isCompleted = appointment.status === 'completed';
   const tipValue = isCompleted ? (appointment.tip || 0) : (parseFloat(state.tip) || 0);
