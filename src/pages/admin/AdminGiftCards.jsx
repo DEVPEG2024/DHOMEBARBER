@@ -24,6 +24,7 @@ function ValidateModal({ card, onClose, onValidated }) {
   const [deductAmount, setDeductAmount] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmReject, setConfirmReject] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
   const currentBalance = card.remaining_balance != null ? card.remaining_balance : card.amount;
 
   const handleValidate = async () => {
@@ -55,6 +56,20 @@ function ValidateModal({ card, onClose, onValidated }) {
     try {
       await api.entities.GiftCard.update(card.id, { status: 'expired' });
       toast({ title: 'Carte rejetée' });
+      queryClient.invalidateQueries({ queryKey: ['adminGiftCards'] });
+      onClose();
+    } catch (err) {
+      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCancel = async () => {
+    setLoading(true);
+    try {
+      await api.entities.GiftCard.update(card.id, { status: 'expired', remaining_balance: 0 });
+      toast({ title: 'Carte annulée', description: `${card.code} - ${card.recipient_name}` });
       queryClient.invalidateQueries({ queryKey: ['adminGiftCards'] });
       onClose();
     } catch (err) {
@@ -270,6 +285,35 @@ function ValidateModal({ card, onClose, onValidated }) {
               <Minus className="w-4 h-4" />
               {loading ? 'Débit...' : deductAmount && Number(deductAmount) >= currentBalance ? 'Épuiser la carte' : 'Débiter'}
             </button>
+
+            {/* Annuler la carte */}
+            <div className="pt-2">
+              {!confirmCancel ? (
+                <button
+                  onClick={() => setConfirmCancel(true)}
+                  disabled={loading}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-medium text-amber-400/70 hover:text-amber-400 hover:bg-amber-500/10 transition-colors"
+                >
+                  <Ban className="w-3.5 h-3.5" /> Annuler cette carte
+                </button>
+              ) : (
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setConfirmCancel(false)}
+                    className="flex-1 py-2.5 rounded-xl text-xs font-medium text-muted-foreground bg-white/5 hover:bg-white/10 transition-colors"
+                  >
+                    Non
+                  </button>
+                  <button
+                    onClick={handleCancel}
+                    disabled={loading}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold text-white bg-amber-500 hover:bg-amber-600 transition-colors disabled:opacity-50"
+                  >
+                    <Ban className="w-3.5 h-3.5" /> Confirmer l'annulation
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
