@@ -3,7 +3,7 @@ import { api } from '@/api/apiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { motion } from 'framer-motion';
-import { PartyPopper, Calendar, Clock, Users, MessageSquare, Send, CheckCircle, Sparkles, Ban } from 'lucide-react';
+import { PartyPopper, Calendar, Clock, Users, MessageSquare, Send, CheckCircle, Sparkles, Ban, Euro, X as XIcon, ThumbsUp, ThumbsDown, MapPin } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
@@ -24,6 +24,8 @@ const TIME_SLOTS = [
 
 const STATUS_CONFIG = {
   pending: { label: 'En attente', color: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' },
+  quoted: { label: 'Devis reçu', color: 'bg-blue-500/10 text-blue-400 border-blue-500/20' },
+  accepted: { label: 'Devis accepté', color: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
   confirmed: { label: 'Confirmé', color: 'bg-green-500/10 text-green-400 border-green-500/20' },
   declined: { label: 'Refusé', color: 'bg-red-500/10 text-red-400 border-red-500/20' },
 };
@@ -321,12 +323,13 @@ export default function Events() {
               const type = EVENT_TYPES.find(t => t.id === event.event_type);
               const status = STATUS_CONFIG[event.status] || STATUS_CONFIG.pending;
               const slot = TIME_SLOTS.find(s => s.id === event.time_slot);
+              const isQuoted = event.status === 'quoted';
               return (
                 <motion.div key={event.id}
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.05 }}
-                  className="bg-card border border-border rounded-xl p-4"
+                  className={`bg-card border rounded-xl p-4 ${isQuoted ? 'border-blue-500/30 ring-1 ring-blue-500/20' : 'border-border'}`}
                 >
                   <div className="flex items-start justify-between mb-2">
                     <div className="flex items-center gap-2">
@@ -346,12 +349,86 @@ export default function Events() {
                   {event.guest_count > 0 && (
                     <p className="text-xs text-muted-foreground">{event.guest_count} personne(s)</p>
                   )}
+
+                  {/* Devis reçu - affichage prominent */}
                   {event.price && (
-                    <p className="text-sm font-bold text-primary mt-1">Devis : {event.price}€</p>
+                    <div className={`mt-3 p-3 rounded-xl border ${isQuoted ? 'bg-blue-500/10 border-blue-500/20' : 'bg-primary/5 border-primary/10'}`}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Euro className={`w-4 h-4 ${isQuoted ? 'text-blue-400' : 'text-primary'}`} />
+                          <span className="text-xs text-muted-foreground">Devis</span>
+                        </div>
+                        <span className={`text-lg font-black ${isQuoted ? 'text-blue-400' : 'text-primary'}`}>{event.price}€</span>
+                      </div>
+                      {event.admin_notes && (
+                        <p className="text-xs text-muted-foreground mt-2 italic">"{event.admin_notes}"</p>
+                      )}
+                      {isQuoted && (
+                        <p className="text-[10px] text-muted-foreground mt-2 flex items-center gap-1">
+                          <MapPin className="w-3 h-3" />
+                          Paiement au salon lors de l'événement
+                        </p>
+                      )}
+                    </div>
                   )}
-                  {event.admin_notes && (
+
+                  {/* Admin notes sans devis */}
+                  {!event.price && event.admin_notes && (
                     <div className="mt-2 p-2 rounded-lg bg-primary/5 border border-primary/10">
                       <p className="text-xs text-muted-foreground">{event.admin_notes}</p>
+                    </div>
+                  )}
+
+                  {/* Boutons accepter/refuser le devis */}
+                  {isQuoted && (
+                    <div className="grid grid-cols-2 gap-2 mt-3">
+                      <motion.button
+                        whileTap={{ scale: 0.97 }}
+                        onClick={async () => {
+                          try {
+                            await api.entities.Event.update(event.id, { status: 'accepted' });
+                            queryClient.invalidateQueries({ queryKey: ['myEvents'] });
+                            queryClient.invalidateQueries({ queryKey: ['confirmedEvents'] });
+                            toast.success('Devis accepté ! Rendez-vous au salon pour le paiement.');
+                          } catch { toast.error('Erreur'); }
+                        }}
+                        className="flex items-center justify-center gap-2 py-3 rounded-xl bg-green-600 text-white text-sm font-semibold hover:bg-green-700 transition-all"
+                      >
+                        <ThumbsUp className="w-4 h-4" />
+                        Accepter
+                      </motion.button>
+                      <motion.button
+                        whileTap={{ scale: 0.97 }}
+                        onClick={async () => {
+                          try {
+                            await api.entities.Event.update(event.id, { status: 'declined' });
+                            queryClient.invalidateQueries({ queryKey: ['myEvents'] });
+                            toast.success('Devis refusé');
+                          } catch { toast.error('Erreur'); }
+                        }}
+                        className="flex items-center justify-center gap-2 py-3 rounded-xl bg-white/5 border border-white/10 text-sm font-medium text-muted-foreground hover:bg-white/10 transition-all"
+                      >
+                        <ThumbsDown className="w-4 h-4" />
+                        Refuser
+                      </motion.button>
+                    </div>
+                  )}
+
+                  {/* Devis accepté - en attente paiement */}
+                  {event.status === 'accepted' && (
+                    <div className="mt-3 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-center">
+                      <p className="text-xs font-semibold text-emerald-400">Devis accepté</p>
+                      <p className="text-[10px] text-muted-foreground mt-1">Rendez-vous au salon pour régler le paiement</p>
+                    </div>
+                  )}
+
+                  {/* Confirmé */}
+                  {event.status === 'confirmed' && (
+                    <div className="mt-3 p-3 rounded-xl bg-green-500/10 border border-green-500/20 text-center">
+                      <p className="text-xs font-semibold text-green-400 flex items-center justify-center gap-1.5">
+                        <CheckCircle className="w-3.5 h-3.5" />
+                        Événement confirmé
+                      </p>
                     </div>
                   )}
                 </motion.div>

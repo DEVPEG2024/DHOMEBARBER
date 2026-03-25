@@ -24,6 +24,8 @@ const TIME_SLOTS = {
 
 const STATUS_CONFIG = {
   pending: { label: 'En attente', color: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20', icon: Clock },
+  quoted: { label: 'Devis envoyé', color: 'bg-blue-500/10 text-blue-400 border-blue-500/20', icon: Euro },
+  accepted: { label: 'Devis accepté', color: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20', icon: CheckCircle },
   confirmed: { label: 'Confirmé', color: 'bg-green-500/10 text-green-400 border-green-500/20', icon: CheckCircle },
   declined: { label: 'Refusé', color: 'bg-red-500/10 text-red-400 border-red-500/20', icon: XCircle },
 };
@@ -66,7 +68,18 @@ export default function AdminEvents() {
         price: editingId === event.id ? (parseFloat(editPrice) || null) : event.price,
       },
     });
-    toast.success(status === 'confirmed' ? 'Événement confirmé' : 'Événement refusé');
+    const messages = { confirmed: 'Événement confirmé', declined: 'Événement refusé', quoted: 'Devis envoyé au client' };
+    toast.success(messages[status] || 'Statut mis à jour');
+  };
+
+  const handleSendQuote = (event) => {
+    const price = editingId === event.id ? parseFloat(editPrice) : event.price;
+    if (!price || price <= 0) {
+      toast.error('Ajoutez un prix avant d\'envoyer le devis');
+      return;
+    }
+    handleStatus(event, 'quoted');
+    setEditingId(null);
   };
 
   const handleSaveNotes = (event) => {
@@ -102,6 +115,8 @@ export default function AdminEvents() {
         {[
           { id: 'all', label: 'Toutes' },
           { id: 'pending', label: 'En attente' },
+          { id: 'quoted', label: 'Devis envoyé' },
+          { id: 'accepted', label: 'Acceptés' },
           { id: 'confirmed', label: 'Confirmées' },
           { id: 'declined', label: 'Refusées' },
         ].map(f => (
@@ -223,12 +238,13 @@ export default function AdminEvents() {
               )}
 
               {/* Actions */}
-              <div className="flex gap-2">
+              <div className="flex gap-2 flex-wrap">
+                {/* Pending: envoyer devis ou refuser */}
                 {event.status === 'pending' && (
                   <>
-                    <Button size="sm" className="flex-1 gap-1.5 bg-green-600 hover:bg-green-700"
-                      onClick={() => handleStatus(event, 'confirmed')}>
-                      <CheckCircle className="w-3.5 h-3.5" /> Confirmer
+                    <Button size="sm" className="flex-1 gap-1.5 bg-blue-600 hover:bg-blue-700"
+                      onClick={() => handleSendQuote(event)}>
+                      <Euro className="w-3.5 h-3.5" /> Envoyer le devis
                     </Button>
                     <Button size="sm" variant="outline"
                       className="border-red-500/30 text-red-400 hover:bg-red-500/10 gap-1.5"
@@ -237,10 +253,25 @@ export default function AdminEvents() {
                     </Button>
                   </>
                 )}
-                {!isEditing && (
+                {/* Quoted: en attente de réponse client */}
+                {event.status === 'quoted' && (
+                  <div className="flex-1 py-2 rounded-lg bg-blue-500/10 border border-blue-500/20 text-center">
+                    <p className="text-xs text-blue-400 font-medium">En attente de réponse du client</p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">Devis : {event.price}€</p>
+                  </div>
+                )}
+                {/* Accepted: client a accepté, confirmer après paiement */}
+                {event.status === 'accepted' && (
+                  <Button size="sm" className="flex-1 gap-1.5 bg-green-600 hover:bg-green-700"
+                    onClick={() => handleStatus(event, 'confirmed')}>
+                    <CheckCircle className="w-3.5 h-3.5" /> Confirmer (payé au salon)
+                  </Button>
+                )}
+                {/* Modifier le devis (pending ou quoted) */}
+                {!isEditing && (event.status === 'pending' || event.status === 'quoted') && (
                   <Button size="sm" variant="outline"
                     onClick={() => { setEditingId(event.id); setEditNotes(event.admin_notes || ''); setEditPrice(event.price || ''); }}>
-                    <Euro className="w-3.5 h-3.5 mr-1" /> Devis
+                    <Euro className="w-3.5 h-3.5 mr-1" /> {event.price ? 'Modifier' : 'Devis'}
                   </Button>
                 )}
                 <Button size="sm" variant="ghost"
