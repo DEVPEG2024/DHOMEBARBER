@@ -4,7 +4,7 @@ import { api } from '@/api/apiClient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Gift, CheckCircle2, XCircle, Clock, Search, X, Ban, CreditCard, Banknote, Minus, ScanLine, Camera } from 'lucide-react';
+import { Gift, CheckCircle2, XCircle, Clock, Search, X, Ban, CreditCard, Banknote, Minus, ScanLine, Camera, Trash2 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 
 const STATUS_CONFIG = {
@@ -21,6 +21,7 @@ function ValidateModal({ card, onClose, onValidated }) {
   const [paymentMethod, setPaymentMethod] = useState('');
   const [loading, setLoading] = useState(false);
   const [deductAmount, setDeductAmount] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const currentBalance = card.remaining_balance != null ? card.remaining_balance : card.amount;
 
   const handleValidate = async () => {
@@ -84,6 +85,20 @@ function ValidateModal({ card, onClose, onValidated }) {
         title: newBalance <= 0 ? 'Carte épuisée' : `${val}€ débité`,
         description: newBalance > 0 ? `Nouveau solde: ${newBalance}€` : 'La carte est maintenant utilisée',
       });
+      queryClient.invalidateQueries({ queryKey: ['adminGiftCards'] });
+      onClose();
+    } catch (err) {
+      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    setLoading(true);
+    try {
+      await api.entities.GiftCard.delete(card.id);
+      toast({ title: 'Carte supprimée' });
       queryClient.invalidateQueries({ queryKey: ['adminGiftCards'] });
       onClose();
     } catch (err) {
@@ -245,6 +260,34 @@ function ValidateModal({ card, onClose, onValidated }) {
             </button>
           </div>
         )}
+
+        {/* Delete */}
+        <div className="mt-4 pt-4 border-t border-border">
+          {!confirmDelete ? (
+            <button
+              onClick={() => setConfirmDelete(true)}
+              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-medium text-red-400/60 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+            >
+              <Trash2 className="w-3.5 h-3.5" /> Supprimer cette carte
+            </button>
+          ) : (
+            <div className="flex gap-2">
+              <button
+                onClick={() => setConfirmDelete(false)}
+                className="flex-1 py-2.5 rounded-xl text-xs font-medium text-muted-foreground bg-white/5 hover:bg-white/10 transition-colors"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={loading}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold text-white bg-red-500 hover:bg-red-600 transition-colors disabled:opacity-50"
+              >
+                <Trash2 className="w-3.5 h-3.5" /> Confirmer
+              </button>
+            </div>
+          )}
+        </div>
       </motion.div>
     </div>
   );
