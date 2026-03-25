@@ -8,40 +8,27 @@ import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { useTheme } from '@/lib/ThemeContext';
 import { useAuth } from '@/lib/AuthContext';
 
-// Items sans catégorie = en haut du menu
-const allSidebarItems = [
-  // --- En haut, sans catégorie ---
+// All nav items with their default category
+const allNavItems = [
   { path: '/admin', icon: LayoutDashboard, label: 'Dashboard', exact: true, perm: 'dashboard' },
   { path: '/admin/agenda', icon: Calendar, label: 'Agenda', perm: 'agenda' },
   { path: '/admin/smart-agenda', icon: Brain, label: 'Agenda IA', perm: 'smart-agenda' },
-
-  // --- Clients ---
   { path: '/admin/clients', icon: UserCircle, label: 'Clients', perm: 'clients', category: 'Clients' },
   { path: '/admin/reviews', icon: Star, label: 'Avis', perm: 'reviews', category: 'Clients' },
   { path: '/admin/notifications', icon: Bell, label: 'Notifications', perm: 'notifications', category: 'Clients' },
-
-  // --- Commerce ---
   { path: '/admin/services', icon: Scissors, label: 'Prestations', perm: 'services', category: 'Commerce' },
   { path: '/admin/products', icon: ShoppingBag, label: 'Produits', perm: 'products', category: 'Commerce' },
   { path: '/admin/stock', icon: Warehouse, label: 'Stock Produits', perm: 'products', category: 'Commerce' },
   { path: '/admin/orders', icon: ClipboardList, label: 'Commandes', perm: 'orders', category: 'Commerce' },
   { path: '/admin/gift-cards', icon: Gift, label: 'Cartes Cadeau', adminOnly: true, category: 'Commerce' },
-
-  // --- Équipe ---
   { path: '/admin/team', icon: Users, label: 'Équipe', perm: 'team', category: 'Équipe' },
   { path: '/admin/barber-accounts', icon: ShieldCheck, label: 'Comptes Barbers', adminOnly: true, category: 'Équipe' },
   { path: '/admin/leave', icon: CalendarDays, label: 'Congés', adminOnly: true, category: 'Équipe' },
   { path: '/admin/cleaning', icon: Sparkles, label: 'Entretien', perm: 'cleaning', category: 'Équipe' },
-
-  // --- Barber only (Mon espace) ---
   { path: '/admin/my-cleaning', icon: Sparkles, label: 'Entretien', barberOnly: true, alwaysShow: true, category: 'Mon espace' },
   { path: '/admin/my-leave', icon: CalendarDays, label: 'Mes Congés', barberOnly: true, alwaysShow: true, category: 'Mon espace' },
   { path: '/admin/my-settings', icon: Settings, label: 'Paramètres', barberOnly: true, alwaysShow: true, category: 'Mon espace' },
-
-  // --- Analyse ---
   { path: '/admin/stats', icon: BarChart3, label: 'Statistiques', perm: 'stats', category: 'Analyse' },
-
-  // --- Divers ---
   { path: '/admin/feed', icon: Newspaper, label: 'New\'sGang', alwaysShow: true, category: 'Divers' },
   { path: '/admin/events', icon: PartyPopper, label: 'Événements', adminOnly: true, category: 'Divers' },
   { path: '/admin/settings', icon: Settings, label: 'Paramètres', perm: 'settings', category: 'Divers' },
@@ -57,52 +44,43 @@ const CATEGORY_ICONS = {
 };
 
 const COLLAPSED_KEY = 'admin_sidebar_collapsed';
-const ORDER_KEY = 'admin_sidebar_order';
+const ORDER_KEY = 'admin_sidebar_order_v2';
 
-function NavLink({ item, isActive, onClick }) {
-  return (
-    <Link
-      to={item.path}
-      onClick={onClick}
-      className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-        isActive
-          ? 'bg-primary/10 text-primary'
-          : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
-      }`}
-    >
-      <item.icon className="w-4 h-4 shrink-0" />
-      {item.label}
-    </Link>
-  );
+// Build a flat list of entries: { type: 'header', id, name } and { type: 'item', id, ...navItem }
+function buildDefaultFlatList(filteredItems) {
+  const list = [];
+  const seenCategories = new Set();
+  filteredItems.forEach(item => {
+    if (item.category && !seenCategories.has(item.category)) {
+      seenCategories.add(item.category);
+      list.push({ type: 'header', id: `hdr:${item.category}`, name: item.category });
+    }
+    list.push({ type: 'item', id: item.path, ...item });
+  });
+  return list;
 }
 
-function CategoryGroup({ name, items, isActive, onNavClick, collapsed, onToggle }) {
-  const CatIcon = CATEGORY_ICONS[name] || Settings;
-  const hasActive = items.some(item => isActive(item));
+// Reorder flat list based on saved order of IDs
+function applyOrder(defaultList, savedIds) {
+  if (!savedIds?.length) return defaultList;
+  const map = {};
+  defaultList.forEach(entry => { map[entry.id] = entry; });
+  const ordered = [];
+  savedIds.forEach(id => {
+    if (map[id]) { ordered.push(map[id]); delete map[id]; }
+  });
+  // Append any new entries not in saved order
+  Object.values(map).forEach(entry => ordered.push(entry));
+  return ordered;
+}
 
-  return (
-    <div>
-      <button
-        onClick={onToggle}
-        className={`flex items-center gap-3 w-full px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-          hasActive && collapsed
-            ? 'bg-primary/10 text-primary'
-            : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
-        }`}
-      >
-        <CatIcon className="w-4 h-4 shrink-0" />
-        <span className="flex-1 text-left">{name}</span>
-        <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${collapsed ? '-rotate-90' : ''}`} />
-      </button>
-      {!collapsed && (
-        <div className="ml-4 pl-3 border-l border-border/50 mt-0.5 space-y-0.5">
-          {items.map(item => (
-            <NavLink key={item.path} item={item} isActive={isActive(item)} onClick={onNavClick} />
-          ))}
-        </div>
-      )}
-    </div>
-  );
+// Determine which category each item belongs to based on position in flat list
+// Items after a header belong to that header's category, until the next header
+function getCategoryForIndex(flatList, index) {
+  for (let i = index - 1; i >= 0; i--) {
+    if (flatList[i].type === 'header') return flatList[i].name;
+  }
+  return null; // top-level
 }
 
 export default function AdminLayout() {
@@ -111,67 +89,42 @@ export default function AdminLayout() {
   const { theme, toggleTheme } = useTheme();
   const { user, logout } = useAuth();
 
-  const sidebarItems = useMemo(() => {
+  // Filter items by role/permissions
+  const filteredItems = useMemo(() => {
     if (!user || user.role === 'admin') {
-      return allSidebarItems.filter(item => !item.barberOnly);
+      return allNavItems.filter(item => !item.barberOnly);
     }
     const perms = user.permissions || [];
-    return allSidebarItems.filter(item => {
+    return allNavItems.filter(item => {
       if (item.adminOnly) return false;
       if (item.alwaysShow || item.barberOnly) return true;
       return perms.includes(item.perm);
     });
   }, [user]);
 
-  // Build sections: each top-level item is a section, each category is a section
-  const defaultSections = useMemo(() => {
-    const sections = [];
-    const catMap = new Map();
-    sidebarItems.forEach(item => {
-      if (!item.category) {
-        sections.push({ type: 'item', id: item.path, item });
-      } else {
-        if (!catMap.has(item.category)) {
-          catMap.set(item.category, []);
-          sections.push({ type: 'category', id: `cat:${item.category}`, name: item.category, items: catMap.get(item.category) });
-        }
-        catMap.get(item.category).push(item);
-      }
-    });
-    return sections;
-  }, [sidebarItems]);
+  // Build default flat list
+  const defaultFlatList = useMemo(() => buildDefaultFlatList(filteredItems), [filteredItems]);
 
-  // Reorder sections based on saved order
-  const [sections, setSections] = useState(defaultSections);
+  // Flat list state with persistence
+  const [flatList, setFlatList] = useState(defaultFlatList);
 
   useEffect(() => {
     try {
-      const savedOrder = JSON.parse(localStorage.getItem(ORDER_KEY));
-      if (savedOrder?.length) {
-        const map = {};
-        defaultSections.forEach(s => { map[s.id] = s; });
-        const ordered = [];
-        savedOrder.forEach(id => {
-          if (map[id]) { ordered.push(map[id]); delete map[id]; }
-        });
-        Object.values(map).forEach(s => ordered.push(s));
-        setSections(ordered);
-      } else {
-        setSections(defaultSections);
-      }
-    } catch { setSections(defaultSections); }
-  }, [defaultSections]);
+      const savedIds = JSON.parse(localStorage.getItem(ORDER_KEY));
+      setFlatList(applyOrder(defaultFlatList, savedIds));
+    } catch { setFlatList(defaultFlatList); }
+  }, [defaultFlatList]);
 
   const handleDragEnd = useCallback((result) => {
-    if (!result.destination) return;
-    const reordered = Array.from(sections);
+    if (!result.destination || result.source.index === result.destination.index) return;
+    const reordered = Array.from(flatList);
     const [moved] = reordered.splice(result.source.index, 1);
     reordered.splice(result.destination.index, 0, moved);
-    setSections(reordered);
-    localStorage.setItem(ORDER_KEY, JSON.stringify(reordered.map(s => s.id)));
-  }, [sections]);
+    setFlatList(reordered);
+    localStorage.setItem(ORDER_KEY, JSON.stringify(reordered.map(e => e.id)));
+  }, [flatList]);
 
-  // Collapsed state per category, persisted in localStorage
+  // Collapsed state per category
   const [collapsedCats, setCollapsedCats] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem(COLLAPSED_KEY)) || {};
@@ -188,14 +141,15 @@ export default function AdminLayout() {
 
   // Barber route protection
   const isBarber = user?.role === 'barber';
+  const allItems = useMemo(() => flatList.filter(e => e.type === 'item'), [flatList]);
   if (isBarber) {
     const currentPath = location.pathname;
-    const isAllowed = sidebarItems.length > 0 && sidebarItems.some(item => {
+    const isAllowed = allItems.some(item => {
       if (item.exact) return currentPath === item.path;
       return currentPath.startsWith(item.path);
     });
     if (!isAllowed) {
-      const target = sidebarItems[0]?.path || '/admin/my-cleaning';
+      const target = allItems[0]?.path || '/admin/my-cleaning';
       return <Navigate to={target} replace />;
     }
   }
@@ -204,6 +158,50 @@ export default function AdminLayout() {
     if (item.exact) return location.pathname === item.path;
     return location.pathname.startsWith(item.path);
   };
+
+  // Determine which items are hidden (inside a collapsed category)
+  // We need to figure out current category for each item based on position
+  const visibilityMap = useMemo(() => {
+    const map = {};
+    let currentCat = null;
+    flatList.forEach(entry => {
+      if (entry.type === 'header') {
+        currentCat = entry.name;
+        map[entry.id] = true; // headers always visible
+      } else {
+        map[entry.id] = currentCat ? !collapsedCats[currentCat] : true;
+      }
+    });
+    return map;
+  }, [flatList, collapsedCats]);
+
+  // Check if a collapsed category has an active item
+  const collapsedActiveMap = useMemo(() => {
+    const map = {};
+    let currentCat = null;
+    flatList.forEach(entry => {
+      if (entry.type === 'header') {
+        currentCat = entry.name;
+      } else if (currentCat && collapsedCats[currentCat] && isActive(entry)) {
+        map[currentCat] = true;
+      }
+    });
+    return map;
+  }, [flatList, collapsedCats, location.pathname]);
+
+  // For indentation: is this item inside a category?
+  const inCategoryMap = useMemo(() => {
+    const map = {};
+    let currentCat = null;
+    flatList.forEach(entry => {
+      if (entry.type === 'header') {
+        currentCat = entry.name;
+      } else {
+        map[entry.id] = currentCat;
+      }
+    });
+    return map;
+  }, [flatList]);
 
   return (
     <div className="min-h-screen bg-background flex">
@@ -237,48 +235,66 @@ export default function AdminLayout() {
           <Droppable droppableId="sidebar">
             {(provided) => (
               <nav
-                className="flex-1 overflow-y-auto p-2.5 space-y-0.5"
+                className="flex-1 overflow-y-auto p-2.5"
                 ref={provided.innerRef}
                 {...provided.droppableProps}
               >
-                {sections.map((section, index) => (
-                  <Draggable key={section.id} draggableId={section.id} index={index}>
-                    {(provided, snapshot) => (
-                      <div
-                        ref={provided.innerRef}
-                        {...provided.draggableProps}
-                        className={snapshot.isDragging ? 'opacity-80 shadow-lg shadow-primary/10 rounded-lg ring-1 ring-primary/20' : ''}
-                      >
-                        {section.type === 'item' ? (
-                          <div className="flex items-center group">
-                            <div {...provided.dragHandleProps} className="w-5 flex items-center justify-center shrink-0 opacity-0 group-hover:opacity-40 transition-opacity cursor-grab">
-                              <GripVertical className="w-3 h-3" />
+                {flatList.map((entry, index) => {
+                  // Hide items inside collapsed categories
+                  if (!visibilityMap[entry.id]) return null;
+
+                  return (
+                    <Draggable key={entry.id} draggableId={entry.id} index={index}>
+                      {(provided, snapshot) => (
+                        <div
+                          ref={provided.innerRef}
+                          {...provided.draggableProps}
+                          className={snapshot.isDragging ? 'opacity-90 shadow-lg shadow-primary/10 rounded-lg ring-1 ring-primary/20 bg-card' : ''}
+                        >
+                          {entry.type === 'header' ? (
+                            /* Category header */
+                            <div className="flex items-center group mt-2 first:mt-0">
+                              <div {...provided.dragHandleProps} className="w-4 flex items-center justify-center shrink-0 opacity-0 group-hover:opacity-40 transition-opacity cursor-grab">
+                                <GripVertical className="w-3 h-3" />
+                              </div>
+                              <button
+                                onClick={() => toggleCategory(entry.name)}
+                                className={`flex items-center gap-3 flex-1 px-2 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+                                  collapsedActiveMap[entry.name]
+                                    ? 'bg-primary/10 text-primary'
+                                    : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
+                                }`}
+                              >
+                                {(() => { const CatIcon = CATEGORY_ICONS[entry.name] || Settings; return <CatIcon className="w-4 h-4 shrink-0" />; })()}
+                                <span className="flex-1 text-left">{entry.name}</span>
+                                <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${collapsedCats[entry.name] ? '-rotate-90' : ''}`} />
+                              </button>
                             </div>
-                            <div className="flex-1 min-w-0">
-                              <NavLink item={section.item} isActive={isActive(section.item)} onClick={() => setSidebarOpen(false)} />
+                          ) : (
+                            /* Nav item */
+                            <div className={`flex items-center group ${inCategoryMap[entry.id] ? 'ml-3 pl-2 border-l border-border/40' : ''}`}>
+                              <div {...provided.dragHandleProps} className="w-4 flex items-center justify-center shrink-0 opacity-0 group-hover:opacity-40 transition-opacity cursor-grab">
+                                <GripVertical className="w-3 h-3" />
+                              </div>
+                              <Link
+                                to={entry.path}
+                                onClick={() => setSidebarOpen(false)}
+                                className={`flex items-center gap-3 flex-1 px-2 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+                                  isActive(entry)
+                                    ? 'bg-primary/10 text-primary'
+                                    : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
+                                }`}
+                              >
+                                <entry.icon className="w-4 h-4 shrink-0" />
+                                {entry.label}
+                              </Link>
                             </div>
-                          </div>
-                        ) : (
-                          <div className="flex items-start group">
-                            <div {...provided.dragHandleProps} className="w-5 flex items-center justify-center shrink-0 opacity-0 group-hover:opacity-40 transition-opacity cursor-grab pt-2.5">
-                              <GripVertical className="w-3 h-3" />
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <CategoryGroup
-                                name={section.name}
-                                items={section.items}
-                                isActive={isActive}
-                                onNavClick={() => setSidebarOpen(false)}
-                                collapsed={!!collapsedCats[section.name]}
-                                onToggle={() => toggleCategory(section.name)}
-                              />
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </Draggable>
-                ))}
+                          )}
+                        </div>
+                      )}
+                    </Draggable>
+                  );
+                })}
                 {provided.placeholder}
               </nav>
             )}
