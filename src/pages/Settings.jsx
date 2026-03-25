@@ -112,11 +112,13 @@ export default function Settings() {
                       if (!user?.id) return;
                       setSavingBirth(true);
                       try {
-                        await api.entities.User.update(user.id, { birth_date: birthDate || null });
+                        const value = birthDate && birthDate.length === 10 ? birthDate : null;
+                        await api.entities.User.update(user.id, { birth_date: value });
                         if (refreshUser) await refreshUser();
-                        toast.success('Date de naissance enregistrée');
+                        toast.success(value ? 'Date de naissance enregistrée' : 'Date de naissance supprimée');
                       } catch (err) {
-                        toast.error('Erreur');
+                        console.error('Birth date save error:', err);
+                        toast.error(err?.message || 'Erreur lors de la sauvegarde');
                       } finally {
                         setSavingBirth(false);
                       }
