@@ -48,6 +48,14 @@ function ModalInner({ appointment, onUpdate, onDelete }) {
     queryFn: () => api.entities.Product.filter({ is_active: true }, 'name', 100),
   });
 
+  const { data: allServices = [] } = useQuery({
+    queryKey: ['servicesForModal'],
+    queryFn: () => api.entities.Service.filter({ is_active: true }, 'sort_order', 100),
+    enabled: isLastMinute && (!appointment.services || appointment.services.length === 0),
+  });
+
+  const [selectedServices, setSelectedServices] = React.useState([]);
+
   const { data: allUsers = [] } = useQuery({
     queryKey: ['allUsersForSearch'],
     queryFn: () => api.entities.User.list('full_name', 1000),
@@ -63,7 +71,8 @@ function ModalInner({ appointment, onUpdate, onDelete }) {
   const isCompleted = appointment.status === 'completed';
   const tipValue = isCompleted ? (appointment.tip || 0) : (parseFloat(state.tip) || 0);
   const prodValue = isCompleted ? (appointment.product_price || 0) : (parseFloat(state.productPrice) || 0);
-  const serviceTotal = appointment.total_price || 0;
+  const manualServiceTotal = selectedServices.reduce((sum, s) => sum + (s.price || 0), 0);
+  const serviceTotal = appointment.total_price || manualServiceTotal || 0;
   const grandTotal = isCompleted ? (appointment.grand_total || serviceTotal + tipValue + prodValue) : (serviceTotal + tipValue + prodValue);
   const canValidate = !isCompleted && state.paymentMethod && (tipValue === 0 || state.tipMethod);
 
@@ -80,6 +89,12 @@ function ModalInner({ appointment, onUpdate, onDelete }) {
         product_price: prodValue,
         grand_total: grandTotal,
       };
+      // For last_minute: include selected services if none existed
+      if (selectedServices.length > 0 && (!appointment.services || appointment.services.length === 0)) {
+        updateData.services = selectedServices.map(s => ({ service_id: s.id, name: s.name, price: s.price, duration: s.duration }));
+        updateData.total_price = manualServiceTotal;
+        updateData.total_duration = selectedServices.reduce((sum, s) => sum + (s.duration || 0), 0);
+      }
       // For last_minute walk-ins: include manually entered client info
       if (isLastMinute || !appointment.client_email) {
         if (state.clientName && state.clientName !== 'Last Minute') {
@@ -255,6 +270,53 @@ function ModalInner({ appointment, onUpdate, onDelete }) {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Sélection prestation pour last minute sans services */}
+      {isLastMinute && !isCompleted && (!appointment.services || appointment.services.length === 0) && (
+        <div>
+          <p className="text-xs text-muted-foreground mb-2">Prestation effectuée</p>
+          {selectedServices.length > 0 && (
+            <div className="space-y-1.5 mb-2">
+              {selectedServices.map((s, idx) => (
+                <div key={s.id} className="flex items-center justify-between rounded-lg px-3 py-2"
+                  style={{ background: getServiceColor(s.id || idx) + '22', borderLeft: `3px solid ${getServiceColor(s.id || idx)}` }}>
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full" style={{ background: getServiceColor(s.id || idx) }} />
+                    <span className="text-sm font-medium">{s.name}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs">
+                    <span className="text-muted-foreground">{s.duration} min</span>
+                    <span className="font-bold text-primary">{s.price}€</span>
+                    <button
+                      onClick={() => setSelectedServices(prev => prev.filter(x => x.id !== s.id))}
+                      className="w-5 h-5 rounded-full bg-red-500/20 flex items-center justify-center hover:bg-red-500/30 transition-colors"
+                    >
+                      <X className="w-3 h-3 text-red-400" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <select
+            value=""
+            onChange={(e) => {
+              const svc = allServices.find(s => String(s.id) === e.target.value);
+              if (svc && !selectedServices.find(s => s.id === svc.id)) {
+                setSelectedServices(prev => [...prev, svc]);
+              }
+            }}
+            className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 pr-8 text-sm text-foreground appearance-none focus:outline-none focus:border-primary/40"
+          >
+            <option value="" className="bg-card">Ajouter une prestation...</option>
+            {allServices.filter(s => !selectedServices.find(x => x.id === s.id)).map(s => (
+              <option key={s.id} value={s.id} className="bg-card">
+                {s.name} — {s.price}€ ({s.duration} min)
+              </option>
+            ))}
+          </select>
         </div>
       )}
 
