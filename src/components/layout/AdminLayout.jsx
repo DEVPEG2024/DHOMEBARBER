@@ -1,9 +1,10 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { Outlet, Link, useLocation, Navigate } from 'react-router-dom';
 import {
   LayoutDashboard, Calendar, Users, Scissors, UserCircle,
-  BarChart3, Settings, Menu, X, ChevronLeft, ChevronDown, ShoppingBag, Star, Bell, Brain, Sun, Moon, ClipboardList, ShieldCheck, Sparkles, CalendarDays, Newspaper, Warehouse, PartyPopper, LogOut, Gift
+  BarChart3, Settings, Menu, X, ChevronLeft, ChevronDown, ShoppingBag, Star, Bell, Brain, Sun, Moon, ClipboardList, ShieldCheck, Sparkles, CalendarDays, Newspaper, Warehouse, PartyPopper, LogOut, Gift, GripVertical
 } from 'lucide-react';
+import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { useTheme } from '@/lib/ThemeContext';
 import { useAuth } from '@/lib/AuthContext';
 
@@ -55,7 +56,8 @@ const CATEGORY_ICONS = {
   Divers: Newspaper,
 };
 
-const STORAGE_KEY = 'admin_sidebar_collapsed';
+const COLLAPSED_KEY = 'admin_sidebar_collapsed';
+const ORDER_KEY = 'admin_sidebar_order';
 
 function NavLink({ item, isActive, onClick }) {
   return (
@@ -121,32 +123,65 @@ export default function AdminLayout() {
     });
   }, [user]);
 
-  // Group items: top-level (no category) + grouped by category
-  const { topItems, categories } = useMemo(() => {
-    const top = [];
+  // Build sections: each top-level item is a section, each category is a section
+  const defaultSections = useMemo(() => {
+    const sections = [];
     const catMap = new Map();
     sidebarItems.forEach(item => {
       if (!item.category) {
-        top.push(item);
+        sections.push({ type: 'item', id: item.path, item });
       } else {
-        if (!catMap.has(item.category)) catMap.set(item.category, []);
+        if (!catMap.has(item.category)) {
+          catMap.set(item.category, []);
+          sections.push({ type: 'category', id: `cat:${item.category}`, name: item.category, items: catMap.get(item.category) });
+        }
         catMap.get(item.category).push(item);
       }
     });
-    return { topItems: top, categories: [...catMap.entries()] };
+    return sections;
   }, [sidebarItems]);
+
+  // Reorder sections based on saved order
+  const [sections, setSections] = useState(defaultSections);
+
+  useEffect(() => {
+    try {
+      const savedOrder = JSON.parse(localStorage.getItem(ORDER_KEY));
+      if (savedOrder?.length) {
+        const map = {};
+        defaultSections.forEach(s => { map[s.id] = s; });
+        const ordered = [];
+        savedOrder.forEach(id => {
+          if (map[id]) { ordered.push(map[id]); delete map[id]; }
+        });
+        Object.values(map).forEach(s => ordered.push(s));
+        setSections(ordered);
+      } else {
+        setSections(defaultSections);
+      }
+    } catch { setSections(defaultSections); }
+  }, [defaultSections]);
+
+  const handleDragEnd = useCallback((result) => {
+    if (!result.destination) return;
+    const reordered = Array.from(sections);
+    const [moved] = reordered.splice(result.source.index, 1);
+    reordered.splice(result.destination.index, 0, moved);
+    setSections(reordered);
+    localStorage.setItem(ORDER_KEY, JSON.stringify(reordered.map(s => s.id)));
+  }, [sections]);
 
   // Collapsed state per category, persisted in localStorage
   const [collapsedCats, setCollapsedCats] = useState(() => {
     try {
-      return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {};
+      return JSON.parse(localStorage.getItem(COLLAPSED_KEY)) || {};
     } catch { return {}; }
   });
 
   const toggleCategory = useCallback((catName) => {
     setCollapsedCats(prev => {
       const next = { ...prev, [catName]: !prev[catName] };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      localStorage.setItem(COLLAPSED_KEY, JSON.stringify(next));
       return next;
     });
   }, []);
@@ -197,26 +232,58 @@ export default function AdminLayout() {
           </button>
         </div>
 
-        {/* Nav */}
-        <nav className="flex-1 overflow-y-auto p-2.5 space-y-0.5">
-          {/* Top items (Dashboard, Agenda) — sans catégorie */}
-          {topItems.map(item => (
-            <NavLink key={item.path} item={item} isActive={isActive(item)} onClick={() => setSidebarOpen(false)} />
-          ))}
-
-          {/* Collapsible categories */}
-          {categories.map(([catName, items]) => (
-            <CategoryGroup
-              key={catName}
-              name={catName}
-              items={items}
-              isActive={isActive}
-              onNavClick={() => setSidebarOpen(false)}
-              collapsed={!!collapsedCats[catName]}
-              onToggle={() => toggleCategory(catName)}
-            />
-          ))}
-        </nav>
+        {/* Nav with drag & drop */}
+        <DragDropContext onDragEnd={handleDragEnd}>
+          <Droppable droppableId="sidebar">
+            {(provided) => (
+              <nav
+                className="flex-1 overflow-y-auto p-2.5 space-y-0.5"
+                ref={provided.innerRef}
+                {...provided.droppableProps}
+              >
+                {sections.map((section, index) => (
+                  <Draggable key={section.id} draggableId={section.id} index={index}>
+                    {(provided, snapshot) => (
+                      <div
+                        ref={provided.innerRef}
+                        {...provided.draggableProps}
+                        className={snapshot.isDragging ? 'opacity-80 shadow-lg shadow-primary/10 rounded-lg ring-1 ring-primary/20' : ''}
+                      >
+                        {section.type === 'item' ? (
+                          <div className="flex items-center group">
+                            <div {...provided.dragHandleProps} className="w-5 flex items-center justify-center shrink-0 opacity-0 group-hover:opacity-40 transition-opacity cursor-grab">
+                              <GripVertical className="w-3 h-3" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <NavLink item={section.item} isActive={isActive(section.item)} onClick={() => setSidebarOpen(false)} />
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex items-start group">
+                            <div {...provided.dragHandleProps} className="w-5 flex items-center justify-center shrink-0 opacity-0 group-hover:opacity-40 transition-opacity cursor-grab pt-2.5">
+                              <GripVertical className="w-3 h-3" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <CategoryGroup
+                                name={section.name}
+                                items={section.items}
+                                isActive={isActive}
+                                onNavClick={() => setSidebarOpen(false)}
+                                collapsed={!!collapsedCats[section.name]}
+                                onToggle={() => toggleCategory(section.name)}
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </Draggable>
+                ))}
+                {provided.placeholder}
+              </nav>
+            )}
+          </Droppable>
+        </DragDropContext>
 
         {/* Bottom */}
         <div className="p-2.5 border-t border-border space-y-0.5 shrink-0">
