@@ -293,17 +293,28 @@ function ValidateModal({ card, onClose, onValidated }) {
   );
 }
 
+// Extract DHB code from QR value (URL or raw)
+function extractCodeFromQR(value) {
+  if (!value) return null;
+  const match = value.match(/scan=([A-Z0-9-]+)/);
+  if (match) return match[1];
+  const direct = value.trim().toUpperCase();
+  if (direct.startsWith('DHB-')) return direct;
+  return null;
+}
+
 // QR Scanner using device camera
 function QRScannerModal({ onClose, onScanned }) {
   const videoRef = useRef(null);
-  const canvasRef = useRef(null);
   const streamRef = useRef(null);
-  const scanningRef = useRef(true);
-  const [error, setError] = useState(null);
+  const onScannedRef = useRef(onScanned);
+  onScannedRef.current = onScanned;
+  const [cameraReady, setCameraReady] = useState(false);
+  const [cameraError, setCameraError] = useState(false);
+  const [manualCode, setManualCode] = useState('');
   const { toast } = useToast();
 
   const stopCamera = useCallback(() => {
-    scanningRef.current = false;
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(t => t.stop());
       streamRef.current = null;
@@ -311,59 +322,62 @@ function QRScannerModal({ onClose, onScanned }) {
   }, []);
 
   useEffect(() => {
-    let animId;
+    let cancelled = false;
+    let intervalId;
 
-    const startCamera = async () => {
+    const start = async () => {
+      // Check camera support
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setCameraError(true);
+        return;
+      }
+
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } },
+          video: { facingMode: { ideal: 'environment' } },
         });
-        streamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.play();
-        }
+        if (cancelled) { stream.getTracks().forEach(t => t.stop()); return; }
 
-        // Scan loop using BarcodeDetector if available, otherwise manual code input
+        streamRef.current = stream;
+        const video = videoRef.current;
+        if (!video) return;
+        video.srcObject = stream;
+        await video.play();
+        setCameraReady(true);
+
+        // BarcodeDetector (Chrome Android, desktop Chrome/Edge)
         if ('BarcodeDetector' in window) {
-          const detector = new BarcodeDetector({ formats: ['qr_code'] });
-          const scan = async () => {
-            if (!scanningRef.current || !videoRef.current) return;
+          const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+          intervalId = setInterval(async () => {
+            if (cancelled || !video || video.readyState < 2) return;
             try {
-              const barcodes = await detector.detect(videoRef.current);
-              if (barcodes.length > 0) {
-                const value = barcodes[0].rawValue;
-                // Extract code from URL or direct code
-                const match = value.match(/scan=([A-Z0-9-]+)/);
-                const code = match ? match[1] : value;
-                if (code.startsWith('DHB-')) {
+              const barcodes = await detector.detect(video);
+              for (const bc of barcodes) {
+                const code = extractCodeFromQR(bc.rawValue);
+                if (code) {
+                  clearInterval(intervalId);
                   stopCamera();
-                  onScanned(code);
+                  onScannedRef.current(code);
                   return;
                 }
               }
             } catch (_) {}
-            animId = requestAnimationFrame(scan);
-          };
-          // Wait for video to be ready
-          videoRef.current.onloadeddata = () => { animId = requestAnimationFrame(scan); };
-        } else {
-          setError('manual');
+          }, 300);
         }
+        // No BarcodeDetector (iOS Safari, Firefox) → camera shown but manual input required
       } catch (err) {
         console.error('Camera error:', err);
-        setError('manual');
+        if (!cancelled) setCameraError(true);
       }
     };
 
-    startCamera();
+    start();
     return () => {
+      cancelled = true;
+      if (intervalId) clearInterval(intervalId);
       stopCamera();
-      if (animId) cancelAnimationFrame(animId);
     };
-  }, [onScanned, stopCamera]);
-
-  const [manualCode, setManualCode] = useState('');
+  }, [stopCamera]);
 
   const handleManualSubmit = () => {
     const code = manualCode.trim().toUpperCase();
@@ -375,17 +389,21 @@ function QRScannerModal({ onClose, onScanned }) {
     }
   };
 
+  const handleClose = () => { stopCamera(); onClose(); };
+
+  const hasBarcodeDetector = typeof window !== 'undefined' && 'BarcodeDetector' in window;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" onClick={() => { stopCamera(); onClose(); }}>
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center px-4 pb-4" onClick={handleClose}>
       <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
       <motion.div
-        initial={{ opacity: 0, scale: 0.9 }}
-        animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.9 }}
+        initial={{ opacity: 0, y: 40 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: 40 }}
         onClick={e => e.stopPropagation()}
         className="relative w-full max-w-sm rounded-3xl bg-card border border-border p-5 shadow-2xl"
       >
-        <button onClick={() => { stopCamera(); onClose(); }} className="absolute top-3 right-3 w-8 h-8 rounded-full flex items-center justify-center hover:bg-secondary z-10">
+        <button onClick={handleClose} className="absolute top-3 right-3 w-8 h-8 rounded-full flex items-center justify-center hover:bg-secondary z-10">
           <X className="w-4 h-4" />
         </button>
 
@@ -394,32 +412,42 @@ function QRScannerModal({ onClose, onScanned }) {
           <h3 className="text-base font-bold text-foreground">Scanner une carte</h3>
         </div>
 
-        {error !== 'manual' ? (
-          <div className="relative rounded-2xl overflow-hidden bg-black aspect-square mb-4">
-            <video ref={videoRef} className="w-full h-full object-cover" playsInline muted />
-            {/* Scan overlay */}
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="w-48 h-48 border-2 border-primary rounded-2xl relative">
-                <div className="absolute top-0 left-0 w-6 h-6 border-t-4 border-l-4 border-primary rounded-tl-lg" />
-                <div className="absolute top-0 right-0 w-6 h-6 border-t-4 border-r-4 border-primary rounded-tr-lg" />
-                <div className="absolute bottom-0 left-0 w-6 h-6 border-b-4 border-l-4 border-primary rounded-bl-lg" />
-                <div className="absolute bottom-0 right-0 w-6 h-6 border-b-4 border-r-4 border-primary rounded-br-lg" />
-                <motion.div
-                  className="absolute left-2 right-2 h-0.5 bg-primary/80"
-                  animate={{ top: ['10%', '90%', '10%'] }}
-                  transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
-                />
+        {/* Camera preview */}
+        {!cameraError && (
+          <div className="relative rounded-2xl overflow-hidden bg-black aspect-[4/3] mb-4">
+            <video ref={videoRef} className="w-full h-full object-cover" playsInline muted autoPlay />
+            {!cameraReady && (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
               </div>
-            </div>
-            <canvas ref={canvasRef} className="hidden" />
+            )}
+            {cameraReady && (
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="w-44 h-44 relative">
+                  <div className="absolute top-0 left-0 w-6 h-6 border-t-3 border-l-3 border-primary rounded-tl-lg" />
+                  <div className="absolute top-0 right-0 w-6 h-6 border-t-3 border-r-3 border-primary rounded-tr-lg" />
+                  <div className="absolute bottom-0 left-0 w-6 h-6 border-b-3 border-l-3 border-primary rounded-bl-lg" />
+                  <div className="absolute bottom-0 right-0 w-6 h-6 border-b-3 border-r-3 border-primary rounded-br-lg" />
+                  <motion.div
+                    className="absolute left-2 right-2 h-0.5 bg-primary"
+                    animate={{ top: ['10%', '90%', '10%'] }}
+                    transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+                  />
+                </div>
+              </div>
+            )}
           </div>
-        ) : null}
+        )}
 
         <p className="text-xs text-muted-foreground text-center mb-3">
-          {error === 'manual' ? 'Caméra non disponible. Entrez le code manuellement.' : 'Pointez la caméra vers le QR code de la carte'}
+          {cameraError
+            ? 'Caméra non disponible. Entrez le code manuellement.'
+            : !hasBarcodeDetector
+              ? 'Scan auto non supporté sur ce navigateur. Entrez le code ci-dessous.'
+              : 'Pointez la caméra vers le QR code'}
         </p>
 
-        {/* Manual fallback */}
+        {/* Manual input (always visible) */}
         <div className="flex gap-2">
           <input
             type="text"
@@ -431,7 +459,8 @@ function QRScannerModal({ onClose, onScanned }) {
           />
           <button
             onClick={handleManualSubmit}
-            className="shrink-0 px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold"
+            disabled={!manualCode.trim()}
+            className="shrink-0 px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold disabled:opacity-50"
           >
             OK
           </button>
