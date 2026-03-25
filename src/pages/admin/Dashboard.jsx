@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import {
   Calendar, Users, TrendingUp, Clock, AlertTriangle, CheckCircle,
-  CreditCard, Banknote, Euro, Percent, Star, UserCheck, ArrowUpRight, ArrowDownRight, Coffee, Heart, ShoppingBag
+  CreditCard, Banknote, Euro, Percent, Star, UserCheck, ArrowUpRight, ArrowDownRight, Coffee, Heart, ShoppingBag, Gift
 } from 'lucide-react';
 import { format, subDays, startOfWeek, addDays } from 'date-fns';
 import { fr } from 'date-fns/locale';
@@ -109,16 +109,19 @@ export default function AdminDashboard() {
   const noShowsMonth = thisMonth.filter(a => a.status === 'no_show').length;
   const cancelledMonth = thisMonth.filter(a => a.status === 'cancelled').length;
 
-  // Prestations CB vs Espèces (sans pourboire, sans produit)
+  // Prestations CB vs Espèces vs Carte cadeau (sans pourboire)
   const getServiceOnly = (a) => a.total_price || 0;
-  const todayCB = paidToday.filter(a => a.payment_method === 'cb').reduce((s, a) => s + getServiceOnly(a) + (a.product_price || 0), 0);
-  const todayCash = paidToday.filter(a => a.payment_method === 'especes').reduce((s, a) => s + getServiceOnly(a) + (a.product_price || 0), 0);
-  const todayNoMethod = paidToday.filter(a => !a.payment_method).reduce((s, a) => s + getServiceOnly(a) + (a.product_price || 0), 0);
+  const getPayTotal = (a) => getServiceOnly(a) + (a.product_price || 0);
+  const todayCB = paidToday.filter(a => a.payment_method === 'cb').reduce((s, a) => s + getPayTotal(a), 0);
+  const todayCash = paidToday.filter(a => a.payment_method === 'especes').reduce((s, a) => s + getPayTotal(a), 0);
+  const todayGift = paidToday.filter(a => a.payment_method === 'carte_cadeau').reduce((s, a) => s + getPayTotal(a), 0);
+  const todayNoMethod = paidToday.filter(a => !a.payment_method).reduce((s, a) => s + getPayTotal(a), 0);
 
-  // Month CB vs Espèces (sans pourboire)
-  const monthCB = monthPaid.filter(a => a.payment_method === 'cb').reduce((s, a) => s + getServiceOnly(a) + (a.product_price || 0), 0);
-  const monthCash = monthPaid.filter(a => a.payment_method === 'especes').reduce((s, a) => s + getServiceOnly(a) + (a.product_price || 0), 0);
-  const monthNoMethod = monthPaid.filter(a => !a.payment_method).reduce((s, a) => s + getServiceOnly(a) + (a.product_price || 0), 0);
+  // Month CB vs Espèces vs Carte cadeau (sans pourboire)
+  const monthCB = monthPaid.filter(a => a.payment_method === 'cb').reduce((s, a) => s + getPayTotal(a), 0);
+  const monthCash = monthPaid.filter(a => a.payment_method === 'especes').reduce((s, a) => s + getPayTotal(a), 0);
+  const monthGift = monthPaid.filter(a => a.payment_method === 'carte_cadeau').reduce((s, a) => s + getPayTotal(a), 0);
+  const monthNoMethod = monthPaid.filter(a => !a.payment_method).reduce((s, a) => s + getPayTotal(a), 0);
 
   // Pourboires CB vs Espèces
   const todayTipsCB = paidToday.filter(a => a.tip_method === 'cb').reduce((s, a) => s + (a.tip || 0), 0);
@@ -155,13 +158,15 @@ export default function AdminDashboard() {
       const dayPaid = realAppts.filter(a => a.date === dateStr && isPaid(a));
       const dayCB = dayPaid.filter(a => a.payment_method === 'cb').reduce((sum, a) => sum + getTotal(a), 0);
       const dayCash = dayPaid.filter(a => a.payment_method === 'especes').reduce((sum, a) => sum + getTotal(a), 0);
+      const dayGift = dayPaid.filter(a => a.payment_method === 'carte_cadeau').reduce((sum, a) => sum + getTotal(a), 0);
       const dayOther = dayPaid.filter(a => !a.payment_method).reduce((sum, a) => sum + getTotal(a), 0);
       data.push({
         day: format(d, 'EEE', { locale: fr }),
         cb: dayCB,
         especes: dayCash,
+        carte_cadeau: dayGift,
         autre: dayOther,
-        revenue: dayCB + dayCash + dayOther,
+        revenue: dayCB + dayCash + dayGift + dayOther,
         count: dayPaid.length,
       });
     }
@@ -225,14 +230,18 @@ export default function AdminDashboard() {
         />
       </div>
 
-      {/* Encaissements CB / Espèces */}
+      {/* Encaissements par mode de paiement */}
       <div className="bg-card border border-border rounded-xl p-4 mb-4">
         <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Encaissements prestations + produits</h3>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-3 gap-3 mb-3">
           <MiniCard label="CB aujourd'hui" value={`${todayCB}€`} icon={CreditCard} color="#60a5fa" />
           <MiniCard label="Espèces aujourd'hui" value={`${todayCash}€`} icon={Banknote} color="#4ade80" />
+          <MiniCard label="Carte cadeau aujourd'hui" value={`${todayGift}€`} icon={Gift} color="#f59e0b" />
+        </div>
+        <div className="grid grid-cols-3 gap-3">
           <MiniCard label="CB ce mois" value={`${monthCB}€`} icon={CreditCard} color="#60a5fa" />
           <MiniCard label="Espèces ce mois" value={`${monthCash}€`} icon={Banknote} color="#4ade80" />
+          <MiniCard label="Carte cadeau ce mois" value={`${monthGift}€`} icon={Gift} color="#f59e0b" />
         </div>
       </div>
 
@@ -282,12 +291,15 @@ export default function AdminDashboard() {
         {/* Weekly Revenue Chart */}
         <div className="lg:col-span-2 bg-card border border-border rounded-xl p-5">
           <h3 className="text-sm font-semibold mb-1">CA encaissé — 7 derniers jours</h3>
-          <div className="flex items-center gap-4 mb-4">
+          <div className="flex items-center gap-4 mb-4 flex-wrap">
             <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
               <div className="w-2.5 h-2.5 rounded-sm" style={{ background: '#60a5fa' }} /> CB
             </div>
             <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
               <div className="w-2.5 h-2.5 rounded-sm" style={{ background: '#4ade80' }} /> Espèces
+            </div>
+            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+              <div className="w-2.5 h-2.5 rounded-sm" style={{ background: '#f59e0b' }} /> Carte cadeau
             </div>
             <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
               <div className="w-2.5 h-2.5 rounded-sm" style={{ background: '#facc15' }} /> Non renseigné
@@ -301,10 +313,11 @@ export default function AdminDashboard() {
                 <Tooltip
                   contentStyle={{ background: 'hsl(30 8% 10%)', border: '1px solid hsl(30 6% 18%)', borderRadius: '8px', fontSize: '12px' }}
                   labelStyle={{ color: 'hsl(40 20% 95%)' }}
-                  formatter={(value, name) => [`${value}€`, name === 'cb' ? 'CB' : name === 'especes' ? 'Espèces' : 'Non renseigné']}
+                  formatter={(value, name) => [`${value}€`, name === 'cb' ? 'CB' : name === 'especes' ? 'Espèces' : name === 'carte_cadeau' ? 'Carte cadeau' : 'Non renseigné']}
                 />
                 <Bar dataKey="cb" stackId="revenue" fill="#60a5fa" />
                 <Bar dataKey="especes" stackId="revenue" fill="#4ade80" />
+                <Bar dataKey="carte_cadeau" stackId="revenue" fill="#f59e0b" />
                 <Bar dataKey="autre" stackId="revenue" fill="#facc15" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
