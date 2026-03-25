@@ -1,16 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/lib/AuthContext';
+import { api } from '@/api/apiClient';
 import { isPushSupported, isSubscribed, subscribeToPush, unsubscribeFromPush } from '@/lib/pushNotifications';
 import { motion } from 'framer-motion';
-import { User, Mail, Phone, Bell, Shield, ChevronRight } from 'lucide-react';
+import { User, Mail, Phone, Bell, Shield, ChevronRight, Cake } from 'lucide-react';
 import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
 
 export default function Settings() {
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const [pushEnabled, setPushEnabled] = useState(false);
   const [pushLoading, setPushLoading] = useState(false);
+  const [birthDate, setBirthDate] = useState('');
+  const [savingBirth, setSavingBirth] = useState(false);
   const pushSupported = isPushSupported();
+
+  useEffect(() => {
+    if (user?.birth_date) setBirthDate(user.birth_date);
+  }, [user]);
 
   // Check current subscription status on mount
   useEffect(() => {
@@ -84,6 +91,45 @@ export default function Settings() {
               </div>
             </div>
           )}
+          {/* Birthday */}
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+              <Cake className="w-4 h-4 text-primary" />
+            </div>
+            <div className="flex-1">
+              <p className="text-[11px] text-muted-foreground">Date de naissance</p>
+              <div className="flex items-center gap-2 mt-0.5">
+                <input
+                  type="date"
+                  value={birthDate}
+                  onChange={e => setBirthDate(e.target.value)}
+                  max={new Date().toISOString().split('T')[0]}
+                  className="flex-1 bg-transparent text-sm font-semibold text-foreground focus:outline-none"
+                />
+                {birthDate !== (user?.birth_date || '') && (
+                  <button
+                    onClick={async () => {
+                      if (!user?.id) return;
+                      setSavingBirth(true);
+                      try {
+                        await api.entities.User.update(user.id, { birth_date: birthDate || null });
+                        if (refreshUser) await refreshUser();
+                        toast.success('Date de naissance enregistrée');
+                      } catch (err) {
+                        toast.error('Erreur');
+                      } finally {
+                        setSavingBirth(false);
+                      }
+                    }}
+                    disabled={savingBirth}
+                    className="text-xs font-semibold text-primary px-2 py-1 rounded-lg bg-primary/10 hover:bg-primary/20 transition-colors disabled:opacity-50"
+                  >
+                    {savingBirth ? '...' : 'OK'}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
         </motion.div>
 
         {/* Preferences */}
