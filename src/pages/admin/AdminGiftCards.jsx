@@ -296,10 +296,13 @@ function ValidateModal({ card, onClose, onValidated }) {
 // Extract DHB code from QR value (URL or raw)
 function extractCodeFromQR(value) {
   if (!value) return null;
-  const match = value.match(/scan=([A-Z0-9-]+)/);
+  const upper = value.toUpperCase();
+  // Match scan= param (case insensitive)
+  const match = upper.match(/SCAN=([A-Z0-9-]+)/);
   if (match) return match[1];
-  const direct = value.trim().toUpperCase();
-  if (direct.startsWith('DHB-')) return direct;
+  // Match DHB-XXXX-XXXX anywhere in the string
+  const dhbMatch = upper.match(/(DHB-[A-Z0-9]{4}-[A-Z0-9]{4})/);
+  if (dhbMatch) return dhbMatch[1];
   return null;
 }
 
@@ -349,7 +352,7 @@ function QRScannerModal({ onClose, onScanned }) {
         if ('BarcodeDetector' in window) {
           const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
           intervalId = setInterval(async () => {
-            if (cancelled || !video || video.readyState < 2) return;
+            if (cancelled || !video || video.readyState < 2 || !video.videoWidth) return;
             try {
               const barcodes = await detector.detect(video);
               for (const bc of barcodes) {

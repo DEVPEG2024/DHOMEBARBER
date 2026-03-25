@@ -111,8 +111,8 @@ function GiftCardBack({ card, backRef }) {
       <div className="absolute inset-0 bg-gradient-to-br from-[#111] to-[#0a0a0a]" />
       <div className="absolute inset-[1px] rounded-3xl border border-white/10" />
       <div className="relative h-full flex flex-col items-center justify-center p-5">
-        <div className="bg-white rounded-2xl p-2 mb-3">
-          <QRCodeSVG value={qrUrl} size={100} level="H" includeMargin={false} />
+        <div className="bg-white rounded-2xl p-3 mb-3">
+          <QRCodeSVG value={qrUrl} size={120} level="M" includeMargin />
         </div>
         <p className="text-[10px] text-white/40 uppercase tracking-[0.2em] mb-1">Scanner pour utiliser</p>
         <p className="text-xs text-white/60 font-mono">{card.code}</p>
