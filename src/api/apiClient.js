@@ -161,11 +161,18 @@ const auth = {
 // ── Integrations module ──────────────────────────────────────────────
 const integrations = {
   Core: {
-    /** POST /integration-endpoints/Core/UploadFile */
+    /** Multipart file upload — tries /upload then legacy endpoint */
     async UploadFile({ file }) {
       const formData = new FormData();
       formData.append('file', file, file.name);
-      return request('POST', `${API_BASE}/integration-endpoints/Core/UploadFile`, formData);
+      try {
+        return await request('POST', `${API_SERVER_URL}/upload`, formData);
+      } catch (e) {
+        // Fallback to legacy Base44 endpoint
+        const formData2 = new FormData();
+        formData2.append('file', file, file.name);
+        return request('POST', `${API_BASE}/integration-endpoints/Core/UploadFile`, formData2);
+      }
     },
 
     /** POST /integration-endpoints/Core/SendEmail */
