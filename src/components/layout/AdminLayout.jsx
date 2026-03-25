@@ -1,8 +1,8 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { Outlet, Link, useLocation, Navigate } from 'react-router-dom';
 import {
   LayoutDashboard, Calendar, Users, Scissors, UserCircle,
-  BarChart3, Settings, Menu, X, ChevronLeft, ShoppingBag, Star, Bell, Brain, Sun, Moon, ClipboardList, ShieldCheck, Sparkles, CalendarDays, Newspaper, Warehouse, PartyPopper, LogOut, Gift
+  BarChart3, Settings, Menu, X, ChevronLeft, ChevronDown, ShoppingBag, Star, Bell, Brain, Sun, Moon, ClipboardList, ShieldCheck, Sparkles, CalendarDays, Newspaper, Warehouse, PartyPopper, LogOut, Gift
 } from 'lucide-react';
 import { useTheme } from '@/lib/ThemeContext';
 import { useAuth } from '@/lib/AuthContext';
@@ -46,6 +46,17 @@ const allSidebarItems = [
   { path: '/admin/settings', icon: Settings, label: 'Paramètres', perm: 'settings', category: 'Divers' },
 ];
 
+const CATEGORY_ICONS = {
+  Clients: UserCircle,
+  Commerce: ShoppingBag,
+  'Équipe': Users,
+  'Mon espace': Settings,
+  Analyse: BarChart3,
+  Divers: Newspaper,
+};
+
+const STORAGE_KEY = 'admin_sidebar_collapsed';
+
 function NavLink({ item, isActive, onClick }) {
   return (
     <Link
@@ -60,6 +71,35 @@ function NavLink({ item, isActive, onClick }) {
       <item.icon className="w-4 h-4 shrink-0" />
       {item.label}
     </Link>
+  );
+}
+
+function CategoryGroup({ name, items, isActive, onNavClick, collapsed, onToggle }) {
+  const CatIcon = CATEGORY_ICONS[name] || Settings;
+  const hasActive = items.some(item => isActive(item));
+
+  return (
+    <div>
+      <button
+        onClick={onToggle}
+        className={`flex items-center gap-3 w-full px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+          hasActive && collapsed
+            ? 'bg-primary/10 text-primary'
+            : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
+        }`}
+      >
+        <CatIcon className="w-4 h-4 shrink-0" />
+        <span className="flex-1 text-left">{name}</span>
+        <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${collapsed ? '-rotate-90' : ''}`} />
+      </button>
+      {!collapsed && (
+        <div className="ml-4 pl-3 border-l border-border/50 mt-0.5 space-y-0.5">
+          {items.map(item => (
+            <NavLink key={item.path} item={item} isActive={isActive(item)} onClick={onNavClick} />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -95,6 +135,21 @@ export default function AdminLayout() {
     });
     return { topItems: top, categories: [...catMap.entries()] };
   }, [sidebarItems]);
+
+  // Collapsed state per category, persisted in localStorage
+  const [collapsedCats, setCollapsedCats] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {};
+    } catch { return {}; }
+  });
+
+  const toggleCategory = useCallback((catName) => {
+    setCollapsedCats(prev => {
+      const next = { ...prev, [catName]: !prev[catName] };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, []);
 
   // Barber route protection
   const isBarber = user?.role === 'barber';
@@ -143,24 +198,23 @@ export default function AdminLayout() {
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 overflow-y-auto p-2.5">
+        <nav className="flex-1 overflow-y-auto p-2.5 space-y-0.5">
           {/* Top items (Dashboard, Agenda) — sans catégorie */}
-          <div className="space-y-0.5 mb-1">
-            {topItems.map(item => (
-              <NavLink key={item.path} item={item} isActive={isActive(item)} onClick={() => setSidebarOpen(false)} />
-            ))}
-          </div>
+          {topItems.map(item => (
+            <NavLink key={item.path} item={item} isActive={isActive(item)} onClick={() => setSidebarOpen(false)} />
+          ))}
 
-          {/* Grouped by category */}
+          {/* Collapsible categories */}
           {categories.map(([catName, items]) => (
-            <div key={catName} className="mt-3">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-muted-foreground/60 px-3 mb-1">{catName}</p>
-              <div className="space-y-0.5">
-                {items.map(item => (
-                  <NavLink key={item.path} item={item} isActive={isActive(item)} onClick={() => setSidebarOpen(false)} />
-                ))}
-              </div>
-            </div>
+            <CategoryGroup
+              key={catName}
+              name={catName}
+              items={items}
+              isActive={isActive}
+              onNavClick={() => setSidebarOpen(false)}
+              collapsed={!!collapsedCats[catName]}
+              onToggle={() => toggleCategory(catName)}
+            />
           ))}
         </nav>
 
