@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '@/api/apiClient';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Gift, CheckCircle2, XCircle, Clock, Search, Filter, X, Ban, CreditCard, Banknote } from 'lucide-react';
+import { Gift, CheckCircle2, XCircle, Clock, Search, X, Ban, CreditCard, Banknote, Minus } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 
 const STATUS_CONFIG = {
@@ -19,6 +20,8 @@ function ValidateModal({ card, onClose, onValidated }) {
   const queryClient = useQueryClient();
   const [paymentMethod, setPaymentMethod] = useState('');
   const [loading, setLoading] = useState(false);
+  const [deductAmount, setDeductAmount] = useState('');
+  const currentBalance = card.remaining_balance != null ? card.remaining_balance : card.amount;
 
   const handleValidate = async () => {
     if (!paymentMethod) {
@@ -31,6 +34,7 @@ function ValidateModal({ card, onClose, onValidated }) {
         status: 'validated',
         validated_at: new Date().toISOString(),
         validated_by: user?.full_name || user?.email || 'admin',
+        remaining_balance: card.amount,
       });
       toast({ title: 'Carte validée !', description: `${card.amount}€ - ${card.recipient_name}` });
       queryClient.invalidateQueries({ queryKey: ['adminGiftCards'] });
@@ -57,14 +61,29 @@ function ValidateModal({ card, onClose, onValidated }) {
     }
   };
 
-  const handleMarkUsed = async () => {
+  const handleDeduct = async () => {
+    const val = Number(deductAmount);
+    if (!val || val <= 0) {
+      toast({ title: 'Montant invalide', variant: 'destructive' });
+      return;
+    }
+    if (val > currentBalance) {
+      toast({ title: `Solde insuffisant (${currentBalance}€)`, variant: 'destructive' });
+      return;
+    }
     setLoading(true);
     try {
-      await api.entities.GiftCard.update(card.id, {
-        status: 'used',
-        used_at: new Date().toISOString(),
+      const newBalance = Math.round((currentBalance - val) * 100) / 100;
+      const updates = { remaining_balance: newBalance };
+      if (newBalance <= 0) {
+        updates.status = 'used';
+        updates.used_at = new Date().toISOString();
+      }
+      await api.entities.GiftCard.update(card.id, updates);
+      toast({
+        title: newBalance <= 0 ? 'Carte épuisée' : `${val}€ débité`,
+        description: newBalance > 0 ? `Nouveau solde: ${newBalance}€` : 'La carte est maintenant utilisée',
       });
-      toast({ title: 'Carte marquée comme utilisée' });
       queryClient.invalidateQueries({ queryKey: ['adminGiftCards'] });
       onClose();
     } catch (err) {
@@ -191,13 +210,40 @@ function ValidateModal({ card, onClose, onValidated }) {
         )}
 
         {card.status === 'validated' && (
-          <button
-            onClick={handleMarkUsed}
-            disabled={loading}
-            className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-blue-500 text-white text-sm font-semibold hover:bg-blue-600 transition-colors disabled:opacity-50"
-          >
-            <CheckCircle2 className="w-4 h-4" /> Marquer comme utilisée
-          </button>
+          <div className="space-y-3">
+            <div className="bg-primary/10 rounded-2xl p-4 text-center border border-primary/20">
+              <p className="text-xs text-muted-foreground mb-1">Solde disponible</p>
+              <p className="text-3xl font-black text-primary">{currentBalance}€</p>
+              <p className="text-[10px] text-muted-foreground mt-1">sur {card.amount}€</p>
+            </div>
+            <p className="text-xs font-semibold text-foreground">Débiter un montant</p>
+            <div className="flex gap-2">
+              <input
+                type="number"
+                value={deductAmount}
+                onChange={e => setDeductAmount(e.target.value)}
+                placeholder="Montant à débiter..."
+                min="0.01"
+                max={currentBalance}
+                step="0.01"
+                className="flex-1 px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+              />
+              <button
+                onClick={() => setDeductAmount(String(currentBalance))}
+                className="shrink-0 px-3 py-3 rounded-xl bg-white/5 border border-white/10 text-xs font-semibold text-muted-foreground hover:bg-white/10"
+              >
+                Tout
+              </button>
+            </div>
+            <button
+              onClick={handleDeduct}
+              disabled={loading || !deductAmount}
+              className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50"
+            >
+              <Minus className="w-4 h-4" />
+              {loading ? 'Débit...' : deductAmount && Number(deductAmount) >= currentBalance ? 'Épuiser la carte' : 'Débiter'}
+            </button>
+          </div>
         )}
       </motion.div>
     </div>
@@ -205,6 +251,7 @@ function ValidateModal({ card, onClose, onValidated }) {
 }
 
 export default function AdminGiftCards() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [selectedCard, setSelectedCard] = useState(null);
@@ -213,6 +260,18 @@ export default function AdminGiftCards() {
     queryKey: ['adminGiftCards'],
     queryFn: () => api.entities.GiftCard.list('-created_at', 200),
   });
+
+  // Handle QR scan: ?scan=DHB-XXXX-XXXX
+  useEffect(() => {
+    const scanCode = searchParams.get('scan');
+    if (scanCode && giftCards.length > 0) {
+      const card = giftCards.find(c => c.code === scanCode);
+      if (card) {
+        setSelectedCard(card);
+        setSearchParams({}, { replace: true });
+      }
+    }
+  }, [searchParams, giftCards, setSearchParams]);
 
   const filtered = giftCards.filter(c => {
     if (filter !== 'all' && c.status !== filter) return false;
@@ -342,7 +401,12 @@ export default function AdminGiftCards() {
                   </div>
                   <div className="text-right shrink-0 ml-2">
                     <p className="text-lg font-bold text-foreground">{card.amount}€</p>
-                    <p className={`text-[10px] font-semibold ${conf.color}`}>{conf.label}</p>
+                    {card.status === 'validated' && card.remaining_balance != null && card.remaining_balance < card.amount && (
+                      <p className="text-[10px] font-bold text-primary">Solde: {card.remaining_balance}€</p>
+                    )}
+                    {(card.status !== 'validated' || card.remaining_balance == null || card.remaining_balance >= card.amount) && (
+                      <p className={`text-[10px] font-semibold ${conf.color}`}>{conf.label}</p>
+                    )}
                   </div>
                 </div>
               </motion.div>

@@ -5,6 +5,7 @@ import { useAuth } from '@/lib/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Gift, Plus, Download, Share2, Clock, CheckCircle2, XCircle, ChevronLeft, X, Sparkles } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
+import { QRCodeSVG } from 'qrcode.react';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 
@@ -26,8 +27,11 @@ const STATUS_CONFIG = {
   expired: { label: 'Expirée', color: 'text-red-400', bg: 'bg-red-500/15 border-red-500/20', icon: XCircle },
 };
 
-// Premium gift card visual component
+const QR_BASE_URL = 'https://dhomebarber.fr/admin/gift-cards';
+
+// Premium gift card visual component (FRONT)
 function GiftCardVisual({ card, cardRef, compact = false }) {
+  const isValid = card.status === 'validated';
   const validDate = card.valid_until ? new Date(card.valid_until).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
 
   return (
@@ -46,6 +50,13 @@ function GiftCardVisual({ card, cardRef, compact = false }) {
 
       {/* Gold/premium border effect */}
       <div className="absolute inset-[1px] rounded-3xl border border-white/10" />
+
+      {/* INVALIDE watermark for pending cards */}
+      {!isValid && card.status !== undefined && (
+        <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
+          <p className="text-5xl font-black text-red-500/30 -rotate-12 tracking-widest select-none">INVALIDE</p>
+        </div>
+      )}
 
       {/* Content */}
       <div className="relative h-full flex flex-col justify-between p-5">
@@ -71,10 +82,46 @@ function GiftCardVisual({ card, cardRef, compact = false }) {
             <p className="text-sm font-semibold text-white">{card.recipient_name || 'À définir'}</p>
           </div>
           <div className="text-right">
-            <p className="text-[10px] text-white/40 uppercase tracking-wider">Valable jusqu'au</p>
-            <p className="text-xs text-white/70">{validDate}</p>
+            {isValid ? (
+              <>
+                <p className="text-[10px] text-white/40 uppercase tracking-wider">Valable jusqu'au</p>
+                <p className="text-xs text-white/70">{validDate}</p>
+              </>
+            ) : (
+              <p className="text-xs font-bold text-red-400">Non validée</p>
+            )}
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Gift card BACK visual (QR code)
+function GiftCardBack({ card, backRef }) {
+  const qrUrl = `${QR_BASE_URL}?scan=${card.code}`;
+  const balance = card.remaining_balance != null ? card.remaining_balance : card.amount;
+
+  return (
+    <div
+      ref={backRef}
+      className="relative overflow-hidden rounded-3xl w-full max-w-sm mx-auto"
+      style={{ aspectRatio: '1.6/1' }}
+    >
+      <div className="absolute inset-0 bg-gradient-to-br from-[#111] to-[#0a0a0a]" />
+      <div className="absolute inset-[1px] rounded-3xl border border-white/10" />
+      <div className="relative h-full flex flex-col items-center justify-center p-5">
+        <div className="bg-white rounded-2xl p-2 mb-3">
+          <QRCodeSVG value={qrUrl} size={100} level="H" includeMargin={false} />
+        </div>
+        <p className="text-[10px] text-white/40 uppercase tracking-[0.2em] mb-1">Scanner pour utiliser</p>
+        <p className="text-xs text-white/60 font-mono">{card.code}</p>
+        {card.status === 'validated' && (
+          <p className="text-sm font-bold text-primary mt-2">Solde: {balance}€</p>
+        )}
+        {card.recipient_message && (
+          <p className="text-[10px] text-white/30 mt-2 text-center italic line-clamp-2 max-w-[200px]">"{card.recipient_message}"</p>
+        )}
       </div>
     </div>
   );
@@ -245,39 +292,27 @@ function CreateGiftCardModal({ onClose, onCreated }) {
 // Gift card detail modal
 function GiftCardDetailModal({ card, onClose }) {
   const cardRef = useRef(null);
+  const backRef = useRef(null);
   const [downloading, setDownloading] = useState(false);
   const statusConf = STATUS_CONFIG[card.status] || STATUS_CONFIG.pending;
   const StatusIcon = statusConf.icon;
+  const balance = card.remaining_balance != null ? card.remaining_balance : card.amount;
 
   const handleDownloadPDF = async () => {
-    if (!cardRef.current) return;
+    if (!cardRef.current || !backRef.current) return;
     setDownloading(true);
     try {
-      const canvas = await html2canvas(cardRef.current, {
-        scale: 3,
-        backgroundColor: null,
-        useCORS: true,
-      });
-      const imgData = canvas.toDataURL('image/png');
+      // Front
+      const frontCanvas = await html2canvas(cardRef.current, { scale: 3, backgroundColor: null, useCORS: true });
+      const frontImg = frontCanvas.toDataURL('image/png');
       const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: [90, 55] });
-      pdf.addImage(imgData, 'PNG', 0, 0, 90, 55);
+      pdf.addImage(frontImg, 'PNG', 0, 0, 90, 55);
 
-      // Add message on back page if exists
-      if (card.recipient_message) {
-        pdf.addPage([90, 55], 'landscape');
-        pdf.setFillColor(17, 17, 17);
-        pdf.rect(0, 0, 90, 55, 'F');
-        pdf.setTextColor(255, 255, 255);
-        pdf.setFontSize(7);
-        pdf.text('Message personnel', 10, 12);
-        pdf.setFontSize(9);
-        pdf.setTextColor(200, 200, 200);
-        const lines = pdf.splitTextToSize(card.recipient_message, 70);
-        pdf.text(lines, 10, 20);
-        pdf.setFontSize(6);
-        pdf.setTextColor(100, 100, 100);
-        pdf.text(`De: ${card.sender_name}`, 10, 48);
-      }
+      // Back (QR code)
+      const backCanvas = await html2canvas(backRef.current, { scale: 3, backgroundColor: null, useCORS: true });
+      const backImg = backCanvas.toDataURL('image/png');
+      pdf.addPage([90, 55], 'landscape');
+      pdf.addImage(backImg, 'PNG', 0, 0, 90, 55);
 
       pdf.save(`carte-cadeau-dhomebarber-${card.code}.pdf`);
     } catch (err) {
@@ -319,15 +354,25 @@ function GiftCardDetailModal({ card, onClose }) {
           <X className="w-4 h-4" />
         </button>
 
-        {/* Card visual */}
+        {/* Card FRONT */}
         <GiftCardVisual card={card} cardRef={cardRef} />
 
+        {/* Card BACK (QR code) */}
+        <div className="mt-3">
+          <GiftCardBack card={card} backRef={backRef} />
+        </div>
+
         {/* Status badge */}
-        <div className="flex justify-center mt-4">
+        <div className="flex justify-center mt-4 gap-2">
           <div className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-semibold ${statusConf.bg} ${statusConf.color}`}>
             <StatusIcon className="w-3.5 h-3.5" />
             {statusConf.label}
           </div>
+          {card.status === 'validated' && (
+            <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border bg-primary/15 border-primary/20 text-xs font-bold text-primary">
+              Solde: {balance}€
+            </div>
+          )}
         </div>
 
         {/* Info */}
@@ -337,17 +382,15 @@ function GiftCardDetailModal({ card, onClose }) {
             <span className="font-medium text-foreground">{card.recipient_name}</span>
           </div>
           <div className="flex justify-between text-sm">
-            <span className="text-muted-foreground">De</span>
-            <span className="font-medium text-foreground">{card.sender_name}</span>
-          </div>
-          <div className="flex justify-between text-sm">
-            <span className="text-muted-foreground">Montant</span>
+            <span className="text-muted-foreground">Montant initial</span>
             <span className="font-bold text-primary">{card.amount}€</span>
           </div>
-          <div className="flex justify-between text-sm">
-            <span className="text-muted-foreground">Validité</span>
-            <span className="text-foreground">{new Date(card.valid_until).toLocaleDateString('fr-FR')}</span>
-          </div>
+          {card.status === 'validated' && (
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Validité</span>
+              <span className="text-foreground">{new Date(card.valid_until).toLocaleDateString('fr-FR')}</span>
+            </div>
+          )}
           {card.recipient_message && (
             <div className="bg-white/5 rounded-xl p-3 mt-2">
               <p className="text-xs text-muted-foreground mb-1">Message</p>
