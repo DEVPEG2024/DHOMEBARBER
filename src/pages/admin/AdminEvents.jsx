@@ -274,10 +274,10 @@ export default function AdminEvents() {
                     <Euro className="w-3.5 h-3.5 mr-1" /> {event.price ? 'Modifier' : 'Devis'}
                   </Button>
                 )}
-                <Button size="sm" variant="ghost"
-                  className="text-muted-foreground hover:text-red-400 px-2"
-                  onClick={() => { if (window.confirm('Supprimer cette demande ?')) deleteMutation.mutate(event.id); }}>
-                  <Trash2 className="w-3.5 h-3.5" />
+                <Button size="sm" variant="outline"
+                  className="border-red-500/20 text-red-400 hover:bg-red-500/10 hover:text-red-300 gap-1.5 px-3"
+                  onClick={() => { if (window.confirm('Supprimer définitivement cette demande ?')) deleteMutation.mutate(event.id); }}>
+                  <Trash2 className="w-3.5 h-3.5" /> Supprimer
                 </Button>
               </div>
             </motion.div>
