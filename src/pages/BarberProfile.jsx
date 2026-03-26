@@ -109,7 +109,6 @@ function getYouTubeId(url) {
 
 function MediaBlock({ videoUrl, photoUrl, name }) {
   const videoRef = useRef(null);
-  const [videoReady, setVideoReady] = useState(false);
   const [videoFailed, setVideoFailed] = useState(false);
 
   const youtubeId = getYouTubeId(videoUrl);
@@ -125,22 +124,19 @@ function MediaBlock({ videoUrl, photoUrl, name }) {
       className="relative rounded-2xl overflow-hidden border border-white/[0.08] mb-6"
       style={{ aspectRatio: '1080/1350' }}
     >
-      {/* YouTube embed */}
+      {/* YouTube embed — no title, no controls, no branding, fast start */}
       {youtubeId && (
-        <iframe
-          src={`https://www.youtube.com/embed/${youtubeId}?autoplay=1&mute=1&loop=1&playlist=${youtubeId}&controls=0&showinfo=0&modestbranding=1&playsinline=1`}
-          className="absolute inset-0 w-full h-full border-0"
-          allow="autoplay; encrypted-media"
-          allowFullScreen
-        />
-      )}
-
-      {/* Direct video - loading spinner */}
-      {showDirectVideo && !videoReady && (
-        <div className="absolute inset-0 flex items-center justify-center bg-white/[0.02] z-10">
-          {photoUrl && <img src={photoUrl} alt={name} className="absolute inset-0 w-full h-full object-cover opacity-40" />}
-          <div className="w-8 h-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin z-20" />
-        </div>
+        <>
+          {photoUrl && <img src={photoUrl} alt={name} className="absolute inset-0 w-full h-full object-cover" />}
+          <iframe
+            src={`https://www.youtube-nocookie.com/embed/${youtubeId}?autoplay=1&mute=1&loop=1&playlist=${youtubeId}&controls=0&showinfo=0&modestbranding=1&playsinline=1&rel=0&iv_load_policy=3&disablekb=1&fs=0`}
+            className="absolute inset-0 w-full h-full border-0 z-[1]"
+            style={{ pointerEvents: 'none' }}
+            allow="autoplay; encrypted-media"
+            loading="eager"
+            title=""
+          />
+        </>
       )}
 
       {/* Direct video */}
@@ -152,10 +148,10 @@ function MediaBlock({ videoUrl, photoUrl, name }) {
           loop
           muted
           playsInline
+          preload="auto"
           poster={photoUrl || undefined}
-          onCanPlay={() => setVideoReady(true)}
           onError={() => setVideoFailed(true)}
-          className={`w-full h-full object-cover transition-opacity duration-500 ${videoReady ? 'opacity-100' : 'opacity-0'}`}
+          className="w-full h-full object-cover"
         />
       )}
 
@@ -172,8 +168,8 @@ function MediaBlock({ videoUrl, photoUrl, name }) {
       )}
 
       {/* Gradient overlay bottom */}
-      <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-background/80 to-transparent pointer-events-none" />
-      <div className="absolute bottom-3 right-3 w-9 h-9 rounded-xl bg-primary/90 backdrop-blur-sm flex items-center justify-center shadow-lg shadow-primary/20">
+      <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-background/80 to-transparent pointer-events-none z-[2]" />
+      <div className="absolute bottom-3 right-3 w-9 h-9 rounded-xl bg-primary/90 backdrop-blur-sm flex items-center justify-center shadow-lg shadow-primary/20 z-[2]">
         <Scissors className="w-4 h-4 text-primary-foreground" />
       </div>
     </motion.div>
