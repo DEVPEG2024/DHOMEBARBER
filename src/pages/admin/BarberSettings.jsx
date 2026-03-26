@@ -174,7 +174,7 @@ export default function BarberSettings() {
     retry: false,
   });
 
-  const employee = employees.find(e => e.id === user?.employee_id);
+  const employee = employees.find(e => String(e.id) === String(user?.employee_id));
 
   // Init from employee data
   useEffect(() => {
