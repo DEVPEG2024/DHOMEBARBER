@@ -225,21 +225,26 @@ export default function BarberSettings() {
   };
 
   const saveVideoUrl = () => {
-    if (!employee) return;
-    const url = videoUrl.trim();
-    // Always read current working_hours from employee, merge with local state
-    const currentHours = workingHours || employee.working_hours || defaultHours;
-    const updatedHours = { ...currentHours };
-    if (url) {
-      updatedHours._video_url = url;
-    } else {
-      delete updatedHours._video_url;
+    if (!employee) {
+      toast.error('Profil barber introuvable');
+      return;
     }
-    setWorkingHours(updatedHours);
-    updateMutation.mutate({ id: employee.id, data: { working_hours: updatedHours } }, {
+    const url = videoUrl.trim();
+    // Merge _video_url into the full working_hours object
+    const currentHours = { ...(employee.working_hours || defaultHours), ...(workingHours || {}) };
+    if (url) {
+      currentHours._video_url = url;
+    } else {
+      delete currentHours._video_url;
+    }
+    setWorkingHours(currentHours);
+    updateMutation.mutate({ id: employee.id, data: { working_hours: currentHours } }, {
       onSuccess: () => {
         toast.success(url ? 'Vidéo mise à jour' : 'Vidéo supprimée');
         queryClient.invalidateQueries({ queryKey: ['employees'] });
+      },
+      onError: (err) => {
+        toast.error('Erreur : ' + (err?.message || 'sauvegarde échouée'));
       },
     });
   };
