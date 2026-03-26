@@ -145,6 +145,23 @@ function ExperienceGauge({ value }) {
   );
 }
 
+// Video URL is stored at the end of bio with a marker: \n%%VIDEO%%url
+const VIDEO_MARKER = '\n%%VIDEO%%';
+
+function extractVideoFromBio(bio) {
+  if (!bio) return { text: '', video: '' };
+  const idx = bio.indexOf(VIDEO_MARKER);
+  if (idx === -1) return { text: bio, video: '' };
+  return { text: bio.slice(0, idx), video: bio.slice(idx + VIDEO_MARKER.length) };
+}
+
+function packBioWithVideo(text, videoUrl) {
+  const cleanText = (text || '').trim();
+  const cleanVideo = (videoUrl || '').trim();
+  if (cleanVideo) return cleanText + VIDEO_MARKER + cleanVideo;
+  return cleanText;
+}
+
 // Find employee matching user - try multiple strategies
 function findEmployee(employees, user) {
   if (!user || !employees?.length) return null;
@@ -200,8 +217,9 @@ export default function BarberSettings() {
   useEffect(() => {
     if (employee && skills === null) {
       setSkills(employee.skills || []);
-      setBio(employee.bio || '');
-      setVideoUrl(employee.working_hours?._video_url || '');
+      const { text, video } = extractVideoFromBio(employee.bio);
+      setBio(text);
+      setVideoUrl(video);
       setWorkingHours(employee.working_hours || defaultHours);
     }
   }, [employee]);
@@ -278,20 +296,17 @@ export default function BarberSettings() {
       return;
     }
     setSaveStatus('Sauvegarde en cours...');
-    // Build working_hours with video URL
     const hours = { ...(employee.working_hours || defaultHours), ...(workingHours || {}) };
-    const trimmedVideo = videoUrl.trim();
-    if (trimmedVideo) {
-      hours._video_url = trimmedVideo;
-    } else {
-      delete hours._video_url;
-    }
+    // Clean any old _video_url from working_hours
+    delete hours._video_url;
     setWorkingHours(hours);
+    // Pack video URL into bio
+    const fullBio = packBioWithVideo(bio, videoUrl);
 
     try {
       await api.entities.Employee.update(employee.id, {
         skills,
-        bio,
+        bio: fullBio,
         experience_level: computedExperience,
         working_hours: hours,
       });
@@ -418,8 +433,8 @@ export default function BarberSettings() {
           {videoUrl.trim() && videoUrl.trim() !== (employee?.working_hours?._video_url || '') && (
             <p className="text-[11px] text-primary mt-2">Cliquez "Sauvegarder" en haut pour enregistrer la vidéo</p>
           )}
-          {employee?.working_hours?._video_url && (() => {
-            const url = employee.working_hours._video_url;
+          {extractVideoFromBio(employee?.bio).video && (() => {
+            const url = extractVideoFromBio(employee.bio).video;
             const ytMatch = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/);
             const ytId = ytMatch?.[1];
             return (

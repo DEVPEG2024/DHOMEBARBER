@@ -161,14 +161,18 @@ export default function Team() {
                 </label>
               </div>
 
-              {/* Video URL */}
+              {/* Video URL — stored in bio with marker */}
               <div>
                 <Label className="text-xs">URL vidéo de présentation</Label>
-                <Input value={editEmployee.working_hours?._video_url || ''} onChange={e => setEditEmployee({
-                  ...editEmployee,
-                  working_hours: { ...(editEmployee.working_hours || {}), _video_url: e.target.value || undefined }
-                })}
-                  className="bg-secondary border-border mt-1" placeholder="https://... (format vertical 1350x1080)" />
+                <Input value={(() => { const b = editEmployee.bio || ''; const m = '\n%%VIDEO%%'; const i = b.indexOf(m); return i >= 0 ? b.slice(i + m.length) : ''; })()} onChange={e => {
+                  const marker = '\n%%VIDEO%%';
+                  const raw = editEmployee.bio || '';
+                  const idx = raw.indexOf(marker);
+                  const textPart = idx >= 0 ? raw.slice(0, idx) : raw;
+                  const v = e.target.value.trim();
+                  setEditEmployee({ ...editEmployee, bio: v ? textPart + marker + v : textPart });
+                }}
+                  className="bg-secondary border-border mt-1" placeholder="https://youtube.com/watch?v=... ou lien .mp4" />
               </div>
 
               <div>

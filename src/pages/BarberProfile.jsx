@@ -228,9 +228,14 @@ export default function BarberProfile() {
     return { category: cat, level: s?.level || 0 };
   });
 
-  const hasAboutContent = employee.bio || allSkills.length > 0 || (employee.experience_level > 0);
-  const videoUrl = employee.working_hours?._video_url;
+  // Extract video URL from bio marker
+  const VIDEO_MARKER = '\n%%VIDEO%%';
+  const rawBio = employee.bio || '';
+  const markerIdx = rawBio.indexOf(VIDEO_MARKER);
+  const displayBio = markerIdx >= 0 ? rawBio.slice(0, markerIdx) : rawBio;
+  const videoUrl = markerIdx >= 0 ? rawBio.slice(markerIdx + VIDEO_MARKER.length) : null;
   const photoUrl = employee.photo_url;
+  const hasAboutContent = displayBio || allSkills.length > 0 || (employee.experience_level > 0);
 
   return (
     <div className="min-h-screen relative overflow-hidden">
@@ -261,8 +266,8 @@ export default function BarberProfile() {
             <h3 className="text-[10px] uppercase tracking-[0.2em] text-primary/60 font-semibold">À propos</h3>
 
             {/* Bio */}
-            {employee.bio && (
-              <p className="text-sm text-muted-foreground leading-relaxed">{employee.bio}</p>
+            {displayBio && (
+              <p className="text-sm text-muted-foreground leading-relaxed">{displayBio}</p>
             )}
 
             {/* Experience gauge */}
@@ -273,7 +278,7 @@ export default function BarberProfile() {
             {/* Skills */}
             {allSkills.length > 0 && (
               <>
-                {(employee.bio || employee.experience_level > 0) && (
+                {(displayBio || employee.experience_level > 0) && (
                   <div className="border-t border-white/[0.06]" />
                 )}
                 <div>
