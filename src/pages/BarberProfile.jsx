@@ -162,11 +162,19 @@ export default function BarberProfile() {
       return all.find(e => e.id === id) || null;
     },
     enabled: !!id,
+    retry: 1,
   });
 
   const { data: skillCategories = [] } = useQuery({
     queryKey: ['skillCategories'],
-    queryFn: () => api.entities.SkillCategory.list('sort_order', 100),
+    queryFn: async () => {
+      try {
+        return await api.entities.SkillCategory.list('sort_order', 100);
+      } catch {
+        return [];
+      }
+    },
+    retry: false,
   });
 
   if (isLoading) {
@@ -177,7 +185,7 @@ export default function BarberProfile() {
     );
   }
 
-  if (!employee) {
+  if (!employee || isError) {
     return (
       <div className="text-center py-20">
         <p className="text-muted-foreground">Barber introuvable</p>
