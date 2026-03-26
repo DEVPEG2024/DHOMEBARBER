@@ -185,7 +185,7 @@ export default function BarberProfile() {
     );
   }
 
-  if (!employee || isError) {
+  if (!employee) {
     return (
       <div className="text-center py-20">
         <p className="text-muted-foreground">Barber introuvable</p>
