@@ -361,10 +361,22 @@ export default function BarberSettings() {
               OK
             </Button>
           </div>
-          {employee?.working_hours?._video_url && (
+          {employee?.working_hours?._video_url && (() => {
+            const url = employee.working_hours._video_url;
+            const ytMatch = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/);
+            const ytId = ytMatch?.[1];
+            return (
             <div className="mt-3">
               <div className="rounded-xl overflow-hidden border border-border" style={{ aspectRatio: '1080/1350', maxWidth: 180 }}>
-                <video src={employee.working_hours._video_url} autoPlay loop muted playsInline className="w-full h-full object-cover" />
+                {ytId ? (
+                  <iframe
+                    src={`https://www.youtube.com/embed/${ytId}?autoplay=0&controls=0&modestbranding=1`}
+                    className="w-full h-full border-0"
+                    allow="encrypted-media"
+                  />
+                ) : (
+                  <video src={url} autoPlay loop muted playsInline className="w-full h-full object-cover" />
+                )}
               </div>
               <Button variant="outline" size="sm" className="text-xs text-red-400 hover:text-red-300 mt-2" onClick={() => {
                 setVideoUrl('');
@@ -382,7 +394,8 @@ export default function BarberSettings() {
                 Supprimer la vidéo
               </Button>
             </div>
-          )}
+            );
+          })()}
         </div>
 
         {/* Bio */}

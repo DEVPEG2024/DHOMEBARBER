@@ -94,13 +94,28 @@ function GlassCard({ children, className = '', delay = 0 }) {
   );
 }
 
+// Extract YouTube video ID from various URL formats
+function getYouTubeId(url) {
+  if (!url) return null;
+  const patterns = [
+    /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/,
+  ];
+  for (const p of patterns) {
+    const m = url.match(p);
+    if (m) return m[1];
+  }
+  return null;
+}
+
 function MediaBlock({ videoUrl, photoUrl, name }) {
   const videoRef = useRef(null);
   const [videoReady, setVideoReady] = useState(false);
   const [videoFailed, setVideoFailed] = useState(false);
 
-  const showVideo = videoUrl && !videoFailed;
-  const showPhoto = (!videoUrl || videoFailed) && photoUrl;
+  const youtubeId = getYouTubeId(videoUrl);
+  const isDirectVideo = videoUrl && !youtubeId;
+  const showDirectVideo = isDirectVideo && !videoFailed;
+  const showPhoto = (!videoUrl || (isDirectVideo && videoFailed)) && photoUrl;
 
   return (
     <motion.div
@@ -110,15 +125,26 @@ function MediaBlock({ videoUrl, photoUrl, name }) {
       className="relative rounded-2xl overflow-hidden border border-white/[0.08] mb-6"
       style={{ aspectRatio: '1080/1350' }}
     >
-      {/* Loading spinner */}
-      {showVideo && !videoReady && (
+      {/* YouTube embed */}
+      {youtubeId && (
+        <iframe
+          src={`https://www.youtube.com/embed/${youtubeId}?autoplay=1&mute=1&loop=1&playlist=${youtubeId}&controls=0&showinfo=0&modestbranding=1&playsinline=1`}
+          className="absolute inset-0 w-full h-full border-0"
+          allow="autoplay; encrypted-media"
+          allowFullScreen
+        />
+      )}
+
+      {/* Direct video - loading spinner */}
+      {showDirectVideo && !videoReady && (
         <div className="absolute inset-0 flex items-center justify-center bg-white/[0.02] z-10">
           {photoUrl && <img src={photoUrl} alt={name} className="absolute inset-0 w-full h-full object-cover opacity-40" />}
           <div className="w-8 h-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin z-20" />
         </div>
       )}
 
-      {showVideo && (
+      {/* Direct video */}
+      {showDirectVideo && (
         <video
           ref={videoRef}
           src={videoUrl}
@@ -133,18 +159,20 @@ function MediaBlock({ videoUrl, photoUrl, name }) {
         />
       )}
 
+      {/* Photo fallback */}
       {showPhoto && (
         <img src={photoUrl} alt={name} className="w-full h-full object-cover" />
       )}
 
-      {!showVideo && !showPhoto && (
+      {/* No media */}
+      {!videoUrl && !photoUrl && (
         <div className="w-full h-full bg-white/[0.02] flex items-center justify-center">
           <User className="w-20 h-20 text-muted-foreground/20" />
         </div>
       )}
 
       {/* Gradient overlay bottom */}
-      <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-background/80 to-transparent" />
+      <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-background/80 to-transparent pointer-events-none" />
       <div className="absolute bottom-3 right-3 w-9 h-9 rounded-xl bg-primary/90 backdrop-blur-sm flex items-center justify-center shadow-lg shadow-primary/20">
         <Scissors className="w-4 h-4 text-primary-foreground" />
       </div>
