@@ -177,7 +177,7 @@ export default function BarberSettings() {
     if (employee && skills === null) {
       setSkills(employee.skills || []);
       setBio(employee.bio || '');
-      setVideoUrl(employee.video_url || '');
+      setVideoUrl(employee.working_hours?._video_url || '');
       setWorkingHours(employee.working_hours || defaultHours);
     }
   }, [employee]);
@@ -227,7 +227,9 @@ export default function BarberSettings() {
   const saveVideoUrl = () => {
     if (!employee) return;
     const url = videoUrl.trim();
-    updateMutation.mutate({ id: employee.id, data: { video_url: url || null } }, {
+    const updatedHours = { ...(workingHours || defaultHours), _video_url: url || undefined };
+    setWorkingHours(updatedHours);
+    updateMutation.mutate({ id: employee.id, data: { working_hours: updatedHours } }, {
       onSuccess: () => toast.success(url ? 'Vidéo mise à jour' : 'Vidéo supprimée'),
     });
   };
@@ -349,14 +351,17 @@ export default function BarberSettings() {
               OK
             </Button>
           </div>
-          {employee?.video_url && (
+          {employee?.working_hours?._video_url && (
             <div className="mt-3">
               <div className="rounded-xl overflow-hidden border border-border" style={{ aspectRatio: '1080/1350', maxWidth: 180 }}>
-                <video src={employee.video_url} autoPlay loop muted playsInline className="w-full h-full object-cover" />
+                <video src={employee.working_hours._video_url} autoPlay loop muted playsInline className="w-full h-full object-cover" />
               </div>
               <Button variant="outline" size="sm" className="text-xs text-red-400 hover:text-red-300 mt-2" onClick={() => {
                 setVideoUrl('');
-                updateMutation.mutate({ id: employee.id, data: { video_url: null } }, {
+                const updatedHours = { ...(workingHours || defaultHours) };
+                delete updatedHours._video_url;
+                setWorkingHours(updatedHours);
+                updateMutation.mutate({ id: employee.id, data: { working_hours: updatedHours } }, {
                   onSuccess: () => toast.success('Vidéo supprimée'),
                 });
               }}>

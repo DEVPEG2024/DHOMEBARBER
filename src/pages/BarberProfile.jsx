@@ -201,7 +201,7 @@ export default function BarberProfile() {
   });
 
   const hasAboutContent = employee.bio || allSkills.length > 0 || (employee.experience_level > 0);
-  const videoUrl = employee.video_url;
+  const videoUrl = employee.working_hours?._video_url;
   const photoUrl = employee.photo_url;
 
   return (
