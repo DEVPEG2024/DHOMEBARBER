@@ -227,10 +227,20 @@ export default function BarberSettings() {
   const saveVideoUrl = () => {
     if (!employee) return;
     const url = videoUrl.trim();
-    const updatedHours = { ...(workingHours || defaultHours), _video_url: url || undefined };
+    // Always read current working_hours from employee, merge with local state
+    const currentHours = workingHours || employee.working_hours || defaultHours;
+    const updatedHours = { ...currentHours };
+    if (url) {
+      updatedHours._video_url = url;
+    } else {
+      delete updatedHours._video_url;
+    }
     setWorkingHours(updatedHours);
     updateMutation.mutate({ id: employee.id, data: { working_hours: updatedHours } }, {
-      onSuccess: () => toast.success(url ? 'Vidéo mise à jour' : 'Vidéo supprimée'),
+      onSuccess: () => {
+        toast.success(url ? 'Vidéo mise à jour' : 'Vidéo supprimée');
+        queryClient.invalidateQueries({ queryKey: ['employees'] });
+      },
     });
   };
 
@@ -345,7 +355,7 @@ export default function BarberSettings() {
               size="sm"
               className="text-xs shrink-0"
               onClick={saveVideoUrl}
-              disabled={updateMutation.isPending || videoUrl === (employee?.working_hours?._video_url || '')}
+              disabled={updateMutation.isPending}
             >
               <Save className="w-3 h-3 mr-1.5" />
               OK
@@ -358,11 +368,15 @@ export default function BarberSettings() {
               </div>
               <Button variant="outline" size="sm" className="text-xs text-red-400 hover:text-red-300 mt-2" onClick={() => {
                 setVideoUrl('');
-                const updatedHours = { ...(workingHours || defaultHours) };
+                const currentHours = workingHours || employee.working_hours || defaultHours;
+                const updatedHours = { ...currentHours };
                 delete updatedHours._video_url;
                 setWorkingHours(updatedHours);
                 updateMutation.mutate({ id: employee.id, data: { working_hours: updatedHours } }, {
-                  onSuccess: () => toast.success('Vidéo supprimée'),
+                  onSuccess: () => {
+                    toast.success('Vidéo supprimée');
+                    queryClient.invalidateQueries({ queryKey: ['employees'] });
+                  },
                 });
               }}>
                 Supprimer la vidéo
