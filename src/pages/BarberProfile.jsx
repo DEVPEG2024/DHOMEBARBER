@@ -117,26 +117,20 @@ function MediaBlock({ videoUrl, photoUrl, name }) {
   const showPhoto = (!videoUrl || (isDirectVideo && videoFailed)) && photoUrl;
 
   return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.97 }}
-      animate={{ opacity: 1, scale: 1 }}
-      transition={{ delay: 0.05 }}
+    <div
       className="relative rounded-2xl overflow-hidden border border-white/[0.08] mb-6"
       style={{ aspectRatio: '1080/1350' }}
     >
-      {/* YouTube embed — no title, no controls, no branding, fast start */}
+      {/* YouTube embed */}
       {youtubeId && (
-        <>
-          {photoUrl && <img src={photoUrl} alt={name} className="absolute inset-0 w-full h-full object-cover" />}
-          <iframe
-            src={`https://www.youtube-nocookie.com/embed/${youtubeId}?autoplay=1&mute=1&loop=1&playlist=${youtubeId}&controls=0&showinfo=0&modestbranding=1&playsinline=1&rel=0&iv_load_policy=3&disablekb=1&fs=0`}
-            className="absolute inset-0 w-full h-full border-0 z-[1]"
-            style={{ pointerEvents: 'none' }}
-            allow="autoplay; encrypted-media"
-            loading="eager"
-            title=""
-          />
-        </>
+        <iframe
+          src={`https://www.youtube-nocookie.com/embed/${youtubeId}?autoplay=1&mute=1&loop=1&playlist=${youtubeId}&controls=0&showinfo=0&modestbranding=1&playsinline=1&rel=0&iv_load_policy=3&disablekb=1&fs=0`}
+          className="absolute inset-0 w-full h-full border-0 z-[1]"
+          style={{ pointerEvents: 'none' }}
+          allow="autoplay; encrypted-media"
+          loading="eager"
+          title=""
+        />
       )}
 
       {/* Direct video */}
@@ -172,7 +166,7 @@ function MediaBlock({ videoUrl, photoUrl, name }) {
       <div className="absolute bottom-3 right-3 w-9 h-9 rounded-xl bg-primary/90 backdrop-blur-sm flex items-center justify-center shadow-lg shadow-primary/20 z-[2]">
         <Scissors className="w-4 h-4 text-primary-foreground" />
       </div>
-    </motion.div>
+    </div>
   );
 }
 
