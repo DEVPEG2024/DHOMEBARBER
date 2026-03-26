@@ -167,7 +167,11 @@ export default function BarberSettings() {
 
   const { data: skillCategories = [] } = useQuery({
     queryKey: ['skillCategories'],
-    queryFn: () => api.entities.SkillCategory.list('sort_order', 100),
+    queryFn: async () => {
+      try { return await api.entities.SkillCategory.list('sort_order', 100); }
+      catch { return []; }
+    },
+    retry: false,
   });
 
   const employee = employees.find(e => e.id === user?.employee_id);
@@ -274,7 +278,10 @@ export default function BarberSettings() {
   };
 
   const saveProfile = () => {
-    if (!employee) return;
+    if (!employee) {
+      toast.error('Profil barber introuvable — contactez l\'admin');
+      return;
+    }
     // Merge video URL into working_hours
     const hours = { ...(employee.working_hours || defaultHours), ...(workingHours || {}) };
     const trimmedVideo = videoUrl.trim();
@@ -284,14 +291,17 @@ export default function BarberSettings() {
       delete hours._video_url;
     }
     setWorkingHours(hours);
-    updateMutation.mutate({
-      id: employee.id,
-      data: { skills, bio, experience_level: computedExperience, working_hours: hours }
-    }, {
+    const payload = { skills, bio, experience_level: computedExperience, working_hours: hours };
+    console.log('[BarberSettings] saveProfile', employee.id, payload);
+    updateMutation.mutate({ id: employee.id, data: payload }, {
       onSuccess: () => {
         toast.success('Profil sauvegardé ✨');
         setDirty(false);
         queryClient.invalidateQueries({ queryKey: ['employees'] });
+      },
+      onError: (err) => {
+        console.error('[BarberSettings] save error', err);
+        toast.error('Erreur : ' + (err?.message || 'sauvegarde échouée'));
       },
     });
   };
@@ -303,18 +313,16 @@ export default function BarberSettings() {
           <p className="text-[10px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Mon compte</p>
           <h1 className="font-display text-2xl font-bold">Paramètres</h1>
         </div>
-        {dirty && (
-          <motion.div initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }}>
-            <Button
-              onClick={saveProfile}
-              disabled={updateMutation.isPending}
-              className="bg-primary text-primary-foreground text-xs"
-            >
-              {updateMutation.isPending ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Save className="w-3.5 h-3.5 mr-1.5" />}
-              Sauvegarder
-            </Button>
-          </motion.div>
-        )}
+        <motion.div initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }}>
+          <Button
+            onClick={saveProfile}
+            disabled={updateMutation.isPending || !employee}
+            className="bg-primary text-primary-foreground text-xs"
+          >
+            {updateMutation.isPending ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Save className="w-3.5 h-3.5 mr-1.5" />}
+            Sauvegarder
+          </Button>
+        </motion.div>
       </div>
 
       <div className="space-y-6 max-w-md">
