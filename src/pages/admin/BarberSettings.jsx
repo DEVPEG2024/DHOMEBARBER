@@ -275,13 +275,23 @@ export default function BarberSettings() {
 
   const saveProfile = () => {
     if (!employee) return;
+    // Merge video URL into working_hours
+    const hours = { ...(employee.working_hours || defaultHours), ...(workingHours || {}) };
+    const trimmedVideo = videoUrl.trim();
+    if (trimmedVideo) {
+      hours._video_url = trimmedVideo;
+    } else {
+      delete hours._video_url;
+    }
+    setWorkingHours(hours);
     updateMutation.mutate({
       id: employee.id,
-      data: { skills, bio, experience_level: computedExperience, working_hours: workingHours }
+      data: { skills, bio, experience_level: computedExperience, working_hours: hours }
     }, {
       onSuccess: () => {
         toast.success('Profil sauvegardé ✨');
         setDirty(false);
+        queryClient.invalidateQueries({ queryKey: ['employees'] });
       },
     });
   };
@@ -349,23 +359,12 @@ export default function BarberSettings() {
             <Video className="w-4 h-4" /> Vidéo de présentation
           </h3>
           <p className="text-[11px] text-muted-foreground mb-4">Collez le lien d'une vidéo (format vertical 1350x1080). Elle tournera en boucle sur votre profil.</p>
-          <div className="flex gap-2">
-            <Input
-              value={videoUrl}
-              onChange={(e) => { setVideoUrl(e.target.value); setDirty(true); }}
-              placeholder="https://exemple.com/ma-video.mp4"
-              className="bg-secondary border-border text-sm flex-1"
-            />
-            <Button
-              size="sm"
-              className="text-xs shrink-0"
-              onClick={saveVideoUrl}
-              disabled={updateMutation.isPending}
-            >
-              <Save className="w-3 h-3 mr-1.5" />
-              OK
-            </Button>
-          </div>
+          <Input
+            value={videoUrl}
+            onChange={(e) => { setVideoUrl(e.target.value); setDirty(true); }}
+            placeholder="https://youtube.com/watch?v=... ou lien .mp4"
+            className="bg-secondary border-border text-sm"
+          />
           {employee?.working_hours?._video_url && (() => {
             const url = employee.working_hours._video_url;
             const ytMatch = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/);
