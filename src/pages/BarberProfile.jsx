@@ -3,42 +3,35 @@ import { useParams, Link } from 'react-router-dom';
 import { api } from '@/api/apiClient';
 import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
-import { ChevronLeft, Scissors, Calendar, User } from 'lucide-react';
+import { ChevronLeft, Scissors, Calendar, User, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 function SkillBar({ category, level, delay }) {
   const labels = ['Non évalué', 'Débutant', 'Intermédiaire', 'Avancé', 'Expert', 'Maître'];
+  const pct = (level / 5) * 100;
 
   return (
     <motion.div
-      initial={{ opacity: 0, x: -20 }}
+      initial={{ opacity: 0, x: -10 }}
       animate={{ opacity: 1, x: 0 }}
       transition={{ delay, duration: 0.4 }}
     >
-      <div className="flex items-center gap-3 mb-1.5">
-        <div
-          className="w-9 h-9 rounded-xl flex items-center justify-center text-base"
-          style={{ backgroundColor: category.color + '20' }}
-        >
-          {category.emoji}
+      <div className="flex items-center justify-between mb-1.5">
+        <div className="flex items-center gap-2.5">
+          <span className="text-base">{category.emoji}</span>
+          <span className="text-sm font-medium text-foreground">{category.name}</span>
         </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-foreground">{category.name}</p>
-        </div>
-        <span className="text-xs font-medium" style={{ color: level > 0 ? category.color : 'var(--muted-foreground)' }}>
-          {labels[level]} {level}/5
+        <span className={`text-xs font-medium ${level > 0 ? 'text-primary' : 'text-muted-foreground/50'}`}>
+          {labels[level]}
         </span>
       </div>
-      <div className="ml-12 h-3 rounded-full overflow-hidden" style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}>
+      <div className="h-1.5 rounded-full overflow-hidden bg-white/[0.06]">
         <motion.div
           initial={{ width: 0 }}
-          animate={{ width: `${(level / 5) * 100}%` }}
-          transition={{ delay: delay + 0.2, duration: 0.6, ease: 'easeOut' }}
-          className="h-full rounded-full"
-          style={{
-            backgroundColor: category.color,
-            boxShadow: level > 0 ? `0 0 10px ${category.color}50` : 'none',
-          }}
+          animate={{ width: `${pct}%` }}
+          transition={{ delay: delay + 0.15, duration: 0.6, ease: 'easeOut' }}
+          className="h-full rounded-full bg-primary/80"
+          style={{ boxShadow: level > 0 ? '0 0 8px hsl(var(--primary) / 0.3)' : 'none' }}
         />
       </div>
     </motion.div>
@@ -46,21 +39,13 @@ function SkillBar({ category, level, delay }) {
 }
 
 function ExperienceBar({ value, delay }) {
-  const getColor = (v) => {
-    if (v < 25) return '#ef4444';
-    if (v < 50) return '#f59e0b';
-    if (v < 75) return '#3b82f6';
-    return '#3fcf8e';
-  };
   const getLabel = (v) => {
-    if (v < 25) return '🌱 Junior';
-    if (v < 50) return '💪 Confirmé';
-    if (v < 75) return '🔥 Expérimenté';
-    if (v < 90) return '⭐ Expert';
-    return '👑 Maître';
+    if (v < 25) return 'Junior';
+    if (v < 50) return 'Confirmé';
+    if (v < 75) return 'Expérimenté';
+    if (v < 90) return 'Expert';
+    return 'Maître';
   };
-
-  const color = getColor(value);
 
   return (
     <motion.div
@@ -69,39 +54,42 @@ function ExperienceBar({ value, delay }) {
       transition={{ delay }}
     >
       <div className="flex items-center justify-between mb-2">
-        <span className="text-sm font-semibold">🏆 Niveau d'expérience</span>
+        <span className="text-sm font-medium text-foreground">Niveau d'expérience</span>
         <div className="flex items-center gap-2">
-          <span className="text-xs font-medium" style={{ color }}>{getLabel(value)}</span>
+          <span className="text-xs text-muted-foreground">{getLabel(value)}</span>
           <motion.span
             initial={{ scale: 0 }}
             animate={{ scale: 1 }}
             transition={{ delay: delay + 0.3, type: 'spring' }}
-            className="text-sm font-bold tabular-nums"
-            style={{ color }}
+            className="text-sm font-bold text-primary tabular-nums"
           >
             {value}%
           </motion.span>
         </div>
       </div>
-      <div className="h-3 rounded-full overflow-hidden bg-white/8">
+      <div className="h-2 rounded-full overflow-hidden bg-white/[0.06]">
         <motion.div
           initial={{ width: 0 }}
           animate={{ width: `${value}%` }}
           transition={{ delay: delay + 0.2, duration: 0.8, ease: 'easeOut' }}
-          className="h-full rounded-full relative"
-          style={{
-            background: `linear-gradient(90deg, #ef4444, #f59e0b, #3b82f6, #3fcf8e)`,
-            boxShadow: `0 0 12px ${color}40`,
-          }}
-        >
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: [0, 0.5, 0] }}
-            transition={{ delay: delay + 0.6, duration: 0.8 }}
-            className="absolute inset-0 rounded-full bg-white"
-          />
-        </motion.div>
+          className="h-full rounded-full bg-gradient-to-r from-primary/60 to-primary"
+          style={{ boxShadow: '0 0 12px hsl(var(--primary) / 0.25)' }}
+        />
       </div>
+    </motion.div>
+  );
+}
+
+// Glass card wrapper
+function GlassCard({ children, className = '', delay = 0 }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay, duration: 0.4 }}
+      className={`rounded-2xl border border-white/[0.08] bg-white/[0.03] backdrop-blur-xl shadow-[0_8px_32px_rgba(0,0,0,0.12)] ${className}`}
+    >
+      {children}
     </motion.div>
   );
 }
@@ -147,12 +135,14 @@ export default function BarberProfile() {
   });
 
   const hasAboutContent = employee.bio || allSkills.length > 0 || (employee.experience_level > 0);
+  const videoUrl = employee.video_url;
+  const photoUrl = employee.photo_url;
 
   return (
     <div className="min-h-screen relative overflow-hidden">
-      {/* Ambient background */}
+      {/* Subtle ambient glow */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden">
-        <div className="absolute -top-32 left-1/2 -translate-x-1/2 w-96 h-96 bg-primary/8 rounded-full blur-3xl" />
+        <div className="absolute -top-40 left-1/2 -translate-x-1/2 w-[500px] h-[500px] bg-primary/[0.04] rounded-full blur-[100px]" />
       </div>
 
       <div className="relative max-w-lg mx-auto px-4 pt-6 pb-28">
@@ -163,33 +153,49 @@ export default function BarberProfile() {
         </Link>
 
         {/* Name + Title */}
-        <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="text-center mb-4">
+        <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="text-center mb-5">
           <h1 className="font-display text-2xl font-bold text-foreground">{employee.name}</h1>
-          <p className="text-sm text-primary font-medium mt-1">{employee.title || 'Barber'}</p>
+          <p className="text-sm text-primary/80 font-medium mt-1">{employee.title || 'Barber'}</p>
         </motion.div>
 
-        {/* Photo - full width */}
-        <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.05 }}
-          className="relative rounded-2xl overflow-hidden bg-gradient-to-br from-primary/20 to-primary/5 border border-white/8 mb-6 aspect-square">
-          {employee.photo_url ? (
-            <img src={employee.photo_url} alt={employee.name} className="w-full h-full object-cover" />
+        {/* Video / Photo - format vertical 1350x1080 (aspect 5:4) */}
+        <motion.div
+          initial={{ opacity: 0, scale: 0.97 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ delay: 0.05 }}
+          className="relative rounded-2xl overflow-hidden border border-white/[0.08] mb-6"
+          style={{ aspectRatio: '1080/1350' }}
+        >
+          {videoUrl ? (
+            <video
+              src={videoUrl}
+              autoPlay
+              loop
+              muted
+              playsInline
+              className="w-full h-full object-cover"
+              poster={photoUrl || undefined}
+            />
+          ) : photoUrl ? (
+            <img src={photoUrl} alt={employee.name} className="w-full h-full object-cover" />
           ) : (
-            <div className="w-full h-full flex items-center justify-center">
-              <User className="w-20 h-20 text-muted-foreground/30" />
+            <div className="w-full h-full bg-white/[0.02] flex items-center justify-center">
+              <User className="w-20 h-20 text-muted-foreground/20" />
             </div>
           )}
-          <div className="absolute bottom-3 right-3 w-10 h-10 rounded-xl bg-primary flex items-center justify-center shadow-lg shadow-primary/30">
-            <Scissors className="w-5 h-5 text-primary-foreground" />
+          {/* Gradient overlay bottom */}
+          <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-background/80 to-transparent" />
+          <div className="absolute bottom-3 right-3 w-9 h-9 rounded-xl bg-primary/90 backdrop-blur-sm flex items-center justify-center shadow-lg shadow-primary/20">
+            <Scissors className="w-4 h-4 text-primary-foreground" />
           </div>
         </motion.div>
 
-        {/* À propos - Bio + Experience + Skills combined */}
+        {/* About section - Glass card */}
         {hasAboutContent && (
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
-            className="rounded-2xl bg-white/4 border border-white/8 backdrop-blur-xl p-5 mb-6 space-y-5">
-            <h3 className="text-xs uppercase tracking-widest text-primary font-medium">✨ À propos</h3>
+          <GlassCard className="p-5 mb-5 space-y-5" delay={0.1}>
+            <h3 className="text-[10px] uppercase tracking-[0.2em] text-primary/60 font-semibold">À propos</h3>
 
-            {/* Bio text */}
+            {/* Bio */}
             {employee.bio && (
               <p className="text-sm text-muted-foreground leading-relaxed">{employee.bio}</p>
             )}
@@ -199,30 +205,32 @@ export default function BarberProfile() {
               <ExperienceBar value={employee.experience_level} delay={0.15} />
             )}
 
-            {/* Divider if both bio/experience and skills */}
-            {(employee.bio || employee.experience_level > 0) && allSkills.length > 0 && (
-              <div className="border-t border-white/8" />
-            )}
-
             {/* Skills */}
             {allSkills.length > 0 && (
-              <div>
-                <h4 className="text-xs uppercase tracking-widest text-primary/70 font-medium mb-4">🎯 Spécialités</h4>
-                <div className="space-y-4">
-                  {allSkills.map(({ category, level }, i) => (
-                    <SkillBar key={category.id} category={category} level={level} delay={0.2 + i * 0.08} />
-                  ))}
+              <>
+                {(employee.bio || employee.experience_level > 0) && (
+                  <div className="border-t border-white/[0.06]" />
+                )}
+                <div>
+                  <h4 className="text-[10px] uppercase tracking-[0.2em] text-primary/50 font-semibold mb-4">Spécialités</h4>
+                  <div className="space-y-3.5">
+                    {allSkills.map(({ category, level }, i) => (
+                      <SkillBar key={category.id} category={category} level={level} delay={0.2 + i * 0.06} />
+                    ))}
+                  </div>
                 </div>
-              </div>
+              </>
             )}
-          </motion.div>
+          </GlassCard>
         )}
 
-        {/* Working hours */}
+        {/* Working hours - Glass card */}
         {employee.working_hours && Object.keys(employee.working_hours).length > 0 && (
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}
-            className="rounded-2xl bg-white/4 border border-white/8 backdrop-blur-xl p-5 mb-6">
-            <h3 className="text-xs uppercase tracking-widest text-primary font-medium mb-3">🕐 Horaires</h3>
+          <GlassCard className="p-5 mb-6" delay={0.25}>
+            <h3 className="text-[10px] uppercase tracking-[0.2em] text-primary/60 font-semibold mb-3 flex items-center gap-2">
+              <Clock className="w-3.5 h-3.5" />
+              Horaires
+            </h3>
             <div className="space-y-2">
               {Object.entries(employee.working_hours).map(([day, hours]) => {
                 const dayLabels = { monday: 'Lundi', tuesday: 'Mardi', wednesday: 'Mercredi', thursday: 'Jeudi', friday: 'Vendredi', saturday: 'Samedi', sunday: 'Dimanche' };
@@ -230,26 +238,26 @@ export default function BarberProfile() {
                 if (hours?.closed) {
                   return (
                     <div key={day} className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">{label}</span>
-                      <span className="text-muted-foreground/50">Fermé</span>
+                      <span className="text-muted-foreground/50">{label}</span>
+                      <span className="text-muted-foreground/30 text-xs">Fermé</span>
                     </div>
                   );
                 }
                 return (
                   <div key={day} className="flex justify-between text-sm">
                     <span className="text-muted-foreground">{label}</span>
-                    <span className="text-foreground font-medium">{hours?.open || '09:00'} - {hours?.close || '19:00'}</span>
+                    <span className="text-foreground/80 font-medium tabular-nums">{hours?.open || '09:00'} – {hours?.close || '19:00'}</span>
                   </div>
                 );
               })}
             </div>
-          </motion.div>
+          </GlassCard>
         )}
 
         {/* CTA */}
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }}>
           <Link to={`/booking?barber=${employee.id}`}>
-            <Button className="w-full h-12 rounded-2xl bg-primary text-primary-foreground font-semibold text-sm shadow-lg shadow-primary/25 hover:bg-primary/90">
+            <Button className="w-full h-12 rounded-2xl bg-primary text-primary-foreground font-semibold text-sm shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all">
               <Calendar className="w-4 h-4 mr-2" />
               Prendre rendez-vous avec {employee.name}
             </Button>

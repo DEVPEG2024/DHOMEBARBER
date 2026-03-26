@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { api } from '@/api/apiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
-import { Camera, LogOut, Loader2, User, Save, Clock } from 'lucide-react';
+import { Camera, LogOut, Loader2, User, Save, Clock, Video } from 'lucide-react';
 import ImageCropDialog from '@/components/shared/ImageCropDialog';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
@@ -152,6 +152,7 @@ export default function BarberSettings() {
   const queryClient = useQueryClient();
   const fileInputRef = useRef(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadingVideo, setUploadingVideo] = useState(false);
   const [cropSrc, setCropSrc] = useState(null);
   const [showCrop, setShowCrop] = useState(false);
   const [skills, setSkills] = useState(null);
@@ -220,6 +221,30 @@ export default function BarberSettings() {
     } finally {
       setUploading(false);
     }
+  };
+
+  const handleVideoUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !employee) return;
+    e.target.value = '';
+    setUploadingVideo(true);
+    try {
+      const { file_url } = await api.integrations.Core.UploadFile({ file });
+      updateMutation.mutate({ id: employee.id, data: { video_url: file_url } }, {
+        onSuccess: () => toast.success('Vidéo mise à jour'),
+      });
+    } catch {
+      toast.error("Erreur lors de l'upload vidéo");
+    } finally {
+      setUploadingVideo(false);
+    }
+  };
+
+  const removeVideo = () => {
+    if (!employee) return;
+    updateMutation.mutate({ id: employee.id, data: { video_url: null } }, {
+      onSuccess: () => toast.success('Vidéo supprimée'),
+    });
   };
 
   const getSkillLevel = (categoryId) => {
@@ -314,6 +339,34 @@ export default function BarberSettings() {
               </Button>
             </div>
           </div>
+        </div>
+
+        {/* Video */}
+        <div className="bg-card border border-border rounded-xl p-6">
+          <h3 className="text-sm font-semibold mb-1 flex items-center gap-2">
+            <Video className="w-4 h-4" /> Vidéo de présentation
+          </h3>
+          <p className="text-[11px] text-muted-foreground mb-4">Format vertical recommandé (1350x1080). Tourne en boucle sur votre profil.</p>
+          {employee?.video_url ? (
+            <div className="space-y-3">
+              <div className="rounded-xl overflow-hidden border border-border" style={{ aspectRatio: '1080/1350', maxWidth: 200 }}>
+                <video src={employee.video_url} autoPlay loop muted playsInline className="w-full h-full object-cover" />
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" className="text-xs" onClick={() => document.getElementById('video-input')?.click()} disabled={uploadingVideo}>
+                  {uploadingVideo ? <><Loader2 className="w-3 h-3 mr-1.5 animate-spin" />Upload...</> : 'Remplacer'}
+                </Button>
+                <Button variant="outline" size="sm" className="text-xs text-red-400 hover:text-red-300" onClick={removeVideo}>
+                  Supprimer
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <Button variant="outline" size="sm" className="text-xs" onClick={() => document.getElementById('video-input')?.click()} disabled={uploadingVideo}>
+              {uploadingVideo ? <><Loader2 className="w-3 h-3 mr-1.5 animate-spin" />Upload...</> : <><Video className="w-3 h-3 mr-1.5" />Ajouter une vidéo</>}
+            </Button>
+          )}
+          <input id="video-input" type="file" accept="video/*" className="hidden" onChange={handleVideoUpload} disabled={uploadingVideo} />
         </div>
 
         {/* Bio */}

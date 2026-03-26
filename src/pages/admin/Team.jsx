@@ -161,6 +161,13 @@ export default function Team() {
                 </label>
               </div>
 
+              {/* Video URL */}
+              <div>
+                <Label className="text-xs">URL vidéo de présentation</Label>
+                <Input value={editEmployee.video_url || ''} onChange={e => setEditEmployee({ ...editEmployee, video_url: e.target.value })}
+                  className="bg-secondary border-border mt-1" placeholder="https://... (format vertical 1350x1080)" />
+              </div>
+
               <div>
                 <Label className="text-xs">Nom complet</Label>
                 <Input value={editEmployee.name} onChange={e => setEditEmployee({ ...editEmployee, name: e.target.value })}
