@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { api } from '@/api/apiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
-import { Camera, LogOut, Loader2, User, Save, Clock, Video } from 'lucide-react';
+import { Camera, LogOut, Loader2, User, Save, Clock, Video, AlertTriangle } from 'lucide-react';
 import ImageCropDialog from '@/components/shared/ImageCropDialog';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
@@ -52,7 +52,6 @@ function SkillSlider({ category, value, onChange }) {
         </motion.span>
       </div>
 
-      {/* Green gauge - full bar, clickable zones */}
       <div
         className="relative h-6 rounded-full overflow-hidden cursor-pointer"
         style={{ backgroundColor: '#27272a', border: '2px solid #3f3f46' }}
@@ -96,11 +95,11 @@ function ExperienceGauge({ value }) {
   };
   const getLabel = (v) => {
     if (v === 0) return 'Aucune compétence';
-    if (v < 25) return '🌱 Junior';
-    if (v < 50) return '💪 Confirmé';
-    if (v < 75) return '🔥 Expérimenté';
-    if (v < 90) return '⭐ Expert';
-    return '👑 Maître';
+    if (v < 25) return 'Junior';
+    if (v < 50) return 'Confirmé';
+    if (v < 75) return 'Expérimenté';
+    if (v < 90) return 'Expert';
+    return 'Maître';
   };
 
   const color = getColor(value);
@@ -122,7 +121,6 @@ function ExperienceGauge({ value }) {
         </motion.span>
       </div>
 
-      {/* Track */}
       <div className="relative h-4 rounded-full overflow-hidden bg-secondary">
         <motion.div
           initial={false}
@@ -137,14 +135,35 @@ function ExperienceGauge({ value }) {
       </div>
 
       <div className="flex justify-between text-[10px] text-muted-foreground mt-2">
-        <span>🌱 0</span>
-        <span>💪 25</span>
-        <span>🔥 50</span>
-        <span>⭐ 75</span>
-        <span>👑 100</span>
+        <span>0</span>
+        <span>25</span>
+        <span>50</span>
+        <span>75</span>
+        <span>100</span>
       </div>
     </div>
   );
+}
+
+// Find employee matching user - try multiple strategies
+function findEmployee(employees, user) {
+  if (!user || !employees?.length) return null;
+  // 1. By employee_id
+  if (user.employee_id) {
+    const match = employees.find(e => String(e.id) === String(user.employee_id));
+    if (match) return match;
+  }
+  // 2. By email
+  if (user.email) {
+    const match = employees.find(e => e.email && e.email.toLowerCase() === user.email.toLowerCase());
+    if (match) return match;
+  }
+  // 3. By name
+  if (user.full_name) {
+    const match = employees.find(e => e.name && e.name.toLowerCase() === user.full_name.toLowerCase());
+    if (match) return match;
+  }
+  return null;
 }
 
 export default function BarberSettings() {
@@ -159,8 +178,9 @@ export default function BarberSettings() {
   const [bio, setBio] = useState('');
   const [workingHours, setWorkingHours] = useState(null);
   const [dirty, setDirty] = useState(false);
+  const [saveStatus, setSaveStatus] = useState('');
 
-  const { data: employees = [] } = useQuery({
+  const { data: employees = [], isLoading: loadingEmployees } = useQuery({
     queryKey: ['employees'],
     queryFn: () => api.entities.Employee.list('-created_at', 100),
   });
@@ -174,7 +194,7 @@ export default function BarberSettings() {
     retry: false,
   });
 
-  const employee = employees.find(e => String(e.id) === String(user?.employee_id));
+  const employee = findEmployee(employees, user);
 
   // Init from employee data
   useEffect(() => {
@@ -186,7 +206,6 @@ export default function BarberSettings() {
     }
   }, [employee]);
 
-  // Calcul automatique du niveau d'expérience à partir des compétences
   const computedExperience = (() => {
     if (!skills || skills.length === 0 || skillCategories.length === 0) return 0;
     const totalPossible = skillCategories.length * 5;
@@ -199,8 +218,8 @@ export default function BarberSettings() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['employees'] });
     },
-    onError: () => {
-      toast.error('Erreur lors de la mise à jour');
+    onError: (err) => {
+      toast.error('Erreur : ' + (err?.message || 'sauvegarde échouée'));
     },
   });
 
@@ -228,31 +247,6 @@ export default function BarberSettings() {
     }
   };
 
-  const saveVideoUrl = () => {
-    if (!employee) {
-      toast.error('Profil barber introuvable');
-      return;
-    }
-    const url = videoUrl.trim();
-    // Merge _video_url into the full working_hours object
-    const currentHours = { ...(employee.working_hours || defaultHours), ...(workingHours || {}) };
-    if (url) {
-      currentHours._video_url = url;
-    } else {
-      delete currentHours._video_url;
-    }
-    setWorkingHours(currentHours);
-    updateMutation.mutate({ id: employee.id, data: { working_hours: currentHours } }, {
-      onSuccess: () => {
-        toast.success(url ? 'Vidéo mise à jour' : 'Vidéo supprimée');
-        queryClient.invalidateQueries({ queryKey: ['employees'] });
-      },
-      onError: (err) => {
-        toast.error('Erreur : ' + (err?.message || 'sauvegarde échouée'));
-      },
-    });
-  };
-
   const getSkillLevel = (categoryId) => {
     const s = (skills || []).find(s => s.category_id === categoryId);
     return s?.level || 0;
@@ -277,12 +271,14 @@ export default function BarberSettings() {
     });
   };
 
-  const saveProfile = () => {
+  const saveProfile = async () => {
     if (!employee) {
-      toast.error('Profil barber introuvable — contactez l\'admin');
+      toast.error('Profil barber introuvable');
+      setSaveStatus('Profil introuvable');
       return;
     }
-    // Merge video URL into working_hours
+    setSaveStatus('Sauvegarde en cours...');
+    // Build working_hours with video URL
     const hours = { ...(employee.working_hours || defaultHours), ...(workingHours || {}) };
     const trimmedVideo = videoUrl.trim();
     if (trimmedVideo) {
@@ -291,20 +287,61 @@ export default function BarberSettings() {
       delete hours._video_url;
     }
     setWorkingHours(hours);
-    const payload = { skills, bio, experience_level: computedExperience, working_hours: hours };
-    console.log('[BarberSettings] saveProfile', employee.id, payload);
-    updateMutation.mutate({ id: employee.id, data: payload }, {
-      onSuccess: () => {
-        toast.success('Profil sauvegardé ✨');
-        setDirty(false);
-        queryClient.invalidateQueries({ queryKey: ['employees'] });
-      },
-      onError: (err) => {
-        console.error('[BarberSettings] save error', err);
-        toast.error('Erreur : ' + (err?.message || 'sauvegarde échouée'));
-      },
-    });
+
+    try {
+      await api.entities.Employee.update(employee.id, {
+        skills,
+        bio,
+        experience_level: computedExperience,
+        working_hours: hours,
+      });
+      toast.success('Profil sauvegardé !');
+      setSaveStatus('Sauvegardé !');
+      setDirty(false);
+      queryClient.invalidateQueries({ queryKey: ['employees'] });
+    } catch (err) {
+      toast.error('Erreur : ' + (err?.message || 'sauvegarde échouée'));
+      setSaveStatus('Erreur : ' + (err?.message || 'échec'));
+    }
   };
+
+  // Show debug info if employee not found
+  if (!loadingEmployees && !employee) {
+    return (
+      <div className="p-6">
+        <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <AlertTriangle className="w-5 h-5 text-red-400" />
+            <h2 className="text-sm font-semibold text-red-400">Profil barber introuvable</h2>
+          </div>
+          <p className="text-xs text-muted-foreground mb-2">
+            Votre compte utilisateur n'est pas lié à un profil employé.
+          </p>
+          <div className="bg-secondary/50 rounded-lg p-3 text-xs font-mono space-y-1">
+            <p>user.id: {user?.id || 'null'}</p>
+            <p>user.email: {user?.email || 'null'}</p>
+            <p>user.employee_id: {user?.employee_id || 'null'}</p>
+            <p>user.role: {user?.role || 'null'}</p>
+            <p>employees trouvés: {employees.length}</p>
+            {employees.map(e => (
+              <p key={e.id}>- emp [{e.id}] {e.name} ({e.email || 'pas d\'email'})</p>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground mt-3">
+            Demandez à l'admin de lier votre compte dans "Comptes Barbers".
+          </p>
+        </div>
+        <Button
+          onClick={logout}
+          variant="outline"
+          className="w-full mt-4 border-red-500/20 bg-red-500/8 text-red-400"
+        >
+          <LogOut className="w-4 h-4 mr-2" />
+          Déconnexion
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -313,22 +350,27 @@ export default function BarberSettings() {
           <p className="text-[10px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Mon compte</p>
           <h1 className="font-display text-2xl font-bold">Paramètres</h1>
         </div>
-        <motion.div initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }}>
-          <Button
-            onClick={saveProfile}
-            disabled={updateMutation.isPending || !employee}
-            className="bg-primary text-primary-foreground text-xs"
-          >
-            {updateMutation.isPending ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Save className="w-3.5 h-3.5 mr-1.5" />}
-            Sauvegarder
-          </Button>
-        </motion.div>
+        <Button
+          onClick={saveProfile}
+          disabled={updateMutation.isPending}
+          className="bg-primary text-primary-foreground text-xs"
+        >
+          {updateMutation.isPending ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Save className="w-3.5 h-3.5 mr-1.5" />}
+          Sauvegarder
+        </Button>
       </div>
+
+      {/* Save status feedback */}
+      {saveStatus && (
+        <div className="mb-4 px-3 py-2 rounded-lg bg-secondary/50 text-xs text-muted-foreground">
+          {saveStatus}
+        </div>
+      )}
 
       <div className="space-y-6 max-w-md">
         {/* Profile photo */}
         <div className="bg-card border border-border rounded-xl p-6">
-          <h3 className="text-sm font-semibold mb-5">📸 Photo de profil</h3>
+          <h3 className="text-sm font-semibold mb-5">Photo de profil</h3>
           <div className="flex items-center gap-5">
             <div className="relative group">
               <div className="w-24 h-24 rounded-2xl overflow-hidden bg-secondary border border-border flex items-center justify-center">
@@ -366,53 +408,42 @@ export default function BarberSettings() {
           <h3 className="text-sm font-semibold mb-1 flex items-center gap-2">
             <Video className="w-4 h-4" /> Vidéo de présentation
           </h3>
-          <p className="text-[11px] text-muted-foreground mb-4">Collez le lien d'une vidéo (format vertical 1350x1080). Elle tournera en boucle sur votre profil.</p>
+          <p className="text-[11px] text-muted-foreground mb-4">Collez un lien YouTube ou vidéo directe (.mp4). Cliquez Sauvegarder en haut.</p>
           <Input
             value={videoUrl}
             onChange={(e) => { setVideoUrl(e.target.value); setDirty(true); }}
             placeholder="https://youtube.com/watch?v=... ou lien .mp4"
             className="bg-secondary border-border text-sm"
           />
+          {videoUrl.trim() && videoUrl.trim() !== (employee?.working_hours?._video_url || '') && (
+            <p className="text-[11px] text-primary mt-2">Cliquez "Sauvegarder" en haut pour enregistrer la vidéo</p>
+          )}
           {employee?.working_hours?._video_url && (() => {
             const url = employee.working_hours._video_url;
             const ytMatch = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/);
             const ytId = ytMatch?.[1];
             return (
             <div className="mt-3">
-              <div className="rounded-xl overflow-hidden border border-border" style={{ aspectRatio: '1080/1350', maxWidth: 180 }}>
+              <p className="text-[11px] text-green-400 mb-2">Vidéo enregistrée</p>
+              <div className="rounded-xl overflow-hidden border border-border" style={{ aspectRatio: '16/9', maxWidth: 240 }}>
                 {ytId ? (
                   <iframe
-                    src={`https://www.youtube.com/embed/${ytId}?autoplay=0&controls=0&modestbranding=1`}
+                    src={`https://www.youtube.com/embed/${ytId}?autoplay=0&controls=1&modestbranding=1`}
                     className="w-full h-full border-0"
                     allow="encrypted-media"
                   />
                 ) : (
-                  <video src={url} autoPlay loop muted playsInline className="w-full h-full object-cover" />
+                  <video src={url} controls muted playsInline className="w-full h-full object-cover" />
                 )}
               </div>
-              <Button variant="outline" size="sm" className="text-xs text-red-400 hover:text-red-300 mt-2" onClick={() => {
-                setVideoUrl('');
-                const currentHours = workingHours || employee.working_hours || defaultHours;
-                const updatedHours = { ...currentHours };
-                delete updatedHours._video_url;
-                setWorkingHours(updatedHours);
-                updateMutation.mutate({ id: employee.id, data: { working_hours: updatedHours } }, {
-                  onSuccess: () => {
-                    toast.success('Vidéo supprimée');
-                    queryClient.invalidateQueries({ queryKey: ['employees'] });
-                  },
-                });
-              }}>
-                Supprimer la vidéo
-              </Button>
             </div>
             );
           })()}
         </div>
 
         {/* Bio */}
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-card border border-border rounded-xl p-6">
-          <h3 className="text-sm font-semibold mb-1">📝 À propos de moi</h3>
+        <div className="bg-card border border-border rounded-xl p-6">
+          <h3 className="text-sm font-semibold mb-1">À propos de moi</h3>
           <p className="text-[11px] text-muted-foreground mb-4">Présentez-vous aux clients en quelques lignes</p>
           <Textarea
             value={bio}
@@ -421,10 +452,10 @@ export default function BarberSettings() {
             className="bg-secondary border-border text-sm"
             rows={4}
           />
-        </motion.div>
+        </div>
 
         {/* Working Hours */}
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="bg-card border border-border rounded-xl p-6">
+        <div className="bg-card border border-border rounded-xl p-6">
           <h3 className="text-sm font-semibold mb-1 flex items-center gap-2">
             <Clock className="w-4 h-4" /> Mes horaires
           </h3>
@@ -473,48 +504,36 @@ export default function BarberSettings() {
               );
             })}
           </div>
-        </motion.div>
+        </div>
 
         {/* Skills */}
         {skillCategories.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.05 }}
-            className="bg-card border border-border rounded-xl p-6"
-          >
-            <h3 className="text-sm font-semibold mb-1">🎯 Mes spécialités</h3>
+          <div className="bg-card border border-border rounded-xl p-6">
+            <h3 className="text-sm font-semibold mb-1">Mes spécialités</h3>
             <p className="text-[11px] text-muted-foreground mb-5">Évaluez votre niveau de 1 à 5</p>
-
             <div className="space-y-5">
               {skillCategories.map((cat, i) => (
-                <motion.div
+                <SkillSlider
                   key={cat.id}
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i * 0.05 }}
-                >
-                  <SkillSlider
-                    category={cat}
-                    value={getSkillLevel(cat.id)}
-                    onChange={(level) => setSkillLevel(cat.id, level)}
-                  />
-                </motion.div>
+                  category={cat}
+                  value={getSkillLevel(cat.id)}
+                  onChange={(level) => setSkillLevel(cat.id, level)}
+                />
               ))}
             </div>
-          </motion.div>
+          </div>
         )}
 
-        {/* Experience Level Gauge - calculé automatiquement */}
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="bg-card border border-border rounded-xl p-6">
-          <h3 className="text-sm font-semibold mb-1">🏆 Niveau d'expérience</h3>
+        {/* Experience Level Gauge */}
+        <div className="bg-card border border-border rounded-xl p-6">
+          <h3 className="text-sm font-semibold mb-1">Niveau d'expérience</h3>
           <p className="text-[11px] text-muted-foreground mb-4">Calculé automatiquement selon vos compétences</p>
           <ExperienceGauge value={computedExperience} />
-        </motion.div>
+        </div>
 
         {/* Account info */}
         <div className="bg-card border border-border rounded-xl p-6">
-          <h3 className="text-sm font-semibold mb-4">👤 Informations du compte</h3>
+          <h3 className="text-sm font-semibold mb-4">Informations du compte</h3>
           <div className="space-y-3 text-sm">
             <div className="flex justify-between">
               <span className="text-muted-foreground">Nom</span>
