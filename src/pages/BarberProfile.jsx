@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api } from '@/api/apiClient';
 import { useQuery } from '@tanstack/react-query';
@@ -94,6 +94,64 @@ function GlassCard({ children, className = '', delay = 0 }) {
   );
 }
 
+function MediaBlock({ videoUrl, photoUrl, name }) {
+  const videoRef = useRef(null);
+  const [videoReady, setVideoReady] = useState(false);
+  const [videoFailed, setVideoFailed] = useState(false);
+
+  const showVideo = videoUrl && !videoFailed;
+  const showPhoto = (!videoUrl || videoFailed) && photoUrl;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.97 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ delay: 0.05 }}
+      className="relative rounded-2xl overflow-hidden border border-white/[0.08] mb-6"
+      style={{ aspectRatio: '1080/1350' }}
+    >
+      {/* Loading spinner */}
+      {showVideo && !videoReady && (
+        <div className="absolute inset-0 flex items-center justify-center bg-white/[0.02] z-10">
+          {photoUrl && <img src={photoUrl} alt={name} className="absolute inset-0 w-full h-full object-cover opacity-40" />}
+          <div className="w-8 h-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin z-20" />
+        </div>
+      )}
+
+      {showVideo && (
+        <video
+          ref={videoRef}
+          src={videoUrl}
+          autoPlay
+          loop
+          muted
+          playsInline
+          poster={photoUrl || undefined}
+          onCanPlay={() => setVideoReady(true)}
+          onError={() => setVideoFailed(true)}
+          className={`w-full h-full object-cover transition-opacity duration-500 ${videoReady ? 'opacity-100' : 'opacity-0'}`}
+        />
+      )}
+
+      {showPhoto && (
+        <img src={photoUrl} alt={name} className="w-full h-full object-cover" />
+      )}
+
+      {!showVideo && !showPhoto && (
+        <div className="w-full h-full bg-white/[0.02] flex items-center justify-center">
+          <User className="w-20 h-20 text-muted-foreground/20" />
+        </div>
+      )}
+
+      {/* Gradient overlay bottom */}
+      <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-background/80 to-transparent" />
+      <div className="absolute bottom-3 right-3 w-9 h-9 rounded-xl bg-primary/90 backdrop-blur-sm flex items-center justify-center shadow-lg shadow-primary/20">
+        <Scissors className="w-4 h-4 text-primary-foreground" />
+      </div>
+    </motion.div>
+  );
+}
+
 export default function BarberProfile() {
   const { id } = useParams();
 
@@ -158,37 +216,8 @@ export default function BarberProfile() {
           <p className="text-sm text-primary/80 font-medium mt-1">{employee.title || 'Barber'}</p>
         </motion.div>
 
-        {/* Video / Photo - format vertical 1350x1080 (aspect 5:4) */}
-        <motion.div
-          initial={{ opacity: 0, scale: 0.97 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ delay: 0.05 }}
-          className="relative rounded-2xl overflow-hidden border border-white/[0.08] mb-6"
-          style={{ aspectRatio: '1080/1350' }}
-        >
-          {videoUrl ? (
-            <video
-              src={videoUrl}
-              autoPlay
-              loop
-              muted
-              playsInline
-              className="w-full h-full object-cover"
-              poster={photoUrl || undefined}
-            />
-          ) : photoUrl ? (
-            <img src={photoUrl} alt={employee.name} className="w-full h-full object-cover" />
-          ) : (
-            <div className="w-full h-full bg-white/[0.02] flex items-center justify-center">
-              <User className="w-20 h-20 text-muted-foreground/20" />
-            </div>
-          )}
-          {/* Gradient overlay bottom */}
-          <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-background/80 to-transparent" />
-          <div className="absolute bottom-3 right-3 w-9 h-9 rounded-xl bg-primary/90 backdrop-blur-sm flex items-center justify-center shadow-lg shadow-primary/20">
-            <Scissors className="w-4 h-4 text-primary-foreground" />
-          </div>
-        </motion.div>
+        {/* Video / Photo - format vertical 1350x1080 */}
+        <MediaBlock videoUrl={videoUrl} photoUrl={photoUrl} name={employee.name} />
 
         {/* About section - Glass card */}
         {hasAboutContent && (
