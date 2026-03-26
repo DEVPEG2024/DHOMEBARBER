@@ -345,7 +345,7 @@ export default function BarberSettings() {
               size="sm"
               className="text-xs shrink-0"
               onClick={saveVideoUrl}
-              disabled={updateMutation.isPending || videoUrl === (employee?.video_url || '')}
+              disabled={updateMutation.isPending || videoUrl === (employee?.working_hours?._video_url || '')}
             >
               <Save className="w-3 h-3 mr-1.5" />
               OK
