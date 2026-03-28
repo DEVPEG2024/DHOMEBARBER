@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client'
 import App from '@/App.jsx'
 import '@/index.css'
 import { initCapacitor, isNative } from '@/lib/capacitor'
+import { initNativePush } from '@/lib/pushNotifications'
 
 const NOTIF_KEY = 'dhome_notifications';
 
@@ -27,6 +28,7 @@ function updateBadge() {
 // Initialize Capacitor on native platforms
 if (isNative) {
   initCapacitor();
+  initNativePush();
 }
 
 // Register service worker for push notifications (web only)

@@ -4,6 +4,7 @@ import { fr } from 'date-fns/locale';
 import { Coffee, Zap } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import AppointmentDetailModal from './AppointmentDetailModal';
+import { hapticFeedback } from '@/lib/capacitor';
 
 const HOUR_HEIGHT = 72;
 const START_HOUR = 7;
@@ -289,7 +290,7 @@ export default function WeekView({ currentDate, appointments, employees, onStatu
     if (isTouch) {
       longPressTimer.current = setTimeout(() => {
         longPressActive.current = true;
-        if (navigator.vibrate) navigator.vibrate(50);
+        hapticFeedback();
         setDragging({ startMin: minutes, currentMin: minutes, dateStr });
       }, 1000);
     } else {

@@ -1,4 +1,8 @@
 import { apiRequest, apiUrl } from '@/api/apiClient';
+import { Capacitor } from '@capacitor/core';
+import { PushNotifications } from '@capacitor/push-notifications';
+
+const isNative = Capacitor.isNativePlatform();
 
 // Get VAPID public key from backend
 export async function getVapidPublicKey() {
@@ -8,12 +12,17 @@ export async function getVapidPublicKey() {
 
 // Check if push is supported
 export function isPushSupported() {
+  if (isNative) return true;
   return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
 }
 
 // Check if already subscribed
 export async function isSubscribed() {
   if (!isPushSupported()) return false;
+  if (isNative) {
+    const permStatus = await PushNotifications.checkPermissions();
+    return permStatus.receive === 'granted';
+  }
   const reg = await navigator.serviceWorker.ready;
   const sub = await reg.pushManager.getSubscription();
   return !!sub;
@@ -21,45 +30,108 @@ export async function isSubscribed() {
 
 // Subscribe to push notifications
 export async function subscribeToPush() {
-  if (!isPushSupported()) throw new Error('Push non supporté sur ce navigateur');
+  if (!isPushSupported()) throw new Error('Push non supporté');
 
-  // Request permission
+  if (isNative) {
+    return subscribeNativePush();
+  }
+  return subscribeWebPush();
+}
+
+// Native push (iOS/Android via Capacitor)
+async function subscribeNativePush() {
+  let permStatus = await PushNotifications.checkPermissions();
+  if (permStatus.receive === 'prompt') {
+    permStatus = await PushNotifications.requestPermissions();
+  }
+  if (permStatus.receive !== 'granted') {
+    throw new Error('Permission push refusée');
+  }
+  await PushNotifications.register();
+  return true;
+}
+
+// Setup native push listeners (call once at app startup)
+export function initNativePush() {
+  if (!isNative) return;
+
+  // Registration success - send token to backend
+  PushNotifications.addListener('registration', async (token) => {
+    try {
+      await apiRequest('POST', apiUrl('/push/subscribe-native'), {
+        token: token.value,
+        platform: Capacitor.getPlatform(),
+      });
+    } catch {
+      // Silent fail - will retry on next launch
+    }
+  });
+
+  // Registration error
+  PushNotifications.addListener('registrationError', (error) => {
+    console.warn('Push registration failed:', error);
+  });
+
+  // Notification received while app is in foreground
+  PushNotifications.addListener('pushNotificationReceived', (notification) => {
+    const NOTIF_KEY = 'dhome_notifications';
+    try {
+      const notifs = JSON.parse(localStorage.getItem(NOTIF_KEY) || '[]');
+      notifs.unshift({
+        id: Date.now(),
+        title: notification.title || '',
+        body: notification.body || '',
+        date: new Date().toISOString(),
+        read: false,
+      });
+      localStorage.setItem(NOTIF_KEY, JSON.stringify(notifs.slice(0, 50)));
+    } catch {}
+  });
+
+  // Notification tapped
+  PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
+    const data = action.notification.data;
+    if (data?.url) {
+      window.location.hash = data.url;
+    }
+  });
+}
+
+// Web push (PWA via Service Worker)
+async function subscribeWebPush() {
   const permission = await Notification.requestPermission();
   if (permission !== 'granted') throw new Error('Permission refusée');
 
-  // Register service worker
   const registration = await navigator.serviceWorker.register('/sw.js');
   await navigator.serviceWorker.ready;
 
-  // Get VAPID key
   const vapidKey = await getVapidPublicKey();
   if (!vapidKey) throw new Error('Clé VAPID non configurée');
 
-  // Subscribe
   const subscription = await registration.pushManager.subscribe({
     userVisibleOnly: true,
     applicationServerKey: urlBase64ToUint8Array(vapidKey),
   });
 
-  // Send subscription to backend
   await apiRequest('POST', apiUrl('/push/subscribe'), subscription.toJSON());
   return true;
 }
 
 // Unsubscribe from push
 export async function unsubscribeFromPush() {
-  if (!isPushSupported()) return;
+  if (isNative) {
+    await PushNotifications.removeAllListeners();
+    return;
+  }
 
+  if (!isPushSupported()) return;
   const reg = await navigator.serviceWorker.ready;
   const subscription = await reg.pushManager.getSubscription();
 
   if (subscription) {
-    // Notify backend
     try {
       await apiRequest('POST', apiUrl('/push/unsubscribe'), { endpoint: subscription.endpoint });
-    } catch {
-      // Ignore unsubscribe errors
-    }
+    } catch {}
     await subscription.unsubscribe();
   }
 }

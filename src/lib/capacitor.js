@@ -3,6 +3,8 @@ import { StatusBar, Style } from '@capacitor/status-bar';
 import { SplashScreen } from '@capacitor/splash-screen';
 import { Keyboard } from '@capacitor/keyboard';
 import { App } from '@capacitor/app';
+import { Haptics, ImpactStyle } from '@capacitor/haptics';
+import { Browser } from '@capacitor/browser';
 
 /**
  * Returns true if running inside a native Capacitor shell (iOS/Android)
@@ -59,4 +61,30 @@ export async function initCapacitor() {
       window.location.hash = url.pathname;
     }
   });
+}
+
+/**
+ * Haptic feedback — uses native Capacitor plugin on iOS/Android, falls back to navigator.vibrate
+ */
+export async function hapticFeedback() {
+  if (isNative) {
+    try {
+      await Haptics.impact({ style: ImpactStyle.Light });
+    } catch {}
+  } else if (navigator.vibrate) {
+    navigator.vibrate(50);
+  }
+}
+
+/**
+ * Open external URL — uses native in-app browser on iOS/Android, falls back to window.open
+ */
+export async function openExternalUrl(url) {
+  if (isNative) {
+    try {
+      await Browser.open({ url });
+    } catch {}
+  } else {
+    window.open(url, '_blank');
+  }
 }

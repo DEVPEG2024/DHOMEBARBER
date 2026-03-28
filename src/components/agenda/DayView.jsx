@@ -3,6 +3,7 @@ import { Coffee, Zap } from 'lucide-react';
 import { getServiceColor } from '@/utils/serviceColors';
 import { useQueryClient } from '@tanstack/react-query';
 import AppointmentDetailModal from './AppointmentDetailModal';
+import { hapticFeedback } from '@/lib/capacitor';
 
 const HOUR_HEIGHT = 64;
 const START_HOUR = 7;
@@ -271,7 +272,7 @@ export default function DayView({ appointments, employees, employeeFilter, onSta
       longPressTimer.current = setTimeout(() => {
         longPressActive.current = true;
         // Vibrate to signal activation
-        if (navigator.vibrate) navigator.vibrate(50);
+        hapticFeedback();
         // Show initial drag preview at touch position
         setDragging({ startMin: minutes, currentMin: minutes, colEmpId });
       }, 1000);
