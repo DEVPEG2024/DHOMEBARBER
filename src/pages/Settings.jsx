@@ -1,18 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/lib/AuthContext';
-import { api } from '@/api/apiClient';
+import { api, apiRequest, apiUrl } from '@/api/apiClient';
 import { isPushSupported, isSubscribed, subscribeToPush, unsubscribeFromPush } from '@/lib/pushNotifications';
 import { motion } from 'framer-motion';
-import { User, Mail, Phone, Bell, Shield, ChevronRight, Cake } from 'lucide-react';
+import { User, Mail, Phone, Bell, Shield, ChevronRight, Cake, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
 
 export default function Settings() {
-  const { user, refreshUser } = useAuth();
+  const { user, refreshUser, logout } = useAuth();
   const [pushEnabled, setPushEnabled] = useState(false);
   const [pushLoading, setPushLoading] = useState(false);
   const [birthDate, setBirthDate] = useState('');
   const [savingBirth, setSavingBirth] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
   const pushSupported = isPushSupported();
 
   useEffect(() => {
@@ -184,8 +186,71 @@ export default function Settings() {
           </motion.div>
         )}
 
+        {/* Danger zone */}
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
+          className="rounded-2xl border border-red-500/20 bg-red-500/5 overflow-hidden mb-4 mt-4">
+          <p className="text-xs font-semibold text-red-400 uppercase tracking-wider px-4 pt-4 pb-2">Zone de danger</p>
+          {!showDeleteConfirm ? (
+            <button
+              onClick={() => setShowDeleteConfirm(true)}
+              className="flex items-center gap-3 w-full px-4 py-3.5 hover:bg-red-500/10 transition-colors"
+            >
+              <div className="w-10 h-10 rounded-xl bg-red-500/10 flex items-center justify-center shrink-0">
+                <Trash2 className="w-4 h-4 text-red-400" />
+              </div>
+              <div className="text-left">
+                <p className="text-sm font-semibold text-red-400">Supprimer mon compte</p>
+                <p className="text-[11px] text-muted-foreground">Cette action est irréversible</p>
+              </div>
+            </button>
+          ) : (
+            <div className="px-4 py-4 space-y-3">
+              <p className="text-sm text-red-300">Êtes-vous sûr de vouloir supprimer votre compte ? Toutes vos données seront définitivement supprimées.</p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowDeleteConfirm(false)}
+                  className="flex-1 px-4 py-2.5 text-sm font-semibold rounded-xl bg-white/10 text-foreground hover:bg-white/15 transition-colors"
+                >
+                  Annuler
+                </button>
+                <button
+                  onClick={async () => {
+                    setDeleteLoading(true);
+                    try {
+                      await apiRequest('DELETE', apiUrl('/auth/delete-account'));
+                      toast.success('Compte supprimé avec succès');
+                      logout();
+                    } catch (err) {
+                      toast.error(err?.message || 'Erreur lors de la suppression');
+                    } finally {
+                      setDeleteLoading(false);
+                    }
+                  }}
+                  disabled={deleteLoading}
+                  className="flex-1 px-4 py-2.5 text-sm font-semibold rounded-xl bg-red-500 text-white hover:bg-red-600 transition-colors disabled:opacity-50"
+                >
+                  {deleteLoading ? 'Suppression...' : 'Confirmer la suppression'}
+                </button>
+              </div>
+            </div>
+          )}
+        </motion.div>
+
+        {/* Legal links */}
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}
+          className="rounded-2xl border border-white/8 bg-white/4 backdrop-blur-xl overflow-hidden mb-4">
+          <a href="/privacy.html" target="_blank" rel="noopener noreferrer" className="flex items-center justify-between px-4 py-3 hover:bg-white/5 transition-colors border-b border-white/5">
+            <span className="text-sm text-muted-foreground">Politique de confidentialité</span>
+            <ChevronRight className="w-4 h-4 text-muted-foreground" />
+          </a>
+          <a href="/cgu.html" target="_blank" rel="noopener noreferrer" className="flex items-center justify-between px-4 py-3 hover:bg-white/5 transition-colors">
+            <span className="text-sm text-muted-foreground">Conditions générales d'utilisation</span>
+            <ChevronRight className="w-4 h-4 text-muted-foreground" />
+          </a>
+        </motion.div>
+
         {/* App info */}
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }}
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }}
           className="text-center mt-8">
           <p className="text-[11px] text-muted-foreground">D'Home Barber v1.0</p>
           <p className="text-[11px] text-muted-foreground">Douvaine, France</p>
