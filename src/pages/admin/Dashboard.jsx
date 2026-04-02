@@ -5,8 +5,9 @@ import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import {
   Calendar, TrendingUp, Clock, AlertTriangle, CheckCircle,
-  CreditCard, Banknote, Euro, Star, UserCheck, ArrowUpRight, ArrowDownRight, Coffee, Heart, ShoppingBag, Zap, Gift
+  CreditCard, Banknote, Euro, Star, UserCheck, ArrowUpRight, ArrowDownRight, Coffee, Heart, ShoppingBag, Zap, Gift, Wifi
 } from 'lucide-react';
+import { useLiveCount } from '@/lib/useLiveCount';
 import { format, subDays } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
@@ -56,6 +57,7 @@ function MiniCard({ label, value, icon: Icon, color }) {
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
+  const liveCount = useLiveCount();
   const [showExport, setShowExport] = React.useState(false);
   const [exportAmount, setExportAmount] = React.useState('');
   const [exportMonth, setExportMonth] = React.useState(format(new Date(), 'yyyy-MM'));
@@ -285,7 +287,19 @@ export default function AdminDashboard() {
   return (
     <div className="min-w-0">
       <div className="mb-6">
-        <p className="text-[11px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Tableau de bord</p>
+        <div className="flex items-center justify-between">
+          <p className="text-[11px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Tableau de bord</p>
+          {liveCount !== null && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-green-500/10 border border-green-500/20">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
+              </span>
+              <Wifi className="w-3 h-3 text-green-400" />
+              <span className="text-xs font-semibold text-green-400">{liveCount} en ligne</span>
+            </div>
+          )}
+        </div>
         <h1 className="font-display text-2xl font-bold">Ciao le gang ! 🇮🇹🇵🇹</h1>
         <p className="text-sm text-muted-foreground mt-1">{format(new Date(), 'EEEE d MMMM yyyy', { locale: fr })}</p>
         <button
