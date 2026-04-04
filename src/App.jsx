@@ -6,6 +6,8 @@ import { BrowserRouter as Router, Route, Routes, Navigate, Outlet, useLocation }
 import PageNotFound from './lib/PageNotFound';
 import { AuthProvider, useAuth } from '@/lib/AuthContext';
 import { ThemeProvider } from '@/lib/ThemeContext';
+import { MusicProvider } from '@/lib/MusicContext';
+import MusicToggle from '@/components/shared/MusicToggle';
 import ErrorBoundary from '@/components/ErrorBoundary';
 
 // Layouts
@@ -216,14 +218,17 @@ function App() {
   return (
     <ErrorBoundary>
       <ThemeProvider>
-        <AuthProvider>
-          <QueryClientProvider client={queryClientInstance}>
-            <Router>
-              <AppRoutes />
-            </Router>
-            <Toaster />
-          </QueryClientProvider>
-        </AuthProvider>
+        <MusicProvider>
+          <AuthProvider>
+            <QueryClientProvider client={queryClientInstance}>
+              <Router>
+                <AppRoutes />
+              </Router>
+              <MusicToggle />
+              <Toaster />
+            </QueryClientProvider>
+          </AuthProvider>
+        </MusicProvider>
       </ThemeProvider>
     </ErrorBoundary>
   )
