@@ -9,7 +9,7 @@ export default function BackgroundMusic() {
   useEffect(() => {
     const audio = new Audio('/ambiance.mp3');
     audio.loop = true;
-    audio.volume = 0.3;
+    audio.volume = 0.1;
     audioRef.current = audio;
 
     // Start on first user interaction (browser autoplay policy)
