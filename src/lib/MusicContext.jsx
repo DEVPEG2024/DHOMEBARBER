@@ -4,7 +4,7 @@ const MusicContext = createContext();
 
 // Path to the audio file in public/ or an external URL
 const MUSIC_SRC = '/ambiance.mp3';
-const DEFAULT_VOLUME = 0.10; // 10% — subtle background
+const DEFAULT_VOLUME = 0.03; // 3% — subtle background
 
 export function MusicProvider({ children }) {
   const audioRef = useRef(null);
