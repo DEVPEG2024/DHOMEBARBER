@@ -32,5 +32,5 @@ dist-ssr
 .vercel
 
 # Capacitor native projects
+# android/ is versioned (see android/.gitignore for build outputs)
 ios/
-android/
