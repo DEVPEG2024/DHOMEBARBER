@@ -66,11 +66,11 @@ src/
 │   ├── Appointments.jsx       # Mes rendez-vous (client)
 │   ├── MyReviews.jsx          # Mes avis (client)
 │   ├── BarberProfile.jsx      # Profil public d'un barber (/barber/:id), vidéo de présentation
-│   ├── Feed.jsx               # Fil social "Ca dit quoi le Gang ?" (posts, réactions emoji, commentaires) — aussi /admin/feed
+│   ├── Feed.jsx               # Fil social "Ca dit quoi le Gang ?" (posts, réactions emoji, commentaires, menu Signaler / Bloquer, panneau admin des signalements) — aussi /admin/feed
 │   ├── Events.jsx             # Privatisation du salon : demande d'événement, acceptation/refus du devis
 │   ├── GiftCards.jsx          # Cartes cadeau : achat (code DHB + QR), affichage
 │   ├── Profile.jsx            # Profil utilisateur
-│   ├── Settings.jsx           # Paramètres client (suppression de compte, liens CGU / confidentialité)
+│   ├── Settings.jsx           # Paramètres client (date de naissance, utilisateurs bloqués, suppression de compte, liens CGU / confidentialité)
 │   ├── Login.jsx              # Connexion, inscription, mot de passe oublié (code à 6 chiffres par email)
 │   ├── ClientNotifications.jsx # Notifications client
 │   └── admin/
@@ -154,6 +154,8 @@ Mapping entité → table dans `routes/entities.js`.
 | PostLike | post_likes | post_id, user_email, reaction (emoji) |
 | PostComment | post_comments | post_id, author_email, author_name, author_role, author_photo_url, content |
 | Event | events | client_name, client_email, client_phone, event_type, date, time_slot, guest_count, employees (JSONB), message, status, admin_notes, price |
+| PostReport | post_reports | post_id / comment_id (SET NULL à la suppression), reporter_email (forcé serveur), reporter_name, reported_email, reported_name, reason, details, content_snapshot (copie serveur), status (pending / handled / dismissed), handled_by, handled_at |
+| UserBlock | user_blocks | blocker_email (forcé serveur), blocked_email, blocked_name, UNIQUE(blocker, blocked) |
 | GiftCard | gift_cards | code (DHB…, généré côté serveur), amount, remaining_balance, sender_*, recipient_name, recipient_message, status (pending → validé par admin), valid_until, validated_at, validated_by, used_at |
 | SalonSettings | salon_settings | salon_name, tagline, description, phone, email, address, city, opening_hours (JSONB), social_*, cancellation_hours, require_deposit, deposit_percentage, homepage_order (JSONB) |
 | PushSubscription | push_subscriptions | user_id, user_email, endpoint, keys_p256dh, keys_auth (+ tokens natifs via subscribe-native) |
@@ -172,6 +174,13 @@ Mapping entité → table dans `routes/entities.js`.
 - Gift cards : code généré côté serveur, montant validé, statut forcé à `pending` à la création, suppression admin uniquement
 - Events : le client ne peut qu'accepter/refuser un devis, suppression admin uniquement
 - Congés : changement de statut réservé à l'admin (`routes/leave.js`)
+- Fil : suppression d'un post / commentaire / réaction réservée à son auteur ou à l'admin ; `post_reports` lisible et modifiable par l'admin seul ; `user_blocks` : chacun ne voit et ne supprime que ses propres blocages
+
+### Modération du fil (exigence App Store 1.2)
+- **Signaler** : menu « ··· » d'une publication ou lien « Signaler » sous un commentaire → `PostReport.create` (motif + précisions). Le serveur copie le contenu et l'auteur, puis envoie push + email à tous les admins (`notifyAdminsOfReport` dans `routes/entities.js`, `sendContentReportAdmin` dans `lib/emailHelper.js`)
+- **Bloquer** : `UserBlock.create` ; les posts et commentaires de l'utilisateur bloqué sont filtrés côté serveur (`handleList`) et côté client. Déblocage dans Paramètres → « Utilisateurs bloqués »
+- **Admin** : sur `/admin/feed`, panneau « Signalements en attente » (supprimer le contenu ou ignorer, statut `handled` / `dismissed`)
+- Les CGU (`public/cgu.html`, section 7) décrivent tolérance zéro, signalement, blocage et modération sous 24 h ; acceptation rappelée à l'inscription et dans le composeur
 
 ### Client API (`src/api/apiClient.js`)
 - **list** → `GET /api/apps/:appId/entities/:entityName?sort=X&limit=N`
@@ -208,7 +217,7 @@ Mapping entité → table dans `routes/entities.js`.
 - Les permissions barber sont stockées dans `employees.permissions` (JSONB)
 
 ### Auto-migration au démarrage
-Le `server.js` exécute des migrations automatiques au démarrage (`ADD COLUMN IF NOT EXISTS` / `CREATE TABLE IF NOT EXISTS`). Les tables `skill_categories`, `posts`, `post_likes`, `post_comments`, `events` et `gift_cards` sont créées ici, pas dans `init-db.js`. Pour ajouter une colonne ou une table : ajouter la requête dans ce bloc, puis déployer.
+Le `server.js` exécute des migrations automatiques au démarrage (`ADD COLUMN IF NOT EXISTS` / `CREATE TABLE IF NOT EXISTS`). Les tables `skill_categories`, `posts`, `post_likes`, `post_comments`, `events`, `gift_cards`, `post_reports` et `user_blocks` sont créées ici, pas dans `init-db.js`. Pour ajouter une colonne ou une table : ajouter la requête dans ce bloc, puis déployer.
 
 ### Notifications
 - **Push web** : Web Push (VAPID) via `lib/pushHelper.js`, service worker `public/sw.js`

@@ -3,7 +3,8 @@ import { api } from '@/api/apiClient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { motion, AnimatePresence, useScroll, useTransform } from 'framer-motion';
-import { Send, Heart, Trash2, Loader2, Camera, MessageCircle, Plus, X } from 'lucide-react';
+import { Send, Heart, Trash2, Loader2, Camera, MessageCircle, Plus, X, MoreHorizontal, Flag, Ban, ShieldAlert, Check } from 'lucide-react';
+import LegalLink from '@/components/shared/LegalLink';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
@@ -26,7 +27,7 @@ function getRoleBadge(role) {
   return null;
 }
 
-function CommentItem({ comment, currentUser, onDelete }) {
+function CommentItem({ comment, currentUser, onDelete, onOpenMenu }) {
   const badge = getRoleBadge(comment.author_role);
   const initials = comment.author_name?.split(' ').map(n => n[0]).join('').slice(0, 2) || '?';
   const isOwner = currentUser?.email === comment.author_email || currentUser?.role === 'admin';
@@ -61,6 +62,14 @@ function CommentItem({ comment, currentUser, onDelete }) {
           {isOwner && (
             <button onClick={() => onDelete(comment.id)} className="text-[10px] text-muted-foreground hover:text-red-400 transition-colors">
               Supprimer
+            </button>
+          )}
+          {!isOwner && currentUser && (
+            <button
+              onClick={() => onOpenMenu({ type: 'comment', id: comment.id, authorEmail: comment.author_email, authorName: comment.author_name, content: comment.content })}
+              className="text-[10px] text-muted-foreground hover:text-amber-400 transition-colors"
+            >
+              Signaler
             </button>
           )}
         </div>
@@ -114,7 +123,7 @@ function GlassCard({ children }) {
 
 const REACTIONS = ['❤️', '🔥', '💪', '😂', '👏', '💈'];
 
-function PostCard({ post, currentUser, onLike, onDelete, likes, comments, onComment, onDeleteComment, getAuthorPhoto }) {
+function PostCard({ post, currentUser, onLike, onDelete, likes, comments, onComment, onDeleteComment, getAuthorPhoto, onOpenMenu }) {
   const [showComments, setShowComments] = useState(false);
   const [showReactions, setShowReactions] = useState(false);
   const [commentText, setCommentText] = useState('');
@@ -172,11 +181,19 @@ function PostCard({ post, currentUser, onLike, onDelete, likes, comments, onComm
           </div>
           <p className="text-[11px] text-muted-foreground">{timeAgo(post.created_at)}</p>
         </div>
-        {isOwner && (
+        {isOwner ? (
           <button onClick={() => onDelete(post.id)} className="text-muted-foreground/40 hover:text-red-400 transition-colors">
             <Trash2 className="w-4 h-4" />
           </button>
-        )}
+        ) : currentUser ? (
+          <button
+            onClick={() => onOpenMenu({ type: 'post', id: post.id, authorEmail: post.author_email, authorName: post.author_name, content: post.content })}
+            className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground/60 hover:text-foreground hover:bg-secondary transition-colors"
+            aria-label="Signaler ou bloquer"
+          >
+            <MoreHorizontal className="w-4 h-4" />
+          </button>
+        ) : null}
       </div>
 
       {/* Content */}
@@ -280,6 +297,7 @@ function PostCard({ post, currentUser, onLike, onDelete, likes, comments, onComm
                   comment={comment}
                   currentUser={currentUser}
                   onDelete={onDeleteComment}
+                  onOpenMenu={onOpenMenu}
                 />
               ))}
               {postComments.length === 0 && (
@@ -329,6 +347,16 @@ export default function Feed() {
   const [showComposer, setShowComposer] = useState(false);
   const fileInputRef = useRef(null);
 
+  // Modération : menu Signaler / Bloquer, formulaire de signalement, confirmation de blocage
+  const [menuTarget, setMenuTarget] = useState(null);
+  const [reportTarget, setReportTarget] = useState(null);
+  const [reportReason, setReportReason] = useState('');
+  const [reportDetails, setReportDetails] = useState('');
+  const [reportSending, setReportSending] = useState(false);
+  const [blockTarget, setBlockTarget] = useState(null);
+  const [blocking, setBlocking] = useState(false);
+  const [handlingReport, setHandlingReport] = useState(null);
+
   const { data: posts = [], isLoading } = useQuery({
     queryKey: ['posts'],
     queryFn: () => api.entities.Post.list('-created_at', 100),
@@ -348,6 +376,25 @@ export default function Feed() {
     queryKey: ['employees'],
     queryFn: () => api.entities.Employee.filter({ is_active: true }, 'sort_order', 50),
   });
+
+  // Utilisateurs que j'ai bloqués : leurs contenus sont masqués (le serveur filtre aussi)
+  const { data: blocks = [] } = useQuery({
+    queryKey: ['userBlocks'],
+    queryFn: () => api.entities.UserBlock.list('-created_at', 200),
+    enabled: !!user,
+  });
+
+  // Admin : signalements en attente
+  const { data: reports = [] } = useQuery({
+    queryKey: ['postReports'],
+    queryFn: () => api.entities.PostReport.filter({ status: 'pending' }, '-created_at', 50),
+    enabled: user?.role === 'admin',
+  });
+
+  const blockedEmails = new Set(blocks.map(b => (b.blocked_email || '').toLowerCase()));
+  const isBlocked = (email) => blockedEmails.has((email || '').toLowerCase());
+  const visiblePosts = posts.filter(p => !isBlocked(p.author_email));
+  const visibleComments = comments.filter(c => !isBlocked(c.author_email));
 
   const getAuthorPhoto = () => {
     if (user?.role === 'barber' || user?.role === 'admin') {
@@ -441,6 +488,80 @@ export default function Feed() {
     }
   };
 
+  const REPORT_REASONS = ['Contenu inapproprié', 'Harcèlement ou propos haineux', 'Spam ou publicité', 'Autre'];
+
+  const openReport = (target) => {
+    setMenuTarget(null);
+    setReportReason('');
+    setReportDetails('');
+    setReportTarget(target);
+  };
+
+  const submitReport = async () => {
+    if (!reportTarget || !reportReason) return;
+    setReportSending(true);
+    try {
+      await api.entities.PostReport.create({
+        post_id: reportTarget.type === 'post' ? reportTarget.id : null,
+        comment_id: reportTarget.type === 'comment' ? reportTarget.id : null,
+        reporter_name: user.full_name || user.email,
+        reason: reportReason,
+        details: reportDetails.trim() || null,
+      });
+      setReportTarget(null);
+      toast.success('Signalement envoyé. Notre équipe le traite sous 24 h.');
+    } catch (err) {
+      toast.error(err?.message || "Erreur lors de l'envoi du signalement");
+    } finally {
+      setReportSending(false);
+    }
+  };
+
+  const confirmBlock = async () => {
+    if (!blockTarget) return;
+    setBlocking(true);
+    try {
+      await api.entities.UserBlock.create({ blocked_email: blockTarget.email, blocked_name: blockTarget.name });
+      queryClient.invalidateQueries({ queryKey: ['userBlocks'] });
+      queryClient.invalidateQueries({ queryKey: ['posts'] });
+      queryClient.invalidateQueries({ queryKey: ['postComments'] });
+      toast.success(`${blockTarget.name || 'Utilisateur'} bloqué. Vous ne verrez plus ses publications.`);
+      setBlockTarget(null);
+    } catch (err) {
+      toast.error(err?.message || 'Erreur lors du blocage');
+    } finally {
+      setBlocking(false);
+    }
+  };
+
+  // Admin : traiter un signalement (supprimer le contenu ou l'ignorer)
+  const handleReport = async (report, action) => {
+    setHandlingReport(report.id);
+    try {
+      await api.entities.PostReport.update(report.id, {
+        status: action === 'delete' ? 'handled' : 'dismissed',
+        handled_by: user.email,
+        handled_at: new Date().toISOString(),
+      });
+      if (action === 'delete') {
+        try {
+          if (report.comment_id) await api.entities.PostComment.delete(report.comment_id);
+          else if (report.post_id) await api.entities.Post.delete(report.post_id);
+        } catch (err) {
+          if (err?.status !== 404) throw err; // déjà supprimé : rien à faire
+        }
+      }
+      queryClient.invalidateQueries({ queryKey: ['postReports'] });
+      queryClient.invalidateQueries({ queryKey: ['posts'] });
+      queryClient.invalidateQueries({ queryKey: ['postComments'] });
+      toast.success(action === 'delete' ? 'Contenu supprimé' : 'Signalement ignoré');
+    } catch (err) {
+      toast.error(err?.message || 'Erreur lors du traitement');
+    } finally {
+      setHandlingReport(null);
+    }
+  };
+
   return (
     <div className="max-w-lg mx-auto">
       <div className="mb-6">
@@ -509,6 +630,11 @@ export default function Feed() {
                 </div>
               </div>
 
+              <p className="text-[10px] text-muted-foreground mt-2 ml-[52px] leading-relaxed">
+                Respect et bienveillance : pas de propos offensants ni de contenu inapproprié. En publiant, vous acceptez les{' '}
+                <LegalLink path="/cgu.html" className="text-primary underline">règles de la communauté</LegalLink>.
+              </p>
+
               {imageUrl && (
                 <div className="relative mt-3 ml-[52px] w-32">
                   <div className="rounded-xl overflow-hidden" style={{ aspectRatio: '4/5' }}>
@@ -550,12 +676,215 @@ export default function Feed() {
         )}
       </AnimatePresence>
 
+      {/* Admin : signalements en attente */}
+      {user?.role === 'admin' && reports.length > 0 && (
+        <div className="mb-6 rounded-2xl border border-amber-500/30 bg-amber-500/5 overflow-hidden">
+          <div className="flex items-center gap-2 px-4 py-3 border-b border-amber-500/20">
+            <ShieldAlert className="w-4 h-4 text-amber-400" />
+            <p className="text-sm font-semibold text-foreground">Signalements en attente ({reports.length})</p>
+          </div>
+          <div className="divide-y divide-border">
+            {reports.map(r => (
+              <div key={r.id} className="px-4 py-3 space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  <span className="font-semibold text-foreground">{r.reporter_name || r.reporter_email}</span>
+                  {' '}a signalé {r.comment_id ? 'un commentaire' : 'une publication'} de{' '}
+                  <span className="font-semibold text-foreground">{r.reported_name || r.reported_email || 'inconnu'}</span>
+                  {' '}· {timeAgo(r.created_at)}
+                </p>
+                <p className="text-xs font-semibold text-amber-400">{r.reason}{r.details ? ` — ${r.details}` : ''}</p>
+                {r.content_snapshot && (
+                  <p className="text-xs text-foreground/80 bg-secondary/50 rounded-lg px-3 py-2 whitespace-pre-wrap line-clamp-4">{r.content_snapshot}</p>
+                )}
+                <div className="flex gap-2 pt-1">
+                  <button
+                    onClick={() => handleReport(r, 'delete')}
+                    disabled={handlingReport === r.id}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-red-500/15 text-red-400 text-xs font-semibold hover:bg-red-500/25 transition-colors disabled:opacity-50"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" /> Supprimer le contenu
+                  </button>
+                  <button
+                    onClick={() => handleReport(r, 'dismiss')}
+                    disabled={handlingReport === r.id}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-secondary text-muted-foreground text-xs font-semibold hover:text-foreground transition-colors disabled:opacity-50"
+                  >
+                    <Check className="w-3.5 h-3.5" /> Ignorer
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Menu Signaler / Bloquer (feuille en bas d'écran) */}
+      <AnimatePresence>
+        {menuTarget && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[60] bg-black/60"
+              onClick={() => setMenuTarget(null)}
+            />
+            <motion.div
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              className="fixed inset-x-0 bottom-0 z-[60] rounded-t-2xl border-t border-border bg-background p-4 pb-8"
+            >
+              <div className="flex justify-center mb-3">
+                <div className="w-10 h-1 rounded-full bg-muted" />
+              </div>
+              <p className="text-xs text-muted-foreground text-center mb-3">
+                {menuTarget.type === 'comment' ? 'Commentaire' : 'Publication'} de {menuTarget.authorName || 'un membre'}
+              </p>
+              <button
+                onClick={() => openReport(menuTarget)}
+                className="flex items-center gap-3 w-full px-4 py-3.5 rounded-xl bg-secondary/60 hover:bg-secondary text-sm font-semibold text-foreground transition-colors"
+              >
+                <Flag className="w-4 h-4 text-amber-400" />
+                Signaler {menuTarget.type === 'comment' ? 'ce commentaire' : 'cette publication'}
+              </button>
+              <button
+                onClick={() => { setMenuTarget(null); setBlockTarget({ email: menuTarget.authorEmail, name: menuTarget.authorName }); }}
+                className="flex items-center gap-3 w-full px-4 py-3.5 mt-2 rounded-xl bg-secondary/60 hover:bg-secondary text-sm font-semibold text-red-400 transition-colors"
+              >
+                <Ban className="w-4 h-4" />
+                Bloquer {menuTarget.authorName || 'cet utilisateur'}
+              </button>
+              <button onClick={() => setMenuTarget(null)} className="w-full px-4 py-3 mt-3 text-sm font-medium text-muted-foreground">
+                Annuler
+              </button>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Formulaire de signalement */}
+      <AnimatePresence>
+        {reportTarget && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[60] bg-black/60"
+              onClick={() => !reportSending && setReportTarget(null)}
+            />
+            <motion.div
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              className="fixed inset-x-0 bottom-0 z-[60] rounded-t-2xl border-t border-border bg-background p-5 pb-8 max-h-[90vh] overflow-y-auto"
+            >
+              <div className="flex justify-center mb-3">
+                <div className="w-10 h-1 rounded-full bg-muted" />
+              </div>
+              <div className="flex items-center justify-between mb-1">
+                <h3 className="font-display text-base font-bold flex items-center gap-2">
+                  <Flag className="w-4 h-4 text-amber-400" /> Signaler
+                </h3>
+                <button onClick={() => setReportTarget(null)} className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <p className="text-xs text-muted-foreground mb-3">
+                Pourquoi signalez-vous {reportTarget.type === 'comment' ? 'ce commentaire' : 'cette publication'} ? Notre équipe examine chaque signalement sous 24 h.
+              </p>
+              {reportTarget.content && (
+                <p className="text-xs text-foreground/70 bg-secondary/50 rounded-lg px-3 py-2 mb-3 line-clamp-3 whitespace-pre-wrap">{reportTarget.content}</p>
+              )}
+              <div className="space-y-2">
+                {REPORT_REASONS.map(reason => (
+                  <button
+                    key={reason}
+                    onClick={() => setReportReason(reason)}
+                    className={`flex items-center justify-between w-full px-4 py-3 rounded-xl border text-sm transition-colors ${
+                      reportReason === reason ? 'border-primary bg-primary/10 text-foreground' : 'border-border bg-secondary/40 text-muted-foreground'
+                    }`}
+                  >
+                    {reason}
+                    {reportReason === reason && <Check className="w-4 h-4 text-primary" />}
+                  </button>
+                ))}
+              </div>
+              <Textarea
+                value={reportDetails}
+                onChange={(e) => setReportDetails(e.target.value)}
+                placeholder="Précisions (optionnel)"
+                className="bg-secondary/50 border-border text-sm resize-none mt-3"
+                rows={2}
+              />
+              <Button
+                onClick={submitReport}
+                disabled={!reportReason || reportSending}
+                className="w-full mt-4 bg-primary text-primary-foreground rounded-full"
+              >
+                {reportSending ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Envoyer le signalement'}
+              </Button>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Confirmation de blocage */}
+      <AnimatePresence>
+        {blockTarget && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[60] bg-black/60"
+              onClick={() => !blocking && setBlockTarget(null)}
+            />
+            <div className="fixed inset-0 z-[60] flex items-center justify-center p-5 pointer-events-none">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 10 }}
+                className="w-full max-w-sm rounded-2xl border border-border bg-background p-5 pointer-events-auto"
+              >
+                <div className="w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center mx-auto mb-3">
+                  <Ban className="w-6 h-6 text-red-400" />
+                </div>
+                <h3 className="font-display text-base font-bold text-center">Bloquer {blockTarget.name || 'cet utilisateur'} ?</h3>
+                <p className="text-xs text-muted-foreground text-center mt-2">
+                  Vous ne verrez plus ses publications ni ses commentaires. Vous pourrez le débloquer depuis vos Paramètres.
+                </p>
+                <div className="flex gap-2 mt-5">
+                  <button
+                    onClick={() => setBlockTarget(null)}
+                    disabled={blocking}
+                    className="flex-1 px-4 py-2.5 text-sm font-semibold rounded-xl bg-secondary text-foreground"
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    onClick={confirmBlock}
+                    disabled={blocking}
+                    className="flex-1 px-4 py-2.5 text-sm font-semibold rounded-xl bg-red-500 text-white disabled:opacity-60 flex items-center justify-center"
+                  >
+                    {blocking ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Bloquer'}
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          </>
+        )}
+      </AnimatePresence>
+
       {/* Posts */}
       {isLoading ? (
         <div className="flex justify-center py-12">
           <Loader2 className="w-6 h-6 animate-spin text-primary" />
         </div>
-      ) : posts.length === 0 ? (
+      ) : visiblePosts.length === 0 ? (
         <div className="text-center py-16">
           <MessageCircle className="w-12 h-12 text-muted-foreground/20 mx-auto mb-3" />
           <p className="text-sm text-muted-foreground">Aucune publication pour le moment</p>
@@ -564,18 +893,19 @@ export default function Feed() {
       ) : (
         <div className="space-y-6">
           <AnimatePresence>
-            {posts.map(post => (
+            {visiblePosts.map(post => (
               <GlassCard key={post.id}>
                 <PostCard
                   post={post}
                   currentUser={user}
                   likes={likes}
-                  comments={comments}
+                  comments={visibleComments}
                   onLike={handleLike}
                   onComment={handleComment}
                   onDelete={handleDelete}
                   onDeleteComment={handleDeleteComment}
                   getAuthorPhoto={getAuthorPhoto}
+                  onOpenMenu={setMenuTarget}
                 />
               </GlassCard>
             ))}

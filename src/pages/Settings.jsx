@@ -3,7 +3,8 @@ import { useAuth } from '@/lib/AuthContext';
 import { api, apiRequest, apiUrl } from '@/api/apiClient';
 import { isPushSupported, isSubscribed, subscribeToPush, unsubscribeFromPush } from '@/lib/pushNotifications';
 import { motion } from 'framer-motion';
-import { User, Mail, Phone, Bell, Shield, ChevronRight, Cake, Trash2 } from 'lucide-react';
+import { User, Mail, Phone, Bell, Shield, ChevronRight, Cake, Trash2, Ban } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
 import { isNative, openExternalUrl } from '@/lib/capacitor';
@@ -17,6 +18,30 @@ export default function Settings() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const pushSupported = isPushSupported();
+  const queryClient = useQueryClient();
+  const [unblocking, setUnblocking] = useState(null);
+
+  // Utilisateurs bloqués depuis le fil
+  const { data: blocks = [] } = useQuery({
+    queryKey: ['userBlocks'],
+    queryFn: () => api.entities.UserBlock.list('-created_at', 200),
+    enabled: !!user,
+  });
+
+  const unblock = async (b) => {
+    setUnblocking(b.id);
+    try {
+      await api.entities.UserBlock.delete(b.id);
+      queryClient.invalidateQueries({ queryKey: ['userBlocks'] });
+      queryClient.invalidateQueries({ queryKey: ['posts'] });
+      queryClient.invalidateQueries({ queryKey: ['postComments'] });
+      toast.success(`${b.blocked_name || b.blocked_email} débloqué`);
+    } catch (err) {
+      toast.error(err?.message || 'Erreur lors du déblocage');
+    } finally {
+      setUnblocking(null);
+    }
+  };
 
   // birth_date peut arriver en ISO complet (ex. 1990-05-04T00:00:00.000Z) : on garde YYYY-MM-DD
   const userBirthDate = user?.birth_date ? String(user.birth_date).slice(0, 10) : '';
@@ -178,6 +203,38 @@ export default function Settings() {
               <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${pushEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
             </div>
           </button>
+        </motion.div>
+
+        {/* Blocked users */}
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }}
+          className="rounded-2xl border border-white/8 bg-white/4 backdrop-blur-xl overflow-hidden mb-4">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 pt-4 pb-2">Utilisateurs bloqués</p>
+          {blocks.length === 0 ? (
+            <p className="px-4 pb-4 text-[11px] text-muted-foreground">
+              Aucun utilisateur bloqué. Vous pouvez bloquer un membre depuis le fil « Ca dit quoi le Gang ? » (menu ··· d'une publication).
+            </p>
+          ) : (
+            blocks.map(b => (
+              <div key={b.id} className="flex items-center justify-between gap-3 px-4 py-3 border-t border-white/5">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-xl bg-red-500/10 flex items-center justify-center shrink-0">
+                    <Ban className="w-4 h-4 text-red-400" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-foreground truncate">{b.blocked_name || b.blocked_email}</p>
+                    <p className="text-[11px] text-muted-foreground truncate">{b.blocked_email}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => unblock(b)}
+                  disabled={unblocking === b.id}
+                  className="text-xs font-semibold text-primary px-3 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 transition-colors disabled:opacity-50 shrink-0"
+                >
+                  {unblocking === b.id ? '...' : 'Débloquer'}
+                </button>
+              </div>
+            ))
+          )}
         </motion.div>
 
         {/* Admin access */}

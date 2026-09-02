@@ -4,6 +4,7 @@ import { useAuth } from '@/lib/AuthContext';
 import { motion } from 'framer-motion';
 import { Mail, Lock, User, Phone, Eye, EyeOff, Download, Bell, CheckCircle, ArrowRight, Share, Plus, KeyRound } from 'lucide-react';
 import { toast } from 'sonner';
+import LegalLink from '@/components/shared/LegalLink';
 import { isPushSupported, subscribeToPush } from '@/lib/pushNotifications';
 import { API_SERVER_URL, resolvedAppId } from '@/api/apiClient';
 
@@ -465,6 +466,15 @@ export default function Login() {
               mode === 'login' ? 'Se connecter' : 'Créer mon compte'
             )}
           </button>
+
+          {mode === 'register' && (
+            <p className="text-[11px] text-muted-foreground text-center leading-relaxed pt-1">
+              En créant un compte, vous acceptez les{' '}
+              <LegalLink path="/cgu.html" className="text-primary underline">conditions d'utilisation</LegalLink>
+              {' '}et la{' '}
+              <LegalLink path="/privacy.html" className="text-primary underline">politique de confidentialité</LegalLink>.
+            </p>
+          )}
         </motion.form>}
 
         {/* Footer */}
