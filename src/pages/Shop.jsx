@@ -68,6 +68,7 @@ export default function Shop() {
 
   const { data: products = [] } = useQuery({
     queryKey: ['products'],
+    staleTime: 5 * 60 * 1000, // catalogue : change rarement
     queryFn: () => api.entities.Product.filter({ is_active: true }, 'name', 100),
   });
 

@@ -30,7 +30,7 @@ function getRoleBadge(role) {
 function CommentItem({ comment, currentUser, onDelete, onOpenMenu }) {
   const badge = getRoleBadge(comment.author_role);
   const initials = comment.author_name?.split(' ').map(n => n[0]).join('').slice(0, 2) || '?';
-  const isOwner = currentUser?.email === comment.author_email || currentUser?.role === 'admin';
+  const isOwner = currentUser?.role === 'admin' || (!!currentUser?.email && currentUser.email === comment.author_email);
 
   return (
     <motion.div
@@ -130,7 +130,7 @@ function PostCard({ post, currentUser, onLike, onDelete, likes, comments, onComm
   const [submitting, setSubmitting] = useState(false);
 
   const postLikes = likes.filter(l => l.post_id === post.id);
-  const userLike = postLikes.find(l => l.user_email === currentUser?.email);
+  const userLike = currentUser?.email ? postLikes.find(l => l.user_email === currentUser.email) : undefined;
   const likeCount = postLikes.length;
 
   // Group reactions by emoji
@@ -143,7 +143,7 @@ function PostCard({ post, currentUser, onLike, onDelete, likes, comments, onComm
   const commentCount = postComments.length;
   const badge = getRoleBadge(post.author_role);
   const initials = post.author_name?.split(' ').map(n => n[0]).join('').slice(0, 2) || '?';
-  const isOwner = currentUser?.email === post.author_email || currentUser?.role === 'admin';
+  const isOwner = currentUser?.role === 'admin' || (!!currentUser?.email && currentUser.email === post.author_email);
 
   const handleSubmitComment = async () => {
     if (!commentText.trim()) return;
@@ -374,6 +374,7 @@ export default function Feed() {
 
   const { data: employees = [] } = useQuery({
     queryKey: ['employees'],
+    staleTime: 5 * 60 * 1000, // catalogue : change rarement
     queryFn: () => api.entities.Employee.filter({ is_active: true }, 'sort_order', 50),
   });
 

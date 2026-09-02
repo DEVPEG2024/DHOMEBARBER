@@ -44,6 +44,7 @@ export default function Events() {
 
   const { data: employees = [] } = useQuery({
     queryKey: ['employees'],
+    staleTime: 5 * 60 * 1000, // catalogue : change rarement
     queryFn: () => api.entities.Employee.filter({ is_active: true }, 'sort_order', 50),
   });
 

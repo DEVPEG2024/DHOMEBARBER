@@ -31,7 +31,7 @@ export default function Appointments() {
     queryKey: ['myAppointments', user?.email],
     queryFn: () => api.entities.Appointment.filter({ client_email: user.email }, '-date', 100),
     enabled: !!user?.email,
-    refetchInterval: 15000, // Auto-refresh toutes les 15s
+    refetchInterval: 30000, // Auto-refresh toutes les 30s
   });
 
   const cancelMutation = useMutation({
@@ -39,6 +39,11 @@ export default function Appointments() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['myAppointments'] });
       toast.success('Rendez-vous annulé');
+      setCancelId(null);
+    },
+    onError: (err) => {
+      // Le serveur refuse l'annulation dans le délai du salon (cancellation_hours) : afficher son message
+      toast.error(err?.message || "Impossible d'annuler ce rendez-vous");
       setCancelId(null);
     },
   });

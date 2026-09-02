@@ -1,5 +1,6 @@
 import React, { createContext, useState, useContext, useEffect, useCallback } from 'react';
 import { api } from '@/api/apiClient';
+import { queryClientInstance } from '@/lib/query-client';
 
 const AuthContext = createContext();
 
@@ -38,6 +39,9 @@ export const AuthProvider = ({ children }) => {
 
   const login = useCallback(async (email, password) => {
     await api.auth.loginViaEmailPassword(email, password);
+    // Les réponses de l'API dépendent du rôle (champs masqués en anonyme) :
+    // on vide le cache React Query pour ne pas réutiliser des données anonymes.
+    queryClientInstance.clear();
     // Fetch full user with permissions from /me endpoint
     const fullUser = await api.auth.me();
     setUser(fullUser);
@@ -51,6 +55,7 @@ export const AuthProvider = ({ children }) => {
     if (access_token) {
       api.auth.setToken(access_token);
     }
+    queryClientInstance.clear();
     setUser(newUser);
     setIsAuthenticated(true);
     return newUser;

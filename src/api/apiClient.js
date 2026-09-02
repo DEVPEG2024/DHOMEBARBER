@@ -15,6 +15,8 @@
  *   api.integrations.Core.SendEmail(data)
  */
 
+import { compressImage } from '@/lib/imageCompress';
+
 export const resolvedAppId = 'prod';
 export const API_SERVER_URL = 'https://dhomebarber-api-3aabb8313cb6.herokuapp.com';
 
@@ -161,18 +163,16 @@ const auth = {
 // ── Integrations module ──────────────────────────────────────────────
 const integrations = {
   Core: {
-    /** Multipart file upload — tries /upload then legacy endpoint */
+    /**
+     * POST /integration-endpoints/Core/UploadFile (multipart).
+     * Les images sont compressées côté client avant l'envoi (voir lib/imageCompress.js) :
+     * le serveur les stocke en base64 et les renvoie inline dans chaque liste.
+     */
     async UploadFile({ file }) {
+      const upload = await compressImage(file);
       const formData = new FormData();
-      formData.append('file', file, file.name);
-      try {
-        return await request('POST', `${API_SERVER_URL}/upload`, formData);
-      } catch (e) {
-        // Fallback to legacy Base44 endpoint
-        const formData2 = new FormData();
-        formData2.append('file', file, file.name);
-        return request('POST', `${API_BASE}/integration-endpoints/Core/UploadFile`, formData2);
-      }
+      formData.append('file', upload, upload.name || file.name);
+      return request('POST', `${API_BASE}/integration-endpoints/Core/UploadFile`, formData);
     },
 
     /** POST /integration-endpoints/Core/SendEmail */

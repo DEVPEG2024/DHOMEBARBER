@@ -23,7 +23,7 @@ export default function Orders() {
     queryKey: ['myOrders', user?.email],
     queryFn: () => api.entities.Order.filter({ client_email: user?.email }, '-created_date', 100),
     enabled: !!user?.email,
-    refetchInterval: 10000, // Auto-refresh toutes les 10s
+    refetchInterval: 30000, // Auto-refresh toutes les 30s
   });
 
   return (

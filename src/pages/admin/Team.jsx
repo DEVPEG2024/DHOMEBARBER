@@ -28,7 +28,7 @@ export default function Team() {
   const queryClient = useQueryClient();
 
   const { data: employees = [] } = useQuery({
-    queryKey: ['employees'],
+    queryKey: ['employees', 'all'], // liste complète (inactifs inclus) : clé distincte des pages client
     queryFn: () => api.entities.Employee.list('sort_order', 50),
   });
 

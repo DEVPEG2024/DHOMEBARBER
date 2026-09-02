@@ -174,7 +174,8 @@ export default function BarberProfile() {
   const { id } = useParams();
 
   const { data: employee, isLoading } = useQuery({
-    queryKey: ['employee', id],
+    queryKey: ['employees', 'profile', id],
+    staleTime: 5 * 60 * 1000, // catalogue : change rarement
     queryFn: async () => {
       const all = await api.entities.Employee.filter({ is_active: true }, 'sort_order', 100);
       return all.find(e => e.id === id) || null;
@@ -185,6 +186,7 @@ export default function BarberProfile() {
 
   const { data: skillCategories = [] } = useQuery({
     queryKey: ['skillCategories'],
+    staleTime: 5 * 60 * 1000, // catalogue : change rarement
     queryFn: async () => {
       try {
         return await api.entities.SkillCategory.list('sort_order', 100);

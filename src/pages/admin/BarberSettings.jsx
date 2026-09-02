@@ -198,7 +198,7 @@ export default function BarberSettings() {
   const [saveStatus, setSaveStatus] = useState('');
 
   const { data: employees = [], isLoading: loadingEmployees } = useQuery({
-    queryKey: ['employees'],
+    queryKey: ['employees', 'me'], // liste complète : clé distincte des pages client
     queryFn: () => api.entities.Employee.list('-created_at', 100),
   });
 

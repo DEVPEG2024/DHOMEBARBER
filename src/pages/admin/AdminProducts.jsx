@@ -26,7 +26,7 @@ export default function AdminProducts() {
   const queryClient = useQueryClient();
 
   const { data: products = [] } = useQuery({
-    queryKey: ['products'],
+    queryKey: ['products', 'all'], // liste complète (inactifs inclus) : clé distincte de la boutique
     queryFn: () => api.entities.Product.list('name', 200),
   });
 

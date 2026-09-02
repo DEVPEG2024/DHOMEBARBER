@@ -45,11 +45,13 @@ export default function Booking() {
 
   const { data: services = [] } = useQuery({
     queryKey: ['services'],
+    staleTime: 5 * 60 * 1000, // catalogue : change rarement
     queryFn: () => api.entities.Service.filter({ is_active: true }, 'sort_order', 100),
   });
 
   const { data: employees = [] } = useQuery({
     queryKey: ['employees'],
+    staleTime: 5 * 60 * 1000, // catalogue : change rarement
     queryFn: () => api.entities.Employee.filter({ is_active: true }, 'sort_order', 50),
   });
 

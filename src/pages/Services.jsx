@@ -55,6 +55,7 @@ export default function Services() {
 
   const { data: categories = [] } = useQuery({
     queryKey: ['serviceCategories'],
+    staleTime: 5 * 60 * 1000, // catalogue : change rarement
     queryFn: async () => {
       try {
         return await api.entities.ServiceCategory.filter({ is_active: true }, 'sort_order', 50);
@@ -66,6 +67,7 @@ export default function Services() {
 
   const { data: services = [] } = useQuery({
     queryKey: ['services'],
+    staleTime: 5 * 60 * 1000, // catalogue : change rarement
     queryFn: () => api.entities.Service.filter({ is_active: true }, 'sort_order', 100),
   });
 

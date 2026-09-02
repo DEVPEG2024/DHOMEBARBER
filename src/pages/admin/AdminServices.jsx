@@ -23,12 +23,12 @@ export default function AdminServices() {
   const queryClient = useQueryClient();
 
   const { data: services = [] } = useQuery({
-    queryKey: ['services'],
+    queryKey: ['services', 'all'], // liste complète (inactifs inclus) : clé distincte des pages client
     queryFn: () => api.entities.Service.list('sort_order', 200),
   });
 
   const { data: categories = [] } = useQuery({
-    queryKey: ['serviceCategories'],
+    queryKey: ['serviceCategories', 'all'], // liste complète : clé distincte de la page Prestations
     queryFn: async () => {
       try {
         return await api.entities.ServiceCategory.list('sort_order', 50);
