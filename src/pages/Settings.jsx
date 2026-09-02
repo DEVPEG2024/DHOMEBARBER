@@ -6,6 +6,7 @@ import { motion } from 'framer-motion';
 import { User, Mail, Phone, Bell, Shield, ChevronRight, Cake, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
+import { isNative, openExternalUrl } from '@/lib/capacitor';
 
 export default function Settings() {
   const { user, refreshUser, logout } = useAuth();
@@ -17,9 +18,20 @@ export default function Settings() {
   const [deleteLoading, setDeleteLoading] = useState(false);
   const pushSupported = isPushSupported();
 
+  // birth_date peut arriver en ISO complet (ex. 1990-05-04T00:00:00.000Z) : on garde YYYY-MM-DD
+  const userBirthDate = user?.birth_date ? String(user.birth_date).slice(0, 10) : '';
+
   useEffect(() => {
-    if (user?.birth_date) setBirthDate(user.birth_date);
-  }, [user]);
+    setBirthDate(userBirthDate);
+  }, [userBirthDate]);
+
+  // Dans l'app native, target="_blank" ne fait rien : on ouvre les pages légales via le navigateur in-app
+  const openLegal = (path) => (e) => {
+    if (isNative) {
+      e.preventDefault();
+      openExternalUrl(`https://dhomebarber.fr${path}`);
+    }
+  };
 
   // Check current subscription status on mount
   useEffect(() => {
@@ -108,7 +120,7 @@ export default function Settings() {
                   max={new Date().toISOString().split('T')[0]}
                   className="flex-1 bg-transparent text-sm font-semibold text-foreground focus:outline-none"
                 />
-                {birthDate !== (user?.birth_date || '') && (
+                {birthDate !== userBirthDate && (
                   <button
                     onClick={async () => {
                       if (!user?.id) return;
@@ -239,11 +251,11 @@ export default function Settings() {
         {/* Legal links */}
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}
           className="rounded-2xl border border-white/8 bg-white/4 backdrop-blur-xl overflow-hidden mb-4">
-          <a href="/privacy.html" target="_blank" rel="noopener noreferrer" className="flex items-center justify-between px-4 py-3 hover:bg-white/5 transition-colors border-b border-white/5">
+          <a href="/privacy.html" target="_blank" rel="noopener noreferrer" onClick={openLegal('/privacy.html')} className="flex items-center justify-between px-4 py-3 hover:bg-white/5 transition-colors border-b border-white/5">
             <span className="text-sm text-muted-foreground">Politique de confidentialité</span>
             <ChevronRight className="w-4 h-4 text-muted-foreground" />
           </a>
-          <a href="/cgu.html" target="_blank" rel="noopener noreferrer" className="flex items-center justify-between px-4 py-3 hover:bg-white/5 transition-colors">
+          <a href="/cgu.html" target="_blank" rel="noopener noreferrer" onClick={openLegal('/cgu.html')} className="flex items-center justify-between px-4 py-3 hover:bg-white/5 transition-colors">
             <span className="text-sm text-muted-foreground">Conditions générales d'utilisation</span>
             <ChevronRight className="w-4 h-4 text-muted-foreground" />
           </a>
