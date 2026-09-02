@@ -1,5 +1,6 @@
 import React, { Suspense } from 'react';
 import { Toaster } from "@/components/ui/toaster"
+import { Toaster as SonnerToaster } from "@/components/ui/sonner"
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClientInstance } from '@/lib/query-client'
 import { BrowserRouter as Router, Route, Routes, Navigate, Outlet, useLocation } from 'react-router-dom';
@@ -226,6 +227,7 @@ function App() {
               </Router>
               <MusicToggle />
               <Toaster />
+              <SonnerToaster />
             </QueryClientProvider>
           </AuthProvider>
         </MusicProvider>
