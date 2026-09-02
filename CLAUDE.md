@@ -29,7 +29,7 @@
 - Scripts : `npm run cap:sync` (build + sync), `npm run cap:ios`, `npm run cap:android` (build + sync + ouverture Xcode / Android Studio)
 - Le build web (`dist/`) est copié dans les projets natifs par `cap sync` ; les apps chargent le bundle local, pas dhomebarber.fr
 - Android : `android/dhomebarber-release.keystore` + `android/keystore.properties` servent à signer les releases Play Store. **Ils ne sont dans aucun git : à sauvegarder ailleurs, sans eux aucune mise à jour Play Store n'est possible.**
-- Dernier état connu (2 septembre 2026) : Android 1.0.1 (versionCode 2), iOS 1.0 (build 1). Incrémenter `versionCode` / `CURRENT_PROJECT_VERSION` avant chaque envoi aux stores.
+- Dernier état connu (2 septembre 2026) : Android 1.0.1 (versionCode 2), iOS 1.0 (build 2, en TestFlight interne). Incrémenter `versionCode` / `CURRENT_PROJECT_VERSION` avant chaque envoi aux stores.
 - Plugins utilisés : push-notifications, haptics, browser, status-bar, splash-screen, keyboard, app (wrapper dans `src/lib/capacitor.js` : `isNative`, `platform`, `initCapacitor`, `hapticFeedback`, `openExternalUrl`)
 
 ## Structure Frontend
