@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">D\'Home Barber</string>
+    <string name="title_activity_main">D\'Home Barber</string>
+    <string name="package_name">fr.dhomebarber.app</string>
+    <string name="custom_url_scheme">fr.dhomebarber.app</string>
+</resources>
