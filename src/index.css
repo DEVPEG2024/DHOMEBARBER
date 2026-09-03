@@ -158,11 +158,16 @@ body.keyboard-open {
    Accueil : pulsations d'incitation au clic (bouton Réserver, bloc Carte Cadeau)
    Les animations sont posées sur un conteneur (le <a>), jamais sur l'élément
    animé par framer-motion (whileTap), pour ne pas écraser son transform inline.
+   Fluidité : on n'anime que transform et opacity (composés par le GPU) ; les
+   ombres / halos sont statiques sur des pseudo-éléments dont seule l'opacité
+   et l'échelle varient. Jamais de box-shadow animé (repeint à chaque image).
    --------------------------------------------------------------------------- */
 .pulse-cta {
   position: relative;
   display: inline-block;
-  animation: pulse-breathe 2.4s ease-in-out infinite;
+  transform: translateZ(0);
+  will-change: transform;
+  animation: pulse-breathe 2.8s cubic-bezier(0.37, 0, 0.63, 1) infinite;
 }
 .pulse-cta::before,
 .pulse-cta::after {
@@ -171,17 +176,22 @@ body.keyboard-open {
   inset: 0;
   border-radius: inherit;
   pointer-events: none;
-  box-shadow: 0 0 0 0 hsl(var(--primary) / 0.7);
-  animation: pulse-ring 2.4s ease-out infinite;
+  box-shadow: 0 0 0 2px hsl(var(--primary) / 0.6), 0 0 16px 3px hsl(var(--primary) / 0.35);
+  opacity: 0;
+  transform: scale(1);
+  will-change: transform, opacity;
+  animation: pulse-ring 2.8s cubic-bezier(0.25, 0.46, 0.45, 0.94) infinite;
 }
 .pulse-cta::after {
-  animation-delay: 0.8s;
+  animation-delay: 1.4s;
 }
 
 .pulse-card {
   position: relative;
   display: block;
-  animation: pulse-breathe-soft 3s ease-in-out infinite;
+  transform: translateZ(0);
+  will-change: transform;
+  animation: pulse-breathe-soft 3.2s cubic-bezier(0.37, 0, 0.63, 1) infinite;
 }
 .pulse-card::before {
   content: '';
@@ -190,37 +200,44 @@ body.keyboard-open {
   border-radius: inherit;
   pointer-events: none;
   z-index: 1;
-  animation: pulse-glow 3s ease-in-out infinite;
+  box-shadow: 0 0 0 2px hsl(var(--primary) / 0.45), 0 0 44px 6px hsl(var(--primary) / 0.4);
+  opacity: 0.2;
+  will-change: opacity;
+  animation: pulse-fade 3.2s cubic-bezier(0.37, 0, 0.63, 1) infinite;
 }
 
 .gift-wiggle {
   transform-origin: 50% 60%;
-  animation: gift-wiggle 3s ease-in-out infinite;
+  will-change: transform;
+  animation: gift-wiggle 3.2s cubic-bezier(0.37, 0, 0.63, 1) infinite;
 }
 
+/* Respiration : sinusoïdale, sans à-coup aux extrémités */
 @keyframes pulse-breathe {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.045); }
+  0%, 100% { transform: translateZ(0) scale(1); }
+  50% { transform: translateZ(0) scale(1.04); }
 }
 @keyframes pulse-breathe-soft {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.015); }
+  0%, 100% { transform: translateZ(0) scale(1); }
+  50% { transform: translateZ(0) scale(1.012); }
 }
+/* Anneau : apparaît en fondu, s'écarte du bouton (échelle non uniforme pour
+   rester à distance constante d'un bouton large) et s'éteint en douceur */
 @keyframes pulse-ring {
-  0% { box-shadow: 0 0 0 0 hsl(var(--primary) / 0.7); }
-  70% { box-shadow: 0 0 0 18px hsl(var(--primary) / 0); }
-  100% { box-shadow: 0 0 0 18px hsl(var(--primary) / 0); }
+  0% { transform: scale(1); opacity: 0; }
+  14% { opacity: 0.85; }
+  100% { transform: scale(1.16, 1.55); opacity: 0; }
 }
-@keyframes pulse-glow {
-  0%, 100% { box-shadow: 0 0 0 0 hsl(var(--primary) / 0.45), 0 0 24px 0 hsl(var(--primary) / 0.15); }
-  50% { box-shadow: 0 0 0 8px hsl(var(--primary) / 0), 0 0 44px 4px hsl(var(--primary) / 0.45); }
+@keyframes pulse-fade {
+  0%, 100% { opacity: 0.2; }
+  50% { opacity: 1; }
 }
 @keyframes gift-wiggle {
-  0%, 60%, 100% { transform: rotate(0deg) scale(1); }
-  65% { transform: rotate(-12deg) scale(1.15); }
-  75% { transform: rotate(10deg) scale(1.15); }
-  85% { transform: rotate(-6deg) scale(1.1); }
-  92% { transform: rotate(4deg) scale(1.05); }
+  0%, 62%, 100% { transform: rotate(0deg) scale(1); }
+  68% { transform: rotate(-12deg) scale(1.15); }
+  76% { transform: rotate(10deg) scale(1.15); }
+  84% { transform: rotate(-6deg) scale(1.1); }
+  92% { transform: rotate(3deg) scale(1.04); }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -56,13 +56,11 @@ const itemVariants = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: 'easeOut' } },
 };
 
-// Décor parallaxe sous les cartes des barbers : rayures « barber pole » + halos.
-// Période horizontale des rayures = pas du dégradé / sin(angle) : on translate
-// la couche modulo cette période, le défilement est donc sans couture.
-const STRIPE_ANGLE = 115;
-const STRIPE_STEP = 44;
-const STRIPE_PERIOD = STRIPE_STEP / Math.sin((STRIPE_ANGLE * Math.PI) / 180);
-const GLOW_PERIOD = 360;
+// Décor parallaxe sous les cartes des barbers : nuances de vert et de bleu
+// (halos flous répétés). Chaque couche est translatée modulo la période de son
+// motif répété, le défilement est donc sans couture.
+const GREEN_PERIOD = 440;
+const BLUE_PERIOD = 340;
 
 function BarberMarquee({ employees }) {
   const scrollRef = useRef(null);
@@ -86,13 +84,13 @@ function BarberMarquee({ employees }) {
 
   // Parallaxe horizontal : le décor suit le carrousel mais moins vite (profondeur)
   const travel = useMotionValue(0);
-  const stripesX = useTransform(travel, (v) => -((v * 0.45) % STRIPE_PERIOD));
-  const glowX = useTransform(travel, (v) => -((v * 0.2) % GLOW_PERIOD));
+  const greenX = useTransform(travel, (v) => -((v * 0.2) % GREEN_PERIOD));
+  const blueX = useTransform(travel, (v) => -((v * 0.4) % BLUE_PERIOD));
   // Parallaxe vertical : le décor glisse légèrement quand la page défile
   const pageOffset = useMotionValue(0);
   const smoothOffset = useSpring(pageOffset, { stiffness: 90, damping: 22, mass: 0.6 });
-  const stripesY = useTransform(smoothOffset, (v) => v * 0.12);
-  const glowY = useTransform(smoothOffset, (v) => v * 0.22);
+  const greenY = useTransform(smoothOffset, (v) => v * 0.12);
+  const blueY = useTransform(smoothOffset, (v) => v * 0.22);
 
   const syncParallax = useCallback(() => {
     const el = scrollRef.current;
@@ -184,23 +182,34 @@ function BarberMarquee({ employees }) {
         className="absolute inset-x-0 -inset-y-3 overflow-hidden pointer-events-none"
         style={{ maskImage: edgeMask, WebkitMaskImage: edgeMask }}
       >
+        {/* Teinte de fond fixe, du vert au bleu */}
+        <div
+          className="absolute inset-0"
+          style={{ backgroundImage: 'linear-gradient(100deg, hsl(var(--primary) / 0.2), rgba(37, 99, 235, 0.2))' }}
+        />
+        {/* Halos verts (lents) */}
         <motion.div
           className="absolute"
           style={{
-            top: -90, bottom: -90, left: -STRIPE_PERIOD * 2, right: -STRIPE_PERIOD * 2,
-            x: stripesX, y: stripesY,
-            backgroundImage: `repeating-linear-gradient(${STRIPE_ANGLE}deg, hsl(var(--primary) / 0.13) 0 ${STRIPE_STEP * 0.3}px, transparent ${STRIPE_STEP * 0.3}px ${STRIPE_STEP}px)`,
+            top: -90, bottom: -90, left: -GREEN_PERIOD, right: -GREEN_PERIOD,
+            x: greenX, y: greenY,
+            backgroundImage: 'radial-gradient(ellipse 46% 70% at 50% 40%, hsl(var(--primary) / 0.65), transparent 70%)',
+            backgroundSize: `${GREEN_PERIOD}px 100%`,
+            backgroundRepeat: 'repeat-x',
+            filter: 'blur(14px)',
           }}
         />
+        {/* Halos bleus (plus rapides), décalés d'une demi-période */}
         <motion.div
           className="absolute"
           style={{
-            top: -90, bottom: -90, left: -GLOW_PERIOD, right: -GLOW_PERIOD,
-            x: glowX, y: glowY,
-            backgroundImage: 'radial-gradient(ellipse 42% 60% at 50% 55%, hsl(var(--primary) / 0.32), transparent 70%)',
-            backgroundSize: `${GLOW_PERIOD}px 100%`,
+            top: -90, bottom: -90, left: -BLUE_PERIOD, right: -BLUE_PERIOD,
+            x: blueX, y: blueY,
+            backgroundImage: 'radial-gradient(ellipse 40% 62% at 50% 65%, rgba(37, 99, 235, 0.65), transparent 70%)',
+            backgroundSize: `${BLUE_PERIOD}px 100%`,
+            backgroundPosition: `${BLUE_PERIOD / 2}px 0`,
             backgroundRepeat: 'repeat-x',
-            filter: 'blur(6px)',
+            filter: 'blur(14px)',
           }}
         />
       </div>
