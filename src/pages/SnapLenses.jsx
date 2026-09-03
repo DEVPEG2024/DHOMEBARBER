@@ -18,6 +18,8 @@ import { snapConfig, snapSupported } from '@/lib/snapLenses';
 
 const RENDER_WIDTH = 720;
 const RENDER_HEIGHT = 960;
+// Lentilles mises en avant et appliquées d'office si présentes
+const RELEVANT = /hair|cheveu|beard|barbe|colou?r|couleur|coupe|haircut/i;
 
 export default function SnapLenses() {
   const reduceMotion = useReducedMotion();
@@ -79,13 +81,20 @@ export default function SnapLenses() {
         setMessage('Chargement des filtres…');
         const { lenses: loaded } = await cameraKit.lensRepository.loadLensGroups([config.lensGroupId]);
         if (cancelled) return;
-        lensesRef.current = loaded || [];
-        setLenses(lensesRef.current);
+        // Les lentilles cheveux / barbe / couleur d'abord ; aucune lentille appliquée d'office
+        // (une lentille quelconque, comme les démos de Snap, peut recouvrir la caméra de sa propre interface)
+        const relevant = (lens) => RELEVANT.test(lens?.name || '');
+        const sorted = [...(loaded || [])].sort((a, b) => Number(relevant(b)) - Number(relevant(a)));
+        lensesRef.current = sorted;
+        setLenses(sorted);
         setStatus('ready');
         setMessage('');
-        if (lensesRef.current[0]) {
-          await session.applyLens(lensesRef.current[0]);
-          setActiveId(lensesRef.current[0].id);
+        const first = sorted.find(relevant);
+        if (first) {
+          try {
+            await session.applyLens(first);
+            setActiveId(first.id);
+          } catch { /* on reste sans filtre */ }
         }
       } catch (err) {
         if (cancelled) return;
@@ -226,6 +235,17 @@ export default function SnapLenses() {
         {status === 'ready' && (
           <div className="mt-4 -mx-4 px-4 flex gap-3 overflow-x-auto scrollbar-hide pb-1">
             {lenses.length === 0 && <p className="text-xs text-muted-foreground">Aucune lentille publiée dans le groupe du salon.</p>}
+            {lenses.length > 0 && (
+              <button type="button" disabled={applying}
+                onClick={async () => { if (!activeId || !sessionRef.current) return; hapticFeedback(); setApplying(true); try { await sessionRef.current.removeLens(); setActiveId(null); } catch { /* ignoré */ } finally { setApplying(false); } }}
+                className="flex flex-col items-center gap-1.5 shrink-0 w-[72px]">
+                <motion.span animate={{ scale: activeId ? 1 : 1.1 }} transition={{ type: 'spring', stiffness: 400, damping: 22 }}
+                  className={`w-14 h-14 rounded-full border-2 flex items-center justify-center bg-white/5 ${activeId ? 'border-white/15' : 'border-primary shadow-lg shadow-primary/40'}`}>
+                  <X className="w-5 h-5 text-muted-foreground" />
+                </motion.span>
+                <span className={`text-[10px] leading-tight text-center ${activeId ? 'text-muted-foreground' : 'text-foreground font-semibold'}`}>Sans filtre</span>
+              </button>
+            )}
             {lenses.map((lens) => {
               const active = lens.id === activeId;
               return (
