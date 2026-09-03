@@ -1,4 +1,4 @@
-import React, { Suspense } from 'react';
+import React, { Suspense, useLayoutEffect } from 'react';
 import { Toaster } from "@/components/ui/toaster"
 import { Toaster as SonnerToaster } from "@/components/ui/sonner"
 import { QueryClientProvider } from '@tanstack/react-query'
@@ -141,6 +141,24 @@ function GuestOnly() {
   return <Outlet />;
 }
 
+// Remet la page tout en haut à chaque changement de route (le profil barber
+// s'ouvre sur la carte, pas à la position de défilement de la page précédente).
+// Le défilement est instantané malgré `html { scroll-behavior: smooth }`.
+function ScrollToTop() {
+  const { pathname } = useLocation();
+
+  useLayoutEffect(() => {
+    if ('scrollRestoration' in window.history) window.history.scrollRestoration = 'manual';
+    const root = document.documentElement;
+    const previous = root.style.scrollBehavior;
+    root.style.scrollBehavior = 'auto';
+    window.scrollTo(0, 0);
+    root.style.scrollBehavior = previous;
+  }, [pathname]);
+
+  return null;
+}
+
 const AppRoutes = () => {
   const { isLoadingAuth } = useAuth();
 
@@ -223,6 +241,7 @@ function App() {
           <AuthProvider>
             <QueryClientProvider client={queryClientInstance}>
               <Router>
+                <ScrollToTop />
                 <AppRoutes />
               </Router>
               <MusicToggle />

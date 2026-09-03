@@ -37,7 +37,7 @@
 ```
 src/
 ├── api/apiClient.js          # Client HTTP maison (entities, auth, upload) → Heroku
-├── App.jsx                   # Routing (react-router), layouts client/admin, lazy loading admin
+├── App.jsx                   # Routing (react-router), layouts client/admin, lazy loading admin, ScrollToTop (haut de page à chaque route)
 ├── lib/
 │   ├── AuthContext.jsx        # Auth réelle (token localStorage, /me endpoint)
 │   ├── ThemeContext.jsx       # Gestion du thème clair/sombre
