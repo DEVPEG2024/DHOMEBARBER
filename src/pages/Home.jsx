@@ -172,20 +172,22 @@ function BarberMarquee({ employees }) {
   // période avant de reboucler, même avec peu de barbers (carte + gap = 124 px)
   const reps = Math.max(2, 1 + Math.ceil(600 / Math.max(1, employees.length * 124)));
   const doubled = Array.from({ length: reps }, () => employees).flat();
-  const edgeMask = 'linear-gradient(to right, transparent, black 10%, black 90%, transparent)';
+  // Fondu sur les quatre côtés (masques horizontal et vertical combinés) :
+  // aucun bord net, les nuances se dissolvent dans le fond de la page
+  const softMask = 'linear-gradient(to right, transparent, black 18%, black 82%, transparent), linear-gradient(to bottom, transparent, black 38%, black 62%, transparent)';
 
   return (
     <div ref={wrapperRef} className="relative -mx-5">
       {/* Décor parallaxe sous les cartes */}
       <div
         aria-hidden="true"
-        className="absolute inset-x-0 -inset-y-3 overflow-hidden pointer-events-none"
-        style={{ maskImage: edgeMask, WebkitMaskImage: edgeMask }}
+        className="absolute inset-x-0 -inset-y-10 overflow-hidden pointer-events-none"
+        style={{ maskImage: softMask, WebkitMaskImage: softMask, maskComposite: 'intersect', WebkitMaskComposite: 'source-in' }}
       >
         {/* Teinte de fond fixe, du vert au bleu */}
         <div
           className="absolute inset-0"
-          style={{ backgroundImage: 'linear-gradient(100deg, hsl(var(--primary) / 0.2), rgba(37, 99, 235, 0.2))' }}
+          style={{ backgroundImage: 'linear-gradient(100deg, hsl(var(--primary) / 0.3), rgba(37, 99, 235, 0.3))' }}
         />
         {/* Halos verts (lents) */}
         <motion.div
@@ -193,7 +195,7 @@ function BarberMarquee({ employees }) {
           style={{
             top: -90, bottom: -90, left: -GREEN_PERIOD, right: -GREEN_PERIOD,
             x: greenX, y: greenY,
-            backgroundImage: 'radial-gradient(ellipse 46% 70% at 50% 40%, hsl(var(--primary) / 0.65), transparent 70%)',
+            backgroundImage: 'radial-gradient(ellipse 46% 70% at 50% 40%, hsl(var(--primary) / 0.85), transparent 70%)',
             backgroundSize: `${GREEN_PERIOD}px 100%`,
             backgroundRepeat: 'repeat-x',
             filter: 'blur(14px)',
@@ -205,7 +207,7 @@ function BarberMarquee({ employees }) {
           style={{
             top: -90, bottom: -90, left: -BLUE_PERIOD, right: -BLUE_PERIOD,
             x: blueX, y: blueY,
-            backgroundImage: 'radial-gradient(ellipse 40% 62% at 50% 65%, rgba(37, 99, 235, 0.65), transparent 70%)',
+            backgroundImage: 'radial-gradient(ellipse 40% 62% at 50% 65%, rgba(37, 99, 235, 0.85), transparent 70%)',
             backgroundSize: `${BLUE_PERIOD}px 100%`,
             backgroundPosition: `${BLUE_PERIOD / 2}px 0`,
             backgroundRepeat: 'repeat-x',
