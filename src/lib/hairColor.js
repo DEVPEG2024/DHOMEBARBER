@@ -39,6 +39,46 @@ const TONES = {
   natural: { lift: 0.65, contrast: 1.0 },
   vivid: { lift: 0.5, contrast: 1.05 },
 };
+// ---------------------------------------------------------------------------
+// Oklab (espace perceptuel) : mêmes formules que le shader (hairGl.js)
+// ---------------------------------------------------------------------------
+const SRGB_TO_LINEAR = new Float32Array(256);
+for (let i = 0; i < 256; i++) {
+  const c = i / 255;
+  SRGB_TO_LINEAR[i] = c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+/** Oklab [L, a, b] d'une couleur sRGB 0..255. */
+export function rgbToOklab(r, g, b) {
+  const lr = SRGB_TO_LINEAR[r];
+  const lg = SRGB_TO_LINEAR[g];
+  const lb = SRGB_TO_LINEAR[b];
+  const l = Math.cbrt(0.4122214708 * lr + 0.5363325363 * lg + 0.0514459929 * lb);
+  const m = Math.cbrt(0.2119034982 * lr + 0.6806995451 * lg + 0.1073969566 * lb);
+  const s = Math.cbrt(0.0883024619 * lr + 0.2817188376 * lg + 0.6299787005 * lb);
+  return [
+    0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
+    1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
+    0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s,
+  ];
+}
+
+/** Ton d'une couleur (pilote le réalisme) déduit de sa clarté et de son chroma Oklab. */
+function toneOf(lab) {
+  const chroma = Math.hypot(lab[1], lab[2]);
+  if (chroma > 0.11) return 'vivid';
+  if (lab[0] > 0.78) return 'light';
+  if (lab[0] < 0.36) return 'dark';
+  return 'natural';
+}
+
+/** Couleur complète (rgb, Oklab, ton, paramètres) depuis un hexadécimal : préréglages et couleur personnalisée. */
+export function makeColor({ id, name, hex, tone }) {
+  const rgb = hexToRgb(hex);
+  const lab = rgbToOklab(rgb.r, rgb.g, rgb.b);
+  const t = tone || toneOf(lab);
+  return { id, name, hex, tone: t, rgb, lab, targetL: luma(rgb), ...TONES[t], light: t === 'light', dark: t === 'dark' };
+}
+
 export const HAIR_COLORS = [
   { id: 'platine', name: 'Blond platine', hex: '#f1e6c8', tone: 'light' },
   { id: 'blond', name: 'Blond doré', hex: '#d8ae5a', tone: 'light' },
@@ -54,10 +94,7 @@ export const HAIR_COLORS = [
   { id: 'rose', name: 'Rose', hex: '#e0529b', tone: 'vivid' },
   { id: 'rouge', name: 'Rouge', hex: '#c62828', tone: 'vivid' },
   { id: 'vert', name: 'Vert émeraude', hex: '#1f8a5b', tone: 'vivid' },
-].map((c) => {
-  const rgb = hexToRgb(c.hex);
-  return { ...c, rgb, targetL: luma(rgb), ...TONES[c.tone], light: c.tone === 'light', dark: c.tone === 'dark' };
-});
+].map(makeColor);
 
 let modelsPromise = null;
 let currentMode = null;
@@ -297,7 +334,7 @@ export function subtractZone(alpha, zone) {
   }
 }
 
-/** Luminosité moyenne (0..1) des pixels pondérée par un masque alpha. */
+/** Clarté Oklab moyenne (0..1) des pixels pondérée par un masque alpha (même échelle que le shader). */
 export function meanLuminance(pixels, alpha) {
   if (!alpha) return null;
   let sum = 0;
@@ -305,10 +342,43 @@ export function meanLuminance(pixels, alpha) {
   for (let i = 0, j = 0; i < alpha.length; i++, j += 4) {
     const a = alpha[i];
     if (a < 8) continue;
-    sum += pixelLuma(pixels, j) * a;
+    // Clarté achromatique : racine cubique de la luminance linéaire (≈ L d'Oklab)
+    const y = 0.2126 * SRGB_TO_LINEAR[pixels[j]] + 0.7152 * SRGB_TO_LINEAR[pixels[j + 1]] + 0.0722 * SRGB_TO_LINEAR[pixels[j + 2]];
+    sum += Math.cbrt(y) * a;
     wsum += a;
   }
   return wsum > 0 ? sum / wsum : null;
+}
+
+// Ovale complet du visage (points MediaPipe), pour situer la ligne des cheveux
+const FACE_OVAL = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109];
+
+/**
+ * Masque « racines » (alpha 0..255) : bande des cheveux qui longe la ligne des cheveux
+ * (proximité de l'ovale du visage, dilaté et adouci), pondérée par le masque cheveux.
+ * Sans visage : null (pas d'effet racines).
+ */
+export function computeRootsAlpha({ landmarks, hairAlpha, w, h, scratch }) {
+  if (!landmarks || landmarks.length < 470 || !hairAlpha || hairAlpha.length !== w * h) return null;
+  if (scratch.width !== w || scratch.height !== h) { scratch.width = w; scratch.height = h; }
+  const ctx = scratch.getContext('2d', { willReadFrequently: true });
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = '#fff';
+  pathFromPoints(ctx, landmarks, FACE_OVAL, w, h);
+  ctx.fill();
+  const data = ctx.getImageData(0, 0, w, h).data;
+  const face = new Uint8ClampedArray(w * h);
+  for (let i = 0, j = 3; i < face.length; i++, j += 4) face[i] = data[j];
+  // Dilatation douce : la bande racine s'étend sur ~8 % de la largeur depuis la peau
+  const near = boxBlur(face, w, h, Math.max(4, Math.round(w / 12)));
+  const out = new Uint8ClampedArray(w * h);
+  for (let i = 0; i < out.length; i++) {
+    const n = near[i] / 255;
+    // 0 loin du visage, 1 au contact : rampe, puis pondération par la présence de cheveux
+    const band = n < 0.08 ? 0 : n > 0.5 ? 1 : (n - 0.08) / 0.42;
+    out[i] = band * (hairAlpha[i] / 255) * 255;
+  }
+  return boxBlur(out, w, h, 2);
 }
 
 // ---------------------------------------------------------------------------

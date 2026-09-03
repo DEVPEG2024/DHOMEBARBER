@@ -23,7 +23,7 @@
 - Init DB : `heroku run node init-db.js --app dhomebarber-api`
 - PostgreSQL addon : `postgresql-deep-70510` (plan essential-0)
 - La session Heroku CLI expire régulièrement : relancer `heroku login` si les commandes renvoient `Invalid credentials`
-- Variables d'environnement attendues : `DATABASE_URL`, `JWT_SECRET`, `FRONTEND_URL`, `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_EMAIL`, `SMTP_HOST` (défaut smtp.hostinger.com), `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`
+- Variables d'environnement attendues : `DATABASE_URL`, `JWT_SECRET`, `FRONTEND_URL`, `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_EMAIL`, `SMTP_HOST` (défaut smtp.hostinger.com), `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` ; optionnelles : `FAL_KEY` (active le mode AI ULTRA de l'essayage couleur, release v69), `HAIR_ULTRA_EDIT_MODEL`
 
 ### Apps natives (Capacitor)
 - Scripts : `npm run cap:sync` (build + sync), `npm run cap:ios`, `npm run cap:android` (build + sync + ouverture Xcode / Android Studio)
@@ -46,7 +46,9 @@ src/
 │   ├── useLiveCount.js        # Hook WebSocket → compteur d'utilisateurs connectés (/ws/live)
 │   ├── barberPhoto.js         # Format des photos de barbers (portrait 1748 × 2480, ratio + fond sombre)
 │   ├── calendarLinks.js       # Ajout au calendrier : URL Google Agenda, fichier .ics (VTIMEZONE Europe/Paris), openCalendar web / natif
-│   ├── hairColor.js           # Essayage couleur : chargement MediaPipe (hair segmenter), palette, masque → alpha, rendu canvas (modes de fusion)
+│   ├── hairColor.js           # Essayage couleur : MediaPipe (cheveux + visage), palette Oklab, masques barbe / racines, repli canvas 2D
+│   ├── hairGl.js              # Essayage couleur : shader WebGL Oklab (mode FAST)
+│   ├── hairUltra.js           # Essayage couleur : appel du mode AI ULTRA (backend)
 │   ├── app-params.js          # Paramètres app (appId, token, etc.)
 │   ├── pushNotifications.js   # Service Worker push notifications (web)
 │   ├── query-client.js        # React Query config
@@ -125,13 +127,15 @@ dhomebarber-api/
 ├── lib/
 │   ├── accessControl.js # Politique de lecture par rôle (applyReadPolicy), validation, identité du compte, code carte cadeau
 │   ├── emailHelper.js # Nodemailer SMTP : bienvenue, confirmation/rappel/annulation RDV, commande, événements, avis, anniversaire, relance
-│   └── pushHelper.js  # sendPushToRole, sendPushToEmail, sendPushToEmployee, sendToSubscriptions (Web Push, lots de 50)
+│   ├── pushHelper.js  # sendPushToRole, sendPushToEmail, sendPushToEmployee, sendToSubscriptions (Web Push, lots de 50)
+│   └── hairUltra.js   # AI ULTRA : SAM 3 + FLUX Kontext (fal.ai) + fusion gardée par le masque (sharp)
 ├── jobs/
 │   ├── appointmentReminder.js  # Toutes les 30 min : rappel RDV (push + email)
 │   ├── reviewReminder.js       # Toutes les 30 min : demande d'avis après prestation (review_reminder_sent)
 │   ├── birthdayReminder.js     # Tous les jours 8h : notif + email anniversaire (users.birth_date)
 │   └── comebackReminder.js     # Tous les jours 10h Paris : relance « il est temps de revenir » (comeback_reminder_sent), --dry-run
 └── routes/
+    ├── hairUltra.js   # POST /ai/hair-ultra : recoloration HD (lib/hairUltra.js, fal.ai, FAL_KEY)
     ├── entities.js    # CRUD générique : politique d'accès par rôle (CREATE_RULES / UPDATE_RULES), emails sur création RDV / commande / événement
     ├── auth.js        # register, login, /me, forgot-password, reset-password, delete-account, logout
     ├── public.js      # Public settings endpoint
@@ -286,17 +290,15 @@ Règle commune : n'animer que `transform` et `opacity`, respecter `useReducedMot
 - **Carte FUT, gyroscope** (`BarberCard.jsx` + `lib/motion.js`) : `deviceorientation` → mêmes motion values que le pointeur (gamma → rotateY ± 18°, beta − 40 → rotateX ± 14°), pointeur prioritaire 300 ms. **Autorisation gérée au niveau de l'app** : `armMotionPermissionOnFirstGesture()` dans `main.jsx` demande `DeviceOrientationEvent.requestPermission()` au premier geste valide n'importe où dans l'app (touchend / pointerup / click / keydown, Safari ne compte pas `pointerdown`), résultat mémorisé en `localStorage` (`dhb-motion-permission`) et diffusé aux cartes via `onMotionPermission`. Sans `requestPermission` (Android, web), actif d'emblée. Impossible d'activer sans aucun geste sur iOS : c'est une règle de Safari / WKWebView
 - **Tailwind** : `theme.extend.opacity` ajoute 2, 3, 4, 6, 8, 12 car le code utilise `bg-white/4`, `border-white/8`… que Tailwind 3.4 ignorait silencieusement (fonds et bordures très légers absents du CSS compilé jusqu'ici)
 
-### Essayage couleur « Nouvelle tête » (`src/pages/TryOn.jsx`, `src/lib/hairColor.js`, `src/lib/hairGl.js`, ajouté le 3 sept. 2026)
-- **Tout sur l'appareil**, aucune image envoyée au backend. Deux modèles MediaPipe (`@mediapipe/tasks-vision`, épinglé ; le WASM est chargé depuis jsDelivr **à la même version** que le paquet, constante `TASKS_VISION_VERSION` à mettre à jour avec le paquet ; modèles depuis `storage.googleapis.com`) : `hair_segmenter` (masque cheveux par pixel) et `face_landmarker` (478 points du visage, pour la barbe). Page chargée à la demande (`React.lazy`)
-- **Barbe** : le modèle cheveux ne la voit pas. `computeBeardAlpha` délimite la zone avec les points du visage (contour bas de l'ovale `JAW`, bord haut joues → sous le nez `BEARD_TOP`, lèvres `LIPS` exclues avec marge, flou de bord), puis ne garde que les pixels plus sombres que la peau de référence (joues / front, `SKIN_POINTS`) et peu saturés (la peau ombrée est orangée). La zone barbe est retirée du masque cheveux (`subtractZone`). Barbes claires sur peau claire : détection faible, connu
-- **Cible** : sélecteur Cheveux / Barbe / Les deux (`target`). Indication « Visage non détecté » si la barbe est ciblée sans visage
-- **Rendu réaliste** : shader WebGL (`createHairRenderer`) : teinte et saturation de la cible, luminosité d'origine conservée et déplacée vers celle de la cible (`lift` par ton de couleur : light 0,9 / dark 0,8 / natural 0,65 / vivid 0,5 ; barbe × 0,85), écarts autour de la moyenne conservés (`contrast`), reflets gardés, saturation réduite dans les extrêmes. Luminosité moyenne cheveux / barbe calculée à chaque image (`meanLuminance`). **Pas de `UNPACK_FLIP_Y_WEBGL`** (ignoré pour les ImageBitmap, ce qui désalignait image et masques) : l'orientation est gérée dans le vertex shader. Repli canvas 2D (`renderHairColor2D`) sans WebGL
-- **Pipeline** : analyse en 360 px de large (`PROC_WIDTH`), masques → alpha avec rampe douce et lissage temporel, textures 8 bits bilinéaires, rendu à la résolution du flux / de la photo (max 1080 px)
-- **Modes** : caméra frontale (`getUserMedia`, flux en miroir à l'écran, photo remise à l'endroit à la capture) et photo (fichier, orientation EXIF via `createImageBitmap`, une analyse puis rendu à chaque changement de teinte / intensité / cible). Repli automatique sur le mode photo si la caméra est refusée ou absente
-- **Partage** : `navigator.share` avec fichier si disponible, sinon téléchargement (web) ou consigne « maintenez l'image » (natif). Bouton « Réserver une coloration » → `/booking?services=<prestations dont le nom contient colo / mèche / décolo / blond>`
-- **Natif** : `NSCameraUsageDescription` (iOS, Info.plist) et `android.permission.CAMERA` (AndroidManifest) déclarés localement (dossiers hors git) ; la WebView Capacitor demande la permission à l'exécution. `getUserMedia` exige un contexte sécurisé : https, `capacitor://localhost`, `https://localhost`
-- Entrée : section « Nouvelle tête » de l'accueil (`try-on` dans `DEFAULT_SECTION_ORDER`, ajoutée en fin d'ordre pour les ordres déjà sauvegardés)
-- Test : harnais Chrome headless avec `--use-angle=swiftshader --enable-unsafe-swiftshader` (WebGL logiciel ; avec `--disable-gpu` l'analyse échoue), mode photo avec les portraits des barbers (Romain / Kevin pour cheveux + barbe ; Dom porte une casquette, barbe seulement)
+### Essayage couleur « Nouvelle tête » (`src/pages/TryOn.jsx`, `src/lib/hairColor.js`, `src/lib/hairGl.js`, `src/lib/hairUltra.js`)
+Deux modes. **FAST** = aperçu temps réel sur l'appareil ; **AI ULTRA** = traitement final haute qualité côté serveur (`dhomebarber-api/lib/hairUltra.js`), visible seulement si `features.hairUltra` des paramètres publics est vrai (clé `FAL_KEY` sur Heroku).
+- **Détection (FAST), tout sur l'appareil** : deux modèles MediaPipe (`@mediapipe/tasks-vision`, épinglé ; WASM chargé depuis jsDelivr **à la même version** que le paquet, constante `TASKS_VISION_VERSION` ; modèles depuis `storage.googleapis.com`) : `hair_segmenter` (masque cheveux) et `face_landmarker` (478 points). **Barbe** : zone tracée par les points du visage (`JAW`, `BEARD_TOP`, lèvres `LIPS` exclues, bords floutés) puis pixels plus sombres que la peau (`SKIN_POINTS`) et peu saturés ; retirée du masque cheveux (`subtractZone`). **Racines** : `computeRootsAlpha` = bande des cheveux le long de l'ovale du visage dilaté. Analyse en 360 px (`PROC_WIDTH`), masques → alpha avec rampe douce et lissage temporel
+- **Rendu FAST, shader WebGL en Oklab** (`createHairRenderer`) : clarté d'origine conservée, sa moyenne (`meanLuminance`, clarté Oklab) déplacée vers celle de la cible selon le ton (`TONES` : light 0,9 / dark 0,8 / natural 0,65 / vivid 0,5 ; barbe × 0,8, × 0,55 pour les tons clairs), écarts conservés (`contrast`), chroma de la cible modulé par la clarté et la mèche, reflets gardés. Réglages : intensité, saturation (× 0,4 à 1,6), luminosité (± 0,25), racines (assombrit et désature la bande racine), cheveux gris (pixels peu saturés plus clairs que la masse ramenés vers elle). Couleur personnalisée : `makeColor({ hex })` (ton déduit de la clarté / du chroma Oklab). Avant / après : maintien sur l'image (original) ou curseur (`uSplit`, côté écran même en miroir). **Pas de `UNPACK_FLIP_Y_WEBGL`** (ignoré pour les ImageBitmap) : orientation gérée dans le vertex shader. Repli canvas 2D (`renderHairColor2D`) sans WebGL
+- **Modes d'entrée** : caméra frontale (flux en miroir, capture remise à l'endroit + image brute conservée pour ULTRA) et photo (EXIF via `createImageBitmap`, une analyse puis rendu à chaque réglage). Repli photo si caméra refusée / absente. Partage `navigator.share` sinon téléchargement (web) ou consigne « maintenez l'image » (natif). « Réserver une coloration » → `/booking?services=<colo / mèche / décolo / blond>`
+- **AI ULTRA** (`lib/hairUltra.js` côté client → `POST /api/apps/:appId/ai/hair-ultra`, auth, 12 appels / heure / compte, image JPEG ≤ 6 Mo en data URL, côté max 1536 px) : pipeline serveur sur fal.ai = SAM 3 (`fal-ai/sam-3/image`, prompts « hair », « beard », « mustache », 0,005 $ chacun) → union des masques, bords adoucis → FLUX.1 Kontext [pro] (`fal-ai/flux-pro/kontext`, 0,04 $, modèle modifiable via `HAIR_ULTRA_EDIT_MODEL`) avec consigne « ne changer que la couleur » → **fusion gardée par le masque** : hors masque, pixel d'origine au bit près ; dans le masque, basses fréquences du rendu (la couleur) + hautes fréquences de l'original (chaque poil, `sigma = w / 500`). Rien n'est stocké. Coût ≈ 0,06 $ / photo, ~20 s. Sans `FAL_KEY` : 503 `not_configured`, bouton masqué côté client. Le client affiche le résultat avec le curseur avant / après (deux images superposées, `clip-path`)
+- **Natif** : `NSCameraUsageDescription` (iOS) et `android.permission.CAMERA` déclarés localement (dossiers hors git). `getUserMedia` exige un contexte sécurisé
+- Entrée : section « Nouvelle tête » de l'accueil (`try-on` dans `DEFAULT_SECTION_ORDER`)
+- Tests : harnais Chrome headless avec `--use-angle=swiftshader --enable-unsafe-swiftshader` (WebGL logiciel ; avec `--disable-gpu` l'analyse échoue), mode photo avec les portraits des barbers (Romain / Kevin : cheveux + barbe ; Dom : casquette, barbe seulement) ; backend : `runHairUltra` testé avec un faux fal.ai (masque ellipse, édition teintée) pour vérifier la fusion
 
 ### Profil barber : navigation entre barbers (`src/pages/BarberProfile.jsx`)
 - La page charge la liste des barbers actifs avec la **même requête et la même clé de cache que l'accueil** (`['employees']`, filtre `is_active`, tri `sort_order`) et retrouve le barber courant par son id (comparaison en string)

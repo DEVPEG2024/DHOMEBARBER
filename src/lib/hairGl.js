@@ -1,12 +1,20 @@
 /**
- * Rendu WebGL de la recoloration cheveux / barbe (réaliste et rapide).
+ * Rendu WebGL de la recoloration cheveux / barbe, photoréaliste (mode FAST, temps réel).
  *
- * Par pixel, dans le shader : la teinte et la saturation de la couleur cible remplacent
- * celles du pixel, mais la luminosité d'origine est conservée en la déplaçant vers celle
- * de la cible (paramètre `lift`) tout en gardant les écarts autour de la moyenne (`contrast`) :
- * les mèches, les ombres et les reflets restent, la couleur change. Les reflets très clairs
- * gardent une pointe de blanc (brillance), la saturation baisse dans les extrêmes.
- * Deux masques (cheveux, barbe) en textures 8 bits, échantillonnés en bilinéaire : bords doux.
+ * Principe (par pixel, dans le shader, en espace Oklab, perceptuel) :
+ * - la clarté L d'origine est conservée : sa moyenne sur la zone est déplacée vers celle de
+ *   la couleur cible (`lift`), les écarts autour de la moyenne (mèches, ombres, reflets)
+ *   sont gardés (`contrast`), plus un décalage manuel (`brightness`) ;
+ * - la teinte vient de la cible, le chroma est celui de la cible modulé par la clarté (peu de
+ *   couleur dans les zones très sombres ou très claires) et par la variation naturelle des
+ *   mèches, réglable (`saturation`) ;
+ * - cheveux gris : pixels peu saturés et plus clairs que la masse, ramenés vers elle selon
+ *   `gray` (couverture) ;
+ * - racines : masque `uRootsMask` (bande le long de la ligne des cheveux), plus sombres et
+ *   moins colorées selon `roots` ;
+ * - les reflets très clairs gardent une part du pixel d'origine (brillance) ;
+ * - `split` : avant / après, à gauche du curseur l'image d'origine.
+ * Les masques (cheveux, barbe, racines) sont des textures 8 bits bilinéaires : bords doux.
  *
  * `createHairRenderer(canvas)` renvoie null si WebGL est indisponible (repli canvas 2D).
  */
@@ -22,81 +30,121 @@ void main() {
 }`;
 
 const FRAGMENT = `
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
 precision mediump float;
+#endif
 varying vec2 vUv;
 uniform sampler2D uImage;
 uniform sampler2D uHair;
 uniform sampler2D uBeard;
-uniform vec3 uColor;
+uniform sampler2D uRootsMask;
+uniform vec3 uTargetLab;     // couleur cible en Oklab
 uniform float uStrength;
+uniform float uSaturation;
+uniform float uBrightness;
+uniform float uRoots;
+uniform float uGray;
+uniform float uSplit;
+uniform float uMirror;
 uniform float uHairOn;
 uniform float uBeardOn;
 uniform float uHairMeanL;
 uniform float uBeardMeanL;
-uniform float uTargetL;
 uniform float uLift;
 uniform float uContrast;
+uniform float uBeardLift;
 
-float luma(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
-
-vec3 rgb2hsl(vec3 c) {
-  float mx = max(max(c.r, c.g), c.b);
-  float mn = min(min(c.r, c.g), c.b);
-  float l = (mx + mn) * 0.5;
-  float h = 0.0;
-  float s = 0.0;
-  float d = mx - mn;
-  if (d > 0.0001) {
-    s = l > 0.5 ? d / (2.0 - mx - mn) : d / (mx + mn);
-    if (mx == c.r) h = (c.g - c.b) / d + (c.g < c.b ? 6.0 : 0.0);
-    else if (mx == c.g) h = (c.b - c.r) / d + 2.0;
-    else h = (c.r - c.g) / d + 4.0;
-    h /= 6.0;
-  }
-  return vec3(h, s, l);
+vec3 srgbToLinear(vec3 c) {
+  vec3 lo = c / 12.92;
+  vec3 hi = pow((c + 0.055) / 1.055, vec3(2.4));
+  return mix(lo, hi, step(0.04045, c));
+}
+vec3 linearToSrgb(vec3 c) {
+  c = clamp(c, 0.0, 1.0);
+  vec3 lo = c * 12.92;
+  vec3 hi = 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055;
+  return mix(lo, hi, step(0.0031308, c));
+}
+float cbrt(float x) { return pow(max(x, 0.0), 1.0 / 3.0); }
+vec3 linearToOklab(vec3 c) {
+  float l = 0.4122214708 * c.r + 0.5363325363 * c.g + 0.0514459929 * c.b;
+  float m = 0.2119034982 * c.r + 0.6806995451 * c.g + 0.1073969566 * c.b;
+  float s = 0.0883024619 * c.r + 0.2817188376 * c.g + 0.6299787005 * c.b;
+  float l_ = cbrt(l);
+  float m_ = cbrt(m);
+  float s_ = cbrt(s);
+  return vec3(
+    0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_,
+    1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_,
+    0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_);
+}
+vec3 oklabToLinear(vec3 c) {
+  float l_ = c.x + 0.3963377774 * c.y + 0.2158037573 * c.z;
+  float m_ = c.x - 0.1055613458 * c.y - 0.0638541728 * c.z;
+  float s_ = c.x - 0.0894841775 * c.y - 1.2914855480 * c.z;
+  float l = l_ * l_ * l_;
+  float m = m_ * m_ * m_;
+  float s = s_ * s_ * s_;
+  return vec3(
+    4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+    -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s);
 }
 
-float hue2rgb(float p, float q, float t) {
-  if (t < 0.0) t += 1.0;
-  if (t > 1.0) t -= 1.0;
-  if (t < 1.0 / 6.0) return p + (q - p) * 6.0 * t;
-  if (t < 0.5) return q;
-  if (t < 2.0 / 3.0) return p + (q - p) * (2.0 / 3.0 - t) * 6.0;
-  return p;
-}
+// Recolore un pixel (Oklab) d'une zone de clarté moyenne meanL. rootsW : poids racine 0..1.
+vec3 recolorLab(vec3 lab, float meanL, float lift, float rootsW) {
+  float L = lab.x;
+  float C = length(lab.yz);
+  float tC = length(uTargetLab.yz);
+  vec2 tHue = tC > 1e-4 ? uTargetLab.yz / tC : vec2(0.0);
 
-vec3 hsl2rgb(vec3 c) {
-  if (c.y < 0.0001) return vec3(c.z);
-  float q = c.z < 0.5 ? c.z * (1.0 + c.y) : c.z + c.y - c.z * c.y;
-  float p = 2.0 * c.z - q;
-  return vec3(hue2rgb(p, q, c.x + 1.0 / 3.0), hue2rgb(p, q, c.x), hue2rgb(p, q, c.x - 1.0 / 3.0));
-}
+  // Cheveux gris / blancs : peu de chroma et nettement plus clairs que la masse.
+  // Couverture : leur clarté est ramenée vers celle de la masse (la teinte les couvre)
+  float gray = (1.0 - smoothstep(0.02, 0.06, C)) * smoothstep(meanL + 0.04, meanL + 0.18, L);
+  float Lsrc = mix(L, meanL + (L - meanL) * 0.15, gray * uGray);
 
-vec3 recolor(vec3 src, float meanL, float lift) {
-  float L = luma(src);
-  vec3 target = rgb2hsl(uColor);
-  // Luminosité moyenne déplacée vers la cible, texture (écarts) conservée
-  float meanTarget = mix(meanL, uTargetL, lift);
-  float L2 = clamp(meanTarget + (L - meanL) * uContrast, 0.0, 1.0);
-  // Saturation atténuée dans les très sombres et très clairs (rendu naturel)
-  float sat = target.y * (1.0 - pow(abs(2.0 * L2 - 1.0), 2.2) * 0.85);
-  vec3 outc = hsl2rgb(vec3(target.x, sat, L2));
-  // Brillance : les reflets d'origine gardent une pointe de blanc
-  float spec = smoothstep(0.72, 1.0, L);
-  outc = mix(outc, vec3(1.0), spec * 0.35);
-  return outc;
+  // Clarté : moyenne déplacée vers la cible, écarts (mèches, ombres) conservés
+  float meanTarget = mix(meanL, uTargetLab.x, lift);
+  float L2 = clamp(meanTarget + (Lsrc - meanL) * uContrast + uBrightness, 0.0, 1.0);
+
+  // Chroma : cible × réglage, atténué dans les extrêmes de clarté, modulé par la mèche
+  float tone = 1.0 - pow(abs(2.0 * L2 - 1.0), 2.4) * 0.8;
+  float variation = clamp(0.75 + 0.5 * (Lsrc - meanL) / max(meanL, 0.08), 0.5, 1.35);
+  float C2 = tC * uSaturation * tone * variation;
+
+  // Racines : plus sombres et moins colorées près de la ligne des cheveux
+  float r = rootsW * uRoots;
+  L2 = clamp(L2 - r * 0.2, 0.0, 1.0);
+  C2 *= 1.0 - r * 0.55;
+
+  vec3 lin = oklabToLinear(vec3(L2, tHue * C2));
+  // Brillance : les reflets d'origine très clairs gardent une part du pixel d'origine
+  float spec = smoothstep(0.85, 1.0, L);
+  return mix(lin, oklabToLinear(lab), spec * 0.5);
 }
 
 void main() {
   vec3 src = texture2D(uImage, vUv).rgb;
+  vec3 lin = srgbToLinear(src);
+  vec3 lab = linearToOklab(lin);
   float aH = texture2D(uHair, vUv).r * uHairOn;
   float aB = texture2D(uBeard, vUv).r * uBeardOn;
-  vec3 col = src;
-  if (aH > 0.003) col = mix(col, recolor(src, uHairMeanL, uLift), min(1.0, aH * uStrength));
-  // Barbe : éclaircissement plus doux (poils fins sur la peau)
-  if (aB > 0.003) col = mix(col, recolor(src, uBeardMeanL, uLift * 0.85), min(1.0, aB * uStrength));
-  gl_FragColor = vec4(col, 1.0);
+  float rootsW = texture2D(uRootsMask, vUv).r;
+  vec3 outLin = lin;
+  if (aH > 0.003) outLin = mix(outLin, recolorLab(lab, uHairMeanL, uLift, rootsW), min(1.0, aH * uStrength));
+  if (aB > 0.003) outLin = mix(outLin, recolorLab(lab, uBeardMeanL, uLift * uBeardLift, 0.0), min(1.0, aB * uStrength));
+  // Avant / après : à gauche du curseur (côté écran, même en miroir), l'original
+  float x = uMirror > 0.5 ? 1.0 - vUv.x : vUv.x;
+  if (x < uSplit) outLin = lin;
+  gl_FragColor = vec4(linearToSrgb(outLin), 1.0);
 }`;
+
+const UNIFORMS = [
+  'uImage', 'uHair', 'uBeard', 'uRootsMask', 'uTargetLab', 'uStrength', 'uSaturation', 'uBrightness', 'uRoots', 'uGray',
+  'uSplit', 'uMirror', 'uHairOn', 'uBeardOn', 'uHairMeanL', 'uBeardMeanL', 'uLift', 'uContrast', 'uBeardLift',
+];
 
 function compile(gl, type, source) {
   const shader = gl.createShader(type);
@@ -146,24 +194,26 @@ export function createHairRenderer(canvas) {
   gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
 
   const u = {};
-  ['uImage', 'uHair', 'uBeard', 'uColor', 'uStrength', 'uHairOn', 'uBeardOn', 'uHairMeanL', 'uBeardMeanL', 'uTargetL', 'uLift', 'uContrast']
-    .forEach((name) => { u[name] = gl.getUniformLocation(program, name); });
+  UNIFORMS.forEach((name) => { u[name] = gl.getUniformLocation(program, name); });
   gl.uniform1i(u.uImage, 0);
   gl.uniform1i(u.uHair, 1);
   gl.uniform1i(u.uBeard, 2);
+  gl.uniform1i(u.uRootsMask, 3);
 
   const texImage = makeTexture(gl);
   const texHair = makeTexture(gl);
   const texBeard = makeTexture(gl);
+  const texRoots = makeTexture(gl);
   const empty = new Uint8Array([0]);
   gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
   // Pas de UNPACK_FLIP_Y_WEBGL : il est ignoré pour les ImageBitmap (photos), ce qui
   // désalignerait image et masques ; l'orientation est gérée dans le vertex shader
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
 
-  function uploadMask(tex, data, w, h) {
+  function uploadMask(unit, tex, data, w, h) {
+    gl.activeTexture(unit);
     gl.bindTexture(gl.TEXTURE_2D, tex);
-    if (data && w && h) gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, w, h, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, data);
+    if (data && w && h && data.length === w * h) gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, w, h, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, data);
     else gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, 1, 1, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, empty);
   }
 
@@ -171,9 +221,12 @@ export function createHairRenderer(canvas) {
     gl,
     /**
      * Dessine `source` (vidéo, image, canvas) à `width` × `height` et recolore selon les masques
-     * (`Uint8ClampedArray` de `maskWidth` × `maskHeight`, ou null).
+     * (`Uint8ClampedArray` de `maskWidth` × `maskHeight`, ou null) et les réglages.
      */
-    render({ source, width, height, hairAlpha, beardAlpha, maskWidth, maskHeight, color, strength, hairOn, beardOn, hairMeanL, beardMeanL }) {
+    render({
+      source, width, height, hairAlpha, beardAlpha, rootsAlpha, maskWidth, maskHeight, color, hairOn, beardOn,
+      hairMeanL, beardMeanL, strength = 1, saturation = 1, brightness = 0, roots = 0, gray = 0, split = 0, mirror = false,
+    }) {
       if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
       gl.viewport(0, 0, width, height);
       gl.activeTexture(gl.TEXTURE0);
@@ -183,26 +236,33 @@ export function createHairRenderer(canvas) {
       } catch {
         return; // image pas encore prête
       }
-      gl.activeTexture(gl.TEXTURE1);
-      uploadMask(texHair, hairOn ? hairAlpha : null, maskWidth, maskHeight);
-      gl.activeTexture(gl.TEXTURE2);
-      uploadMask(texBeard, beardOn ? beardAlpha : null, maskWidth, maskHeight);
-      const c = color?.rgb || { r: 0, g: 0, b: 0 };
-      gl.uniform3f(u.uColor, c.r / 255, c.g / 255, c.b / 255);
+      uploadMask(gl.TEXTURE1, texHair, hairOn ? hairAlpha : null, maskWidth, maskHeight);
+      uploadMask(gl.TEXTURE2, texBeard, beardOn ? beardAlpha : null, maskWidth, maskHeight);
+      uploadMask(gl.TEXTURE3, texRoots, roots > 0 ? rootsAlpha : null, maskWidth, maskHeight);
+      const lab = color?.lab || [0.5, 0, 0];
+      gl.uniform3f(u.uTargetLab, lab[0], lab[1], lab[2]);
       gl.uniform1f(u.uStrength, color ? strength : 0);
+      gl.uniform1f(u.uSaturation, saturation);
+      gl.uniform1f(u.uBrightness, brightness);
+      gl.uniform1f(u.uRoots, roots);
+      gl.uniform1f(u.uGray, gray);
+      gl.uniform1f(u.uSplit, split);
+      gl.uniform1f(u.uMirror, mirror ? 1 : 0);
       gl.uniform1f(u.uHairOn, hairOn && hairAlpha ? 1 : 0);
       gl.uniform1f(u.uBeardOn, beardOn && beardAlpha ? 1 : 0);
-      gl.uniform1f(u.uHairMeanL, hairMeanL ?? 0.3);
-      gl.uniform1f(u.uBeardMeanL, beardMeanL ?? 0.25);
-      gl.uniform1f(u.uTargetL, color?.targetL ?? 0.4);
+      gl.uniform1f(u.uHairMeanL, hairMeanL ?? 0.35);
+      gl.uniform1f(u.uBeardMeanL, beardMeanL ?? 0.3);
       gl.uniform1f(u.uLift, color?.lift ?? 0.6);
       gl.uniform1f(u.uContrast, color?.contrast ?? 1);
+      // Barbe : éclaircissement modéré pour les teintes claires (poils épars sur la peau)
+      gl.uniform1f(u.uBeardLift, color?.light ? 0.55 : 0.8);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     },
     destroy() {
       gl.deleteTexture(texImage);
       gl.deleteTexture(texHair);
       gl.deleteTexture(texBeard);
+      gl.deleteTexture(texRoots);
       gl.deleteBuffer(quad);
       gl.deleteProgram(program);
       const ext = gl.getExtension('WEBGL_lose_context');
