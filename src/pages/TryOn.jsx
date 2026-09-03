@@ -13,6 +13,7 @@ import {
 } from '@/lib/hairColor';
 import { createHairRenderer } from '@/lib/hairGl';
 import { hairUltraAvailable, requestHairUltra } from '@/lib/hairUltra';
+import { snapConfig } from '@/lib/snapLenses';
 
 /**
  * « Nouvelle tête » : essayage de couleur de cheveux et de barbe.
@@ -103,6 +104,7 @@ export default function TryOn() {
   const [faceMissing, setFaceMissing] = useState(false);
   const [shareHint, setShareHint] = useState(false);
   const [ultraAvailable, setUltraAvailable] = useState(false);
+  const [snapAvailable, setSnapAvailable] = useState(false);
   const [ultra, setUltra] = useState({ status: 'idle', stage: '', result: null, original: null, error: '' });
 
   const canvasRef = useRef(null);
@@ -144,7 +146,7 @@ export default function TryOn() {
   const colorServiceIds = services.filter((s) => /colo|m[èe]che|d[ée]colo|blond/i.test(s.name || '')).map((s) => s.id);
   const bookingHref = colorServiceIds.length > 0 ? `/booking?services=${colorServiceIds.join(',')}` : '/booking';
 
-  useEffect(() => { hairUltraAvailable().then(setUltraAvailable); }, []);
+  useEffect(() => { hairUltraAvailable().then(setUltraAvailable); snapConfig().then((c) => setSnapAvailable(!!c)); }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -666,6 +668,13 @@ export default function TryOn() {
             <span className="text-[10px] uppercase tracking-widest text-primary bg-primary/15 px-1.5 py-0.5 rounded-full">Premium</span>
             <span className="text-[11px] text-muted-foreground font-normal">{hasImage ? 'rendu haute qualité' : 'prenez une photo'}</span>
           </button>
+        )}
+
+        {snapAvailable && (
+          <Link to="/snap" className="mt-3 w-full flex items-center justify-center gap-2 h-12 rounded-2xl glass border border-yellow-400/30 text-sm font-semibold text-foreground">
+            <Sparkles className="w-4 h-4 text-yellow-300" /> Filtres Snap
+            <span className="text-[11px] text-muted-foreground font-normal">lentilles Snapchat du salon</span>
+          </Link>
         )}
 
         <Link to={bookingHref} className="orbit-wrap rounded-2xl block mt-4 shadow-lg shadow-primary/25">

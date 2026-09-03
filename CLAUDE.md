@@ -23,7 +23,7 @@
 - Init DB : `heroku run node init-db.js --app dhomebarber-api`
 - PostgreSQL addon : `postgresql-deep-70510` (plan essential-0)
 - La session Heroku CLI expire régulièrement : relancer `heroku login` si les commandes renvoient `Invalid credentials`
-- Variables d'environnement attendues : `DATABASE_URL`, `JWT_SECRET`, `FRONTEND_URL`, `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_EMAIL`, `SMTP_HOST` (défaut smtp.hostinger.com), `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` ; optionnelles : `FAL_KEY` (active le mode AI ULTRA de l'essayage couleur, release v69), `HAIR_ULTRA_EDIT_MODEL`
+- Variables d'environnement attendues : `DATABASE_URL`, `JWT_SECRET`, `FRONTEND_URL`, `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_EMAIL`, `SMTP_HOST` (défaut smtp.hostinger.com), `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` ; optionnelles : `FAL_KEY` (active le mode AI ULTRA de l'essayage couleur, release v69), `HAIR_ULTRA_EDIT_MODEL`, `SNAP_CAMERA_KIT_API_TOKEN` + `SNAP_LENS_GROUP_ID` (activent les filtres Snap)
 
 ### Apps natives (Capacitor)
 - Scripts : `npm run cap:sync` (build + sync), `npm run cap:ios`, `npm run cap:android` (build + sync + ouverture Xcode / Android Studio)
@@ -75,7 +75,8 @@ src/
 │   ├── Feed.jsx               # Fil social "Ca dit quoi le Gang ?" (posts, réactions emoji, commentaires, menu Signaler / Bloquer, panneau admin des signalements) — aussi /admin/feed
 │   ├── Events.jsx             # Privatisation du salon : demande d'événement, acceptation/refus du devis
 │   ├── GiftCards.jsx          # Cartes cadeau : achat (code DHB + QR), affichage
-│   ├── TryOn.jsx              # « Nouvelle tête » (/try-on, lazy) : essayage de couleur de cheveux en direct (caméra) ou sur photo, tout sur l'appareil
+│   ├── TryOn.jsx              # « Nouvelle tête » (/try-on, lazy) : essayage couleur cheveux / barbe, FAST sur l'appareil + AI ULTRA serveur
+│   ├── SnapLenses.jsx         # « Filtres Snap » (/snap, lazy) : lentilles Snapchat du salon via Camera Kit
 │   ├── Profile.jsx            # Profil utilisateur
 │   ├── Settings.jsx           # Paramètres client (date de naissance, utilisateurs bloqués, suppression de compte, liens CGU / confidentialité)
 │   ├── Login.jsx              # Connexion, inscription, mot de passe oublié (code à 6 chiffres par email)
@@ -111,7 +112,7 @@ public/
 ├── manifest.json, sw.js       # PWA + service worker push
 ```
 
-Routes client : `/`, `/services`, `/booking`, `/shop`, `/appointments`, `/orders`, `/reviews`, `/settings`, `/notifications`, `/profile`, `/barber/:id`, `/feed`, `/events`, `/gift-cards`, `/try-on`, `/login`.
+Routes client : `/`, `/services`, `/booking`, `/shop`, `/appointments`, `/orders`, `/reviews`, `/settings`, `/notifications`, `/profile`, `/barber/:id`, `/feed`, `/events`, `/gift-cards`, `/try-on`, `/snap`, `/login`.
 Routes admin : `/admin`, `/admin/agenda`, `/admin/smart-agenda`, `/admin/services`, `/admin/team`, `/admin/clients`, `/admin/products`, `/admin/stock`, `/admin/orders`, `/admin/reviews`, `/admin/stats`, `/admin/settings`, `/admin/my-settings`, `/admin/notifications`, `/admin/cleaning`, `/admin/my-cleaning`, `/admin/barber-accounts`, `/admin/leave`, `/admin/my-leave`, `/admin/feed`, `/admin/events`, `/admin/gift-cards`.
 
 ## Structure Backend
@@ -299,6 +300,12 @@ Deux modes. **FAST** = aperçu temps réel sur l'appareil ; **AI ULTRA** = trait
 - **Natif** : `NSCameraUsageDescription` (iOS) et `android.permission.CAMERA` déclarés localement (dossiers hors git). `getUserMedia` exige un contexte sécurisé
 - Entrée : section « Nouvelle tête » de l'accueil (`try-on` dans `DEFAULT_SECTION_ORDER`)
 - Tests : harnais Chrome headless avec `--use-angle=swiftshader --enable-unsafe-swiftshader` (WebGL logiciel ; avec `--disable-gpu` l'analyse échoue), mode photo avec les portraits des barbers (Romain / Kevin : cheveux + barbe ; Dom : casquette, barbe seulement) ; backend : `runHairUltra` testé avec un faux fal.ai (masque ellipse, édition teintée) pour vérifier la fusion
+
+### Filtres Snap, Camera Kit (`src/pages/SnapLenses.jsx`, `src/lib/snapLenses.js`, ajouté le 4 sept. 2026)
+- **Technologie** : Camera Kit, le SDK officiel de Snap pour intégrer de vraies lentilles Snapchat dans une app tierce (`@snap/camera-kit`, chargé à la demande sur `/snap`, route lazy). Les lentilles se créent dans **Lens Studio** (modèles « Hair Color », « Hair Simulation » avec coupes et barbes 3D, « Segmentation ») et se publient dans le **groupe de lentilles** de l'app Camera Kit du salon : l'app les liste (`lensRepository.loadLensGroups([groupId])`, icône `iconUrl`, `name`) et les applique sur la caméra frontale (`createMediaStreamSource` avec `Transform2D.MirrorX`, `session.applyLens`). Ajouter un filtre = publier une lentille, aucun code
+- **Configuration** : variables Heroku `SNAP_CAMERA_KIT_API_TOKEN` (jeton d'API client Camera Kit, public par nature) et `SNAP_LENS_GROUP_ID`, exposées par `routes/public.js` (`snap: { apiToken, lensGroupId }`, `features.snapLenses`). Sans elles : page « Filtres Snap bientôt disponibles », bouton masqué dans « Nouvelle tête ». Le jeton de **staging** sert au développement, celui de **production** exige la validation de l'app par Snap dans le portail Camera Kit
+- **Prérequis navigateur** : Safari 16+ (iOS 15+), Chrome 95+, WebGL, caméra (`snapSupported`). CSP si un jour ajoutée au frontend : `connect-src https://*.snapar.com`, `script-src https://cf-st.sc-cdn.net blob: 'wasm-unsafe-eval'`. Dans la WebView Capacitor iOS, `getUserMedia` fonctionne (iOS 14.3+) ; en cas de problème de performance, la voie officielle est le SDK natif iOS / Android via un plugin Capacitor, non fait
+- Page : caméra pleine hauteur (rendu 720 × 960), carrousel des lentilles du groupe, capture (`canvas.toDataURL`), partage, « Réserver ce look ». Erreurs du SDK (`LensExecutionError`) affichées sans casser la session
 
 ### Profil barber : navigation entre barbers (`src/pages/BarberProfile.jsx`)
 - La page charge la liste des barbers actifs avec la **même requête et la même clé de cache que l'accueil** (`['employees']`, filtre `is_active`, tri `sort_order`) et retrouve le barber courant par son id (comparaison en string)

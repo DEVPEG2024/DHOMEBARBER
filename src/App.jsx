@@ -34,6 +34,8 @@ import GiftCards from '@/pages/GiftCards';
 
 // Essayage couleur (lazy : embarque MediaPipe)
 const TryOn = React.lazy(() => import('@/pages/TryOn'));
+// Filtres Snap (Camera Kit, lazy)
+const SnapLenses = React.lazy(() => import('@/pages/SnapLenses'));
 
 // Admin pages (lazy-loaded - only for admin/barber users)
 const AdminDashboard = React.lazy(() => import('@/pages/admin/Dashboard'));
@@ -201,6 +203,7 @@ const AppRoutes = () => {
           <Route path="/events" element={<Events />} />
           <Route path="/gift-cards" element={<GiftCards />} />
           <Route path="/try-on" element={<Suspense fallback={<LazyFallback />}><TryOn /></Suspense>} />
+          <Route path="/snap" element={<Suspense fallback={<LazyFallback />}><SnapLenses /></Suspense>} />
         </Route>
       </Route>
 
