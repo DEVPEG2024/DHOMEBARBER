@@ -26,7 +26,10 @@ const stepVariants = {
 const stepTransition = { x: { type: 'spring', stiffness: 380, damping: 34 }, opacity: { duration: 0.18 } };
 const springy = { type: 'spring', stiffness: 420, damping: 30 };
 /** Durée de l'écran de succès avant la redirection vers Mes rendez-vous (ms). */
-const SUCCESS_DURATION = 3600;
+const SUCCESS_DURATION = 4600;
+/** Durée de la coupe (la tondeuse remonte et le dégradé se dessine), en secondes. */
+const CUT_DURATION = 2.6;
+const CUT_DELAY = 0.6;
 
 function generateTimeSlots(start, end, interval = 30) {
   const slots = [];
@@ -80,130 +83,179 @@ const Chip = React.forwardRef(function Chip({ icon: Icon, children }, ref) {
   );
 });
 
-/** Lame de rasoir (silhouette classique à double tranchant, rendu métallique). */
-function RazorBlade({ width = 30 }) {
+/**
+ * Scène de coupe : profil d'homme, la tondeuse remonte sur le côté de la tête
+ * et le dégradé (skin fade) se dessine derrière elle, petits cheveux qui tombent.
+ * Tout est en transform / opacity sur des éléments SVG.
+ */
+const SKIN = '#d9b48f';
+const SKIN_SHADE = '#c79d78';
+const HAIR = '#141a22';
+const HEAD_PATH = 'M150,58 C120,58 105,82 108,100 C104,112 96,120 98,130 C86,140 84,150 92,156 C98,160 100,166 96,172 C102,178 104,186 98,192 C106,198 112,206 114,212 C130,226 150,228 158,232 L162,264 L192,264 C198,238 206,224 214,200 C234,160 228,90 198,66 C184,56 166,56 150,58 Z';
+const HAIR_CAP_PATH = 'M108,100 C120,88 150,84 178,90 C200,96 216,110 226,132 C232,112 222,80 198,66 C184,56 166,56 150,58 C122,58 108,80 108,100 Z';
+const SIDE_HAIR_PATH = 'M112,100 C124,92 150,86 178,91 C202,96 218,112 226,132 L228,140 C226,160 220,182 214,200 C210,210 204,218 196,224 L184,226 C176,214 166,200 156,196 C146,180 136,160 128,140 C122,126 116,112 112,100 Z';
+
+function Clipping({ x, y, delay }) {
   return (
-    <svg width={width} height={width * 0.45} viewBox="0 0 44 20" aria-hidden="true" style={{ display: 'block' }}>
-      <path d="M2 4 Q2 2 4 2 H40 Q42 2 42 4 V16 Q42 18 40 18 H4 Q2 18 2 16 Z" fill="url(#blade-metal)" stroke="#8a93a0" strokeWidth="0.6" />
-      <path d="M14 8 h5 v-2.5 h6 v2.5 h5 v4 h-5 v2.5 h-6 v-2.5 h-5 z" fill="#0b0f0d" opacity="0.85" />
-      <circle cx="8" cy="10" r="1.6" fill="#0b0f0d" opacity="0.85" />
-      <circle cx="36" cy="10" r="1.6" fill="#0b0f0d" opacity="0.85" />
-      <path d="M3 2.6 H41" stroke="#ffffff" strokeWidth="0.9" opacity="0.9" />
-      <path d="M3 17.4 H41" stroke="#ffffff" strokeWidth="0.9" opacity="0.9" />
-    </svg>
+    <motion.line
+      x1={x} y1={y} x2={x + 5} y2={y + 2}
+      stroke={HAIR} strokeWidth="2" strokeLinecap="round"
+      initial={{ opacity: 0, x: 0, y: 0, rotate: 0 }}
+      animate={{ opacity: [0, 1, 1, 0], x: 14 + Math.random() * 14, y: 46 + Math.random() * 16, rotate: 120 }}
+      transition={{ duration: 0.9, delay, ease: 'easeIn', opacity: { duration: 0.9, delay, times: [0, 0.1, 0.7, 1] } }}
+    />
   );
 }
 
-/** Pluie de lames de rasoir : deux vagues, vol en arc, rotation et chute (transform / opacity uniquement). */
-function RazorRain({ count = 26 }) {
-  const parts = useMemo(() => Array.from({ length: count }, (_, i) => {
-    const wave = i % 2;
-    const angle = (i / count) * Math.PI * 2 + Math.random() * 0.5;
-    const dist = 110 + Math.random() * 120;
-    return {
-      id: i,
-      x: Math.cos(angle) * dist,
-      y: Math.sin(angle) * dist,
-      rotate: (Math.random() > 0.5 ? 1 : -1) * (540 + Math.random() * 540),
-      width: 26 + Math.random() * 16,
-      delay: wave * 0.7 + Math.random() * 0.35,
-      duration: 2.2 + Math.random() * 0.6,
-    };
-  }), [count]);
+function HaircutScene({ reduceMotion }) {
+  const cut = reduceMotion ? { duration: 0 } : { duration: CUT_DURATION, delay: CUT_DELAY, ease: [0.4, 0, 0.2, 1] };
+  // Trajet de la tondeuse : de la nuque vers la tempe, par petits coups
+  const strokes = { y: [0, -18, -8, -34, -24, -50, -40, -66, -58, -84, -84], x: [0, -3, 1, -4, 0, -5, -1, -6, -2, -6, -6] };
+  const clippings = useMemo(() => Array.from({ length: 12 }, (_, i) => ({
+    id: i,
+    x: 176 + (Math.random() - 0.5) * 30,
+    y: 214 - (i / 12) * 84 + (Math.random() - 0.5) * 8,
+    delay: CUT_DELAY + (i / 12) * CUT_DURATION + Math.random() * 0.15,
+  })), []);
 
   return (
-    <div className="absolute inset-0 pointer-events-none flex items-center justify-center" aria-hidden="true">
-      <svg width="0" height="0" style={{ position: 'absolute' }}>
-        <defs>
-          <linearGradient id="blade-metal" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stopColor="#f7f9fc" />
-            <stop offset="45%" stopColor="#b4bcc8" />
-            <stop offset="70%" stopColor="#e6eaf0" />
-            <stop offset="100%" stopColor="#9aa3b0" />
-          </linearGradient>
-        </defs>
-      </svg>
-      {parts.map(p => (
-        <motion.span
-          key={p.id}
-          initial={{ x: 0, y: 0, scale: 0, opacity: 1, rotate: 0 }}
-          animate={{ x: p.x, y: p.y + 160, scale: 1, opacity: 0, rotate: p.rotate }}
-          transition={{
-            duration: p.duration,
-            delay: p.delay,
-            ease: [0.16, 1, 0.3, 1],
-            rotate: { duration: p.duration, delay: p.delay, ease: 'linear' },
-            opacity: { duration: 0.7, delay: p.delay + p.duration - 0.8 },
-          }}
-          className="absolute"
-          style={{ filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.5))' }}
-        >
-          <RazorBlade width={p.width} />
-        </motion.span>
-      ))}
-    </div>
+    <motion.svg
+      viewBox="60 40 220 240"
+      width="250"
+      height="272"
+      aria-hidden="true"
+      initial={{ opacity: 0, scale: 0.9, y: 10 }}
+      animate={{ opacity: 1, scale: 1, y: 0 }}
+      transition={{ duration: 0.5, ease: 'easeOut' }}
+      style={{ overflow: 'visible' }}
+    >
+      <defs>
+        <clipPath id="cut-side-hair"><path d={SIDE_HAIR_PATH} /></clipPath>
+        <linearGradient id="cut-fade" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={HAIR} />
+          <stop offset="34%" stopColor={HAIR} />
+          <stop offset="58%" stopColor="#4a4a4a" />
+          <stop offset="82%" stopColor={SKIN_SHADE} />
+          <stop offset="100%" stopColor={SKIN} />
+        </linearGradient>
+        <linearGradient id="cut-skin" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#e6c19c" />
+          <stop offset="100%" stopColor={SKIN_SHADE} />
+        </linearGradient>
+        <radialGradient id="cut-glow" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity="0.35" />
+          <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity="0" />
+        </radialGradient>
+      </defs>
+
+      {/* Halo vert derrière la tête */}
+      <circle cx="165" cy="160" r="120" fill="url(#cut-glow)" />
+      {/* Tête et cou */}
+      <path d={HEAD_PATH} fill="url(#cut-skin)" />
+      {/* Côté de la tête : dégradé en dessous, cheveux pleins par-dessus qui se retirent de bas en haut */}
+      <g clipPath="url(#cut-side-hair)">
+        <rect x="100" y="86" width="140" height="142" fill="url(#cut-fade)" />
+        <motion.rect
+          x="100" y="86" width="140" height="142" fill={HAIR}
+          style={{ originX: 0.5, originY: 0 }}
+          initial={{ scaleY: 1 }}
+          animate={{ scaleY: 0.3 }}
+          transition={cut}
+        />
+      </g>
+      {/* Cheveux du dessus */}
+      <path d={HAIR_CAP_PATH} fill={HAIR} />
+      {/* Oreille */}
+      <ellipse cx="170" cy="152" rx="9" ry="14" fill={SKIN_SHADE} />
+      <ellipse cx="171" cy="152" rx="5" ry="9" fill="none" stroke="#b58a63" strokeWidth="1.5" />
+      {/* Œil et sourcil, discrets */}
+      <path d="M104,106 C110,102 118,103 124,106" fill="none" stroke={HAIR} strokeWidth="2.5" strokeLinecap="round" />
+      <path d="M106,118 C110,115 116,115 120,118" fill="none" stroke="#8a6547" strokeWidth="2" strokeLinecap="round" />
+      {/* Petits cheveux qui tombent */}
+      {!reduceMotion && clippings.map(c => <Clipping key={c.id} x={c.x} y={c.y} delay={c.delay} />)}
+
+      {/* Tondeuse : remonte de la nuque vers la tempe par petits coups, puis s'écarte */}
+      <motion.g
+        initial={{ x: 0, y: 0, opacity: 0 }}
+        animate={reduceMotion
+          ? { opacity: 0 }
+          : { opacity: [0, 1, 1, 1, 0], x: [12, ...strokes.x.slice(1), 40], y: [20, ...strokes.y.slice(1), -110] }}
+        transition={{
+          duration: CUT_DURATION + 0.5,
+          delay: CUT_DELAY - 0.3,
+          ease: 'easeInOut',
+          times: [0, 0.1, 0.5, 0.88, 1],
+          x: { duration: CUT_DURATION + 0.5, delay: CUT_DELAY - 0.3, ease: 'easeInOut' },
+          y: { duration: CUT_DURATION + 0.5, delay: CUT_DELAY - 0.3, ease: 'easeInOut' },
+        }}
+        style={{ rotate: -12, originX: 0.5, originY: 0.5 }}
+      >
+        <g transform="translate(176 214)">
+          {/* corps */}
+          <rect x="-13" y="-6" width="26" height="54" rx="7" fill="#2b3340" />
+          <rect x="-9" y="0" width="18" height="40" rx="5" fill="#3d4756" />
+          <rect x="-4" y="8" width="8" height="18" rx="3" fill="#1c2129" />
+          {/* tête de coupe et dents */}
+          <rect x="-15" y="-13" width="30" height="8" rx="2" fill="#9aa3b0" />
+          {[-13, -9, -5, -1, 3, 7, 11].map(px => <rect key={px} x={px} y="-18" width="2.4" height="6" rx="1" fill="#c9d0da" />)}
+        </g>
+      </motion.g>
+    </motion.svg>
   );
 }
 
-/** Écran de succès : coche à ressort, anneau qui s'échappe, pluie de lames de rasoir, barre de redirection. */
+/** Écran de succès : scène de coupe (dégradé qui se fait), coche à la fin, barre de redirection. */
 export function SuccessOverlay({ barberName, duration = SUCCESS_DURATION }) {
+  const reduceMotion = useReducedMotion();
+  const checkDelay = reduceMotion ? 0.3 : CUT_DELAY + CUT_DURATION + 0.15;
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-background/85 backdrop-blur-md"
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-background/90 backdrop-blur-md"
     >
       <div className="relative flex flex-col items-center text-center px-8">
-        <RazorRain />
-        <motion.div
-          initial={{ scale: 0, rotate: -30 }}
-          animate={{ scale: 1, rotate: 0 }}
-          transition={{ type: 'spring', stiffness: 260, damping: 16, delay: 0.05 }}
-          className="relative w-24 h-24 rounded-full bg-primary flex items-center justify-center shadow-2xl shadow-primary/40"
-        >
-          <motion.span
-            initial={{ scale: 1, opacity: 0.7 }}
-            animate={{ scale: 2.2, opacity: 0 }}
-            transition={{ duration: 1.3, ease: 'easeOut', delay: 0.2, repeat: Infinity, repeatDelay: 0.3 }}
-            className="absolute inset-0 rounded-full border-2 border-primary"
-          />
-          <motion.span
-            initial={{ scale: 1, opacity: 0.5 }}
-            animate={{ scale: 2.2, opacity: 0 }}
-            transition={{ duration: 1.3, ease: 'easeOut', delay: 0.85, repeat: Infinity, repeatDelay: 0.3 }}
-            className="absolute inset-0 rounded-full border border-primary"
-          />
+        <div className="relative">
+          <HaircutScene reduceMotion={reduceMotion} />
+          {/* Coche : apparaît quand le dégradé est terminé */}
           <motion.div
-            initial={{ scale: 0 }}
-            animate={{ scale: [0, 1.25, 1] }}
-            transition={{ delay: 0.28, duration: 0.5, ease: 'easeOut' }}
+            initial={{ scale: 0, rotate: -30 }}
+            animate={{ scale: 1, rotate: 0 }}
+            transition={{ type: 'spring', stiffness: 300, damping: 16, delay: checkDelay }}
+            className="absolute -right-2 bottom-6 w-16 h-16 rounded-full bg-primary flex items-center justify-center shadow-2xl shadow-primary/40 border-4 border-background"
           >
-            <Check className="w-12 h-12 text-primary-foreground" strokeWidth={3} />
+            <motion.span
+              initial={{ scale: 1, opacity: 0.7 }}
+              animate={{ scale: 2.2, opacity: 0 }}
+              transition={{ duration: 1.2, ease: 'easeOut', delay: checkDelay + 0.2, repeat: Infinity, repeatDelay: 0.3 }}
+              className="absolute inset-0 rounded-full border-2 border-primary"
+            />
+            <Check className="w-8 h-8 text-primary-foreground" strokeWidth={3} />
           </motion.div>
-        </motion.div>
+        </div>
         <motion.h2
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.4 }}
-          className="font-display text-2xl font-bold text-foreground mt-6"
+          transition={{ delay: 0.5 }}
+          className="font-display text-2xl font-bold text-foreground mt-4"
         >
           Rendez-vous confirmé
         </motion.h2>
         <motion.p
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.5 }}
+          transition={{ delay: 0.65 }}
           className="text-sm text-muted-foreground mt-2"
         >
-          {barberName ? `${barberName} vous attend au salon.` : 'À très vite au salon.'}
+          {barberName ? `${barberName} prépare la tondeuse.` : 'À très vite au salon.'}
         </motion.p>
         {/* Barre qui se remplit pendant l'attente avant la redirection */}
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.9 }}
-          className="mt-8 w-40 h-1 rounded-full bg-white/10 overflow-hidden"
+          className="mt-7 w-40 h-1 rounded-full bg-white/10 overflow-hidden"
         >
           <motion.div
             initial={{ scaleX: 0 }}
