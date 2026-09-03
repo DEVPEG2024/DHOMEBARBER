@@ -2,11 +2,12 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { Link } from 'react-router-dom';
 import { api } from '@/api/apiClient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { MapPin, Clock, Phone, Star, ArrowRight, Scissors, ShoppingBag, Newspaper, Sparkles, Gift, GripVertical, Pencil, Check, X } from 'lucide-react';
+import { MapPin, Clock, Phone, Star, ArrowRight, Scissors, ShoppingBag, Newspaper, Sparkles, Gift, GripVertical, Pencil, Check, X, Volume2, VolumeX } from 'lucide-react';
 import { motion, useMotionValue, useSpring, useTransform, Reorder } from 'framer-motion';
 import SectionHeader from '@/components/shared/SectionHeader';
 import StarRating from '@/components/shared/StarRating';
 import { useAuth } from '@/lib/AuthContext';
+import { useMusic } from '@/lib/MusicContext';
 import { BARBER_PHOTO_ASPECT, BARBER_PHOTO_BG } from '@/lib/barberPhoto';
 import { barberPhotoLayoutId } from '@/components/shared/BarberCard';
 import RebookCard from '@/components/home/RebookCard';
@@ -303,6 +304,7 @@ export default function Home() {
   const [sectionOrder, setSectionOrder] = useState(DEFAULT_SECTION_ORDER);
   const [saving, setSaving] = useState(false);
   const { user } = useAuth();
+  const { playing: musicPlaying, toggle: toggleMusic } = useMusic();
   const queryClient = useQueryClient();
   const tilt = useParallaxTilt();
   const isAdmin = user?.role === 'admin';
@@ -650,15 +652,18 @@ export default function Home() {
             Premium BarberShop
           </motion.p>
 
+          {/* Deux lignes fixes quelle que soit la largeur d'écran : note + ville, puis état du salon */}
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}
-            className="flex flex-wrap items-center justify-center gap-3 mb-5">
-            <Link to="/reviews" className="flex items-center gap-1.5 backdrop-blur-xl bg-white/10 border border-white/15 rounded-full px-3 py-1.5 active:scale-95 transition-transform">
-              <Star className="w-3.5 h-3.5 text-primary fill-primary" />
-              <span className="text-white font-bold text-sm">{avgRating}</span>
-              <span className="text-white/50 text-xs">({reviews.length})</span>
-            </Link>
-            <div className="flex items-center gap-1.5 text-white/60 text-xs">
-              <MapPin className="w-3.5 h-3.5" /> Douvaine
+            className="flex flex-col items-center gap-2 mb-5">
+            <div className="flex items-center gap-3">
+              <Link to="/reviews" className="flex items-center gap-1.5 backdrop-blur-xl bg-white/10 border border-white/15 rounded-full px-3 py-1.5 active:scale-95 transition-transform">
+                <Star className="w-3.5 h-3.5 text-primary fill-primary" />
+                <span className="text-white font-bold text-sm">{avgRating}</span>
+                <span className="text-white/50 text-xs">({reviews.length})</span>
+              </Link>
+              <div className="flex items-center gap-1.5 text-white/60 text-xs">
+                <MapPin className="w-3.5 h-3.5" /> Douvaine
+              </div>
             </div>
             {/* Ouvert / Fermé en direct (heure de Paris), rien tant que les horaires ne sont pas chargés */}
             <OpenStatusBadge openingHours={settings?.opening_hours} />
@@ -686,12 +691,67 @@ export default function Home() {
                 <path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.5 2.89 2.89 0 01-2.89-2.89 2.89 2.89 0 012.89-2.89c.28 0 .54.04.79.1v-3.5a6.37 6.37 0 00-.79-.05A6.34 6.34 0 003.15 15.2a6.34 6.34 0 0010.86 4.48V13.2a8.16 8.16 0 005.58 2.17V11.9a4.83 4.83 0 01-3.77-1.87V6.69h3.77z"/>
               </svg>
             </motion.a>
+            {/* Musique d'ambiance : ici plutôt qu'en bouton flottant (qui chevauchait le contenu) */}
+            <motion.button type="button" onClick={toggleMusic} whileTap={{ scale: 0.9 }}
+              aria-label={musicPlaying ? 'Couper la musique' : 'Activer la musique'}
+              className="w-11 h-11 rounded-xl backdrop-blur-xl bg-white/10 border border-white/15 flex items-center justify-center hover:bg-white/20 transition-colors">
+              {musicPlaying ? <Volume2 className="w-5 h-5 text-primary" /> : <VolumeX className="w-5 h-5 text-white/70" />}
+            </motion.button>
           </motion.div>
         </div>
       </div>
 
       {/* Sections - Reorderable by admin */}
       <div className="max-w-lg mx-auto px-5 py-6">
+        {/* Admin : organiser l'accueil. Dans le flux (et collé en haut en mode édition),
+            jamais en bouton flottant qui chevaucherait les cartes d'information */}
+        {isAdmin && (
+          <div className={`flex items-center justify-end gap-2 mb-4 ${editMode ? 'sticky top-2 z-30' : ''}`}>
+            {editMode ? (
+              <>
+                <motion.button
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => {
+                    // Reset to saved order
+                    if (settings?.homepage_order?.length > 0) {
+                      setSectionOrder([...settings.homepage_order]);
+                    } else {
+                      setSectionOrder([...DEFAULT_SECTION_ORDER]);
+                    }
+                    setEditMode(false);
+                  }}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl glass text-xs font-semibold text-muted-foreground shadow-lg"
+                >
+                  <X className="w-3.5 h-3.5" /> Annuler
+                </motion.button>
+                <motion.button
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => {
+                    saveOrder(sectionOrder);
+                    setEditMode(false);
+                  }}
+                  disabled={saving}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-primary text-primary-foreground text-xs font-bold shadow-lg shadow-primary/30 disabled:opacity-50"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  {saving ? 'Sauvegarde...' : 'Sauvegarder'}
+                </motion.button>
+              </>
+            ) : (
+              <motion.button
+                whileTap={{ scale: 0.95 }}
+                onClick={() => setEditMode(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full glass text-[11px] font-semibold text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <Pencil className="w-3 h-3" /> Organiser l'accueil
+              </motion.button>
+            )}
+          </div>
+        )}
         {/* Relance en un tap de la dernière visite (client connecté). Bloc fixe,
             hors de l'ordre des sections : ne rend rien sans RDV exploitable */}
         {user?.email && (
@@ -765,58 +825,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* Admin FAB - Organize homepage */}
-      {isAdmin && (
-        <div className="fixed bottom-20 right-4 z-40 flex flex-col items-end gap-2">
-          {editMode && (
-            <motion.button
-              initial={{ opacity: 0, scale: 0.8 }}
-              animate={{ opacity: 1, scale: 1 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => {
-                saveOrder(sectionOrder);
-                setEditMode(false);
-              }}
-              disabled={saving}
-              className="flex items-center gap-2 px-5 py-3 rounded-2xl bg-green-500 text-white text-sm font-bold shadow-2xl shadow-green-500/30 disabled:opacity-50"
-            >
-              <Check className="w-4 h-4" />
-              {saving ? 'Sauvegarde...' : 'Sauvegarder'}
-            </motion.button>
-          )}
-          {editMode && (
-            <motion.button
-              initial={{ opacity: 0, scale: 0.8 }}
-              animate={{ opacity: 1, scale: 1 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => {
-                // Reset to saved order
-                if (settings?.homepage_order?.length > 0) {
-                  setSectionOrder([...settings.homepage_order]);
-                } else {
-                  setSectionOrder([...DEFAULT_SECTION_ORDER]);
-                }
-                setEditMode(false);
-              }}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-card border border-border text-sm font-semibold text-muted-foreground shadow-xl"
-            >
-              <X className="w-4 h-4" /> Annuler
-            </motion.button>
-          )}
-          <motion.button
-            whileTap={{ scale: 0.95 }}
-            onClick={() => setEditMode(!editMode)}
-            className={`flex items-center gap-2 px-5 py-3 rounded-2xl text-sm font-bold shadow-2xl transition-all ${
-              editMode
-                ? 'bg-red-500/90 text-white shadow-red-500/30'
-                : 'bg-primary text-primary-foreground shadow-primary/30'
-            }`}
-          >
-            <Pencil className="w-4 h-4" />
-            {editMode ? 'Mode édition' : 'Organiser'}
-          </motion.button>
-        </div>
-      )}
     </div>
   );
 }

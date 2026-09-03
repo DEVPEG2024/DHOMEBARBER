@@ -243,8 +243,9 @@ function App() {
               <Router>
                 <ScrollToTop />
                 <AppRoutes />
+                {/* Dans le Router : le bouton lit la route (masqué sur l'accueil, intégré au hero) */}
+                <MusicToggle />
               </Router>
-              <MusicToggle />
               <Toaster />
               <SonnerToaster />
             </QueryClientProvider>

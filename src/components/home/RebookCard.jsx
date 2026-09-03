@@ -68,7 +68,7 @@ export default function RebookCard({ user, employees = [], services = [] }) {
     const parsed = parseISO(last.date);
     const isFuture = last.date > todayInParis();
     const sameYear = isValid(parsed) && parsed.getFullYear() === new Date().getFullYear();
-    const dateLabel = isValid(parsed) ? format(parsed, sameYear ? 'EEEE d MMMM' : 'EEEE d MMMM yyyy', { locale: fr }) : last.date;
+    const dateLabel = isValid(parsed) ? format(parsed, sameYear ? 'EEE d MMM' : 'EEE d MMM yyyy', { locale: fr }) : last.date;
 
     return {
       barber,
@@ -119,11 +119,12 @@ export default function RebookCard({ user, employees = [], services = [] }) {
             <RotateCcw className="w-3.5 h-3.5 text-primary shrink-0" />
             <p className="text-sm font-bold text-foreground truncate">Comme la dernière fois</p>
           </div>
-          <p className="text-xs text-muted-foreground truncate">{subtitle}</p>
-          <p className="text-[11px] text-muted-foreground/80 mt-0.5 truncate">
-            {isFuture ? 'Prochain rendez-vous le ' : 'Dernière visite le '}{dateLabel}
+          {/* Deux lignes max, retour à la ligne plutôt que troncature : lisible sur tous les écrans */}
+          <p className="text-xs text-muted-foreground leading-snug line-clamp-2">{subtitle}</p>
+          <p className="text-[11px] text-muted-foreground/80 mt-1 leading-snug">
+            {isFuture ? 'Prochain RDV : ' : 'Dernière visite : '}<span className="text-foreground/80">{dateLabel}</span>
             {activeServices.length > 0 && (
-              <span className="text-foreground/60"> · {total}€ · {duration} min</span>
+              <span className="text-foreground/60 whitespace-nowrap"> · {total}€ · {duration} min</span>
             )}
           </p>
 
