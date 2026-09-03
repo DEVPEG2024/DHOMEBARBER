@@ -7,6 +7,7 @@ import { motion, useMotionValue, useSpring, Reorder } from 'framer-motion';
 import SectionHeader from '@/components/shared/SectionHeader';
 import StarRating from '@/components/shared/StarRating';
 import { useAuth } from '@/lib/AuthContext';
+import { BARBER_PHOTO_ASPECT, BARBER_PHOTO_BG } from '@/lib/barberPhoto';
 
 const IS_MOBILE = typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
@@ -122,7 +123,10 @@ function BarberMarquee({ employees }) {
             whileTap={{ scale: 0.95 }}
             className="relative w-28 cursor-pointer group"
           >
-            <div className="w-28 h-32 rounded-2xl overflow-hidden glass border border-white/10 mb-2 relative">
+            <div
+              className="w-28 rounded-2xl overflow-hidden border border-white/10 mb-2 relative"
+              style={{ aspectRatio: BARBER_PHOTO_ASPECT, background: BARBER_PHOTO_BG }}
+            >
               {emp.photo_url ? (
                 <img src={emp.photo_url} alt={emp.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
               ) : (

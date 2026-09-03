@@ -44,6 +44,7 @@ src/
 │   ├── MusicContext.jsx       # Musique d'ambiance (/ambiance.mp3, volume 1 %)
 │   ├── capacitor.js           # Wrapper Capacitor (natif vs web)
 │   ├── useLiveCount.js        # Hook WebSocket → compteur d'utilisateurs connectés (/ws/live)
+│   ├── barberPhoto.js         # Format des photos de barbers (portrait 1748 × 2480, ratio + fond sombre)
 │   ├── app-params.js          # Paramètres app (appId, token, etc.)
 │   ├── pushNotifications.js   # Service Worker push notifications (web)
 │   ├── query-client.js        # React Query config
@@ -252,6 +253,7 @@ Le `server.js` exécute des migrations automatiques au démarrage (`ADD COLUMN I
 ### Profil barber
 - La vidéo de présentation est stockée **dans `employees.bio`** après le marqueur `\n%%VIDEO%%url` (pas dans working_hours). Ne pas écraser la bio sans préserver ce suffixe.
 - Comparer les ids employé en string (`String(a) === String(b)`) : mélange UUID / number selon la source
+- **Photos des barbers : format portrait 1748 × 2480** (ratio A4, buste centré, fond sombre, référence « KVB APP »). Les constantes sont dans `src/lib/barberPhoto.js` (`BARBER_PHOTO_ASPECT` pour le CSS, `BARBER_PHOTO_RATIO` pour le recadrage, `BARBER_PHOTO_BG`). Le recadrage à l'upload (Équipe admin, Mes paramètres) force ce ratio (`ImageCropDialog` prop `aspect`, forme `rect`, côté max 2480 px) et tous les affichages (carrousel accueil, cartes de réservation, profil public sans vidéo, admin) utilisent le même cadre. Ne pas réintroduire de vignette carrée / ronde pour un barber ; les avatars clients restent ronds.
 
 ### Infos du salon
 - Adresse : Sur le côté gauche du bâtiment Odyssée, 3 Rue du Bois Arquet, 74140 Douvaine

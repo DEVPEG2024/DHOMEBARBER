@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Check, ChevronDown, ChevronUp } from 'lucide-react';
+import { BARBER_PHOTO_ASPECT, BARBER_PHOTO_BG } from '@/lib/barberPhoto';
 
 export default function EmployeeCard({ employee, onClick, selected }) {
   const [expanded, setExpanded] = useState(false);
@@ -29,7 +30,7 @@ export default function EmployeeCard({ employee, onClick, selected }) {
       animate={{ opacity: 1, scale: 1 }}
       whileTap={{ scale: 0.96 }}
       onClick={() => onClick?.(employee)}
-      className={`cursor-pointer rounded-2xl border p-4 text-center transition-all duration-300 relative overflow-hidden ${
+      className={`cursor-pointer rounded-2xl border p-3 text-center transition-all duration-300 relative overflow-hidden ${
         selected
           ? 'border-primary/40 bg-primary/8 shadow-lg shadow-primary/15'
           : 'border-white/8 bg-white/4 backdrop-blur-xl hover:bg-white/8 hover:border-white/15'
@@ -39,14 +40,17 @@ export default function EmployeeCard({ employee, onClick, selected }) {
         <div className="absolute inset-0 bg-gradient-to-b from-primary/5 to-transparent pointer-events-none" />
       )}
 
-      {/* Avatar */}
-      <div className={`w-16 h-16 mx-auto rounded-2xl overflow-hidden mb-3 transition-all duration-300 ${
-        selected ? 'ring-2 ring-primary ring-offset-2 ring-offset-background' : ''
-      }`}>
+      {/* Photo portrait (format 1748 × 2480) */}
+      <div
+        className={`w-full rounded-xl overflow-hidden mb-3 transition-all duration-300 ${
+          selected ? 'ring-2 ring-primary ring-offset-2 ring-offset-background' : ''
+        }`}
+        style={{ aspectRatio: BARBER_PHOTO_ASPECT, background: BARBER_PHOTO_BG }}
+      >
         {employee.photo_url ? (
           <img src={employee.photo_url} alt={employee.name} className="w-full h-full object-cover" />
         ) : (
-          <div className="w-full h-full flex items-center justify-center text-xl font-bold bg-white/10 text-foreground/60">
+          <div className="w-full h-full flex items-center justify-center text-3xl font-bold bg-white/10 text-foreground/60">
             {employee.name?.charAt(0)}
           </div>
         )}

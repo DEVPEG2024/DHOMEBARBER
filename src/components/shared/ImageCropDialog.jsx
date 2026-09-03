@@ -4,6 +4,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button';
 import { Check, RotateCw, ZoomIn, ZoomOut } from 'lucide-react';
 
+const MAX_OUTPUT_SIDE = 2480;
+
 async function getCroppedImg(imageSrc, pixelCrop) {
   const image = new Image();
   image.crossOrigin = 'anonymous';
@@ -13,9 +15,12 @@ async function getCroppedImg(imageSrc, pixelCrop) {
     image.src = imageSrc;
   });
 
+  // Côté le plus long plafonné (taille de la photo de référence 1748 × 2480) :
+  // évite un canvas trop grand sur iOS et un upload inutilement lourd.
+  const scale = Math.min(1, MAX_OUTPUT_SIDE / Math.max(pixelCrop.width, pixelCrop.height));
   const canvas = document.createElement('canvas');
-  canvas.width = pixelCrop.width;
-  canvas.height = pixelCrop.height;
+  canvas.width = Math.max(1, Math.round(pixelCrop.width * scale));
+  canvas.height = Math.max(1, Math.round(pixelCrop.height * scale));
   const ctx = canvas.getContext('2d');
 
   ctx.drawImage(
@@ -26,8 +31,8 @@ async function getCroppedImg(imageSrc, pixelCrop) {
     pixelCrop.height,
     0,
     0,
-    pixelCrop.width,
-    pixelCrop.height
+    canvas.width,
+    canvas.height
   );
 
   return new Promise((resolve) => {
@@ -37,7 +42,7 @@ async function getCroppedImg(imageSrc, pixelCrop) {
   });
 }
 
-export default function ImageCropDialog({ open, onOpenChange, imageSrc, onCropComplete, cropShape = 'round' }) {
+export default function ImageCropDialog({ open, onOpenChange, imageSrc, onCropComplete, cropShape = 'round', aspect = 1 }) {
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [rotation, setRotation] = useState(0);
@@ -78,7 +83,7 @@ export default function ImageCropDialog({ open, onOpenChange, imageSrc, onCropCo
               crop={crop}
               zoom={zoom}
               rotation={rotation}
-              aspect={1}
+              aspect={aspect}
               cropShape={cropShape}
               showGrid={false}
               onCropChange={onCropChange}

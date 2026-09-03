@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { Camera, LogOut, Loader2, User, Save, Clock, Video, AlertTriangle } from 'lucide-react';
 import ImageCropDialog from '@/components/shared/ImageCropDialog';
+import { BARBER_PHOTO_ASPECT, BARBER_PHOTO_BG, BARBER_PHOTO_RATIO } from '@/lib/barberPhoto';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -388,7 +389,8 @@ export default function BarberSettings() {
           <h3 className="text-sm font-semibold mb-5">Photo de profil</h3>
           <div className="flex items-center gap-5">
             <div className="relative group">
-              <div className="w-24 h-24 rounded-2xl overflow-hidden bg-secondary border border-border flex items-center justify-center">
+              <div className="w-24 rounded-2xl overflow-hidden bg-secondary border border-border flex items-center justify-center"
+                style={{ aspectRatio: BARBER_PHOTO_ASPECT, background: employee?.photo_url ? BARBER_PHOTO_BG : undefined }}>
                 {employee?.photo_url ? (
                   <img src={employee.photo_url} alt={employee.name} className="w-full h-full object-cover" />
                 ) : (
@@ -414,6 +416,7 @@ export default function BarberSettings() {
               <Button variant="outline" size="sm" className="mt-3 text-xs" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
                 {uploading ? <><Loader2 className="w-3 h-3 mr-1.5 animate-spin" />Upload...</> : <><Camera className="w-3 h-3 mr-1.5" />Changer la photo</>}
               </Button>
+              <p className="text-[10px] text-muted-foreground mt-2">Format portrait (1748 × 2480), buste centré, fond sombre</p>
             </div>
           </div>
         </div>
@@ -580,6 +583,8 @@ export default function BarberSettings() {
         open={showCrop}
         onOpenChange={setShowCrop}
         imageSrc={cropSrc}
+        cropShape="rect"
+        aspect={BARBER_PHOTO_RATIO}
         onCropComplete={handleCroppedPhoto}
       />
     </div>

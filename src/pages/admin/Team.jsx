@@ -3,6 +3,7 @@ import { api } from '@/api/apiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Pencil, Trash2, Mail, Upload } from 'lucide-react';
 import ImageCropDialog from '@/components/shared/ImageCropDialog';
+import { BARBER_PHOTO_ASPECT, BARBER_PHOTO_BG, BARBER_PHOTO_RATIO } from '@/lib/barberPhoto';
 import { Button } from '@/components/ui/button';
 
 const BARBER_COLORS = ['#3fcf8e','#60a5fa','#f59e0b','#a78bfa','#f472b6','#34d399','#fb923c','#38bdf8','#e879f9','#4ade80'];
@@ -93,8 +94,8 @@ export default function Team() {
         {employees.map(emp => (
           <div key={emp.id} className="bg-card border border-border rounded-xl p-5">
             <div className="flex items-start gap-4">
-              <div className="w-14 h-14 rounded-full flex items-center justify-center overflow-hidden flex-shrink-0 ring-2"
-                style={{ background: (emp.color || BARBER_COLORS[0]) + '22', ringColor: emp.color || BARBER_COLORS[0], borderColor: emp.color || BARBER_COLORS[0], border: `2px solid ${emp.color || BARBER_COLORS[0]}` }}>
+              <div className="w-14 rounded-lg flex items-center justify-center overflow-hidden flex-shrink-0"
+                style={{ aspectRatio: BARBER_PHOTO_ASPECT, background: emp.photo_url ? BARBER_PHOTO_BG : (emp.color || BARBER_COLORS[0]) + '22', border: `2px solid ${emp.color || BARBER_COLORS[0]}` }}>
                 {emp.photo_url ? (
                   <img src={emp.photo_url} alt={emp.name} className="w-full h-full object-cover" />
                 ) : (
@@ -136,8 +137,8 @@ export default function Team() {
             <div className="space-y-4">
               {/* Photo upload */}
               <div className="flex flex-col items-center gap-3">
-                <div className="w-20 h-20 rounded-full overflow-hidden border-2 flex items-center justify-center"
-                  style={{ borderColor: editEmployee.color || BARBER_COLORS[0], background: (editEmployee.color || BARBER_COLORS[0]) + '22' }}>
+                <div className="w-28 rounded-xl overflow-hidden border-2 flex items-center justify-center"
+                  style={{ aspectRatio: BARBER_PHOTO_ASPECT, borderColor: editEmployee.color || BARBER_COLORS[0], background: editEmployee.photo_url ? BARBER_PHOTO_BG : (editEmployee.color || BARBER_COLORS[0]) + '22' }}>
                   {editEmployee.photo_url ? (
                     <img src={editEmployee.photo_url} alt="Photo" className="w-full h-full object-cover" />
                   ) : (
@@ -159,6 +160,7 @@ export default function Team() {
                     <Upload className="w-3 h-3" /> Changer la photo
                   </span>
                 </label>
+                <p className="text-[10px] text-muted-foreground text-center">Format portrait (1748 × 2480), buste centré, fond sombre</p>
               </div>
 
               {/* Video URL — stored in bio with marker */}
@@ -251,6 +253,8 @@ export default function Team() {
         open={showCrop}
         onOpenChange={setShowCrop}
         imageSrc={cropSrc}
+        cropShape="rect"
+        aspect={BARBER_PHOTO_RATIO}
         onCropComplete={async (croppedFile) => {
           try {
             const { file_url } = await api.integrations.Core.UploadFile({ file: croppedFile });

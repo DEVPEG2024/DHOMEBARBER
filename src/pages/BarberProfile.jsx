@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { ChevronLeft, Scissors, Calendar, User, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { BARBER_PHOTO_ASPECT, BARBER_PHOTO_BG } from '@/lib/barberPhoto';
 
 function SkillBar({ category, level, delay }) {
   const labels = ['Non évalué', 'Débutant', 'Intermédiaire', 'Avancé', 'Expert', 'Maître'];
@@ -115,11 +116,15 @@ function MediaBlock({ videoUrl, photoUrl, name }) {
   const isDirectVideo = videoUrl && !youtubeId;
   const showDirectVideo = isDirectVideo && !videoFailed;
   const showPhoto = (!videoUrl || (isDirectVideo && videoFailed)) && photoUrl;
+  // Vidéo : format vertical 1080 × 1350 ; photo (ou rien) : format portrait 1748 × 2480
+  const showsVideo = !!youtubeId || showDirectVideo;
 
   return (
     <div
       className="relative rounded-2xl overflow-hidden border border-white/[0.08] mb-6"
-      style={{ aspectRatio: '1080/1350' }}
+      style={showsVideo
+        ? { aspectRatio: '1080/1350' }
+        : { aspectRatio: BARBER_PHOTO_ASPECT, background: BARBER_PHOTO_BG }}
     >
       {/* YouTube embed */}
       {youtubeId && (
@@ -249,7 +254,7 @@ export default function BarberProfile() {
           <p className="text-sm text-primary/80 font-medium mt-1">{employee.title || 'Barber'}</p>
         </motion.div>
 
-        {/* Video / Photo - format vertical 1350x1080 */}
+        {/* Vidéo (1080 × 1350) ou photo portrait (1748 × 2480) */}
         <MediaBlock videoUrl={videoUrl} photoUrl={photoUrl} name={employee.name} />
 
         {/* About section - Glass card */}
