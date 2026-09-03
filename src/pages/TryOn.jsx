@@ -6,19 +6,26 @@ import { ChevronLeft, Camera, Image as ImageIcon, RefreshCw, Share2, ShieldCheck
 import { api } from '@/api/apiClient';
 import { hapticFeedback, isNative } from '@/lib/capacitor';
 import {
-  HAIR_COLORS, loadHairSegmenter, setSegmenterMode, hairMaskOf, maskProbabilities, maskToAlpha, renderHairColor,
+  HAIR_COLORS, loadModels, setModelsMode, hairMaskOf, maskProbabilities, maskToAlpha,
+  computeBeardAlpha, subtractZone, meanLuminance, renderHairColor2D,
 } from '@/lib/hairColor';
+import { createHairRenderer } from '@/lib/hairGl';
 
 /**
- * « Nouvelle tête » : essayage de couleur de cheveux en direct (caméra frontale) ou sur une photo.
- * Détection des cheveux et rendu entièrement sur l'appareil, voir src/lib/hairColor.js.
- * Deux modes : caméra (flux vidéo analysé image par image) et photo (une analyse, puis
- * le changement de teinte / d'intensité redessine sans réanalyser).
+ * « Nouvelle tête » : essayage de couleur de cheveux et de barbe, en direct (caméra frontale)
+ * ou sur une photo. Détection et rendu entièrement sur l'appareil (src/lib/hairColor.js,
+ * src/lib/hairGl.js). Cible au choix : cheveux, barbe, ou les deux.
  */
 
-const PROC_WIDTH = 360;      // largeur d'analyse : le modèle travaille en basse résolution, inutile d'aller au-delà
+const PROC_WIDTH = 360;       // largeur d'analyse (les modèles travaillent en basse résolution)
 const PHOTO_MAX_WIDTH = 1080; // largeur max du rendu photo (partage)
 const DEFAULT_COLOR_ID = 'bleu';
+const TARGETS = [
+  { id: 'hair', label: 'Cheveux' },
+  { id: 'beard', label: 'Barbe' },
+  { id: 'both', label: 'Les deux' },
+];
+const PROGRESS_LABELS = { wasm: 'Chargement du moteur…', hair: 'Modèle cheveux…', face: 'Modèle visage…' };
 
 function useOffscreenCanvas() {
   const ref = useRef(null);
@@ -47,30 +54,39 @@ export default function TryOn() {
   const [status, setStatus] = useState('loading'); // loading | ready | error
   const [progress, setProgress] = useState('Préparation…');
   const [mode, setMode] = useState('camera');       // camera | photo
+  const [target, setTarget] = useState('hair');     // hair | beard | both
   const [color, setColor] = useState(() => HAIR_COLORS.find((c) => c.id === DEFAULT_COLOR_ID) || HAIR_COLORS[0]);
-  const [strength, setStrength] = useState(0.85);
-  const [captured, setCaptured] = useState(null);   // photo prise avec la caméra (data URL, déjà remise à l'endroit)
+  const [strength, setStrength] = useState(0.9);
+  const [captured, setCaptured] = useState(null);   // photo prise avec la caméra (data URL, remise à l'endroit)
   const [photo, setPhoto] = useState(null);         // image choisie en mode photo
   const [analysing, setAnalysing] = useState(false);
   const [notice, setNotice] = useState('');
+  const [faceMissing, setFaceMissing] = useState(false);
   const [shareHint, setShareHint] = useState(false);
 
   const canvasRef = useRef(null);
   const videoRef = useRef(null);
   const fileInputRef = useRef(null);
   const procCanvasRef = useOffscreenCanvas();
+  const scratchCanvasRef = useOffscreenCanvas();
   const overlayCanvasRef = useOffscreenCanvas();
-  const segmenterRef = useRef(null);
-  const alphaRef = useRef(null);
+  const modelsRef = useRef(null);
+  const rendererRef = useRef(null);
+  const hairAlphaRef = useRef(null);
+  const beardAlphaRef = useRef(null);
   const maskDimsRef = useRef({ w: 0, h: 0 });
+  const meansRef = useRef({ hair: null, beard: null });
+  const faceSeenAtRef = useRef(0);
   const rafRef = useRef(0);
   const runningRef = useRef(false);
   const busyRef = useRef(false);
   const streamRef = useRef(null);
   const colorRef = useRef(color);
   const strengthRef = useRef(strength);
+  const targetRef = useRef(target);
   colorRef.current = color;
   strengthRef.current = strength;
+  targetRef.current = target;
 
   // Prestations de coloration : pré-sélection dans la réservation
   const { data: services = [] } = useQuery({
@@ -81,11 +97,19 @@ export default function TryOn() {
   const colorServiceIds = services.filter((s) => /colo|m[èe]che|d[ée]colo|blond/i.test(s.name || '')).map((s) => s.id);
   const bookingHref = colorServiceIds.length > 0 ? `/booking?services=${colorServiceIds.join(',')}` : '/booking';
 
-  // 1. Moteur + modèle (une fois par session)
+  // Moteur de rendu : WebGL (réaliste), sinon canvas 2D
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return undefined;
+    rendererRef.current = createHairRenderer(canvas);
+    return () => { rendererRef.current?.destroy(); rendererRef.current = null; };
+  }, []);
+
+  // Modèles (une fois par session)
   useEffect(() => {
     let cancelled = false;
-    loadHairSegmenter((step) => setProgress(step === 'wasm' ? 'Chargement du moteur…' : 'Chargement du modèle…'))
-      .then((segmenter) => { if (!cancelled) { segmenterRef.current = segmenter; setStatus('ready'); } })
+    loadModels((step) => setProgress(PROGRESS_LABELS[step] || 'Chargement…'))
+      .then((models) => { if (!cancelled) { modelsRef.current = models; setStatus('ready'); } })
       .catch(() => { if (!cancelled) setStatus('error'); });
     return () => { cancelled = true; };
   }, []);
@@ -98,45 +122,107 @@ export default function TryOn() {
     if (videoRef.current) videoRef.current.srcObject = null;
   }, []);
 
-  // Boucle vidéo : analyse en basse résolution, rendu à la taille du flux
+  /** Analyse une image (vidéo ou photo) en basse résolution : masques cheveux et barbe, luminosités moyennes. */
+  const analyse = useCallback((source, sw, sh, timestamp, isVideo) => {
+    const models = modelsRef.current;
+    const proc = procCanvasRef.current;
+    if (!models || !proc) return;
+    const pw = PROC_WIDTH;
+    const ph = Math.round((pw * sh) / sw);
+    if (proc.width !== pw || proc.height !== ph) { proc.width = pw; proc.height = ph; }
+    const pctx = proc.getContext('2d', { willReadFrequently: true });
+    pctx.drawImage(source, 0, 0, pw, ph);
+    const pixels = pctx.getImageData(0, 0, pw, ph).data;
+
+    // Cheveux
+    const onHair = (result) => {
+      const mask = hairMaskOf(result);
+      if (mask) {
+        const probs = maskProbabilities(mask);
+        hairAlphaRef.current = maskToAlpha(probs, isVideo ? hairAlphaRef.current : null);
+      }
+    };
+    if (isVideo) {
+      models.segmenter.segmentForVideo(proc, timestamp, onHair);
+    } else {
+      const result = models.segmenter.segment(proc);
+      onHair(result);
+      result.close?.();
+    }
+
+    // Visage → barbe
+    let landmarks = null;
+    if (models.landmarker) {
+      try {
+        const faces = isVideo ? models.landmarker.detectForVideo(proc, timestamp) : models.landmarker.detect(proc);
+        landmarks = faces?.faceLandmarks?.[0] || null;
+      } catch {
+        landmarks = null;
+      }
+    }
+    const beard = computeBeardAlpha({ landmarks, pixels, w: pw, h: ph, scratch: scratchCanvasRef.current, prev: isVideo ? beardAlphaRef.current : null });
+    beardAlphaRef.current = beard.alpha;
+    if (beard.zone && hairAlphaRef.current && hairAlphaRef.current.length === pw * ph) subtractZone(hairAlphaRef.current, beard.zone);
+    if (landmarks) faceSeenAtRef.current = Date.now();
+
+    maskDimsRef.current = { w: pw, h: ph };
+    meansRef.current = {
+      hair: meanLuminance(pixels, hairAlphaRef.current && hairAlphaRef.current.length === pw * ph ? hairAlphaRef.current : null),
+      beard: meanLuminance(pixels, beardAlphaRef.current),
+    };
+  }, [procCanvasRef, scratchCanvasRef]);
+
+  /** Dessine `source` recolorée à `w` × `h` avec les masques courants. */
+  const draw = useCallback((source, w, h) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const t = targetRef.current;
+    const hairOn = t !== 'beard';
+    const beardOn = t !== 'hair';
+    const { w: mw, h: mh } = maskDimsRef.current;
+    const hairAlpha = hairAlphaRef.current && hairAlphaRef.current.length === mw * mh ? hairAlphaRef.current : null;
+    const beardAlpha = beardAlphaRef.current && beardAlphaRef.current.length === mw * mh ? beardAlphaRef.current : null;
+    const renderer = rendererRef.current;
+    if (renderer) {
+      renderer.render({
+        source, width: w, height: h, hairAlpha, beardAlpha, maskWidth: mw, maskHeight: mh,
+        color: colorRef.current, strength: strengthRef.current, hairOn, beardOn,
+        hairMeanL: meansRef.current.hair, beardMeanL: meansRef.current.beard,
+      });
+    } else {
+      if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+      renderHairColor2D({
+        ctx: canvas.getContext('2d'), width: w, height: h, source,
+        alphas: [hairOn ? hairAlpha : null, beardOn ? beardAlpha : null], maskWidth: mw, maskHeight: mh,
+        color: colorRef.current, strength: strengthRef.current, overlayCanvas: overlayCanvasRef.current,
+      });
+    }
+  }, [overlayCanvasRef]);
+
+  // Boucle vidéo
   const loop = useCallback(() => {
     if (!runningRef.current) return;
     rafRef.current = requestAnimationFrame(loop);
     const video = videoRef.current;
-    const segmenter = segmenterRef.current;
-    const canvas = canvasRef.current;
-    const proc = procCanvasRef.current;
-    if (!video || !segmenter || !canvas || !proc || video.readyState < 2 || busyRef.current) return;
+    if (!video || video.readyState < 2 || busyRef.current) return;
     const vw = video.videoWidth;
     const vh = video.videoHeight;
     if (!vw || !vh) return;
-    if (canvas.width !== vw || canvas.height !== vh) { canvas.width = vw; canvas.height = vh; }
-    const pw = PROC_WIDTH;
-    const ph = Math.round((pw * vh) / vw);
-    if (proc.width !== pw || proc.height !== ph) { proc.width = pw; proc.height = ph; }
-    proc.getContext('2d').drawImage(video, 0, 0, pw, ph);
     busyRef.current = true;
     try {
-      segmenter.segmentForVideo(proc, performance.now(), (result) => {
-        const mask = hairMaskOf(result);
-        if (mask) {
-          alphaRef.current = maskToAlpha(maskProbabilities(mask), alphaRef.current);
-          maskDimsRef.current = { w: mask.width, h: mask.height };
-        }
-        renderHairColor({
-          ctx: canvas.getContext('2d'), width: vw, height: vh, source: video,
-          alpha: alphaRef.current, maskWidth: maskDimsRef.current.w, maskHeight: maskDimsRef.current.h,
-          color: colorRef.current, strength: strengthRef.current, overlayCanvas: overlayCanvasRef.current,
-        });
-      });
+      analyse(video, vw, vh, performance.now(), true);
+      draw(video, vw, vh);
+      // Indication « visage non détecté » quand la barbe est ciblée
+      const missing = targetRef.current !== 'hair' && Date.now() - faceSeenAtRef.current > 1500;
+      setFaceMissing((prev) => (prev === missing ? prev : missing));
     } catch {
-      // image ignorée (le modèle bascule de mode, ou frame invalide)
+      // image ignorée (changement de mode en cours, frame invalide)
     } finally {
       busyRef.current = false;
     }
-  }, [procCanvasRef, overlayCanvasRef]);
+  }, [analyse, draw]);
 
-  // 2. Caméra frontale quand le modèle est prêt, en mode caméra, hors capture
+  // Caméra frontale quand les modèles sont prêts, en mode caméra, hors capture
   useEffect(() => {
     if (status !== 'ready' || mode !== 'camera' || captured) return undefined;
     let cancelled = false;
@@ -152,9 +238,11 @@ export default function TryOn() {
         const video = videoRef.current;
         video.srcObject = stream;
         await video.play();
-        await setSegmenterMode(segmenterRef.current, 'VIDEO');
+        await setModelsMode(modelsRef.current, 'VIDEO');
         if (cancelled) return;
-        alphaRef.current = null;
+        hairAlphaRef.current = null;
+        beardAlphaRef.current = null;
+        faceSeenAtRef.current = Date.now();
         setNotice('');
         runningRef.current = true;
         loop();
@@ -169,49 +257,33 @@ export default function TryOn() {
     return () => { cancelled = true; stopCamera(); };
   }, [status, mode, captured, loop, stopCamera]);
 
-  // Mode photo : analyse une fois, puis rendu à chaque changement de teinte / intensité
+  // Mode photo : une analyse, puis rendu à chaque changement de teinte / intensité / cible
   const renderPhoto = useCallback((img) => {
-    const canvas = canvasRef.current;
-    if (!canvas || !img) return;
+    if (!img) return;
     const scale = Math.min(1, PHOTO_MAX_WIDTH / imageWidth(img));
-    const w = Math.round(imageWidth(img) * scale);
-    const h = Math.round(imageHeight(img) * scale);
-    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
-    renderHairColor({
-      ctx: canvas.getContext('2d'), width: w, height: h, source: img,
-      alpha: alphaRef.current, maskWidth: maskDimsRef.current.w, maskHeight: maskDimsRef.current.h,
-      color: colorRef.current, strength: strengthRef.current, overlayCanvas: overlayCanvasRef.current,
-    });
-  }, [overlayCanvasRef]);
+    draw(img, Math.round(imageWidth(img) * scale), Math.round(imageHeight(img) * scale));
+  }, [draw]);
 
   const analysePhoto = useCallback(async (img) => {
-    const segmenter = segmenterRef.current;
-    const proc = procCanvasRef.current;
-    if (!segmenter || !proc) return;
+    if (!modelsRef.current) return;
     setAnalysing(true);
     try {
-      await setSegmenterMode(segmenter, 'IMAGE');
-      const pw = PROC_WIDTH;
-      const ph = Math.round((pw * imageHeight(img)) / imageWidth(img));
-      proc.width = pw;
-      proc.height = ph;
-      proc.getContext('2d').drawImage(img, 0, 0, pw, ph);
-      const result = segmenter.segment(proc);
-      const mask = hairMaskOf(result);
-      alphaRef.current = mask ? maskToAlpha(maskProbabilities(mask), null) : null;
-      maskDimsRef.current = mask ? { w: mask.width, h: mask.height } : { w: 0, h: 0 };
-      result.close?.();
+      await setModelsMode(modelsRef.current, 'IMAGE');
+      hairAlphaRef.current = null;
+      beardAlphaRef.current = null;
+      analyse(img, imageWidth(img), imageHeight(img), 0, false);
+      setFaceMissing(Date.now() - faceSeenAtRef.current > 1500);
       renderPhoto(img);
     } catch {
       setNotice("Impossible d'analyser cette photo.");
     } finally {
       setAnalysing(false);
     }
-  }, [procCanvasRef, renderPhoto]);
+  }, [analyse, renderPhoto]);
 
   useEffect(() => {
     if (mode === 'photo' && photo && status === 'ready') renderPhoto(photo);
-  }, [color, strength, mode, photo, status, renderPhoto]);
+  }, [color, strength, target, mode, photo, status, renderPhoto]);
 
   useEffect(() => () => stopCamera(), [stopCamera]);
 
@@ -276,8 +348,8 @@ export default function TryOn() {
     }
   };
 
-  const showCanvas = !captured;
   const cameraLive = status === 'ready' && mode === 'camera' && !captured;
+  const beardTargeted = target !== 'hair';
 
   return (
     <div className="min-h-screen relative overflow-hidden">
@@ -306,19 +378,18 @@ export default function TryOn() {
           <Palette className="w-3 h-3" /> Nouvelle tête
         </p>
         <h1 className="font-display text-2xl font-bold text-foreground">Essayez une couleur</h1>
-        <p className="text-xs text-muted-foreground mt-1 mb-4">En direct sur vous. Tout se passe sur votre téléphone, rien n'est envoyé.</p>
+        <p className="text-xs text-muted-foreground mt-1 mb-4">Cheveux ou barbe, en direct sur vous. Tout se passe sur votre téléphone, rien n'est envoyé.</p>
 
         {/* Scène */}
         <div className="relative rounded-3xl overflow-hidden bg-black border border-white/10 shadow-2xl" style={{ aspectRatio: '3 / 4' }}>
           <video ref={videoRef} playsInline muted autoPlay className="hidden" />
           <canvas
             ref={canvasRef}
-            className={`absolute inset-0 w-full h-full object-cover ${showCanvas ? '' : 'invisible'}`}
+            className={`absolute inset-0 w-full h-full object-cover ${captured ? 'invisible' : ''}`}
             style={{ transform: mode === 'camera' ? 'scaleX(-1)' : 'none' }}
           />
           {captured && <img src={captured} alt="Votre nouvelle tête" className="absolute inset-0 w-full h-full object-cover" />}
 
-          {/* Chargement du modèle */}
           {status === 'loading' && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center px-8 bg-black/60">
               <Loader2 className="w-7 h-7 text-primary animate-spin" />
@@ -334,7 +405,6 @@ export default function TryOn() {
             </div>
           )}
 
-          {/* Mode photo sans photo : invitation */}
           {status === 'ready' && mode === 'photo' && !photo && (
             <button type="button" onClick={() => fileInputRef.current?.click()}
               className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center px-8 bg-gradient-to-b from-white/5 to-black/40">
@@ -342,7 +412,7 @@ export default function TryOn() {
                 <ImageIcon className="w-7 h-7 text-primary" />
               </span>
               <span className="text-sm font-semibold text-white">Choisir une photo</span>
-              <span className="text-[11px] text-white/50">De face, cheveux bien visibles</span>
+              <span className="text-[11px] text-white/50">De face, cheveux et barbe bien visibles</span>
             </button>
           )}
           {analysing && (
@@ -351,16 +421,12 @@ export default function TryOn() {
             </div>
           )}
 
-          {notice && (
-            <p className="absolute top-3 left-3 right-3 text-center text-[11px] text-white bg-black/60 backdrop-blur rounded-xl px-3 py-2">{notice}</p>
-          )}
-          {shareHint && (
+          {(notice || shareHint || (beardTargeted && faceMissing && status === 'ready' && (cameraLive || photo))) && (
             <p className="absolute top-3 left-3 right-3 text-center text-[11px] text-white bg-black/60 backdrop-blur rounded-xl px-3 py-2">
-              Maintenez l'image appuyée pour l'enregistrer
+              {notice || (shareHint ? "Maintenez l'image appuyée pour l'enregistrer" : 'Visage non détecté : placez-vous bien de face pour la barbe')}
             </p>
           )}
 
-          {/* Déclencheur */}
           {cameraLive && (
             <motion.button
               type="button"
@@ -370,7 +436,6 @@ export default function TryOn() {
               className="absolute bottom-4 left-1/2 -translate-x-1/2 w-16 h-16 rounded-full bg-white/95 border-4 border-white/40 shadow-xl"
             />
           )}
-          {/* Actions après capture ou sur photo */}
           {status === 'ready' && (captured || (mode === 'photo' && photo)) && !analysing && (
             <div className="absolute bottom-3 left-3 right-3 flex items-center justify-center gap-2">
               <button type="button"
@@ -386,6 +451,16 @@ export default function TryOn() {
           )}
           <input ref={fileInputRef} type="file" accept="image/*" className="hidden"
             onChange={(e) => { handleFile(e.target.files?.[0]); e.target.value = ''; }} />
+        </div>
+
+        {/* Cible : cheveux, barbe, les deux */}
+        <div className="mt-4 flex items-center rounded-2xl glass p-1 text-xs font-semibold">
+          {TARGETS.map((t) => (
+            <button key={t.id} type="button" onClick={() => { setTarget(t.id); hapticFeedback(); }}
+              className={`flex-1 h-9 rounded-xl transition-colors ${target === t.id ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/25' : 'text-muted-foreground'}`}>
+              {t.label}
+            </button>
+          ))}
         </div>
 
         {/* Teintes */}
