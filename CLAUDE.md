@@ -46,6 +46,7 @@ src/
 │   ├── useLiveCount.js        # Hook WebSocket → compteur d'utilisateurs connectés (/ws/live)
 │   ├── barberPhoto.js         # Format des photos de barbers (portrait 1748 × 2480, ratio + fond sombre)
 │   ├── calendarLinks.js       # Ajout au calendrier : URL Google Agenda, fichier .ics (VTIMEZONE Europe/Paris), openCalendar web / natif
+│   ├── hairColor.js           # Essayage couleur : chargement MediaPipe (hair segmenter), palette, masque → alpha, rendu canvas (modes de fusion)
 │   ├── app-params.js          # Paramètres app (appId, token, etc.)
 │   ├── pushNotifications.js   # Service Worker push notifications (web)
 │   ├── query-client.js        # React Query config
@@ -72,6 +73,7 @@ src/
 │   ├── Feed.jsx               # Fil social "Ca dit quoi le Gang ?" (posts, réactions emoji, commentaires, menu Signaler / Bloquer, panneau admin des signalements) — aussi /admin/feed
 │   ├── Events.jsx             # Privatisation du salon : demande d'événement, acceptation/refus du devis
 │   ├── GiftCards.jsx          # Cartes cadeau : achat (code DHB + QR), affichage
+│   ├── TryOn.jsx              # « Nouvelle tête » (/try-on, lazy) : essayage de couleur de cheveux en direct (caméra) ou sur photo, tout sur l'appareil
 │   ├── Profile.jsx            # Profil utilisateur
 │   ├── Settings.jsx           # Paramètres client (date de naissance, utilisateurs bloqués, suppression de compte, liens CGU / confidentialité)
 │   ├── Login.jsx              # Connexion, inscription, mot de passe oublié (code à 6 chiffres par email)
@@ -107,7 +109,7 @@ public/
 ├── manifest.json, sw.js       # PWA + service worker push
 ```
 
-Routes client : `/`, `/services`, `/booking`, `/shop`, `/appointments`, `/orders`, `/reviews`, `/settings`, `/notifications`, `/profile`, `/barber/:id`, `/feed`, `/events`, `/gift-cards`, `/login`.
+Routes client : `/`, `/services`, `/booking`, `/shop`, `/appointments`, `/orders`, `/reviews`, `/settings`, `/notifications`, `/profile`, `/barber/:id`, `/feed`, `/events`, `/gift-cards`, `/try-on`, `/login`.
 Routes admin : `/admin`, `/admin/agenda`, `/admin/smart-agenda`, `/admin/services`, `/admin/team`, `/admin/clients`, `/admin/products`, `/admin/stock`, `/admin/orders`, `/admin/reviews`, `/admin/stats`, `/admin/settings`, `/admin/my-settings`, `/admin/notifications`, `/admin/cleaning`, `/admin/my-cleaning`, `/admin/barber-accounts`, `/admin/leave`, `/admin/my-leave`, `/admin/feed`, `/admin/events`, `/admin/gift-cards`.
 
 ## Structure Backend
@@ -283,6 +285,14 @@ Règle commune : n'animer que `transform` et `opacity`, respecter `useReducedMot
 - **Boutique** (`Shop.jsx`) : à l'ajout, un clone de l'image vole en arc vers le bouton panier (`position: fixed`, 0,7 s), rebond du bouton et pop du compteur via une motion value, haptique ; plusieurs ajouts = plusieurs clones
 - **Carte FUT, gyroscope** (`BarberCard.jsx` + `lib/motion.js`) : `deviceorientation` → mêmes motion values que le pointeur (gamma → rotateY ± 18°, beta − 40 → rotateX ± 14°), pointeur prioritaire 300 ms. **Autorisation gérée au niveau de l'app** : `armMotionPermissionOnFirstGesture()` dans `main.jsx` demande `DeviceOrientationEvent.requestPermission()` au premier geste valide n'importe où dans l'app (touchend / pointerup / click / keydown, Safari ne compte pas `pointerdown`), résultat mémorisé en `localStorage` (`dhb-motion-permission`) et diffusé aux cartes via `onMotionPermission`. Sans `requestPermission` (Android, web), actif d'emblée. Impossible d'activer sans aucun geste sur iOS : c'est une règle de Safari / WKWebView
 - **Tailwind** : `theme.extend.opacity` ajoute 2, 3, 4, 6, 8, 12 car le code utilise `bg-white/4`, `border-white/8`… que Tailwind 3.4 ignorait silencieusement (fonds et bordures très légers absents du CSS compilé jusqu'ici)
+
+### Essayage couleur « Nouvelle tête » (`src/pages/TryOn.jsx`, `src/lib/hairColor.js`, ajouté le 3 sept. 2026)
+- **Tout sur l'appareil** : détection des cheveux par le modèle MediaPipe `hair_segmenter` (`@mediapipe/tasks-vision`, épinglé, le WASM est chargé depuis jsDelivr **à la même version** que le paquet, constante `TASKS_VISION_VERSION` à mettre à jour avec le paquet ; modèle depuis `storage.googleapis.com`). Aucune image n'est envoyée au backend. Page chargée à la demande (`React.lazy`)
+- **Rendu** : analyse en 360 px de large (`PROC_WIDTH`), masque de confiance → alpha avec rampe douce et lissage temporel (`maskToAlpha`), calque de couleur composé avec `globalCompositeOperation` `color` puis `screen` (teintes claires) / `multiply` (foncées) / `soft-light`. Palette dans `HAIR_COLORS` (`light` / `dark` pilotent la correction de luminosité)
+- **Modes** : caméra frontale (`getUserMedia`, flux en miroir à l'écran, photo remise à l'endroit à la capture) et photo (fichier, orientation EXIF via `createImageBitmap`, une analyse puis rendu à chaque changement de teinte). Repli automatique sur le mode photo si la caméra est refusée ou absente
+- **Partage** : `navigator.share` avec fichier si disponible, sinon téléchargement (web) ou consigne « maintenez l'image » (natif). Bouton « Réserver une coloration » → `/booking?services=<prestations dont le nom contient colo / mèche / décolo / blond>`
+- **Natif** : `NSCameraUsageDescription` (iOS, Info.plist) et `android.permission.CAMERA` (AndroidManifest) déclarés localement (dossiers hors git) ; la WebView Capacitor demande la permission à l'exécution. `getUserMedia` exige un contexte sécurisé : https, `capacitor://localhost`, `https://localhost`
+- Entrée : section « Nouvelle tête » de l'accueil (`try-on` dans `DEFAULT_SECTION_ORDER`, ajoutée en fin d'ordre pour les ordres déjà sauvegardés)
 
 ### Profil barber : navigation entre barbers (`src/pages/BarberProfile.jsx`)
 - La page charge la liste des barbers actifs avec la **même requête et la même clé de cache que l'accueil** (`['employees']`, filtre `is_active`, tri `sort_order`) et retrouve le barber courant par son id (comparaison en string)

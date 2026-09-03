@@ -32,6 +32,9 @@ import Feed from '@/pages/Feed';
 import Events from '@/pages/Events';
 import GiftCards from '@/pages/GiftCards';
 
+// Essayage couleur (lazy : embarque MediaPipe)
+const TryOn = React.lazy(() => import('@/pages/TryOn'));
+
 // Admin pages (lazy-loaded - only for admin/barber users)
 const AdminDashboard = React.lazy(() => import('@/pages/admin/Dashboard'));
 const Agenda = React.lazy(() => import('@/pages/admin/Agenda'));
@@ -197,6 +200,7 @@ const AppRoutes = () => {
           <Route path="/feed" element={<Feed />} />
           <Route path="/events" element={<Events />} />
           <Route path="/gift-cards" element={<GiftCards />} />
+          <Route path="/try-on" element={<Suspense fallback={<LazyFallback />}><TryOn /></Suspense>} />
         </Route>
       </Route>
 

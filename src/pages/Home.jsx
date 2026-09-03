@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { Link } from 'react-router-dom';
 import { api } from '@/api/apiClient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { MapPin, Clock, Phone, Star, ArrowRight, Scissors, ShoppingBag, Newspaper, Sparkles, Gift, GripVertical, Pencil, Check, X, Volume2, VolumeX } from 'lucide-react';
+import { MapPin, Clock, Phone, Star, ArrowRight, Scissors, ShoppingBag, Newspaper, Sparkles, Gift, GripVertical, Pencil, Check, X, Volume2, VolumeX, Palette } from 'lucide-react';
 import { motion, useMotionValue, useSpring, useTransform, Reorder } from 'framer-motion';
 import SectionHeader from '@/components/shared/SectionHeader';
 import StarRating from '@/components/shared/StarRating';
@@ -285,7 +285,7 @@ function BarberMarquee({ employees }) {
   );
 }
 
-const DEFAULT_SECTION_ORDER = ['quick-info', 'barbers', 'news', 'services', 'shop', 'reviews', 'gift-card', 'cta'];
+const DEFAULT_SECTION_ORDER = ['quick-info', 'barbers', 'try-on', 'news', 'services', 'shop', 'reviews', 'gift-card', 'cta'];
 
 const SECTION_LABELS = {
   'quick-info': 'Infos rapides',
@@ -295,6 +295,7 @@ const SECTION_LABELS = {
   'shop': 'Boutique',
   'reviews': 'Avis Clients',
   'gift-card': 'Carte Cadeau',
+  'try-on': 'Nouvelle tête',
   'cta': 'Réservation',
 };
 
@@ -431,6 +432,28 @@ export default function Home() {
             <SectionHeader title="Le Gang" subtitle="Les Barbers" />
             {employees.length > 0 && <BarberMarquee employees={employees} />}
           </div>
+        );
+
+      case 'try-on':
+        return (
+          <Link to="/try-on">
+            <motion.div whileTap={{ scale: 0.98 }} className="relative overflow-hidden rounded-3xl cursor-pointer group glass p-5">
+              <div className="absolute inset-0 opacity-70 pointer-events-none"
+                style={{ background: 'linear-gradient(120deg, rgba(30,136,229,0.22), rgba(224,82,155,0.22) 50%, rgba(216,174,90,0.22))' }} />
+              <div className="relative flex items-center gap-4">
+                <div className="w-14 h-14 shrink-0 rounded-2xl flex items-center justify-center shadow-lg"
+                  style={{ background: 'conic-gradient(from 0deg, #1e88e5, #e0529b, #d8ae5a, #1f8a5b, #7b3fbf, #1e88e5)' }}>
+                  <Palette className="w-6 h-6 text-white drop-shadow" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] tracking-[0.3em] uppercase text-white/50 font-medium">Nouvelle tête</p>
+                  <h3 className="text-base font-bold text-white leading-tight">Essayez une couleur en direct</h3>
+                  <p className="text-xs text-white/60 mt-0.5">Blond, gris, bleu… sur vous, avec la caméra</p>
+                </div>
+                <ArrowRight className="w-4 h-4 text-primary shrink-0 group-hover:translate-x-0.5 transition-transform" />
+              </div>
+            </motion.div>
+          </Link>
         );
 
       case 'news':
