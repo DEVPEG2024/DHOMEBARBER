@@ -3,9 +3,9 @@ import { useParams, Link } from 'react-router-dom';
 import { api } from '@/api/apiClient';
 import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
-import { ChevronLeft, Scissors, Calendar, User, Clock } from 'lucide-react';
+import { ChevronLeft, Scissors, Calendar, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { BARBER_PHOTO_ASPECT, BARBER_PHOTO_BG } from '@/lib/barberPhoto';
+import BarberCard, { buildCardStats, overallRating } from '@/components/shared/BarberCard';
 
 function SkillBar({ category, level, delay }) {
   const labels = ['Non évalué', 'Débutant', 'Intermédiaire', 'Avancé', 'Expert', 'Maître'];
@@ -108,6 +108,7 @@ function getYouTubeId(url) {
   return null;
 }
 
+// Vidéo de présentation (format vertical 1080 × 1350). La photo est sur la carte.
 function MediaBlock({ videoUrl, photoUrl, name }) {
   const videoRef = useRef(null);
   const [videoFailed, setVideoFailed] = useState(false);
@@ -115,16 +116,15 @@ function MediaBlock({ videoUrl, photoUrl, name }) {
   const youtubeId = getYouTubeId(videoUrl);
   const isDirectVideo = videoUrl && !youtubeId;
   const showDirectVideo = isDirectVideo && !videoFailed;
-  const showPhoto = (!videoUrl || (isDirectVideo && videoFailed)) && photoUrl;
-  // Vidéo : format vertical 1080 × 1350 ; photo (ou rien) : format portrait 1748 × 2480
-  const showsVideo = !!youtubeId || showDirectVideo;
+  if (!videoUrl || (isDirectVideo && videoFailed)) return null;
 
   return (
-    <div
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.15, duration: 0.4 }}
       className="relative rounded-2xl overflow-hidden border border-white/[0.08] mb-6"
-      style={showsVideo
-        ? { aspectRatio: '1080/1350' }
-        : { aspectRatio: BARBER_PHOTO_ASPECT, background: BARBER_PHOTO_BG }}
+      style={{ aspectRatio: '1080/1350' }}
     >
       {/* YouTube embed */}
       {youtubeId && (
@@ -154,24 +154,12 @@ function MediaBlock({ videoUrl, photoUrl, name }) {
         />
       )}
 
-      {/* Photo fallback */}
-      {showPhoto && (
-        <img src={photoUrl} alt={name} className="w-full h-full object-cover" />
-      )}
-
-      {/* No media */}
-      {!videoUrl && !photoUrl && (
-        <div className="w-full h-full bg-white/[0.02] flex items-center justify-center">
-          <User className="w-20 h-20 text-muted-foreground/20" />
-        </div>
-      )}
-
       {/* Gradient overlay bottom */}
       <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-background/80 to-transparent pointer-events-none z-[2]" />
       <div className="absolute bottom-3 right-3 w-9 h-9 rounded-xl bg-primary/90 backdrop-blur-sm flex items-center justify-center shadow-lg shadow-primary/20 z-[2]">
         <Scissors className="w-4 h-4 text-primary-foreground" />
       </div>
-    </div>
+    </motion.div>
   );
 }
 
@@ -234,6 +222,10 @@ export default function BarberProfile() {
   const photoUrl = employee.photo_url;
   const hasAboutContent = displayBio || allSkills.length > 0 || (employee.experience_level > 0);
 
+  // Carte FUT : stats depuis les compétences saisies, note globale = moyenne
+  const cardStats = buildCardStats(skillCategories, employeeSkills);
+  const overall = overallRating(cardStats);
+
   return (
     <div className="min-h-screen relative overflow-hidden">
       {/* Subtle ambient glow */}
@@ -248,13 +240,12 @@ export default function BarberProfile() {
           Retour
         </Link>
 
-        {/* Name + Title */}
-        <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="text-center mb-5">
-          <h1 className="font-display text-2xl font-bold text-foreground">{employee.name}</h1>
-          <p className="text-sm text-primary/80 font-medium mt-1">{employee.title || 'Barber'}</p>
-        </motion.div>
+        {/* Carte du barber (style FUT) : note, titre, photo, nom, stats */}
+        <div className="flex justify-center mb-7" style={{ perspective: 1000 }}>
+          <BarberCard employee={employee} stats={cardStats} overall={overall} />
+        </div>
 
-        {/* Vidéo (1080 × 1350) ou photo portrait (1748 × 2480) */}
+        {/* Vidéo de présentation, si renseignée */}
         <MediaBlock videoUrl={videoUrl} photoUrl={photoUrl} name={employee.name} />
 
         {/* About section - Glass card */}

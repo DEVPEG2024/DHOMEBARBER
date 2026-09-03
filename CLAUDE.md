@@ -53,7 +53,7 @@ src/
 ├── components/
 │   ├── agenda/                # DayView, WeekView, MonthView, AgendaToolbar, AppointmentDetailModal, BreakModal
 │   ├── layout/                # ClientLayout, AdminLayout, BottomNav
-│   ├── shared/                # ServiceCard, EmployeeCard, StarRating, SectionHeader, ImageCropDialog, MusicToggle
+│   ├── shared/                # ServiceCard, EmployeeCard, BarberCard (carte style FUT), StarRating, SectionHeader, ImageCropDialog, MusicToggle
 │   ├── BackgroundMusic.jsx
 │   ├── ErrorBoundary.jsx
 │   ├── UserNotRegisteredError.jsx
@@ -66,7 +66,7 @@ src/
 │   ├── Orders.jsx             # Commandes client
 │   ├── Appointments.jsx       # Mes rendez-vous (client)
 │   ├── MyReviews.jsx          # Mes avis (client)
-│   ├── BarberProfile.jsx      # Profil public d'un barber (/barber/:id), vidéo de présentation
+│   ├── BarberProfile.jsx      # Profil public d'un barber (/barber/:id) : carte style FUT (BarberCard) + vidéo de présentation
 │   ├── Feed.jsx               # Fil social "Ca dit quoi le Gang ?" (posts, réactions emoji, commentaires, menu Signaler / Bloquer, panneau admin des signalements) — aussi /admin/feed
 │   ├── Events.jsx             # Privatisation du salon : demande d'événement, acceptation/refus du devis
 │   ├── GiftCards.jsx          # Cartes cadeau : achat (code DHB + QR), affichage
@@ -254,6 +254,12 @@ Le `server.js` exécute des migrations automatiques au démarrage (`ADD COLUMN I
 - La vidéo de présentation est stockée **dans `employees.bio`** après le marqueur `\n%%VIDEO%%url` (pas dans working_hours). Ne pas écraser la bio sans préserver ce suffixe.
 - Comparer les ids employé en string (`String(a) === String(b)`) : mélange UUID / number selon la source
 - **Photos des barbers : format portrait 1748 × 2480** (ratio A4, buste centré, fond sombre, référence « KVB APP »). Les constantes sont dans `src/lib/barberPhoto.js` (`BARBER_PHOTO_ASPECT` pour le CSS, `BARBER_PHOTO_RATIO` pour le recadrage, `BARBER_PHOTO_BG`). Le recadrage à l'upload (Équipe admin, Mes paramètres) force ce ratio (`ImageCropDialog` prop `aspect`, forme `rect`, côté max 2480 px) et tous les affichages (carrousel accueil, cartes de réservation, profil public sans vidéo, admin) utilisent le même cadre. Ne pas réintroduire de vignette carrée / ronde pour un barber ; les avatars clients restent ronds.
+
+### Carte barber style FUT (`src/components/shared/BarberCard.jsx`)
+- Affichée en tête du profil public `/barber/:id` (référence : carte FIFA « Team of the Season », bleu / or, liseré néon). Carte fixe 300 × 470 px, forme découpée en `clip-path`, police `Barlow Condensed` (classe `.font-fut`, importée dans `index.css`)
+- Contenu : note globale, `title` du barber (ex. KVB), logo du salon, photo (fondu radial : le fond sombre de la photo se fond dans la carte, d'où l'importance du format portrait fond sombre), bandeau nom, six stats
+- Stats = compétences du barber (`employees.skills`, niveau 0-5 par `SkillCategory`) converties : 1→68, 2→76, 3→84, 4→92, 5→99 ; non évaluée → « – ». Abréviations 3 lettres (`skillAbbr` : CIS, BAR, AFR, DES, COL, TAP, sinon 3 premières lettres). Au-delà de 6 catégories, on garde les 6 mieux notées
+- Note globale = moyenne arrondie des stats renseignées (`overallRating`), « – » si aucune. Ne dépend pas de `experience_level`
 
 ### Infos du salon
 - Adresse : Sur le côté gauche du bâtiment Odyssée, 3 Rue du Bois Arquet, 74140 Douvaine

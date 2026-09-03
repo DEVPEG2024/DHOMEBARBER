@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Playfair+Display:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Playfair+Display:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700;800&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -147,4 +147,9 @@ body {
 /* Keyboard open state (set by Capacitor keyboard plugin) */
 body.keyboard-open {
   padding-bottom: 0;
+}
+
+/* Police condensée de la carte barber (style FUT) */
+.font-fut {
+  font-family: 'Barlow Condensed', 'Arial Narrow', Inter, sans-serif;
 }
