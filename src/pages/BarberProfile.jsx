@@ -180,7 +180,8 @@ function BarberProfileContent({ employee, skillCategories }) {
   const displayBio = markerIdx >= 0 ? rawBio.slice(0, markerIdx) : rawBio;
   const videoUrl = markerIdx >= 0 ? rawBio.slice(markerIdx + VIDEO_MARKER.length) : null;
   const photoUrl = employee.photo_url;
-  const hasAboutContent = displayBio || allSkills.length > 0 || (employee.experience_level > 0);
+  // La description est au dos de la carte (double tap) ; le bloc À propos garde expérience et compétences
+  const hasAboutContent = allSkills.length > 0 || (employee.experience_level > 0);
 
   // Carte FUT : stats depuis les compétences saisies, note globale = moyenne
   const cardStats = buildCardStats(skillCategories, employeeSkills);
@@ -189,9 +190,17 @@ function BarberProfileContent({ employee, skillCategories }) {
   return (
     <>
       {/* Carte du barber (style FUT) : note, titre, photo, nom, stats */}
-      <div className="flex justify-center mb-7" style={{ perspective: 1000 }}>
-        <BarberCard employee={employee} stats={cardStats} overall={overall} />
+      <div className="flex justify-center mb-3" style={{ perspective: 1000 }}>
+        <BarberCard employee={employee} stats={cardStats} overall={overall} bio={displayBio} />
       </div>
+      <motion.p
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.9 }}
+        className="text-center text-[10px] uppercase tracking-[0.25em] text-muted-foreground/45 mb-6 select-none"
+      >
+        Double tap sur la carte pour lire la description
+      </motion.p>
 
       {/* Vidéo de présentation, si renseignée */}
       <MediaBlock videoUrl={videoUrl} photoUrl={photoUrl} />
@@ -201,11 +210,6 @@ function BarberProfileContent({ employee, skillCategories }) {
         <GlassCard className="p-5 mb-5 space-y-5" delay={0.1}>
           <h3 className="text-[10px] uppercase tracking-[0.2em] text-primary/60 font-semibold">À propos</h3>
 
-          {/* Bio */}
-          {displayBio && (
-            <p className="text-sm text-muted-foreground leading-relaxed">{displayBio}</p>
-          )}
-
           {/* Experience gauge */}
           {employee.experience_level > 0 && (
             <ExperienceBar value={employee.experience_level} delay={0.15} />
@@ -214,7 +218,7 @@ function BarberProfileContent({ employee, skillCategories }) {
           {/* Skills */}
           {allSkills.length > 0 && (
             <>
-              {(displayBio || employee.experience_level > 0) && (
+              {employee.experience_level > 0 && (
                 <div className="border-t border-white/[0.06]" />
               )}
               <div>

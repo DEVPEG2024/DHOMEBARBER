@@ -1,5 +1,6 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { motion, useMotionValue, useSpring, animate, useReducedMotion } from 'framer-motion';
+import { hapticFeedback } from '@/lib/capacitor';
 
 /**
  * Carte de barber façon FUT (FIFA Ultimate Team, style « Team of the Season ») :
@@ -13,6 +14,10 @@ import { motion, useMotionValue, useSpring, animate, useReducedMotion } from 'fr
  * Animations : les chiffres montent de 0 à leur valeur à l'arrivée, un reflet
  * holographique balaie la carte, puis la carte s'incline et le reflet suit le
  * doigt / la souris. Tout est en transform / opacity (fluide sur mobile).
+ *
+ * Double tap : la carte se retourne (rotation 3D à ressort) et montre au dos la
+ * description du barber (`bio`). Détection maison sur pointerup (deux taps en
+ * moins de 320 ms sans déplacement), fiable sur iOS / Android et à la souris.
  */
 
 export const CARD_WIDTH = 300;
@@ -173,12 +178,73 @@ function StatRow({ stat, delay }) {
   );
 }
 
-export default function BarberCard({ employee, stats = [], overall = null, logoUrl = '/logo.png', className = '' }) {
+const NEON_SHADOW = `drop-shadow(0 0 3px ${NEON}) drop-shadow(0 0 14px rgba(134,247,230,0.55)) drop-shadow(0 12px 28px rgba(0,0,0,0.6))`;
+const DOUBLE_TAP_MS = 320;
+
+/** Dos de la carte : même découpe et liseré néon, description du barber. */
+function CardBack({ employee, bio, logoUrl }) {
+  const title = (employee?.title || 'Barber').trim();
+  return (
+    <div className="absolute inset-0" style={{ filter: NEON_SHADOW }}>
+      <div className="absolute inset-0" style={{ clipPath: CARD_SHAPE, background: NEON }}>
+        <div
+          className="absolute overflow-hidden"
+          style={{
+            inset: 3,
+            clipPath: CARD_SHAPE,
+            background: [
+              'radial-gradient(ellipse 70% 45% at 50% 0%, rgba(42,79,214,0.55) 0%, transparent 70%)',
+              'linear-gradient(165deg, #142a8f 0%, #0d1f6b 40%, #08143f 100%)',
+            ].join(', '),
+          }}
+        >
+          <img
+            src={logoUrl}
+            alt=""
+            draggable={false}
+            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-60 h-60 object-contain pointer-events-none"
+            style={{ opacity: 0.07 }}
+          />
+          <div className="absolute inset-0 flex flex-col" style={{ padding: '46px 26px 62px' }}>
+            <span className="font-fut uppercase leading-none" style={{ fontSize: 13, letterSpacing: 2, color: GOLD, opacity: 0.8 }}>
+              {title}
+            </span>
+            <span
+              className="font-fut uppercase leading-none whitespace-nowrap overflow-hidden text-ellipsis"
+              style={{ fontSize: 30, fontWeight: 800, color: GOLD, letterSpacing: 1.6, marginTop: 6, textShadow: '0 2px 8px rgba(0,0,0,0.4)' }}
+            >
+              {employee?.name}
+            </span>
+            <span className="block" style={{ width: 60, height: 1, background: GOLD_LINE, margin: '12px 0 14px' }} />
+            <span className="font-fut uppercase leading-none" style={{ fontSize: 12, letterSpacing: 2.5, color: NEON, opacity: 0.85 }}>
+              À propos
+            </span>
+            <div className="mt-2 flex-1 min-h-0 overflow-y-auto scrollbar-hide pr-1" style={{ WebkitOverflowScrolling: 'touch' }}>
+              <p className="text-[13.5px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.88)', whiteSpace: 'pre-wrap' }}>
+                {bio?.trim() || 'Pas encore de description.'}
+              </p>
+            </div>
+            <span className="font-fut uppercase text-center leading-none" style={{ fontSize: 10, letterSpacing: 2, color: GOLD, opacity: 0.5, marginTop: 12 }}>
+              Double tap pour retourner
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function BarberCard({ employee, stats = [], overall = null, logoUrl = '/logo.png', className = '', bio = '' }) {
   const left = stats.slice(0, Math.ceil(stats.length / 2));
   const right = stats.slice(Math.ceil(stats.length / 2));
   const title = (employee?.title || 'Barber').trim();
   const titleSize = title.length > 8 ? 11 : title.length > 5 ? 13 : 16;
   const reduceMotion = useReducedMotion();
+
+  // Retournement au double tap
+  const [flipped, setFlipped] = useState(false);
+  const lastTapRef = useRef(0);
+  const downPosRef = useRef(null);
 
   // Inclinaison 3D et reflet qui suivent le pointeur (souris ou doigt)
   const rotateX = useMotionValue(0);
@@ -207,6 +273,24 @@ export default function BarberCard({ employee, stats = [], overall = null, logoU
     glareY.set(0);
   };
 
+  const handlePointerDown = (e) => {
+    downPosRef.current = { x: e.clientX, y: e.clientY };
+  };
+  const handlePointerUp = (e) => {
+    resetTilt();
+    const down = downPosRef.current;
+    const moved = down ? Math.hypot(e.clientX - down.x, e.clientY - down.y) : 0;
+    if (moved > 12) { lastTapRef.current = 0; return; }
+    const now = Date.now();
+    if (now - lastTapRef.current < DOUBLE_TAP_MS) {
+      lastTapRef.current = 0;
+      setFlipped(f => !f);
+      hapticFeedback();
+    } else {
+      lastTapRef.current = now;
+    }
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 28, rotateY: -14, scale: 0.96 }}
@@ -214,17 +298,31 @@ export default function BarberCard({ employee, stats = [], overall = null, logoU
       transition={{ type: 'spring', stiffness: 120, damping: 16 }}
       whileTap={{ scale: 0.98 }}
       className={`relative select-none ${className}`}
-      style={{ width: CARD_WIDTH, height: CARD_HEIGHT, perspective: 900, transformStyle: 'preserve-3d' }}
+      style={{ width: CARD_WIDTH, height: CARD_HEIGHT, perspective: 900, transformStyle: 'preserve-3d', touchAction: 'manipulation' }}
       onPointerMove={handlePointerMove}
+      onPointerDown={handlePointerDown}
       onPointerLeave={resetTilt}
-      onPointerUp={resetTilt}
+      onPointerUp={handlePointerUp}
       onPointerCancel={resetTilt}
+      onDoubleClick={(e) => e.preventDefault()}
     >
       <motion.div className="absolute inset-0" style={{ rotateX: sRotateX, rotateY: sRotateY, transformStyle: 'preserve-3d' }}>
+      {/* Retournement : les deux faces tournent ensemble, chacune cache son dos */}
+      <motion.div
+        className="absolute inset-0"
+        animate={{ rotateY: flipped ? 180 : 0 }}
+        transition={reduceMotion ? { duration: 0 } : { type: 'spring', stiffness: 170, damping: 20 }}
+        style={{ transformStyle: 'preserve-3d' }}
+      >
+      {/* Face avant */}
+      <div
+        className="absolute inset-0"
+        style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden', pointerEvents: flipped ? 'none' : 'auto' }}
+      >
         {/* Halo néon : le drop-shadow suit la forme découpée */}
         <div
           className="absolute inset-0"
-          style={{ filter: `drop-shadow(0 0 3px ${NEON}) drop-shadow(0 0 14px rgba(134,247,230,0.55)) drop-shadow(0 12px 28px rgba(0,0,0,0.6))` }}
+          style={{ filter: NEON_SHADOW }}
         >
           {/* Liseré néon */}
           <div className="absolute inset-0" style={{ clipPath: CARD_SHAPE, background: NEON }}>
@@ -352,6 +450,16 @@ export default function BarberCard({ employee, stats = [], overall = null, logoU
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Face arrière : description du barber */}
+      <div
+        className="absolute inset-0"
+        style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden', transform: 'rotateY(180deg)', pointerEvents: flipped ? 'auto' : 'none' }}
+      >
+        <CardBack employee={employee} bio={bio} logoUrl={logoUrl} />
+      </div>
+      </motion.div>
       </motion.div>
     </motion.div>
   );
