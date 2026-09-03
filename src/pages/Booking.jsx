@@ -25,7 +25,8 @@ const stepVariants = {
 };
 const stepTransition = { x: { type: 'spring', stiffness: 380, damping: 34 }, opacity: { duration: 0.18 } };
 const springy = { type: 'spring', stiffness: 420, damping: 30 };
-const CONFETTI_COLORS = ['hsl(var(--primary))', '#f6e7ad', '#86f7e6', '#ffffff', '#2563eb'];
+/** Durée de l'écran de succès avant la redirection vers Mes rendez-vous (ms). */
+const SUCCESS_DURATION = 3600;
 
 function generateTimeSlots(start, end, interval = 30) {
   const slots = [];
@@ -79,40 +80,73 @@ const Chip = React.forwardRef(function Chip({ icon: Icon, children }, ref) {
   );
 });
 
-/** Pluie de confettis (transform / opacity uniquement). */
-function Confetti({ count = 24 }) {
+/** Lame de rasoir (silhouette classique à double tranchant, rendu métallique). */
+function RazorBlade({ width = 30 }) {
+  return (
+    <svg width={width} height={width * 0.45} viewBox="0 0 44 20" aria-hidden="true" style={{ display: 'block' }}>
+      <path d="M2 4 Q2 2 4 2 H40 Q42 2 42 4 V16 Q42 18 40 18 H4 Q2 18 2 16 Z" fill="url(#blade-metal)" stroke="#8a93a0" strokeWidth="0.6" />
+      <path d="M14 8 h5 v-2.5 h6 v2.5 h5 v4 h-5 v2.5 h-6 v-2.5 h-5 z" fill="#0b0f0d" opacity="0.85" />
+      <circle cx="8" cy="10" r="1.6" fill="#0b0f0d" opacity="0.85" />
+      <circle cx="36" cy="10" r="1.6" fill="#0b0f0d" opacity="0.85" />
+      <path d="M3 2.6 H41" stroke="#ffffff" strokeWidth="0.9" opacity="0.9" />
+      <path d="M3 17.4 H41" stroke="#ffffff" strokeWidth="0.9" opacity="0.9" />
+    </svg>
+  );
+}
+
+/** Pluie de lames de rasoir : deux vagues, vol en arc, rotation et chute (transform / opacity uniquement). */
+function RazorRain({ count = 26 }) {
   const parts = useMemo(() => Array.from({ length: count }, (_, i) => {
+    const wave = i % 2;
     const angle = (i / count) * Math.PI * 2 + Math.random() * 0.5;
-    const dist = 90 + Math.random() * 100;
+    const dist = 110 + Math.random() * 120;
     return {
       id: i,
       x: Math.cos(angle) * dist,
       y: Math.sin(angle) * dist,
-      rotate: Math.random() * 540 - 270,
-      color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
-      size: 6 + Math.random() * 6,
-      delay: Math.random() * 0.15,
+      rotate: (Math.random() > 0.5 ? 1 : -1) * (540 + Math.random() * 540),
+      width: 26 + Math.random() * 16,
+      delay: wave * 0.7 + Math.random() * 0.35,
+      duration: 2.2 + Math.random() * 0.6,
     };
   }), [count]);
 
   return (
     <div className="absolute inset-0 pointer-events-none flex items-center justify-center" aria-hidden="true">
+      <svg width="0" height="0" style={{ position: 'absolute' }}>
+        <defs>
+          <linearGradient id="blade-metal" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="#f7f9fc" />
+            <stop offset="45%" stopColor="#b4bcc8" />
+            <stop offset="70%" stopColor="#e6eaf0" />
+            <stop offset="100%" stopColor="#9aa3b0" />
+          </linearGradient>
+        </defs>
+      </svg>
       {parts.map(p => (
         <motion.span
           key={p.id}
           initial={{ x: 0, y: 0, scale: 0, opacity: 1, rotate: 0 }}
-          animate={{ x: p.x, y: p.y + 80, scale: 1, opacity: 0, rotate: p.rotate }}
-          transition={{ duration: 1.3, delay: p.delay, ease: [0.16, 1, 0.3, 1], opacity: { duration: 0.6, delay: p.delay + 0.6 } }}
-          className="absolute rounded-sm"
-          style={{ width: p.size, height: p.size * 0.6, background: p.color }}
-        />
+          animate={{ x: p.x, y: p.y + 160, scale: 1, opacity: 0, rotate: p.rotate }}
+          transition={{
+            duration: p.duration,
+            delay: p.delay,
+            ease: [0.16, 1, 0.3, 1],
+            rotate: { duration: p.duration, delay: p.delay, ease: 'linear' },
+            opacity: { duration: 0.7, delay: p.delay + p.duration - 0.8 },
+          }}
+          className="absolute"
+          style={{ filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.5))' }}
+        >
+          <RazorBlade width={p.width} />
+        </motion.span>
       ))}
     </div>
   );
 }
 
-/** Écran de succès : coche à ressort, anneau qui s'échappe, confettis. */
-function SuccessOverlay({ barberName }) {
+/** Écran de succès : coche à ressort, anneau qui s'échappe, pluie de lames de rasoir, barre de redirection. */
+export function SuccessOverlay({ barberName, duration = SUCCESS_DURATION }) {
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -121,7 +155,7 @@ function SuccessOverlay({ barberName }) {
       className="fixed inset-0 z-[70] flex items-center justify-center bg-background/85 backdrop-blur-md"
     >
       <div className="relative flex flex-col items-center text-center px-8">
-        <Confetti />
+        <RazorRain />
         <motion.div
           initial={{ scale: 0, rotate: -30 }}
           animate={{ scale: 1, rotate: 0 }}
@@ -130,14 +164,20 @@ function SuccessOverlay({ barberName }) {
         >
           <motion.span
             initial={{ scale: 1, opacity: 0.7 }}
-            animate={{ scale: 2, opacity: 0 }}
-            transition={{ duration: 1.1, ease: 'easeOut', delay: 0.2, repeat: Infinity, repeatDelay: 0.4 }}
+            animate={{ scale: 2.2, opacity: 0 }}
+            transition={{ duration: 1.3, ease: 'easeOut', delay: 0.2, repeat: Infinity, repeatDelay: 0.3 }}
             className="absolute inset-0 rounded-full border-2 border-primary"
+          />
+          <motion.span
+            initial={{ scale: 1, opacity: 0.5 }}
+            animate={{ scale: 2.2, opacity: 0 }}
+            transition={{ duration: 1.3, ease: 'easeOut', delay: 0.85, repeat: Infinity, repeatDelay: 0.3 }}
+            className="absolute inset-0 rounded-full border border-primary"
           />
           <motion.div
             initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
-            transition={{ delay: 0.28, type: 'spring', stiffness: 320, damping: 14 }}
+            animate={{ scale: [0, 1.25, 1] }}
+            transition={{ delay: 0.28, duration: 0.5, ease: 'easeOut' }}
           >
             <Check className="w-12 h-12 text-primary-foreground" strokeWidth={3} />
           </motion.div>
@@ -157,6 +197,28 @@ function SuccessOverlay({ barberName }) {
           className="text-sm text-muted-foreground mt-2"
         >
           {barberName ? `${barberName} vous attend au salon.` : 'À très vite au salon.'}
+        </motion.p>
+        {/* Barre qui se remplit pendant l'attente avant la redirection */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.9 }}
+          className="mt-8 w-40 h-1 rounded-full bg-white/10 overflow-hidden"
+        >
+          <motion.div
+            initial={{ scaleX: 0 }}
+            animate={{ scaleX: 1 }}
+            transition={{ duration: (duration - 900) / 1000, delay: 0.9, ease: 'linear' }}
+            className="h-full w-full bg-primary origin-left"
+          />
+        </motion.div>
+        <motion.p
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 1 }}
+          className="text-[10px] uppercase tracking-[0.25em] text-muted-foreground/50 mt-3"
+        >
+          Vos rendez-vous
         </motion.p>
       </div>
     </motion.div>
@@ -328,7 +390,7 @@ export default function Booking() {
       setSuccess(true);
       hapticFeedback();
       toast.success('Rendez-vous confirmé !');
-      setTimeout(() => navigate('/appointments'), 1700);
+      setTimeout(() => navigate('/appointments'), SUCCESS_DURATION);
     },
     onError: () => {
       toast.error('Erreur lors de la création du rendez-vous');
