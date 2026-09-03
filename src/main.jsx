@@ -4,6 +4,7 @@ import App from '@/App.jsx'
 import '@/index.css'
 import { initCapacitor, isNative } from '@/lib/capacitor'
 import { initNativePush } from '@/lib/pushNotifications'
+import { armMotionPermissionOnFirstGesture } from '@/lib/motion'
 
 const NOTIF_KEY = 'dhome_notifications';
 
@@ -24,6 +25,10 @@ function updateBadge() {
     navigator.clearAppBadge();
   }
 }
+
+// Gyroscope des cartes FUT : sur iOS l'autorisation est demandée au premier geste
+// dans l'app (obligation Safari), puis mémorisée ; ailleurs, actif d'emblée
+armMotionPermissionOnFirstGesture();
 
 // Initialize Capacitor on native platforms
 if (isNative) {

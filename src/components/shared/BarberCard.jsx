@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { motion, useMotionValue, useSpring, animate, useReducedMotion } from 'framer-motion';
 import { hapticFeedback } from '@/lib/capacitor';
+import { motionPermissionState, onMotionPermission, requestMotionPermission } from '@/lib/motion';
 
 /**
  * Carte de barber façon FUT (FIFA Ultimate Team, style « Team of the Season ») :
@@ -60,21 +61,8 @@ const GYRO_MAX_ROTATE_X = 14;    // beta : avant / arrière
 const GYRO_RANGE_DEG = 35;
 const GYRO_REST_BETA = 40;       // téléphone tenu naturellement, légèrement incliné
 const POINTER_PRIORITY_MS = 300; // le pointeur garde la main ce délai après son dernier événement
-const GYRO_PERMISSION_KEY = 'dhb-gyro-permission';
 
 const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
-
-/** iOS 13+ : l'accès aux capteurs exige une autorisation déclenchée par un geste utilisateur. */
-const gyroNeedsPermission = () =>
-  typeof window !== 'undefined' && typeof window.DeviceOrientationEvent?.requestPermission === 'function';
-
-/** Résultat de requestPermission() mémorisé pour la session ('granted' / 'denied' / null). */
-function readStoredGyroPermission() {
-  try { return window.sessionStorage.getItem(GYRO_PERMISSION_KEY); } catch { return null; }
-}
-function storeGyroPermission(state) {
-  try { window.sessionStorage.setItem(GYRO_PERMISSION_KEY, state); } catch { /* stockage indisponible : on redemandera */ }
-}
 
 function normalizeSkillName(name) {
   return String(name || '')
@@ -274,15 +262,11 @@ export default function BarberCard({ employee, stats = [], overall = null, logoU
   const lastTapRef = useRef(0);
   const downPosRef = useRef(null);
 
-  // Gyroscope : actif d'emblée si l'API existe sans autorisation (Android…),
-  // sinon après autorisation iOS mémorisée pour la session. Sans capteur, aucun
-  // événement n'arrive et rien ne change.
-  const [gyroEnabled, setGyroEnabled] = useState(() => {
-    if (typeof window === 'undefined' || !window.DeviceOrientationEvent) return false;
-    if (!gyroNeedsPermission()) return true;
-    return readStoredGyroPermission() === 'granted';
-  });
-  const gyroAskedRef = useRef(gyroNeedsPermission() && readStoredGyroPermission() != null);
+  // Gyroscope : géré au niveau de l'app (src/lib/motion.js). Actif d'emblée sans autorisation
+  // requise (Android, web) ou dès que l'autorisation iOS, demandée au premier geste dans
+  // l'app, est accordée. Sans capteur, aucun événement n'arrive et rien ne change.
+  const [gyroEnabled, setGyroEnabled] = useState(() => motionPermissionState() === 'granted');
+  useEffect(() => onMotionPermission((state) => setGyroEnabled(state === 'granted')), []);
   const lastPointerRef = useRef(0); // horodatage du dernier événement pointeur (priorité sur le gyroscope)
 
   // Inclinaison 3D et reflet qui suivent le pointeur (souris ou doigt)
@@ -332,28 +316,15 @@ export default function BarberCard({ employee, stats = [], overall = null, logoU
     return () => window.removeEventListener('deviceorientation', onOrientation);
   }, [reduceMotion, gyroEnabled, rotateX, rotateY, glareX, glareY]);
 
-  // iOS : autorisation demandée une seule fois, lors d'un geste sur la carte.
-  // Si l'appel est rejeté (événement non reconnu comme geste utilisateur), on
-  // réessaie au geste suivant ; un refus explicite est mémorisé et non redemandé.
-  const requestGyroPermission = () => {
-    if (reduceMotion || gyroEnabled || gyroAskedRef.current || !gyroNeedsPermission()) return;
-    gyroAskedRef.current = true;
-    window.DeviceOrientationEvent.requestPermission()
-      .then((state) => {
-        storeGyroPermission(state);
-        if (state === 'granted') setGyroEnabled(true);
-      })
-      .catch(() => { gyroAskedRef.current = false; });
-  };
-
   const handlePointerDown = (e) => {
     downPosRef.current = { x: e.clientX, y: e.clientY };
     lastPointerRef.current = Date.now();
-    requestGyroPermission();
   };
   const handlePointerUp = (e) => {
     lastPointerRef.current = Date.now();
-    requestGyroPermission();
+    // iOS : seconde chance si l'app a été ouverte directement sur un profil (le relâchement
+    // est un geste utilisateur valide) ; sans effet si déjà accordé ou refusé
+    if (!reduceMotion && !gyroEnabled) requestMotionPermission();
     resetTilt();
     const down = downPosRef.current;
     const moved = down ? Math.hypot(e.clientX - down.x, e.clientY - down.y) : 0;
