@@ -20,6 +20,10 @@ const RENDER_WIDTH = 720;
 const RENDER_HEIGHT = 960;
 // Lentilles mises en avant et appliquées d'office si présentes
 const RELEVANT = /hair|cheveu|beard|barbe|colou?r|couleur|coupe|haircut/i;
+// Groupe de démonstration de Snap (23 exemples, surtout des tests pour développeurs) :
+// on n'y garde que ce qui a du sens pour un barbier. Un groupe du salon est affiché en entier.
+const SNAP_DEMO_GROUP = '39ed26d4-1931-4d21-98c2-eb2e29b76f6f';
+const DEMO_KEEP = /hair color|face expressions|distort/i;
 
 export default function SnapLenses() {
   const reduceMotion = useReducedMotion();
@@ -84,7 +88,8 @@ export default function SnapLenses() {
         // Les lentilles cheveux / barbe / couleur d'abord ; aucune lentille appliquée d'office
         // (une lentille quelconque, comme les démos de Snap, peut recouvrir la caméra de sa propre interface)
         const relevant = (lens) => RELEVANT.test(lens?.name || '');
-        const sorted = [...(loaded || [])].sort((a, b) => Number(relevant(b)) - Number(relevant(a)));
+        const visible = (loaded || []).filter((lens) => config.lensGroupId !== SNAP_DEMO_GROUP || DEMO_KEEP.test(lens?.name || ''));
+        const sorted = [...visible].sort((a, b) => Number(relevant(b)) - Number(relevant(a)));
         lensesRef.current = sorted;
         setLenses(sorted);
         setStatus('ready');
@@ -168,7 +173,7 @@ export default function SnapLenses() {
     <div className="min-h-screen relative overflow-hidden">
       <div className="relative max-w-lg mx-auto px-4 pt-6 pb-28">
         <div className="flex items-center justify-between mb-4">
-          <Link to="/try-on" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors">
+          <Link to="/" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors">
             <ChevronLeft className="w-4 h-4" /> Retour
           </Link>
           <span className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.25em] text-yellow-300/90 bg-yellow-400/10 border border-yellow-400/30 px-2.5 py-1 rounded-full">
@@ -266,6 +271,9 @@ export default function SnapLenses() {
             className="flex items-center justify-center gap-2 h-12 rounded-[14px] bg-primary text-primary-foreground font-semibold text-sm">
             Réserver ce look
           </motion.span>
+        </Link>
+        <Link to="/try-on" className="mt-3 w-full flex items-center justify-center gap-2 h-11 rounded-2xl glass text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors">
+          <Palette className="w-4 h-4 text-primary" /> Essayer une couleur précise avec l'IA
         </Link>
         <p className="text-[10px] text-muted-foreground/60 text-center mt-3">Propulsé par Camera Kit, la technologie des lentilles Snapchat. Les lentilles tournent sur votre appareil.</p>
       </div>

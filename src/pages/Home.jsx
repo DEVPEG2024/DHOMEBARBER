@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { Link } from 'react-router-dom';
 import { api } from '@/api/apiClient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { MapPin, Clock, Phone, Star, ArrowRight, Scissors, ShoppingBag, Newspaper, Sparkles, Gift, GripVertical, Pencil, Check, X, Volume2, VolumeX, Palette } from 'lucide-react';
+import { MapPin, Clock, Phone, Star, ArrowRight, Scissors, ShoppingBag, Newspaper, Sparkles, Gift, GripVertical, Pencil, Check, X, Volume2, VolumeX } from 'lucide-react';
 import { motion, useMotionValue, useSpring, useTransform, Reorder } from 'framer-motion';
 import SectionHeader from '@/components/shared/SectionHeader';
 import StarRating from '@/components/shared/StarRating';
@@ -295,7 +295,7 @@ const SECTION_LABELS = {
   'shop': 'Boutique',
   'reviews': 'Avis Clients',
   'gift-card': 'Carte Cadeau',
-  'try-on': 'Nouvelle tête',
+  'try-on': 'Filtres Snap',
   'cta': 'Réservation',
 };
 
@@ -436,19 +436,20 @@ export default function Home() {
 
       case 'try-on':
         return (
-          <Link to="/try-on">
+          <Link to="/snap">
             <motion.div whileTap={{ scale: 0.98 }} className="relative overflow-hidden rounded-3xl cursor-pointer group glass p-5">
               <div className="absolute inset-0 opacity-70 pointer-events-none"
-                style={{ background: 'linear-gradient(120deg, rgba(30,136,229,0.22), rgba(224,82,155,0.22) 50%, rgba(216,174,90,0.22))' }} />
+                style={{ background: 'linear-gradient(120deg, rgba(255,214,0,0.16), rgba(224,82,155,0.18) 50%, rgba(30,136,229,0.18))' }} />
               <div className="relative flex items-center gap-4">
-                <div className="w-14 h-14 shrink-0 rounded-2xl flex items-center justify-center shadow-lg"
-                  style={{ background: 'conic-gradient(from 0deg, #1e88e5, #e0529b, #d8ae5a, #1f8a5b, #7b3fbf, #1e88e5)' }}>
-                  <Palette className="w-6 h-6 text-white drop-shadow" />
+                <div className="w-14 h-14 shrink-0 rounded-2xl flex items-center justify-center shadow-lg bg-[#fffc00]">
+                  <svg viewBox="0 0 24 24" className="w-7 h-7" aria-hidden="true">
+                    <path fill="#000" d="M12 2.2c2.9 0 4.9 2.1 4.9 5v2.4c.6.2 1.3-.3 1.7-.1.5.2.5.7.1 1-.5.4-1.5.6-1.7 1 .8 2 2.3 3 3.6 3.5.3.1.4.4.2.7-.4.6-1.6.7-2 .9-.2.1-.2.5-.3.8-.1.3-.3.4-.7.3-.7-.1-1.6-.2-2.5.3-1 .5-1.9 1.6-3.3 1.6s-2.3-1.1-3.3-1.6c-.9-.5-1.8-.4-2.5-.3-.4.1-.6 0-.7-.3-.1-.3-.1-.7-.3-.8-.4-.2-1.6-.3-2-.9-.2-.3-.1-.6.2-.7 1.3-.5 2.8-1.5 3.6-3.5-.2-.4-1.2-.6-1.7-1-.4-.3-.4-.8.1-1 .4-.2 1.1.3 1.7.1V7.2c0-2.9 2-5 4.9-5z" />
+                  </svg>
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-[10px] tracking-[0.3em] uppercase text-white/50 font-medium">Nouvelle tête</p>
-                  <h3 className="text-base font-bold text-white leading-tight">Essayez une couleur en direct</h3>
-                  <p className="text-xs text-white/60 mt-0.5">Blond, gris, bleu… sur vous, avec la caméra</p>
+                  <h3 className="text-base font-bold text-white leading-tight">Filtres Snap</h3>
+                  <p className="text-xs text-white/60 mt-0.5">Les lentilles Snapchat, en direct avec la caméra</p>
                 </div>
                 <ArrowRight className="w-4 h-4 text-primary shrink-0 group-hover:translate-x-0.5 transition-transform" />
               </div>
