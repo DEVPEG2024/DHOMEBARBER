@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '@/api/apiClient';
 import { useAuth } from '@/lib/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { motion, AnimatePresence, animate, useReducedMotion } from 'framer-motion';
+import { motion, AnimatePresence, animate, useReducedMotion, useMotionValue, useTransform } from 'framer-motion';
 import { ChevronLeft, ChevronRight, Check, Calendar, Clock, User, Scissors, Sparkles } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
@@ -30,6 +30,10 @@ const SUCCESS_DURATION = 4600;
 /** Durée de la coupe (la tondeuse remonte et le dégradé se dessine), en secondes. */
 const CUT_DURATION = 2.6;
 const CUT_DELAY = 0.6;
+/** Écran de chargement (envoi du rendez-vous) : affiché au moins ce temps, progression simulée jusqu'à 88 % puis 100 % à la réponse. */
+const LOADING_MIN_MS = 1500;
+const LOADING_FAKE_DURATION = 2.4;
+const TICK_COUNT = 34;
 
 function generateTimeSlots(start, end, interval = 30) {
   const slots = [];
@@ -82,6 +86,111 @@ const Chip = React.forwardRef(function Chip({ icon: Icon, children }, ref) {
     </motion.span>
   );
 });
+
+/** Graduation de l'arc : s'allume quand la progression dépasse son seuil. */
+function Tick({ index, progress, angle, radius }) {
+  const threshold = ((index + 1) / TICK_COUNT) * 100;
+  const opacity = useTransform(progress, (v) => (v >= threshold ? 1 : 0.16));
+  const glow = useTransform(progress, (v) => (v >= threshold ? 0.55 : 0));
+  return (
+    <g transform={`rotate(${angle})`}>
+      <motion.rect x={radius - 3} y="-3" width="20" height="6" rx="3" fill="#bfe9ff" style={{ opacity: glow }} />
+      <motion.rect x={radius} y="-1.4" width="14" height="2.8" rx="1.4" fill="#e9f7ff" style={{ opacity }} />
+    </g>
+  );
+}
+
+/** Lame de rasoir sombre (verticale) avec traînée de fines stries sur le tranchant droit. */
+function DarkBlade() {
+  const streaks = Array.from({ length: 22 }, (_, i) => 32 + i * 7.2);
+  return (
+    <g>
+      <defs>
+        <linearGradient id="ld-blade" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#2a2f37" />
+          <stop offset="45%" stopColor="#151920" />
+          <stop offset="100%" stopColor="#0a0d11" />
+        </linearGradient>
+        <linearGradient id="ld-edge" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#ffffff" stopOpacity="0.35" />
+          <stop offset="50%" stopColor="#ffffff" stopOpacity="0.08" />
+          <stop offset="100%" stopColor="#ffffff" stopOpacity="0.3" />
+        </linearGradient>
+        <linearGradient id="ld-streak" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stopColor="#5a626c" stopOpacity="0.9" />
+          <stop offset="100%" stopColor="#5a626c" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      {/* corps de la lame */}
+      <rect x="22" y="18" width="104" height="208" rx="10" fill="url(#ld-blade)" stroke="url(#ld-edge)" strokeWidth="1.2" />
+      {/* tranchants : liserés clairs */}
+      <path d="M26,22 H122" stroke="#ffffff" strokeOpacity="0.35" strokeWidth="1" strokeLinecap="round" />
+      <path d="M26,222 H122" stroke="#ffffff" strokeOpacity="0.25" strokeWidth="1" strokeLinecap="round" />
+      {/* découpe centrale classique */}
+      <circle cx="74" cy="52" r="7" fill="#07090c" />
+      <circle cx="74" cy="192" r="7" fill="#07090c" />
+      <rect x="67" y="70" width="14" height="104" rx="5" fill="#07090c" />
+      <rect x="56" y="106" width="36" height="32" rx="6" fill="#07090c" />
+      <rect x="62" y="84" width="24" height="12" rx="4" fill="#07090c" />
+      <rect x="62" y="148" width="24" height="12" rx="4" fill="#07090c" />
+      {/* stries qui filent vers la droite (mouvement) */}
+      {streaks.map((y, i) => (
+        <rect key={y} x="126" y={y} width={18 + (i % 4) * 8} height="1.6" rx="0.8" fill="url(#ld-streak)" />
+      ))}
+    </g>
+  );
+}
+
+/** Écran de chargement pendant l'envoi du rendez-vous : lame, arc de graduations, pourcentage. */
+export function LoadingOverlay({ progress }) {
+  const percent = useTransform(progress, (v) => `${Math.round(v)} %`);
+  const barScale = useTransform(progress, (v) => v / 100);
+  const ticks = useMemo(() => Array.from({ length: TICK_COUNT }, (_, i) => ({ i, angle: -78 + (156 * i) / (TICK_COUNT - 1) })), []);
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0, transition: { duration: 0.35 } }}
+      className="fixed inset-0 z-[70] flex flex-col items-center justify-center"
+      style={{ background: 'radial-gradient(ellipse 70% 50% at 50% 42%, #10141a 0%, #07090c 70%)' }}
+    >
+      <motion.svg
+        viewBox="0 0 320 250"
+        width="300"
+        height="234"
+        aria-hidden="true"
+        initial={{ scale: 0.92, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        transition={{ duration: 0.5, ease: 'easeOut' }}
+        style={{ overflow: 'visible' }}
+      >
+        {/* halo derrière la lame */}
+        <ellipse cx="74" cy="122" rx="110" ry="130" fill="url(#ld-halo)" />
+        <defs>
+          <radialGradient id="ld-halo" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor="#3b8fc9" stopOpacity="0.16" />
+            <stop offset="100%" stopColor="#3b8fc9" stopOpacity="0" />
+          </radialGradient>
+        </defs>
+        <DarkBlade />
+        {/* arc de graduations, centré sur la lame */}
+        <g transform="translate(74 122)">
+          {ticks.map(({ i, angle }) => <Tick key={i} index={i} progress={progress} angle={angle} radius={150} />)}
+        </g>
+      </motion.svg>
+
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="flex flex-col items-center mt-6">
+        <p className="text-xl font-medium tracking-[0.42em] text-white/95 uppercase pl-[0.42em]">Chargement</p>
+        <p className="text-[10px] tracking-[0.35em] text-white/45 uppercase mt-1.5 pl-[0.35em]">En cours</p>
+        <motion.p className="text-3xl font-light text-white tabular-nums mt-4">{percent}</motion.p>
+        <div className="mt-4 w-52 h-px bg-white/15 overflow-hidden">
+          <motion.div className="h-full w-full bg-white/85 origin-left" style={{ scaleX: barScale }} />
+        </div>
+        <p className="text-[9px] tracking-[0.35em] text-white/35 uppercase mt-4 pl-[0.35em]">Veuillez patienter</p>
+      </motion.div>
+    </motion.div>
+  );
+}
 
 /**
  * Scène de coupe : profil d'homme, la tondeuse remonte sur le côté de la tête
@@ -285,6 +394,11 @@ export default function Booking() {
   // Sens de la dernière navigation entre étapes (1 = suivant, -1 = retour)
   const [direction, setDirection] = useState(1);
   const [success, setSuccess] = useState(false);
+  // Écran de chargement : progression simulée (motion value, pas de re-render)
+  const [loading, setLoading] = useState(false);
+  const progress = useMotionValue(0);
+  const progressAnimRef = useRef(null);
+  const loadingStartRef = useRef(0);
   const [selectedServices, setSelectedServices] = useState([]);
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [selectedDate, setSelectedDate] = useState(null);
@@ -411,6 +525,32 @@ export default function Booking() {
     hapticFeedback();
   };
 
+  const startLoading = () => {
+    loadingStartRef.current = Date.now();
+    progress.set(0);
+    setLoading(true);
+    progressAnimRef.current?.stop();
+    progressAnimRef.current = animate(progress, 88, { duration: LOADING_FAKE_DURATION, ease: 'easeInOut' });
+  };
+
+  const finishLoading = () => {
+    // Affiché au moins LOADING_MIN_MS, puis 100 %, puis la scène de coupe
+    const wait = Math.max(0, LOADING_MIN_MS - (Date.now() - loadingStartRef.current));
+    setTimeout(() => {
+      progressAnimRef.current?.stop();
+      progressAnimRef.current = animate(progress, 100, {
+        duration: 0.45,
+        ease: 'easeOut',
+        onComplete: () => setTimeout(() => {
+          setLoading(false);
+          setSuccess(true);
+          hapticFeedback();
+          setTimeout(() => navigate('/appointments'), SUCCESS_DURATION);
+        }, 300),
+      });
+    }, wait);
+  };
+
   const createAppointment = useMutation({
     mutationFn: async () => {
       if (!isAuthenticated || !user) {
@@ -438,13 +578,13 @@ export default function Booking() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['appointments-confirmed'] });
-      // Écran de succès animé, puis la liste des rendez-vous
-      setSuccess(true);
-      hapticFeedback();
       toast.success('Rendez-vous confirmé !');
-      setTimeout(() => navigate('/appointments'), SUCCESS_DURATION);
+      // Chargement → 100 % → scène de coupe → liste des rendez-vous
+      finishLoading();
     },
     onError: () => {
+      progressAnimRef.current?.stop();
+      setLoading(false);
       toast.error('Erreur lors de la création du rendez-vous');
     },
   });
@@ -753,7 +893,7 @@ export default function Booking() {
             </motion.button>
           ) : (
             <span className="flex-1 pulse-cta rounded-2xl">
-              <motion.button whileTap={{ scale: 0.97 }} onClick={() => createAppointment.mutate()} disabled={createAppointment.isPending}
+              <motion.button whileTap={{ scale: 0.97 }} onClick={() => { if (createAppointment.isPending || loading) return; startLoading(); createAppointment.mutate(); }} disabled={createAppointment.isPending || loading}
                 className="w-full flex items-center justify-center gap-2 h-12 rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/25 text-sm font-semibold hover:bg-primary/90 transition-all disabled:opacity-60">
                 {createAppointment.isPending ? 'Confirmation...' : 'Confirmer le rendez-vous'}
                 <Check className="w-4 h-4" />
@@ -764,7 +904,8 @@ export default function Booking() {
       </div>
 
       <AnimatePresence>
-        {success && <SuccessOverlay barberName={selectedEmployee?.name} />}
+        {loading && <LoadingOverlay key="loading" progress={progress} />}
+        {success && <SuccessOverlay key="success" barberName={selectedEmployee?.name} />}
       </AnimatePresence>
     </div>
   );
