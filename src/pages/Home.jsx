@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '@/api/apiClient';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { MapPin, Clock, Phone, Star, ArrowRight, Scissors, ShoppingBag, Newspaper, Sparkles, Gift, GripVertical, Pencil, Check, X } from 'lucide-react';
-import { motion, useMotionValue, useSpring, Reorder } from 'framer-motion';
+import { motion, useMotionValue, useSpring, useTransform, Reorder } from 'framer-motion';
 import SectionHeader from '@/components/shared/SectionHeader';
 import StarRating from '@/components/shared/StarRating';
 import { useAuth } from '@/lib/AuthContext';
@@ -56,11 +56,77 @@ const itemVariants = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: 'easeOut' } },
 };
 
+// Décor parallaxe sous les cartes des barbers : rayures « barber pole » + halos.
+// Période horizontale des rayures = pas du dégradé / sin(angle) : on translate
+// la couche modulo cette période, le défilement est donc sans couture.
+const STRIPE_ANGLE = 115;
+const STRIPE_STEP = 44;
+const STRIPE_PERIOD = STRIPE_STEP / Math.sin((STRIPE_ANGLE * Math.PI) / 180);
+const GLOW_PERIOD = 360;
+
 function BarberMarquee({ employees }) {
   const scrollRef = useRef(null);
+  const wrapperRef = useRef(null);
   const autoScrollRef = useRef(null);
   const touchActiveRef = useRef(false);
   const resumeTimerRef = useRef(null);
+  const lastScrollLeftRef = useRef(0);
+  const travelRef = useRef(0);
+  const countRef = useRef(employees.length);
+  countRef.current = employees.length;
+
+  // Largeur d'une série complète de cartes (mesurée sur le DOM) : c'est la
+  // période du carrousel, utilisée pour reboucler sans saut visible
+  const getPeriod = (el) => {
+    const n = countRef.current;
+    const kids = el.children;
+    if (!n || kids.length <= n) return 0;
+    return kids[n].offsetLeft - kids[0].offsetLeft;
+  };
+
+  // Parallaxe horizontal : le décor suit le carrousel mais moins vite (profondeur)
+  const travel = useMotionValue(0);
+  const stripesX = useTransform(travel, (v) => -((v * 0.45) % STRIPE_PERIOD));
+  const glowX = useTransform(travel, (v) => -((v * 0.2) % GLOW_PERIOD));
+  // Parallaxe vertical : le décor glisse légèrement quand la page défile
+  const pageOffset = useMotionValue(0);
+  const smoothOffset = useSpring(pageOffset, { stiffness: 90, damping: 22, mass: 0.6 });
+  const stripesY = useTransform(smoothOffset, (v) => v * 0.12);
+  const glowY = useTransform(smoothOffset, (v) => v * 0.22);
+
+  const syncParallax = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const period = getPeriod(el);
+    let delta = el.scrollLeft - lastScrollLeftRef.current;
+    // Rebouclage du carrousel (contenu répété) : on neutralise le saut
+    if (period > 0 && Math.abs(delta) > period / 2) delta += delta > 0 ? -period : period;
+    lastScrollLeftRef.current = el.scrollLeft;
+    travelRef.current += delta;
+    travel.set(travelRef.current);
+  }, [travel]);
+
+  useEffect(() => {
+    let raf = null;
+    const update = () => {
+      raf = null;
+      const el = wrapperRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      pageOffset.set(rect.top + rect.height / 2 - window.innerHeight / 2);
+    };
+    const onScroll = () => {
+      if (raf == null) raf = requestAnimationFrame(update);
+    };
+    update();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+      if (raf != null) cancelAnimationFrame(raf);
+    };
+  }, [pageOffset]);
 
   const startAutoScroll = useCallback(() => {
     if (autoScrollRef.current) return;
@@ -68,10 +134,10 @@ function BarberMarquee({ employees }) {
       const el = scrollRef.current;
       if (!el || touchActiveRef.current) return;
       el.scrollLeft += 1;
-      // Loop back seamlessly when reaching halfway (duplicate content)
-      const half = el.scrollWidth / 2;
-      if (el.scrollLeft >= half) {
-        el.scrollLeft -= half;
+      // Rebouclage sans couture : on recule d'une série complète de cartes
+      const period = getPeriod(el);
+      if (period > 0 && el.scrollLeft >= period) {
+        el.scrollLeft -= period;
       }
     }, 20);
   }, []);
@@ -104,45 +170,79 @@ function BarberMarquee({ employees }) {
     }, 2000);
   };
 
-  const doubled = [...employees, ...employees];
+  // Assez de répétitions pour que le carrousel puisse toujours dépasser une
+  // période avant de reboucler, même avec peu de barbers (carte + gap = 124 px)
+  const reps = Math.max(2, 1 + Math.ceil(600 / Math.max(1, employees.length * 124)));
+  const doubled = Array.from({ length: reps }, () => employees).flat();
+  const edgeMask = 'linear-gradient(to right, transparent, black 10%, black 90%, transparent)';
 
   return (
-    <div
-      ref={scrollRef}
-      className="flex gap-3 px-5 -mx-5 overflow-x-auto scrollbar-hide"
-      style={{ WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none', msOverflowStyle: 'none' }}
-      onTouchStart={handleTouchStart}
-      onTouchEnd={handleTouchEnd}
-      onMouseDown={handleTouchStart}
-      onMouseUp={handleTouchEnd}
-      onMouseLeave={handleTouchEnd}
-    >
-      {doubled.map((emp, i) => (
-        <Link key={`${emp.id}-${i}`} to={`/barber/${emp.id}`} className="shrink-0">
-          <motion.div
-            whileTap={{ scale: 0.95 }}
-            className="relative w-28 cursor-pointer group"
-          >
-            <div
-              className="w-28 rounded-2xl overflow-hidden border border-white/10 mb-2 relative"
-              style={{ aspectRatio: BARBER_PHOTO_ASPECT, background: BARBER_PHOTO_BG }}
+    <div ref={wrapperRef} className="relative -mx-5">
+      {/* Décor parallaxe sous les cartes */}
+      <div
+        aria-hidden="true"
+        className="absolute inset-x-0 -inset-y-3 overflow-hidden pointer-events-none"
+        style={{ maskImage: edgeMask, WebkitMaskImage: edgeMask }}
+      >
+        <motion.div
+          className="absolute"
+          style={{
+            top: -90, bottom: -90, left: -STRIPE_PERIOD * 2, right: -STRIPE_PERIOD * 2,
+            x: stripesX, y: stripesY,
+            backgroundImage: `repeating-linear-gradient(${STRIPE_ANGLE}deg, hsl(var(--primary) / 0.13) 0 ${STRIPE_STEP * 0.3}px, transparent ${STRIPE_STEP * 0.3}px ${STRIPE_STEP}px)`,
+          }}
+        />
+        <motion.div
+          className="absolute"
+          style={{
+            top: -90, bottom: -90, left: -GLOW_PERIOD, right: -GLOW_PERIOD,
+            x: glowX, y: glowY,
+            backgroundImage: 'radial-gradient(ellipse 42% 60% at 50% 55%, hsl(var(--primary) / 0.32), transparent 70%)',
+            backgroundSize: `${GLOW_PERIOD}px 100%`,
+            backgroundRepeat: 'repeat-x',
+            filter: 'blur(6px)',
+          }}
+        />
+      </div>
+
+      <div
+        ref={scrollRef}
+        className="relative flex gap-3 px-5 py-3 overflow-x-auto scrollbar-hide"
+        style={{ WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+        onScroll={syncParallax}
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+        onMouseDown={handleTouchStart}
+        onMouseUp={handleTouchEnd}
+        onMouseLeave={handleTouchEnd}
+      >
+        {doubled.map((emp, i) => (
+          <Link key={`${emp.id}-${i}`} to={`/barber/${emp.id}`} className="shrink-0">
+            <motion.div
+              whileTap={{ scale: 0.95 }}
+              className="relative w-28 cursor-pointer group"
             >
-              {emp.photo_url ? (
-                <img src={emp.photo_url} alt={emp.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center text-2xl font-bold text-muted-foreground bg-gradient-to-br from-primary/10 to-primary/5">
-                  {emp.name?.charAt(0)}
+              <div
+                className="w-28 rounded-2xl overflow-hidden border border-white/10 mb-2 relative shadow-xl shadow-black/40"
+                style={{ aspectRatio: BARBER_PHOTO_ASPECT, background: BARBER_PHOTO_BG }}
+              >
+                {emp.photo_url ? (
+                  <img src={emp.photo_url} alt={emp.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-2xl font-bold text-muted-foreground bg-gradient-to-br from-primary/10 to-primary/5">
+                    {emp.name?.charAt(0)}
+                  </div>
+                )}
+                <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+                <div className="absolute bottom-2 left-2 right-2">
+                  <p className="text-xs font-bold text-white drop-shadow-lg">{emp.name}</p>
+                  <p className="text-[10px] text-white/70">{emp.title || 'Barber'}</p>
                 </div>
-              )}
-              <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
-              <div className="absolute bottom-2 left-2 right-2">
-                <p className="text-xs font-bold text-white drop-shadow-lg">{emp.name}</p>
-                <p className="text-[10px] text-white/70">{emp.title || 'Barber'}</p>
               </div>
-            </div>
-          </motion.div>
-        </Link>
-      ))}
+            </motion.div>
+          </Link>
+        ))}
+      </div>
     </div>
   );
 }
@@ -430,7 +530,7 @@ export default function Home() {
 
       case 'gift-card':
         return (
-          <Link to="/gift-cards">
+          <Link to="/gift-cards" className="pulse-card rounded-3xl">
             <motion.div whileTap={{ scale: 0.98 }} className="relative overflow-hidden rounded-3xl cursor-pointer group" style={{ aspectRatio: '2.2/1' }}>
               <div className="absolute inset-0 bg-gradient-to-br from-[#1a1a1a] via-[#111] to-[#0a0a0a]" />
               <div className="absolute top-0 right-0 w-40 h-40 bg-gradient-to-bl from-primary/20 to-transparent rounded-bl-full group-hover:from-primary/30 transition-all duration-500" />
@@ -439,7 +539,7 @@ export default function Home() {
               <div className="relative h-full flex items-center justify-between p-6">
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-2">
-                    <Gift className="w-4 h-4 text-primary" />
+                    <Gift className="w-4 h-4 text-primary gift-wiggle" />
                     <p className="text-[10px] tracking-[0.3em] uppercase text-white/50 font-medium">Carte Cadeau</p>
                   </div>
                   <h3 className="text-lg font-bold text-white mb-1">Offrez une expérience</h3>
@@ -464,7 +564,7 @@ export default function Home() {
               <img src={LOGO_URL} alt="D'Home Barber" className="w-16 h-16 object-contain mx-auto mb-3 opacity-80" />
               <h3 className="font-display text-lg font-bold text-foreground">Prêt pour un nouveau look ?</h3>
               <p className="text-xs text-muted-foreground mt-1 mb-4">Réservez votre créneau en quelques clics</p>
-              <Link to="/booking">
+              <Link to="/booking" className="pulse-cta rounded-2xl">
                 <motion.button whileTap={{ scale: 0.97 }}
                   className="inline-flex items-center gap-2 px-7 h-12 rounded-2xl bg-primary text-primary-foreground font-semibold text-sm shadow-lg shadow-primary/25 hover:bg-primary/90 transition-all">
                   Réserver
@@ -526,7 +626,7 @@ export default function Home() {
           </motion.div>
 
           <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.5 }}>
-            <Link to="/booking">
+            <Link to="/booking" className="pulse-cta rounded-2xl">
               <motion.button whileTap={{ scale: 0.97 }}
                 className="flex items-center gap-2 px-7 h-12 rounded-2xl bg-primary text-primary-foreground font-semibold text-sm shadow-2xl shadow-primary/30 hover:bg-primary/90 transition-all">
                 <Scissors className="w-4 h-4" /> Réserver maintenant

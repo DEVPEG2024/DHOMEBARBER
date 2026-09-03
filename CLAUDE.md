@@ -59,7 +59,7 @@ src/
 │   ├── UserNotRegisteredError.jsx
 │   └── ui/                    # Composants shadcn/ui (dialog, button, etc.)
 ├── pages/
-│   ├── Home.jsx               # Page d'accueil (hero centré, logo, "Premium Barber Shop"). Ordre des sections lu depuis salon_settings.homepage_order (pas d'éditeur UI, modifier en DB)
+│   ├── Home.jsx               # Page d'accueil (hero centré, logo, "Premium Barber Shop", bouton Réserver pulsant, carrousel barbers avec parallaxe, bloc Carte Cadeau pulsant). Ordre des sections lu depuis salon_settings.homepage_order (pas d'éditeur UI, modifier en DB)
 │   ├── Booking.jsx            # Réservation en 4 étapes
 │   ├── Services.jsx           # Liste des prestations
 │   ├── Shop.jsx               # Boutique produits
@@ -260,6 +260,11 @@ Le `server.js` exécute des migrations automatiques au démarrage (`ADD COLUMN I
 - Contenu : note globale, `title` du barber (ex. KVB), logo du salon, photo (fondu radial : le fond sombre de la photo se fond dans la carte, d'où l'importance du format portrait fond sombre), bandeau nom, six stats
 - Stats = compétences du barber (`employees.skills`, niveau 0-5 par `SkillCategory`) converties : 1→68, 2→76, 3→84, 4→92, 5→99 ; non évaluée → « – ». Abréviations 3 lettres (`skillAbbr` : CIS, BAR, AFR, DES, COL, TAP, sinon 3 premières lettres). Au-delà de 6 catégories, on garde les 6 mieux notées
 - Note globale = moyenne arrondie des stats renseignées (`overallRating`), « – » si aucune. Ne dépend pas de `experience_level`
+
+### Accueil : incitations au clic et parallaxe (`src/pages/Home.jsx`, `src/index.css`)
+- **Pulsations** : classes CSS `.pulse-cta` (boutons « Réserver maintenant » du hero et « Réserver » de la section Réservation : respiration + double anneau vert) et `.pulse-card` (bloc Carte Cadeau : halo vert) ; l'icône cadeau a `.gift-wiggle`. Ces classes sont posées sur le `<Link>` (`<a>`) qui enveloppe l'élément, **jamais sur l'élément `motion.*`** : une animation CSS sur `transform` écraserait le `whileTap` de framer-motion. Désactivées avec `prefers-reduced-motion`
+- **Parallaxe sous le carrousel des barbers** (`BarberMarquee`) : deux couches décoratives derrière les cartes (rayures « barber pole » à 45 % de la vitesse du carrousel, halos à 20 %) plus un léger glissement vertical au défilement de la page (12 % / 22 %). Le déplacement horizontal est calculé modulo la période des rayures (`STRIPE_PERIOD`) et du halo (`GLOW_PERIOD`), donc sans couture
+- **Boucle du carrousel** : la liste des barbers est répétée `reps` fois (assez pour dépasser 600 px), et le rebouclage recule d'une **période mesurée sur le DOM** (`getPeriod` : largeur d'une série complète de cartes), pas de la moitié du `scrollWidth`. Avec 3 barbers actifs, l'ancienne logique ne bouclait jamais (fin de course < moitié). Le compteur de parallaxe neutralise ce saut (`syncParallax`)
 
 ### Infos du salon
 - Adresse : Sur le côté gauche du bâtiment Odyssée, 3 Rue du Bois Arquet, 74140 Douvaine
