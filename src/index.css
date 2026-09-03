@@ -246,3 +246,17 @@ body.keyboard-open {
     animation: none;
   }
 }
+
+/* Barre du bas : anneau lumineux qui orbite lentement autour du bouton Réserver
+   (rotation d'un dégradé conique = transform seul, composé par le GPU) */
+.nav-orbit {
+  background: conic-gradient(from 0deg, transparent 0deg, transparent 250deg, rgba(134, 247, 230, 0.9) 300deg, hsl(var(--primary)) 330deg, transparent 360deg);
+  animation: nav-orbit-spin 3.6s linear infinite;
+  will-change: transform;
+}
+@keyframes nav-orbit-spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nav-orbit { animation: none; opacity: 0.5; }
+}

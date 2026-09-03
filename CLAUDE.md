@@ -60,13 +60,13 @@ src/
 │   └── ui/                    # Composants shadcn/ui (dialog, button, etc.)
 ├── pages/
 │   ├── Home.jsx               # Page d'accueil (hero centré, logo, "Premium Barber Shop", bouton Réserver pulsant, carrousel barbers avec parallaxe, bloc Carte Cadeau pulsant). Ordre des sections lu depuis salon_settings.homepage_order (pas d'éditeur UI, modifier en DB)
-│   ├── Booking.jsx            # Réservation en 4 étapes
+│   ├── Booking.jsx            # Réservation en 4 étapes (étapes glissantes, récap animé, créneau qui se loge dans le résumé, écran de succès confettis)
 │   ├── Services.jsx           # Liste des prestations
 │   ├── Shop.jsx               # Boutique produits
 │   ├── Orders.jsx             # Commandes client
 │   ├── Appointments.jsx       # Mes rendez-vous (client)
 │   ├── MyReviews.jsx          # Mes avis (client)
-│   ├── BarberProfile.jsx      # Profil public d'un barber (/barber/:id) : carte style FUT (BarberCard) + vidéo de présentation ; swipe gauche/droite (ou flèches, boutons, points) pour passer aux autres barbers sans quitter la page
+│   ├── BarberProfile.jsx      # Profil public d'un barber (/barber/:id) : carte style FUT (BarberCard, holographique, stats qui montent, transition partagée depuis l'accueil) + vidéo de présentation ; swipe gauche/droite (ou flèches, boutons, points) pour passer aux autres barbers sans quitter la page
 │   ├── Feed.jsx               # Fil social "Ca dit quoi le Gang ?" (posts, réactions emoji, commentaires, menu Signaler / Bloquer, panneau admin des signalements) — aussi /admin/feed
 │   ├── Events.jsx             # Privatisation du salon : demande d'événement, acceptation/refus du devis
 │   ├── GiftCards.jsx          # Cartes cadeau : achat (code DHB + QR), affichage
@@ -254,6 +254,14 @@ Le `server.js` exécute des migrations automatiques au démarrage (`ADD COLUMN I
 - La vidéo de présentation est stockée **dans `employees.bio`** après le marqueur `\n%%VIDEO%%url` (pas dans working_hours). Ne pas écraser la bio sans préserver ce suffixe.
 - Comparer les ids employé en string (`String(a) === String(b)`) : mélange UUID / number selon la source
 - **Photos des barbers : format portrait 1748 × 2480** (ratio A4, buste centré, fond sombre, référence « KVB APP »). Les constantes sont dans `src/lib/barberPhoto.js` (`BARBER_PHOTO_ASPECT` pour le CSS, `BARBER_PHOTO_RATIO` pour le recadrage, `BARBER_PHOTO_BG`). Le recadrage à l'upload (Équipe admin, Mes paramètres) force ce ratio (`ImageCropDialog` prop `aspect`, forme `rect`, côté max 2480 px) et tous les affichages (carrousel accueil, cartes de réservation, profil public sans vidéo, admin) utilisent le même cadre. Ne pas réintroduire de vignette carrée / ronde pour un barber ; les avatars clients restent ronds.
+
+### Animations « signature » (ajoutées le 3 sept. 2026)
+Règle commune : n'animer que `transform` et `opacity`, respecter `useReducedMotion` / `prefers-reduced-motion`, retour haptique via `hapticFeedback` sur les actions clés.
+- **Transition partagée carrousel → profil** : la photo du barber « vole » de la vignette de l'accueil vers la photo de la carte FUT. Mécanisme (`BarberMarquee` dans `Home.jsx`) : à la pression d'une vignette (`onPointerDown`), on monte un **fantôme invisible** en `position: fixed` sur le rectangle de la vignette, porteur du `layoutId` `barberPhotoLayoutId(id)` (exporté par `BarberCard.jsx`) ; la photo de la carte porte le même `layoutId` et démarre depuis ce rectangle. Ne pas mettre le `layoutId` sur les vignettes elles-mêmes : framer-motion n'enregistre un `layoutId` qu'au montage, et les clones du carrousel partageraient l'id (masqués). Ne pas remonter la vignette pressée (le clic serait perdu)
+- **Carte FUT** (`BarberCard.jsx`) : chiffres qui montent de 0 à leur valeur (`CountUp`, écrit dans le DOM via `animate`, en cascade), reflet holographique qui balaie la carte à l'arrivée, inclinaison 3D et reflet qui suivent le pointeur (`useMotionValue` + `useSpring`, remis à zéro au relâchement)
+- **Barre du bas** (`BottomNav.jsx`) : indicateur actif partagé (`layoutId="nav-active"`) qui glisse d'un onglet à l'autre, icône qui rebondit, anneau lumineux qui orbite autour du bouton Réserver (`.nav-orbit`, dégradé conique en rotation)
+- **Réservation** (`Booking.jsx`) : étapes qui glissent dans le sens de la navigation (`AnimatePresence mode="popLayout"`, variants avec `direction`), halo d'étape qui glisse (`layoutId="step-halo"`), coches à ressort et lignes qui se remplissent, prestations / dates / créneaux en cascade, **récapitulatif** sous les étapes (chips + prix qui compte, `AnimatedNumber`) avant la confirmation, **créneau choisi qui se loge dans le résumé** (`layoutId` `slot-HH:MM` partagé entre le bouton et le résumé), écran de succès (`SuccessOverlay` : coche à ressort, anneau, confettis) avant la redirection vers Mes rendez-vous
+- **Feed** (`Feed.jsx`) : explosion d'emojis à la réaction (`EmojiBurst`), emoji choisi qui pop, double tap sur la photo = ❤️ avec gros cœur
 
 ### Profil barber : navigation entre barbers (`src/pages/BarberProfile.jsx`)
 - La page charge la liste des barbers actifs avec la **même requête et la même clé de cache que l'accueil** (`['employees']`, filtre `is_active`, tri `sort_order`) et retrouve le barber courant par son id (comparaison en string)

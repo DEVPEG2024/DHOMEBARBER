@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import { api } from '@/api/apiClient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
+import { hapticFeedback } from '@/lib/capacitor';
 
 function timeAgo(dateStr) {
   const now = new Date();
@@ -123,11 +124,47 @@ function GlassCard({ children }) {
 
 const REACTIONS = ['❤️', '🔥', '💪', '😂', '👏', '💈'];
 
+// Explosion d'emojis au moment de réagir : particules en transform / opacity uniquement
+function EmojiBurst({ emoji, onDone }) {
+  const parts = useMemo(() => Array.from({ length: 10 }, (_, i) => {
+    const angle = -Math.PI / 2 + (i - 4.5) * 0.26 + (Math.random() - 0.5) * 0.2;
+    const dist = 44 + Math.random() * 44;
+    return {
+      id: i,
+      x: Math.cos(angle) * dist,
+      y: Math.sin(angle) * dist,
+      scale: 0.7 + Math.random() * 0.7,
+      rotate: (Math.random() - 0.5) * 70,
+      delay: Math.random() * 0.08,
+    };
+  }), []);
+
+  return (
+    <span className="absolute left-8 bottom-6 pointer-events-none z-10" aria-hidden="true">
+      {parts.map(p => (
+        <motion.span
+          key={p.id}
+          initial={{ x: 0, y: 0, scale: 0, opacity: 1, rotate: 0 }}
+          animate={{ x: p.x, y: p.y, scale: p.scale, opacity: 0, rotate: p.rotate }}
+          transition={{ duration: 0.9, delay: p.delay, ease: [0.16, 1, 0.3, 1], opacity: { duration: 0.45, delay: p.delay + 0.45 } }}
+          onAnimationComplete={p.id === 0 ? onDone : undefined}
+          className="absolute text-lg leading-none"
+        >
+          {emoji}
+        </motion.span>
+      ))}
+    </span>
+  );
+}
+
 function PostCard({ post, currentUser, onLike, onDelete, likes, comments, onComment, onDeleteComment, getAuthorPhoto, onOpenMenu }) {
   const [showComments, setShowComments] = useState(false);
   const [showReactions, setShowReactions] = useState(false);
   const [commentText, setCommentText] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  // Animations de réaction : explosion d'emojis, gros cœur au double tap sur la photo
+  const [burst, setBurst] = useState(null);
+  const [heartPop, setHeartPop] = useState(null);
 
   const postLikes = likes.filter(l => l.post_id === post.id);
   const userLike = currentUser?.email ? postLikes.find(l => l.user_email === currentUser.email) : undefined;
@@ -144,6 +181,19 @@ function PostCard({ post, currentUser, onLike, onDelete, likes, comments, onComm
   const badge = getRoleBadge(post.author_role);
   const initials = post.author_name?.split(' ').map(n => n[0]).join('').slice(0, 2) || '?';
   const isOwner = currentUser?.role === 'admin' || (!!currentUser?.email && currentUser.email === post.author_email);
+
+  const react = (emoji) => {
+    setBurst({ emoji, key: Date.now() });
+    hapticFeedback();
+    onLike(post.id, !!userLike, emoji);
+  };
+
+  const handleImageDoubleTap = () => {
+    if (!currentUser) return;
+    setHeartPop(Date.now());
+    hapticFeedback();
+    if (!userLike) onLike(post.id, false, '❤️');
+  };
 
   const handleSubmitComment = async () => {
     if (!commentText.trim()) return;
@@ -204,8 +254,24 @@ function PostCard({ post, currentUser, onLike, onDelete, likes, comments, onComm
       {/* Image - 4:5 vertical format (1080x1350) */}
       {post.image_url && (
         <div className="px-4 pb-3">
-          <div className="relative w-full rounded-xl overflow-hidden" style={{ aspectRatio: '4/5' }}>
-            <img src={post.image_url} alt="" className="absolute inset-0 w-full h-full object-cover" />
+          <div className="relative w-full rounded-xl overflow-hidden select-none" style={{ aspectRatio: '4/5' }} onDoubleClick={handleImageDoubleTap}>
+            <img src={post.image_url} alt="" draggable={false} className="absolute inset-0 w-full h-full object-cover" />
+            <AnimatePresence>
+              {heartPop && (
+                <motion.span
+                  key={heartPop}
+                  initial={{ scale: 0, opacity: 0 }}
+                  animate={{ scale: [0, 1.3, 1], opacity: [0, 1, 1] }}
+                  exit={{ scale: 1.5, opacity: 0 }}
+                  transition={{ duration: 0.45, ease: 'easeOut' }}
+                  onAnimationComplete={() => setTimeout(() => setHeartPop(null), 400)}
+                  className="absolute inset-0 flex items-center justify-center text-7xl pointer-events-none"
+                  style={{ filter: 'drop-shadow(0 8px 24px rgba(0,0,0,0.45))' }}
+                >
+                  ❤️
+                </motion.span>
+              )}
+            </AnimatePresence>
           </div>
         </div>
       )}
@@ -239,7 +305,7 @@ function PostCard({ post, currentUser, onLike, onDelete, likes, comments, onComm
                   whileHover={{ scale: 1.3 }}
                   whileTap={{ scale: 0.8 }}
                   onClick={() => {
-                    onLike(post.id, !!userLike, emoji);
+                    react(emoji);
                     setShowReactions(false);
                   }}
                   className={`text-xl w-9 h-9 flex items-center justify-center rounded-full hover:bg-secondary transition-colors ${
@@ -253,6 +319,10 @@ function PostCard({ post, currentUser, onLike, onDelete, likes, comments, onComm
           )}
         </AnimatePresence>
 
+        <AnimatePresence>
+          {burst && <EmojiBurst key={burst.key} emoji={burst.emoji} onDone={() => setBurst(null)} />}
+        </AnimatePresence>
+
         <motion.button
           whileTap={{ scale: 0.85 }}
           onClick={() => userLike ? onLike(post.id, true, userLike.reaction) : setShowReactions(!showReactions)}
@@ -260,7 +330,15 @@ function PostCard({ post, currentUser, onLike, onDelete, likes, comments, onComm
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-full hover:bg-secondary transition-colors"
         >
           {userLike ? (
-            <span className="text-lg">{userLike.reaction || '❤️'}</span>
+            <motion.span
+              key={userLike.reaction || '❤️'}
+              initial={{ scale: 0, rotate: -20 }}
+              animate={{ scale: 1, rotate: 0 }}
+              transition={{ type: 'spring', stiffness: 500, damping: 18 }}
+              className="text-lg inline-block"
+            >
+              {userLike.reaction || '❤️'}
+            </motion.span>
           ) : (
             <Heart className="w-5 h-5 text-muted-foreground" />
           )}

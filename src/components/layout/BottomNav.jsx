@@ -1,6 +1,8 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Home, ShoppingBag, Calendar, Newspaper, User, PartyPopper } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { Home, Calendar, Newspaper, User, PartyPopper } from 'lucide-react';
+import { hapticFeedback } from '@/lib/capacitor';
 
 const navItems = [
   { path: '/', icon: Home, label: 'Accueil' },
@@ -9,6 +11,8 @@ const navItems = [
   { path: '/feed', icon: Newspaper, label: "New's Gang !" },
   { path: '/profile', icon: User, label: 'Profil' },
 ];
+
+const springy = { type: 'spring', stiffness: 420, damping: 30 };
 
 export default function BottomNav() {
   const location = useLocation();
@@ -29,9 +33,17 @@ export default function BottomNav() {
 
           if (isBooking) {
             return (
-              <Link key={path} to={path} className="flex flex-col items-center -mt-4">
-                <div className={`w-14 h-14 rounded-2xl bg-primary shadow-lg shadow-primary/40 flex items-center justify-center border border-primary/30`}>
-                  <Icon className="w-5 h-5 text-primary-foreground" strokeWidth={2} />
+              <Link key={path} to={path} onClick={() => hapticFeedback()} className="flex flex-col items-center -mt-4">
+                {/* Anneau lumineux qui orbite lentement autour du bouton central */}
+                <div className="relative w-14 h-14 rounded-2xl overflow-hidden shadow-lg shadow-primary/40">
+                  <div className="nav-orbit absolute -inset-1/2" aria-hidden="true" />
+                  <motion.div
+                    whileTap={{ scale: 0.92 }}
+                    transition={springy}
+                    className="absolute inset-[2px] rounded-[14px] bg-primary flex items-center justify-center"
+                  >
+                    <Icon className="w-5 h-5 text-primary-foreground" strokeWidth={2} />
+                  </motion.div>
                 </div>
                 <span className="text-[11px] font-semibold mt-1 text-primary">{label}</span>
               </Link>
@@ -39,14 +51,27 @@ export default function BottomNav() {
           }
 
           return (
-            <Link key={path} to={path} className="flex flex-col items-center justify-center min-w-[56px] py-1.5">
-              <div className={`flex items-center justify-center w-10 h-10 rounded-xl transition-all duration-300 ${
-                isActive ? 'bg-primary/15' : ''
-              }`}>
-                <Icon
-                  className={`w-5 h-5 transition-all duration-300 ${isActive ? 'text-primary' : 'text-muted-foreground'}`}
-                  strokeWidth={isActive ? 2.5 : 1.8}
-                />
+            <Link key={path} to={path} onClick={() => { if (!isActive) hapticFeedback(); }}
+              className="flex flex-col items-center justify-center min-w-[56px] py-1.5">
+              <div className="relative flex items-center justify-center w-10 h-10">
+                {/* Indicateur actif partagé : glisse d'un onglet à l'autre */}
+                {isActive && (
+                  <motion.div
+                    layoutId="nav-active"
+                    transition={springy}
+                    className="absolute inset-0 rounded-xl bg-primary/15"
+                  />
+                )}
+                <motion.div
+                  animate={isActive ? { y: -1.5, scale: 1.1 } : { y: 0, scale: 1 }}
+                  transition={springy}
+                  className="relative"
+                >
+                  <Icon
+                    className={`w-5 h-5 transition-colors duration-300 ${isActive ? 'text-primary' : 'text-muted-foreground'}`}
+                    strokeWidth={isActive ? 2.5 : 1.8}
+                  />
+                </motion.div>
               </div>
               <span className={`text-[11px] font-medium transition-colors duration-300 ${
                 isActive ? 'text-primary' : 'text-muted-foreground/70'

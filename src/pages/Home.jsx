@@ -8,6 +8,7 @@ import SectionHeader from '@/components/shared/SectionHeader';
 import StarRating from '@/components/shared/StarRating';
 import { useAuth } from '@/lib/AuthContext';
 import { BARBER_PHOTO_ASPECT, BARBER_PHOTO_BG } from '@/lib/barberPhoto';
+import { barberPhotoLayoutId } from '@/components/shared/BarberCard';
 
 const IS_MOBILE = typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
@@ -71,6 +72,17 @@ function BarberMarquee({ employees }) {
   const lastScrollLeftRef = useRef(0);
   const travelRef = useRef(0);
   const countRef = useRef(employees.length);
+  // Transition partagée vers le profil : à la pression d'une vignette, on monte
+  // un « fantôme » invisible (position fixe, même rectangle) qui porte le
+  // layoutId de la photo de la carte FUT. Framer n'enregistre un layoutId qu'au
+  // montage, et les vignettes elles-mêmes ne peuvent pas le porter : les clones
+  // du carrousel partageraient l'id et seraient masqués. La photo de la carte
+  // démarre alors son animation depuis le rectangle du fantôme.
+  const [ghost, setGhost] = useState(null);
+  const armGhost = (emp, e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    setGhost({ key: `${emp.id}-${Date.now()}`, id: emp.id, left: rect.left, top: rect.top, width: rect.width, height: rect.height });
+  };
   countRef.current = employees.length;
 
   // Largeur d'une série complète de cartes (mesurée sur le DOM) : c'est la
@@ -236,6 +248,7 @@ function BarberMarquee({ employees }) {
               <div
                 className="w-28 rounded-2xl overflow-hidden border border-white/10 mb-2 relative shadow-xl shadow-black/40"
                 style={{ aspectRatio: BARBER_PHOTO_ASPECT, background: BARBER_PHOTO_BG }}
+                onPointerDown={(e) => armGhost(emp, e)}
               >
                 {emp.photo_url ? (
                   <img src={emp.photo_url} alt={emp.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
@@ -254,6 +267,17 @@ function BarberMarquee({ employees }) {
           </Link>
         ))}
       </div>
+
+      {/* Fantôme de transition partagée (invisible, voir armGhost) */}
+      {ghost && (
+        <motion.div
+          key={ghost.key}
+          layoutId={barberPhotoLayoutId(ghost.id)}
+          aria-hidden="true"
+          className="pointer-events-none"
+          style={{ position: 'fixed', left: ghost.left, top: ghost.top, width: ghost.width, height: ghost.height, borderRadius: 16, zIndex: -1 }}
+        />
+      )}
     </div>
   );
 }

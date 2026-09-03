@@ -1,5 +1,5 @@
-import React from 'react';
-import { motion } from 'framer-motion';
+import React, { useEffect, useRef } from 'react';
+import { motion, useMotionValue, useSpring, animate, useReducedMotion } from 'framer-motion';
 
 /**
  * Carte de barber façon FUT (FIFA Ultimate Team, style « Team of the Season ») :
@@ -9,10 +9,17 @@ import { motion } from 'framer-motion';
  * catégorie, voir Mes paramètres) converties sur l'échelle FUT ; la note
  * globale est la moyenne des stats renseignées. Une compétence non évaluée
  * s'affiche « – ».
+ *
+ * Animations : les chiffres montent de 0 à leur valeur à l'arrivée, un reflet
+ * holographique balaie la carte, puis la carte s'incline et le reflet suit le
+ * doigt / la souris. Tout est en transform / opacity (fluide sur mobile).
  */
 
 export const CARD_WIDTH = 300;
 export const CARD_HEIGHT = 470;
+
+/** Identifiant de transition partagée : la photo « vole » du carrousel de l'accueil vers la carte. */
+export const barberPhotoLayoutId = (employeeId) => `barber-photo-${employeeId}`;
 
 /** Niveau 0-5 → note style FUT (5 = 99). */
 const LEVEL_TO_RATING = [null, 68, 76, 84, 92, 99];
@@ -33,6 +40,8 @@ const NEON = '#86f7e6';
 
 /** Polygone de la carte (chanfreins en haut, pointe en bas). */
 const CARD_SHAPE = 'polygon(0% 4.5%, 7% 0%, 93% 0%, 100% 4.5%, 100% 89%, 50% 100%, 0% 89%)';
+
+const tiltSpring = { stiffness: 180, damping: 18, mass: 0.6 };
 
 function normalizeSkillName(name) {
   return String(name || '')
@@ -84,6 +93,29 @@ export function overallRating(stats = []) {
   return Math.round(filled.reduce((sum, s) => sum + s.value, 0) / filled.length);
 }
 
+/** Nombre qui monte de 0 à sa valeur (écrit directement dans le DOM, sans re-render). */
+function CountUp({ value, delay = 0, duration = 1.1, className, style }) {
+  const ref = useRef(null);
+  const reduceMotion = useReducedMotion();
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    if (value == null) { el.textContent = '–'; return undefined; }
+    if (reduceMotion) { el.textContent = String(value); return undefined; }
+    el.textContent = '0';
+    const controls = animate(0, value, {
+      delay,
+      duration,
+      ease: [0.16, 1, 0.3, 1],
+      onUpdate: (v) => { el.textContent = String(Math.round(v)); },
+    });
+    return () => controls.stop();
+  }, [value, delay, duration, reduceMotion]);
+
+  return <span ref={ref} className={className} style={style}>{value ?? '–'}</span>;
+}
+
 function GoldShards() {
   // Éclats dorés et bleu pâle façon TOTS, derrière la photo
   return (
@@ -124,16 +156,16 @@ function GoldShards() {
   );
 }
 
-function StatRow({ stat }) {
+function StatRow({ stat, delay }) {
   const filled = stat.value != null;
   return (
     <div className="flex items-baseline gap-1.5 h-[30px]" title={stat.label}>
-      <span
+      <CountUp
+        value={filled ? stat.value : null}
+        delay={delay}
         className="font-fut tabular-nums leading-none"
         style={{ fontSize: 25, fontWeight: 800, color: GOLD, opacity: filled ? 1 : 0.45, minWidth: 34, textAlign: 'right' }}
-      >
-        {filled ? stat.value : '–'}
-      </span>
+      />
       <span className="font-fut leading-none" style={{ fontSize: 17, fontWeight: 600, color: GOLD, letterSpacing: 0.5 }}>
         {stat.abbr}
       </span>
@@ -146,118 +178,181 @@ export default function BarberCard({ employee, stats = [], overall = null, logoU
   const right = stats.slice(Math.ceil(stats.length / 2));
   const title = (employee?.title || 'Barber').trim();
   const titleSize = title.length > 8 ? 11 : title.length > 5 ? 13 : 16;
+  const reduceMotion = useReducedMotion();
+
+  // Inclinaison 3D et reflet qui suivent le pointeur (souris ou doigt)
+  const rotateX = useMotionValue(0);
+  const rotateY = useMotionValue(0);
+  const glareX = useMotionValue(0);
+  const glareY = useMotionValue(0);
+  const sRotateX = useSpring(rotateX, tiltSpring);
+  const sRotateY = useSpring(rotateY, tiltSpring);
+  const sGlareX = useSpring(glareX, tiltSpring);
+  const sGlareY = useSpring(glareY, tiltSpring);
+
+  const handlePointerMove = (e) => {
+    if (reduceMotion) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const px = (e.clientX - rect.left) / rect.width - 0.5;
+    const py = (e.clientY - rect.top) / rect.height - 0.5;
+    rotateY.set(px * 18);
+    rotateX.set(-py * 14);
+    glareX.set(px * rect.width * 0.9);
+    glareY.set(py * rect.height * 0.9);
+  };
+  const resetTilt = () => {
+    rotateX.set(0);
+    rotateY.set(0);
+    glareX.set(0);
+    glareY.set(0);
+  };
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 28, rotateY: -14, scale: 0.96 }}
       animate={{ opacity: 1, y: 0, rotateY: 0, scale: 1 }}
       transition={{ type: 'spring', stiffness: 120, damping: 16 }}
-      whileHover={{ rotateY: 5, rotateX: -3 }}
       whileTap={{ scale: 0.98 }}
       className={`relative select-none ${className}`}
       style={{ width: CARD_WIDTH, height: CARD_HEIGHT, perspective: 900, transformStyle: 'preserve-3d' }}
+      onPointerMove={handlePointerMove}
+      onPointerLeave={resetTilt}
+      onPointerUp={resetTilt}
+      onPointerCancel={resetTilt}
     >
-      {/* Halo néon : le drop-shadow suit la forme découpée */}
-      <div
-        className="absolute inset-0"
-        style={{ filter: `drop-shadow(0 0 3px ${NEON}) drop-shadow(0 0 14px rgba(134,247,230,0.55)) drop-shadow(0 12px 28px rgba(0,0,0,0.6))` }}
-      >
-        {/* Liseré néon */}
-        <div className="absolute inset-0" style={{ clipPath: CARD_SHAPE, background: NEON }}>
-          {/* Corps de la carte */}
-          <div
-            className="absolute overflow-hidden"
-            style={{
-              inset: 3,
-              clipPath: CARD_SHAPE,
-              background: [
-                'radial-gradient(ellipse 58% 40% at 62% 26%, rgba(3,7,28,0.92) 0%, rgba(3,7,28,0.55) 45%, transparent 72%)',
-                'linear-gradient(165deg, #2a4fd6 0%, #1a35a8 30%, #0f2278 60%, #0a184f 100%)',
-              ].join(', '),
-            }}
-          >
-            <GoldShards />
-
-            {/* Photo (fondu radial : le fond sombre de la photo se fond dans la carte) */}
+      <motion.div className="absolute inset-0" style={{ rotateX: sRotateX, rotateY: sRotateY, transformStyle: 'preserve-3d' }}>
+        {/* Halo néon : le drop-shadow suit la forme découpée */}
+        <div
+          className="absolute inset-0"
+          style={{ filter: `drop-shadow(0 0 3px ${NEON}) drop-shadow(0 0 14px rgba(134,247,230,0.55)) drop-shadow(0 12px 28px rgba(0,0,0,0.6))` }}
+        >
+          {/* Liseré néon */}
+          <div className="absolute inset-0" style={{ clipPath: CARD_SHAPE, background: NEON }}>
+            {/* Corps de la carte */}
             <div
-              className="absolute"
+              className="absolute overflow-hidden"
               style={{
-                left: 56, top: 4, width: 244, height: 246,
-                WebkitMaskImage: 'radial-gradient(ellipse 60% 64% at 52% 44%, #000 46%, transparent 98%)',
-                maskImage: 'radial-gradient(ellipse 60% 64% at 52% 44%, #000 46%, transparent 98%)',
+                inset: 3,
+                clipPath: CARD_SHAPE,
+                background: [
+                  'radial-gradient(ellipse 58% 40% at 62% 26%, rgba(3,7,28,0.92) 0%, rgba(3,7,28,0.55) 45%, transparent 72%)',
+                  'linear-gradient(165deg, #2a4fd6 0%, #1a35a8 30%, #0f2278 60%, #0a184f 100%)',
+                ].join(', '),
               }}
             >
-              {employee?.photo_url ? (
-                <img
-                  src={employee.photo_url}
-                  alt={employee.name}
-                  draggable={false}
-                  className="w-full h-full object-cover"
-                  style={{ objectPosition: '50% 12%' }}
+              <GoldShards />
+
+              {/* Photo (fondu radial : le fond sombre de la photo se fond dans la carte).
+                  layoutId : transition partagée depuis la vignette du carrousel de l'accueil */}
+              <motion.div
+                layoutId={employee?.id != null ? barberPhotoLayoutId(employee.id) : undefined}
+                transition={{ type: 'spring', stiffness: 260, damping: 30 }}
+                className="absolute"
+                style={{
+                  left: 56, top: 4, width: 244, height: 246,
+                  WebkitMaskImage: 'radial-gradient(ellipse 60% 64% at 52% 44%, #000 46%, transparent 98%)',
+                  maskImage: 'radial-gradient(ellipse 60% 64% at 52% 44%, #000 46%, transparent 98%)',
+                }}
+              >
+                {employee?.photo_url ? (
+                  <img
+                    src={employee.photo_url}
+                    alt={employee.name}
+                    draggable={false}
+                    className="w-full h-full object-cover"
+                    style={{ objectPosition: '50% 12%' }}
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center">
+                    <span className="font-fut" style={{ fontSize: 120, fontWeight: 800, color: GOLD, opacity: 0.35 }}>
+                      {employee?.name?.charAt(0)?.toUpperCase()}
+                    </span>
+                  </div>
+                )}
+              </motion.div>
+
+              {/* Note globale, titre, logo */}
+              <div className="absolute flex flex-col items-center" style={{ left: 16, top: 24, width: 74 }}>
+                <CountUp
+                  value={overall}
+                  delay={0.35}
+                  duration={1.3}
+                  className="font-fut leading-none tabular-nums"
+                  style={{ fontSize: 66, fontWeight: 800, color: GOLD, textShadow: '0 2px 10px rgba(0,0,0,0.35)', opacity: overall == null ? 0.5 : 1 }}
                 />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center">
-                  <span className="font-fut" style={{ fontSize: 120, fontWeight: 800, color: GOLD, opacity: 0.35 }}>
-                    {employee?.name?.charAt(0)?.toUpperCase()}
-                  </span>
+                <span
+                  className="font-fut leading-none uppercase whitespace-nowrap"
+                  style={{ fontSize: titleSize, fontWeight: 700, color: GOLD, letterSpacing: 1, marginTop: 4, maxWidth: 82, overflow: 'hidden', textOverflow: 'ellipsis' }}
+                >
+                  {title}
+                </span>
+                <span className="block" style={{ width: 34, height: 1, background: GOLD_LINE, marginTop: 10 }} />
+                <div
+                  className="flex items-center justify-center rounded-full overflow-hidden"
+                  style={{ width: 42, height: 42, marginTop: 10, background: 'rgba(255,255,255,0.10)', boxShadow: '0 0 0 1px rgba(246,231,173,0.35)' }}
+                >
+                  <img src={logoUrl} alt="D'Home Barber" draggable={false} className="w-[34px] h-[34px] object-contain" />
                 </div>
+              </div>
+
+              {/* Bandeau nom */}
+              <div className="absolute left-0 right-0 flex flex-col items-center" style={{ top: 238 }}>
+                <span className="block" style={{ width: '62%', height: 1, background: GOLD_LINE }} />
+                <span
+                  className="font-fut uppercase leading-none px-3 text-center"
+                  style={{ fontSize: 27, fontWeight: 800, color: GOLD, letterSpacing: 1.8, marginTop: 7, marginBottom: 7, maxWidth: '92%', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textShadow: '0 2px 8px rgba(0,0,0,0.4)' }}
+                >
+                  {employee?.name}
+                </span>
+                <span className="block" style={{ width: '62%', height: 1, background: GOLD_LINE }} />
+              </div>
+
+              {/* Stats : chaque chiffre monte de 0 à sa valeur, en cascade */}
+              <div className="absolute left-0 right-0 flex justify-center" style={{ top: 292 }}>
+                <div className="flex flex-col items-start" style={{ width: 96 }}>
+                  {left.map((s, i) => <StatRow key={s.key} stat={s} delay={0.45 + i * 0.08} />)}
+                </div>
+                <span className="block self-stretch mx-3" style={{ width: 1, background: GOLD_LINE }} />
+                <div className="flex flex-col items-start" style={{ width: 96 }}>
+                  {right.map((s, i) => <StatRow key={s.key} stat={s} delay={0.5 + i * 0.08} />)}
+                </div>
+              </div>
+              {stats.length === 0 && (
+                <p className="absolute left-0 right-0 text-center font-fut uppercase" style={{ top: 318, fontSize: 14, color: GOLD, opacity: 0.6, letterSpacing: 1 }}>
+                  Stats à venir
+                </p>
               )}
-            </div>
+              <span className="absolute block" style={{ left: '19%', width: '62%', height: 1, top: 392, background: GOLD_LINE }} />
 
-            {/* Note globale, titre, logo */}
-            <div className="absolute flex flex-col items-center" style={{ left: 16, top: 24, width: 74 }}>
-              <span
-                className="font-fut leading-none tabular-nums"
-                style={{ fontSize: 66, fontWeight: 800, color: GOLD, textShadow: '0 2px 10px rgba(0,0,0,0.35)', opacity: overall == null ? 0.5 : 1 }}
-              >
-                {overall ?? '–'}
-              </span>
-              <span
-                className="font-fut leading-none uppercase whitespace-nowrap"
-                style={{ fontSize: titleSize, fontWeight: 700, color: GOLD, letterSpacing: 1, marginTop: 4, maxWidth: 82, overflow: 'hidden', textOverflow: 'ellipsis' }}
-              >
-                {title}
-              </span>
-              <span className="block" style={{ width: 34, height: 1, background: GOLD_LINE, marginTop: 10 }} />
-              <div
-                className="flex items-center justify-center rounded-full overflow-hidden"
-                style={{ width: 42, height: 42, marginTop: 10, background: 'rgba(255,255,255,0.10)', boxShadow: '0 0 0 1px rgba(246,231,173,0.35)' }}
-              >
-                <img src={logoUrl} alt="D'Home Barber" draggable={false} className="w-[34px] h-[34px] object-contain" />
-              </div>
+              {/* Reflet holographique : balayage à l'arrivée */}
+              {!reduceMotion && (
+                <motion.div
+                  aria-hidden="true"
+                  initial={{ x: '-140%' }}
+                  animate={{ x: '340%' }}
+                  transition={{ delay: 0.55, duration: 1.15, ease: [0.4, 0, 0.2, 1] }}
+                  className="absolute pointer-events-none"
+                  style={{
+                    top: '-20%', bottom: '-20%', left: 0, width: '34%', skewX: -18,
+                    background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.06) 25%, rgba(255,255,255,0.42) 50%, rgba(134,247,230,0.28) 60%, transparent 100%)',
+                    mixBlendMode: 'screen',
+                  }}
+                />
+              )}
+              {/* Reflet qui suit le pointeur */}
+              <motion.div
+                aria-hidden="true"
+                className="absolute pointer-events-none"
+                style={{
+                  inset: '-40%', x: sGlareX, y: sGlareY,
+                  background: 'radial-gradient(circle at 50% 50%, rgba(255,255,255,0.26) 0%, rgba(255,255,255,0.08) 22%, transparent 48%)',
+                  mixBlendMode: 'screen',
+                }}
+              />
             </div>
-
-            {/* Bandeau nom */}
-            <div className="absolute left-0 right-0 flex flex-col items-center" style={{ top: 238 }}>
-              <span className="block" style={{ width: '62%', height: 1, background: GOLD_LINE }} />
-              <span
-                className="font-fut uppercase leading-none px-3 text-center"
-                style={{ fontSize: 27, fontWeight: 800, color: GOLD, letterSpacing: 1.8, marginTop: 7, marginBottom: 7, maxWidth: '92%', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textShadow: '0 2px 8px rgba(0,0,0,0.4)' }}
-              >
-                {employee?.name}
-              </span>
-              <span className="block" style={{ width: '62%', height: 1, background: GOLD_LINE }} />
-            </div>
-
-            {/* Stats */}
-            <div className="absolute left-0 right-0 flex justify-center" style={{ top: 292 }}>
-              <div className="flex flex-col items-start" style={{ width: 96 }}>
-                {left.map(s => <StatRow key={s.key} stat={s} />)}
-              </div>
-              <span className="block self-stretch mx-3" style={{ width: 1, background: GOLD_LINE }} />
-              <div className="flex flex-col items-start" style={{ width: 96 }}>
-                {right.map(s => <StatRow key={s.key} stat={s} />)}
-              </div>
-            </div>
-            {stats.length === 0 && (
-              <p className="absolute left-0 right-0 text-center font-fut uppercase" style={{ top: 318, fontSize: 14, color: GOLD, opacity: 0.6, letterSpacing: 1 }}>
-                Stats à venir
-              </p>
-            )}
-            <span className="absolute block" style={{ left: '19%', width: '62%', height: 1, top: 392, background: GOLD_LINE }} />
           </div>
         </div>
-      </div>
+      </motion.div>
     </motion.div>
   );
 }
