@@ -15,6 +15,12 @@ import { hapticFeedback } from '@/lib/capacitor';
  * holographique balaie la carte, puis la carte s'incline et le reflet suit le
  * doigt / la souris. Tout est en transform / opacity (fluide sur mobile).
  *
+ * Sur mobile, la carte s'incline aussi au gyroscope (`deviceorientation`) :
+ * gamma → rotateY, beta → rotateX, le reflet suit. Le pointeur garde la
+ * priorité tant qu'il est actif. iOS 13+ exige une autorisation demandée lors
+ * d'un geste : elle est sollicitée une seule fois, au premier toucher de la
+ * carte, et le résultat est mémorisé pour la session.
+ *
  * Double tap : la carte se retourne (rotation 3D à ressort) et montre au dos la
  * description du barber (`bio`). Détection maison sur pointerup (deux taps en
  * moins de 320 ms sans déplacement), fiable sur iOS / Android et à la souris.
@@ -47,6 +53,28 @@ const NEON = '#86f7e6';
 const CARD_SHAPE = 'polygon(0% 4.5%, 7% 0%, 93% 0%, 100% 4.5%, 100% 89%, 50% 100%, 0% 89%)';
 
 const tiltSpring = { stiffness: 180, damping: 18, mass: 0.6 };
+
+/** Inclinaison au gyroscope : amplitude max (°) et plage d'angle capteur (±°) qui l'atteint. */
+const GYRO_MAX_ROTATE_Y = 18;    // gamma : gauche / droite
+const GYRO_MAX_ROTATE_X = 14;    // beta : avant / arrière
+const GYRO_RANGE_DEG = 35;
+const GYRO_REST_BETA = 40;       // téléphone tenu naturellement, légèrement incliné
+const POINTER_PRIORITY_MS = 300; // le pointeur garde la main ce délai après son dernier événement
+const GYRO_PERMISSION_KEY = 'dhb-gyro-permission';
+
+const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
+
+/** iOS 13+ : l'accès aux capteurs exige une autorisation déclenchée par un geste utilisateur. */
+const gyroNeedsPermission = () =>
+  typeof window !== 'undefined' && typeof window.DeviceOrientationEvent?.requestPermission === 'function';
+
+/** Résultat de requestPermission() mémorisé pour la session ('granted' / 'denied' / null). */
+function readStoredGyroPermission() {
+  try { return window.sessionStorage.getItem(GYRO_PERMISSION_KEY); } catch { return null; }
+}
+function storeGyroPermission(state) {
+  try { window.sessionStorage.setItem(GYRO_PERMISSION_KEY, state); } catch { /* stockage indisponible : on redemandera */ }
+}
 
 function normalizeSkillName(name) {
   return String(name || '')
@@ -246,6 +274,17 @@ export default function BarberCard({ employee, stats = [], overall = null, logoU
   const lastTapRef = useRef(0);
   const downPosRef = useRef(null);
 
+  // Gyroscope : actif d'emblée si l'API existe sans autorisation (Android…),
+  // sinon après autorisation iOS mémorisée pour la session. Sans capteur, aucun
+  // événement n'arrive et rien ne change.
+  const [gyroEnabled, setGyroEnabled] = useState(() => {
+    if (typeof window === 'undefined' || !window.DeviceOrientationEvent) return false;
+    if (!gyroNeedsPermission()) return true;
+    return readStoredGyroPermission() === 'granted';
+  });
+  const gyroAskedRef = useRef(gyroNeedsPermission() && readStoredGyroPermission() != null);
+  const lastPointerRef = useRef(0); // horodatage du dernier événement pointeur (priorité sur le gyroscope)
+
   // Inclinaison 3D et reflet qui suivent le pointeur (souris ou doigt)
   const rotateX = useMotionValue(0);
   const rotateY = useMotionValue(0);
@@ -258,6 +297,7 @@ export default function BarberCard({ employee, stats = [], overall = null, logoU
 
   const handlePointerMove = (e) => {
     if (reduceMotion) return;
+    lastPointerRef.current = Date.now();
     const rect = e.currentTarget.getBoundingClientRect();
     const px = (e.clientX - rect.left) / rect.width - 0.5;
     const py = (e.clientY - rect.top) / rect.height - 0.5;
@@ -273,10 +313,47 @@ export default function BarberCard({ employee, stats = [], overall = null, logoU
     glareY.set(0);
   };
 
+  // Inclinaison au gyroscope : gamma → rotateY, beta (autour de la tenue naturelle) → rotateX,
+  // reflet dans la même direction que pour le pointeur. Ignoré tant que le pointeur est actif ;
+  // les ressorts lissent déjà le flux d'événements, pas besoin de throttle.
+  useEffect(() => {
+    if (reduceMotion || !gyroEnabled) return undefined;
+    const onOrientation = (e) => {
+      if (e.gamma == null || e.beta == null) return;
+      if (Date.now() - lastPointerRef.current < POINTER_PRIORITY_MS) return;
+      const nx = clamp(e.gamma / GYRO_RANGE_DEG, -1, 1);
+      const ny = clamp((e.beta - GYRO_REST_BETA) / GYRO_RANGE_DEG, -1, 1);
+      rotateY.set(nx * GYRO_MAX_ROTATE_Y);
+      rotateX.set(-ny * GYRO_MAX_ROTATE_X);
+      glareX.set(nx * CARD_WIDTH * 0.45);
+      glareY.set(ny * CARD_HEIGHT * 0.45);
+    };
+    window.addEventListener('deviceorientation', onOrientation);
+    return () => window.removeEventListener('deviceorientation', onOrientation);
+  }, [reduceMotion, gyroEnabled, rotateX, rotateY, glareX, glareY]);
+
+  // iOS : autorisation demandée une seule fois, lors d'un geste sur la carte.
+  // Si l'appel est rejeté (événement non reconnu comme geste utilisateur), on
+  // réessaie au geste suivant ; un refus explicite est mémorisé et non redemandé.
+  const requestGyroPermission = () => {
+    if (reduceMotion || gyroEnabled || gyroAskedRef.current || !gyroNeedsPermission()) return;
+    gyroAskedRef.current = true;
+    window.DeviceOrientationEvent.requestPermission()
+      .then((state) => {
+        storeGyroPermission(state);
+        if (state === 'granted') setGyroEnabled(true);
+      })
+      .catch(() => { gyroAskedRef.current = false; });
+  };
+
   const handlePointerDown = (e) => {
     downPosRef.current = { x: e.clientX, y: e.clientY };
+    lastPointerRef.current = Date.now();
+    requestGyroPermission();
   };
   const handlePointerUp = (e) => {
+    lastPointerRef.current = Date.now();
+    requestGyroPermission();
     resetTilt();
     const down = downPosRef.current;
     const moved = down ? Math.hypot(e.clientX - down.x, e.clientY - down.y) : 0;

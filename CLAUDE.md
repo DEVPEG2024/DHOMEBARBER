@@ -45,6 +45,7 @@ src/
 │   ├── capacitor.js           # Wrapper Capacitor (natif vs web)
 │   ├── useLiveCount.js        # Hook WebSocket → compteur d'utilisateurs connectés (/ws/live)
 │   ├── barberPhoto.js         # Format des photos de barbers (portrait 1748 × 2480, ratio + fond sombre)
+│   ├── calendarLinks.js       # Ajout au calendrier : URL Google Agenda, fichier .ics (VTIMEZONE Europe/Paris), openCalendar web / natif
 │   ├── app-params.js          # Paramètres app (appId, token, etc.)
 │   ├── pushNotifications.js   # Service Worker push notifications (web)
 │   ├── query-client.js        # React Query config
@@ -53,24 +54,25 @@ src/
 ├── components/
 │   ├── agenda/                # DayView, WeekView, MonthView, AgendaToolbar, AppointmentDetailModal, BreakModal
 │   ├── layout/                # ClientLayout, AdminLayout, BottomNav
-│   ├── shared/                # ServiceCard, EmployeeCard, BarberCard (carte style FUT), StarRating, SectionHeader, ImageCropDialog, MusicToggle
+│   ├── shared/                # ServiceCard, EmployeeCard, BarberCard (carte style FUT), LoyaltyCard (fidélité), StarRating, SectionHeader, ImageCropDialog, MusicToggle
+│   ├── home/                  # RebookCard (« Comme la dernière fois »), OpenStatusBadge (Ouvert / Fermé heure de Paris)
 │   ├── BackgroundMusic.jsx
 │   ├── ErrorBoundary.jsx
 │   ├── UserNotRegisteredError.jsx
 │   └── ui/                    # Composants shadcn/ui (dialog, button, etc.)
 ├── pages/
-│   ├── Home.jsx               # Page d'accueil (hero centré, logo, "Premium Barber Shop", bouton Réserver pulsant, carrousel barbers avec parallaxe, bloc Carte Cadeau pulsant). Ordre des sections lu depuis salon_settings.homepage_order (pas d'éditeur UI, modifier en DB)
-│   ├── Booking.jsx            # Réservation en 4 étapes (étapes glissantes, récap animé, créneau qui se loge dans le résumé, écran de succès confettis)
+│   ├── Home.jsx               # Page d'accueil (hero centré, logo, "Premium Barber Shop", pastille Ouvert / Fermé en direct, bouton Réserver à anneau orbital, bloc « Comme la dernière fois », carrousel barbers avec parallaxe, bloc Carte Cadeau pulsant). Ordre des sections lu depuis salon_settings.homepage_order (pas d'éditeur UI, modifier en DB)
+│   ├── Booking.jsx            # Réservation en 4 étapes (étapes glissantes, récap animé, carte « Peu importe » = premier créneau dispo tous barbers, créneau qui se loge dans le résumé, écran de succès pluie de lames + boutons calendrier)
 │   ├── Services.jsx           # Liste des prestations
 │   ├── Shop.jsx               # Boutique produits
 │   ├── Orders.jsx             # Commandes client
-│   ├── Appointments.jsx       # Mes rendez-vous (client)
+│   ├── Appointments.jsx       # Mes rendez-vous (client) : lien « Ajouter au calendrier » (Google / .ics) sur les RDV à venir
 │   ├── MyReviews.jsx          # Mes avis (client)
 │   ├── BarberProfile.jsx      # Profil public d'un barber (/barber/:id) : carte style FUT (BarberCard, holographique, stats qui montent, transition partagée depuis l'accueil) + vidéo de présentation ; swipe gauche/droite (ou flèches, boutons, points) pour passer aux autres barbers sans quitter la page
 │   ├── Feed.jsx               # Fil social "Ca dit quoi le Gang ?" (posts, réactions emoji, commentaires, menu Signaler / Bloquer, panneau admin des signalements) — aussi /admin/feed
 │   ├── Events.jsx             # Privatisation du salon : demande d'événement, acceptation/refus du devis
 │   ├── GiftCards.jsx          # Cartes cadeau : achat (code DHB + QR), affichage
-│   ├── Profile.jsx            # Profil utilisateur
+│   ├── Profile.jsx            # Profil utilisateur + carte de fidélité (LoyaltyCard, 10 tampons, calculée depuis les RDV terminés)
 │   ├── Settings.jsx           # Paramètres client (date de naissance, utilisateurs bloqués, suppression de compte, liens CGU / confidentialité)
 │   ├── Login.jsx              # Connexion, inscription, mot de passe oublié (code à 6 chiffres par email)
 │   ├── ClientNotifications.jsx # Notifications client
@@ -120,12 +122,13 @@ dhomebarber-api/
 ├── Procfile           # web: node server.js
 ├── lib/
 │   ├── accessControl.js # Politique de lecture par rôle (applyReadPolicy), validation, identité du compte, code carte cadeau
-│   ├── emailHelper.js # Nodemailer SMTP : bienvenue, confirmation/rappel/annulation RDV, commande, événements, avis, anniversaire
+│   ├── emailHelper.js # Nodemailer SMTP : bienvenue, confirmation/rappel/annulation RDV, commande, événements, avis, anniversaire, relance
 │   └── pushHelper.js  # sendPushToRole, sendPushToEmail, sendPushToEmployee, sendToSubscriptions (Web Push, lots de 50)
 ├── jobs/
 │   ├── appointmentReminder.js  # Toutes les 30 min : rappel RDV (push + email)
 │   ├── reviewReminder.js       # Toutes les 30 min : demande d'avis après prestation (review_reminder_sent)
-│   └── birthdayReminder.js     # Tous les jours 8h : notif + email anniversaire (users.birth_date)
+│   ├── birthdayReminder.js     # Tous les jours 8h : notif + email anniversaire (users.birth_date)
+│   └── comebackReminder.js     # Tous les jours 10h Paris : relance « il est temps de revenir » (comeback_reminder_sent), --dry-run
 └── routes/
     ├── entities.js    # CRUD générique : politique d'accès par rôle (CREATE_RULES / UPDATE_RULES), emails sur création RDV / commande / événement
     ├── auth.js        # register, login, /me, forgot-password, reset-password, delete-account, logout
@@ -148,7 +151,7 @@ Mapping entité → table dans `routes/entities.js`.
 | Service | services | name, price, duration, description, category_id, sort_order, is_active |
 | Employee | employees | name, title, bio (contient l'URL vidéo après le marqueur `%%VIDEO%%`), email, phone, photo_url, color, working_hours (JSONB), permissions (JSONB), skills (JSONB), experience_level, sort_order, is_active |
 | SkillCategory | skill_categories | name, emoji, color, sort_order, is_active |
-| Appointment | appointments | client_name, client_email, client_phone, employee_id, employee_name, date, start_time, end_time, services (JSONB), status, payment_method, tip, tip_method, product_sold, product_price, grand_total, deposit_amount, reminder_sent, review_reminder_sent, internal_notes, cancellation_reason |
+| Appointment | appointments | client_name, client_email, client_phone, employee_id, employee_name, date, start_time, end_time, services (JSONB), status, payment_method, tip, tip_method, product_sold, product_price, grand_total, deposit_amount, reminder_sent, review_reminder_sent, comeback_reminder_sent, internal_notes, cancellation_reason |
 | Product | products | name, price, description, image_url, brand, category, stock, ref, critical_stock, stock_type (boutique/salon), is_active |
 | Order | orders | client_email, client_name, client_phone, items (JSONB), total_price, status, notes |
 | Review | reviews | client_name, client_email, rating, comment, employee_name, is_visible |
@@ -159,7 +162,7 @@ Mapping entité → table dans `routes/entities.js`.
 | PostReport | post_reports | post_id / comment_id (SET NULL à la suppression), reporter_email (forcé serveur), reporter_name, reported_email, reported_name, reason, details, content_snapshot (copie serveur), status (pending / handled / dismissed), handled_by, handled_at |
 | UserBlock | user_blocks | blocker_email (forcé serveur), blocked_email, blocked_name, UNIQUE(blocker, blocked) |
 | GiftCard | gift_cards | code (DHB…, généré côté serveur), amount, remaining_balance, sender_*, recipient_name, recipient_message, status (pending → validé par admin), valid_until, validated_at, validated_by, used_at |
-| SalonSettings | salon_settings | salon_name, tagline, description, phone, email, address, city, opening_hours (JSONB), social_*, cancellation_hours, require_deposit, deposit_percentage, homepage_order (JSONB) |
+| SalonSettings | salon_settings | salon_name, tagline, description, phone, email, address, city, opening_hours (JSONB), social_*, cancellation_hours, require_deposit, deposit_percentage, homepage_order (JSONB), comeback_weeks (défaut 5) |
 | PushSubscription | push_subscriptions | user_id, user_email, endpoint, keys_p256dh, keys_auth (+ tokens natifs via subscribe-native) |
 | TimeOff | time_offs | employee_id, employee_name, start_date, end_date, reason, type, status (pending/approved/declined), requested_at |
 | CleaningTask | cleaning_tasks | name, description, frequency, is_active, sort_order |
@@ -237,6 +240,7 @@ Le `server.js` exécute des migrations automatiques au démarrage (`ADD COLUMN I
 - **appointmentReminder** : toutes les 30 min, rappel des RDV à venir (push + email), flag `reminder_sent`
 - **reviewReminder** : toutes les 30 min, demande d'avis après prestation terminée, flag `review_reminder_sent`
 - **birthdayReminder** : tous les jours à 8h, push + email aux clients dont c'est l'anniversaire
+- **comebackReminder** (déployé le 3 sept. 2026, release v68) : tous les jours à 10h heure de Paris, relance « Ça fait N semaines, on te refait ça ? » (push `sendPushToEmail` + email `sendComebackReminder`, lien `/booking?barber=<employee_id>`) aux clients `role = user` dont le dernier RDV `completed` date de plus de `salon_settings.comeback_weeks` semaines (défaut 5, modifiable par l'admin via `SalonSettings.update`) et qui n'ont aucun RDV `confirmed` à venir. Une seule relance par visite : flag `appointments.comeback_reminder_sent` sur ce dernier RDV. Une requête SQL (CTE `DISTINCT ON`), rattrapage au démarrage entre 10h et 12h. Test : `heroku run "node jobs/comebackReminder.js --dry-run" --app dhomebarber-api` (l'argument doit être entre guillemets, sinon la CLI Heroku avale `--dry-run`). Le tutoiement est voulu (ton du push)
 
 ### Agenda - Modal de détail RDV
 - Le champ pourboire utilise un **input non contrôlé** (ref + defaultValue) pour éviter les problèmes de re-render
@@ -262,6 +266,16 @@ Règle commune : n'animer que `transform` et `opacity`, respecter `useReducedMot
 - **Barre du bas** (`BottomNav.jsx`) : indicateur actif partagé (`layoutId="nav-active"`) qui glisse d'un onglet à l'autre, icône qui rebondit, anneau lumineux qui orbite autour du bouton Réserver (`.nav-orbit`, dégradé conique en rotation)
 - **Réservation** (`Booking.jsx`) : étapes qui glissent dans le sens de la navigation (`AnimatePresence mode="popLayout"`, variants avec `direction`), halo d'étape qui glisse (`layoutId="step-halo"`), coches à ressort et lignes qui se remplissent, prestations / dates / créneaux en cascade, **récapitulatif** sous les étapes (chips + prix qui compte, `AnimatedNumber`) avant la confirmation, **créneau choisi qui se loge dans le résumé** (`layoutId` `slot-HH:MM` partagé entre le bouton et le résumé), pendant l'envoi le bouton affiche « Confirmation... » (pas d'écran de chargement, retiré à la demande), puis écran de succès (`SuccessOverlay`, exporté) : flash et deux ondes de choc, coche dont le trait se dessine (`pathLength`) dans un disque entouré d'un anneau gradué qui tourne, **pluie de 30 lames de rasoir acier** (`BladeBurst`, éclatement radial en trois vagues, culbute 3D `rotateX` + rotation, retombée, fondu), titre, barber, chip date · heure (prop `detail`), barre de progression ; `SUCCESS_DURATION` = 4,2 s avant la redirection vers Mes rendez-vous. Choix validé par le client : lames de rasoir en guise de confettis, version soignée (la scène de coupe a été retirée)
 - **Feed** (`Feed.jsx`) : explosion d'emojis à la réaction (`EmojiBurst`), emoji choisi qui pop, double tap sur la photo = ❤️ avec gros cœur
+
+### Fonctions client ajoutées le 3 sept. 2026 (lot multi-agents)
+- **Accueil, « Comme la dernière fois »** (`components/home/RebookCard.jsx`) : dernier RDV du client non annulé (`Appointment.filter({ client_email })`, tri date + heure), photo du barber, prestations, date de la dernière visite, prix / durée **actuels** des prestations encore actives, bouton vers `/booking?barber=<id>&services=<ids>` (Booking pré-sélectionne les deux). Bloc fixe sous le hero, hors `homepage_order`, rien sans RDV
+- **Accueil, pastille Ouvert / Fermé** (`components/home/OpenStatusBadge.jsx`) : `computeOpenStatus(opening_hours)` à l'heure de Paris (`Intl`), états open / soon / closed avec prochain jour ouvert, recalcul chaque minute et au retour au premier plan
+- **Profil, carte de fidélité** (`components/shared/LoyaltyCard.jsx`) : 10 tampons, `filled = count % 10`, carte pleine à 10, 20…, `count` = RDV `completed` du client (limite 200). Purement calculé côté client, rien en base : la récompense est honorée au salon sur présentation ; pour une validation admin il faudra une entité dédiée (à déclarer dans `applyReadPolicy` / `CREATE_RULES` / `UPDATE_RULES`)
+- **Ajouter au calendrier** (`lib/calendarLinks.js`) : `buildAppointmentEvent`, `buildGoogleCalendarUrl` (`ctz=Europe/Paris`), `buildIcs` (VTIMEZONE, CRLF, pliage 75 octets, UID `appointment-<id>@dhomebarber.fr` stable), `openCalendar('google' | 'ics')` (natif : `openExternalUrl` ; le `.ics` en natif passe par une URL `data:`, meilleur effort, la voie robuste serait `@capacitor/filesystem` + `@capacitor/share`). Boutons sur l'écran de succès de la réservation (prop `calendarEvent` de `SuccessOverlay`) et dans Mes rendez-vous (RDV à venir)
+- **Réservation, « Peu importe »** (`Booking.jsx`) : carte `AnyBarberCard` en tête de l'étape 2, état `anyBarber` ; à l'étape 3 les RDV du jour sont chargés pour tous les barbers (`filter({ date, status })` sans `employee_id`, autorisé par la politique de lecture) et `computeSlots` (fonction pure) donne l'union des créneaux, nom du premier barber dispo (ordre `sort_order`) sous chaque heure ; le tap fixe `selectedEmployee`. Le paramètre d'URL `barber` saute toujours l'étape 2
+- **Boutique** (`Shop.jsx`) : à l'ajout, un clone de l'image vole en arc vers le bouton panier (`position: fixed`, 0,7 s), rebond du bouton et pop du compteur via une motion value, haptique ; plusieurs ajouts = plusieurs clones
+- **Carte FUT, gyroscope** (`BarberCard.jsx`) : `deviceorientation` → mêmes motion values que le pointeur (gamma → rotateY ± 18°, beta − 40 → rotateX ± 14°), pointeur prioritaire 300 ms, iOS : `DeviceOrientationEvent.requestPermission()` au premier `pointerdown`, résultat mémorisé en `sessionStorage` (`dhb-gyro-permission`)
+- **Tailwind** : `theme.extend.opacity` ajoute 2, 3, 4, 6, 8, 12 car le code utilise `bg-white/4`, `border-white/8`… que Tailwind 3.4 ignorait silencieusement (fonds et bordures très légers absents du CSS compilé jusqu'ici)
 
 ### Profil barber : navigation entre barbers (`src/pages/BarberProfile.jsx`)
 - La page charge la liste des barbers actifs avec la **même requête et la même clé de cache que l'accueil** (`['employees']`, filtre `is_active`, tri `sort_order`) et retrouve le barber courant par son id (comparaison en string)

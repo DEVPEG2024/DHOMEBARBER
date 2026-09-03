@@ -4,7 +4,7 @@ import { api } from '@/api/apiClient';
 import { useAuth } from '@/lib/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence, animate, useReducedMotion } from 'framer-motion';
-import { ChevronLeft, ChevronRight, Check, Calendar, Clock, User, Scissors, Sparkles } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Check, Calendar, CalendarPlus, Clock, User, Users, Scissors, Sparkles } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { format, addDays, isSameDay, startOfDay } from 'date-fns';
@@ -12,6 +12,8 @@ import { fr } from 'date-fns/locale';
 import ServiceCard from '@/components/shared/ServiceCard';
 import EmployeeCard from '@/components/shared/EmployeeCard';
 import { hapticFeedback } from '@/lib/capacitor';
+import { BARBER_PHOTO_ASPECT } from '@/lib/barberPhoto';
+import { buildAppointmentEvent, openCalendar } from '@/lib/calendarLinks';
 
 const STEPS = ['services', 'barber', 'datetime', 'confirm'];
 const STEP_LABELS = ['Prestations', 'Barber', 'Date & Heure', 'Confirmation'];
@@ -30,6 +32,11 @@ const SUCCESS_DURATION = 4200;
 /** Pluie de lames : nombre et instant de l'éclatement (s). */
 const BLADE_COUNT = 30;
 const BURST_AT = 0.35;
+/** Cibles « Ajouter au calendrier » de l'écran de succès. */
+const CALENDAR_TARGETS = [
+  { kind: 'google', label: 'Google Agenda' },
+  { kind: 'ics', label: 'Apple / Outlook' },
+];
 
 function generateTimeSlots(start, end, interval = 30) {
   const slots = [];
@@ -41,6 +48,47 @@ function generateTimeSlots(start, end, interval = 30) {
     if (sm >= 60) { sh++; sm -= 60; }
   }
   return slots;
+}
+
+/**
+ * Créneaux disponibles d'un barber pour une date (fonction pure, réutilisée pour un barber précis
+ * comme pour l'union « peu importe »).
+ * Règles : congé approuvé → aucun créneau ; horaires du jour `working_hours[jour]` (`start` / `end` /
+ * `closed`) ; un créneau est libre si [créneau, créneau + durée totale[ ne chevauche aucun RDV ni
+ * pause du barber ce jour-là (les RDV annulés sont ignorés).
+ * @param {object} employee  barber (`id`, `working_hours`)
+ * @param {Date} date
+ * @param {Array} appointmentsOfEmployee  RDV et pauses de ce barber ce jour-là (`start_time`, `end_time`, `status`)
+ * @param {Array} timeOffs  congés (tous barbers, filtrés ici sur `employee_id`)
+ * @param {number} totalDuration  durée totale des prestations en minutes
+ * @returns {string[]} heures `HH:mm` triées
+ */
+function computeSlots(employee, date, appointmentsOfEmployee, timeOffs, totalDuration) {
+  if (!employee || !date) return [];
+  const dateStr = format(date, 'yyyy-MM-dd');
+  const onLeave = (timeOffs || []).some(t =>
+    String(t.employee_id) === String(employee.id)
+    && dateStr >= String(t.start_date).slice(0, 10)
+    && dateStr <= String(t.end_date).slice(0, 10)
+    && (t.status === 'approved' || !t.status)
+  );
+  if (onLeave) return [];
+  const dayName = format(date, 'EEEE').toLowerCase();
+  const hours = employee.working_hours?.[dayName];
+  if (!hours || hours.closed) return [];
+  const busy = (appointmentsOfEmployee || [])
+    .filter(apt => apt.status !== 'cancelled' && apt.start_time && apt.end_time)
+    .map(apt => {
+      const [ah, am] = apt.start_time.split(':').map(Number);
+      const [bh, bm] = apt.end_time.split(':').map(Number);
+      return [ah * 60 + am, bh * 60 + bm];
+    });
+  return generateTimeSlots(hours.start || '09:00', hours.end || '19:00', 30).filter(slot => {
+    const [sh, sm] = slot.split(':').map(Number);
+    const slotStart = sh * 60 + sm;
+    const slotEnd = slotStart + totalDuration;
+    return !busy.some(([aptStart, aptEnd]) => slotStart < aptEnd && slotEnd > aptStart);
+  });
 }
 
 /** Nombre qui glisse de l'ancienne valeur à la nouvelle (écrit dans le DOM, sans re-render). */
@@ -164,8 +212,65 @@ function BladeBurst({ reduceMotion }) {
   );
 }
 
+/**
+ * Carte « Peu importe » (étape 2) : premier créneau disponible, tous barbers confondus.
+ * Même gabarit qu'`EmployeeCard` (halo, cadre au ratio photo, titre, sous-titre, coche).
+ */
+function AnyBarberCard({ selected, onClick }) {
+  return (
+    <div className="relative group">
+      <div
+        className={`absolute -bottom-2 left-1/2 -translate-x-1/2 w-3/4 h-8 rounded-full transition-opacity duration-500 ${
+          selected ? 'opacity-60' : 'opacity-25 group-hover:opacity-40'
+        }`}
+        style={{
+          background: 'radial-gradient(ellipse, rgba(34,197,94,0.5) 0%, rgba(34,197,94,0.15) 50%, transparent 80%)',
+          filter: 'blur(12px)',
+        }}
+      />
+      <motion.button
+        type="button"
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        whileTap={{ scale: 0.96 }}
+        onClick={onClick}
+        aria-pressed={selected}
+        className={`w-full cursor-pointer rounded-2xl border p-3 text-center transition-all duration-300 relative overflow-hidden ${
+          selected
+            ? 'border-primary/40 bg-primary/8 shadow-lg shadow-primary/15'
+            : 'border-white/8 bg-white/4 backdrop-blur-xl hover:bg-white/8 hover:border-white/15'
+        }`}
+      >
+        {selected && (
+          <div className="absolute inset-0 bg-gradient-to-b from-primary/5 to-transparent pointer-events-none" />
+        )}
+        {/* Cadre au même ratio que les photos des barbers, pour aligner la grille */}
+        <div
+          className={`w-full rounded-xl overflow-hidden mb-3 flex flex-col items-center justify-center gap-2.5 bg-gradient-to-b from-primary/15 to-primary/5 border border-primary/15 transition-all duration-300 ${
+            selected ? 'ring-2 ring-primary ring-offset-2 ring-offset-background' : ''
+          }`}
+          style={{ aspectRatio: BARBER_PHOTO_ASPECT }}
+        >
+          <div className="w-14 h-14 rounded-full bg-primary/15 border border-primary/25 flex items-center justify-center">
+            <Users className="w-6 h-6 text-primary" />
+          </div>
+          <span className="text-[10px] uppercase tracking-[0.2em] text-primary/70">Tous barbers</span>
+        </div>
+        <h3 className="font-semibold text-sm text-foreground">Peu importe</h3>
+        <p className="text-[11px] text-muted-foreground uppercase tracking-wider mt-0.5">Premier créneau dispo</p>
+        {selected && (
+          <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }}
+            className="absolute top-2.5 right-2.5 w-5 h-5 bg-primary rounded-full flex items-center justify-center">
+            <Check className="w-3 h-3 text-primary-foreground" />
+          </motion.div>
+        )}
+      </motion.button>
+    </div>
+  );
+}
+
 /** Écran de succès : onde de choc, coche qui se dessine, pluie de lames, barre de redirection. */
-export function SuccessOverlay({ barberName, detail, duration = SUCCESS_DURATION }) {
+export function SuccessOverlay({ barberName, detail, calendarEvent = null, duration = SUCCESS_DURATION }) {
   const reduceMotion = useReducedMotion();
   return (
     <motion.div
@@ -256,6 +361,28 @@ export function SuccessOverlay({ barberName, detail, duration = SUCCESS_DURATION
             {detail}
           </motion.p>
         )}
+        {/* Ajout au calendrier : Google Agenda ou fichier .ics (Apple Calendar / Outlook) */}
+        {calendarEvent && (
+          <motion.div
+            initial={{ opacity: 0, y: reduceMotion ? 0 : 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 1.15, duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+            className="mt-3 flex items-center justify-center gap-2"
+          >
+            {CALENDAR_TARGETS.map(({ kind, label }) => (
+              <motion.button
+                key={kind}
+                type="button"
+                whileTap={{ scale: 0.94 }}
+                onClick={() => { hapticFeedback(); openCalendar(kind, calendarEvent); }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-[11px] font-medium text-foreground/80 hover:bg-white/10 hover:text-foreground transition-colors"
+              >
+                <CalendarPlus className="w-3.5 h-3.5 text-primary" />
+                {label}
+              </motion.button>
+            ))}
+          </motion.div>
+        )}
         {/* Barre qui se remplit pendant l'attente avant la redirection */}
         <motion.div
           initial={{ opacity: 0 }}
@@ -296,6 +423,8 @@ export default function Booking() {
   const [selectedDate, setSelectedDate] = useState(null);
   const [selectedTime, setSelectedTime] = useState(null);
   const [notes, setNotes] = useState('');
+  // « Peu importe » : aucun barber choisi, l'étape 3 propose l'union des créneaux de tous les barbers
+  const [anyBarber, setAnyBarber] = useState(false);
 
   const urlParams = new URLSearchParams(window.location.search);
   const preSelectedIds = urlParams.get('services')?.split(',') || [];
@@ -319,30 +448,29 @@ export default function Booking() {
     refetchOnMount: 'always',
   });
 
+  // RDV du jour servant au calcul des créneaux. En mode « peu importe » : une requête par statut,
+  // sans filtre employee_id (tous les barbers) ; sinon uniquement ceux du barber choisi.
+  // Le client ne reçoit que les colonnes de créneau (employee_id, date, start_time, end_time, status).
+  const selectedDateStr = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : null;
+  const slotScope = anyBarber ? 'all' : (selectedEmployee?.id ?? null);
+  const slotsEnabled = !!selectedDate && (anyBarber || !!selectedEmployee);
+  const fetchDayAppointments = (status) => {
+    if (!slotsEnabled) return Promise.resolve([]);
+    const filter = { date: selectedDateStr, status };
+    if (!anyBarber) filter.employee_id = selectedEmployee.id;
+    return api.entities.Appointment.filter(filter);
+  };
+
   const { data: confirmedApts = [] } = useQuery({
-    queryKey: ['appointments-confirmed', selectedDate, selectedEmployee?.id],
-    queryFn: () => {
-      if (!selectedDate || !selectedEmployee) return [];
-      return api.entities.Appointment.filter({
-        date: format(selectedDate, 'yyyy-MM-dd'),
-        employee_id: selectedEmployee.id,
-        status: 'confirmed'
-      });
-    },
-    enabled: !!selectedDate && !!selectedEmployee,
+    queryKey: ['appointments-confirmed', selectedDateStr, slotScope],
+    queryFn: () => fetchDayAppointments('confirmed'),
+    enabled: slotsEnabled,
   });
 
   const { data: breakApts = [] } = useQuery({
-    queryKey: ['appointments-breaks', selectedDate, selectedEmployee?.id],
-    queryFn: () => {
-      if (!selectedDate || !selectedEmployee) return [];
-      return api.entities.Appointment.filter({
-        date: format(selectedDate, 'yyyy-MM-dd'),
-        employee_id: selectedEmployee.id,
-        status: 'break'
-      });
-    },
-    enabled: !!selectedDate && !!selectedEmployee,
+    queryKey: ['appointments-breaks', selectedDateStr, slotScope],
+    queryFn: () => fetchDayAppointments('break'),
+    enabled: slotsEnabled,
   });
 
   const appointments = useMemo(() => [...confirmedApts, ...breakApts], [confirmedApts, breakApts]);
@@ -375,32 +503,38 @@ export default function Booking() {
     return d;
   }, []);
 
-  const availableSlots = useMemo(() => {
-    if (!selectedEmployee || !selectedDate) return [];
-    // Check if barber is on approved leave
-    const dateStr = format(selectedDate, 'yyyy-MM-dd');
-    const onLeave = timeOffs.some(t =>
-      String(t.employee_id) === String(selectedEmployee.id) && dateStr >= String(t.start_date).slice(0,10) && dateStr <= String(t.end_date).slice(0,10) && (t.status === 'approved' || !t.status)
-    );
-    if (onLeave) return [];
-    const dayName = format(selectedDate, 'EEEE').toLowerCase();
-    const hours = selectedEmployee.working_hours?.[dayName];
-    if (!hours || hours.closed) return [];
-    const allSlots = generateTimeSlots(hours.start || '09:00', hours.end || '19:00', 30);
-    return allSlots.filter(slot => {
-      const [sh, sm] = slot.split(':').map(Number);
-      const slotStart = sh * 60 + sm;
-      const slotEnd = slotStart + totalDuration;
-      return !appointments.some(apt => {
-        if (apt.status === 'cancelled') return false;
-        const [ah, am] = apt.start_time.split(':').map(Number);
-        const [bh, bm] = apt.end_time.split(':').map(Number);
-        const aptStart = ah * 60 + am;
-        const aptEnd = bh * 60 + bm;
-        return slotStart < aptEnd && slotEnd > aptStart;
-      });
-    });
-  }, [selectedEmployee, selectedDate, appointments, totalDuration, timeOffs]);
+  /**
+   * Créneaux affichés à l'étape 3 : `{ time, employee }` triés par heure.
+   * - Barber précis : ses créneaux (`computeSlots`).
+   * - « Peu importe » : union des créneaux de tous les barbers actifs ; RDV du jour regroupés par
+   *   `employee_id` (comparés en string) ; pour une même heure on garde le premier barber dans
+   *   l'ordre `sort_order`.
+   */
+  const slotOptions = useMemo(() => {
+    if (!selectedDate) return [];
+    if (!anyBarber) {
+      if (!selectedEmployee) return [];
+      return computeSlots(selectedEmployee, selectedDate, appointments, timeOffs, totalDuration)
+        .map(time => ({ time, employee: selectedEmployee }));
+    }
+    const byEmployee = new Map();
+    for (const apt of appointments) {
+      const key = String(apt.employee_id);
+      if (!byEmployee.has(key)) byEmployee.set(key, []);
+      byEmployee.get(key).push(apt);
+    }
+    const firstAvailable = new Map();
+    const ordered = [...employees].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+    for (const emp of ordered) {
+      const slots = computeSlots(emp, selectedDate, byEmployee.get(String(emp.id)) || [], timeOffs, totalDuration);
+      for (const time of slots) {
+        if (!firstAvailable.has(time)) firstAvailable.set(time, emp);
+      }
+    }
+    return [...firstAvailable.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([time, employee]) => ({ time, employee }));
+  }, [anyBarber, selectedEmployee, selectedDate, appointments, timeOffs, totalDuration, employees]);
 
   const toggleService = (service) => {
     hapticFeedback();
@@ -417,6 +551,32 @@ export default function Booking() {
     hapticFeedback();
   };
 
+  /** Étape 2 : barber précis (quitte le mode « peu importe »). Le créneau est réinitialisé si le barber change. */
+  const chooseBarber = (emp) => {
+    setAnyBarber(false);
+    if (String(selectedEmployee?.id) !== String(emp.id)) setSelectedTime(null);
+    setSelectedEmployee(emp);
+    hapticFeedback();
+    setTimeout(() => goToStep(2), 250);
+  };
+
+  /** Étape 2 : « peu importe » → le barber sera déterminé par le créneau choisi à l'étape 3. */
+  const chooseAnyBarber = () => {
+    setAnyBarber(true);
+    setSelectedEmployee(null);
+    setSelectedTime(null);
+    hapticFeedback();
+    setTimeout(() => goToStep(2), 250);
+  };
+
+  /** Étape 3 : créneau choisi ; en mode « peu importe », le barber disponible devient le barber retenu. */
+  const chooseSlot = (time, employee) => {
+    if (anyBarber && employee) setSelectedEmployee(employee);
+    setSelectedTime(time);
+    hapticFeedback();
+    setTimeout(() => goToStep(3), 250);
+  };
+
   const createAppointment = useMutation({
     mutationFn: async () => {
       if (!isAuthenticated || !user) {
@@ -424,6 +584,7 @@ export default function Booking() {
         navigate('/login?redirect=/booking');
         throw new Error('Non connecté');
       }
+      if (!selectedEmployee || !selectedDate || !selectedTime) throw new Error('Sélection incomplète');
       const [sh, sm] = selectedTime.split(':').map(Number);
       const endMin = sh * 60 + sm + totalDuration;
       const endTime = `${String(Math.floor(endMin / 60)).padStart(2, '0')}:${String(endMin % 60).padStart(2, '0')}`;
@@ -457,12 +618,25 @@ export default function Booking() {
 
   const canNext = () => {
     if (step === 0) return selectedServices.length > 0;
-    if (step === 1) return !!selectedEmployee;
+    if (step === 1) return !!selectedEmployee || anyBarber;
     if (step === 2) return !!selectedDate && !!selectedTime;
     return true;
   };
 
-  const hasRecap = selectedServices.length > 0 || !!selectedEmployee || !!selectedTime;
+  const hasRecap = selectedServices.length > 0 || !!selectedEmployee || anyBarber || !!selectedTime;
+
+  /** Événement proposé sur l'écran de succès (« Ajouter au calendrier »). */
+  const calendarEvent = useMemo(() => {
+    if (!success || !selectedEmployee || !selectedDate || !selectedTime) return null;
+    return buildAppointmentEvent({
+      barberName: selectedEmployee.name,
+      services: selectedServices,
+      date: selectedDate,
+      startTime: selectedTime,
+      totalDuration,
+      totalPrice,
+    });
+  }, [success, selectedEmployee, selectedDate, selectedTime, selectedServices, totalDuration, totalPrice]);
 
   return (
     <div className="min-h-screen relative overflow-hidden">
@@ -532,7 +706,10 @@ export default function Booking() {
           <AnimatePresence mode="wait" initial={false}>
             <motion.div key={step} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }}>
               <h1 className="font-display text-2xl font-bold text-foreground">{STEP_LABELS[step]}</h1>
-              <p className="text-xs text-muted-foreground mt-1">Étape {step + 1} sur {STEPS.length}{preSelectedBarberId && selectedEmployee ? ` · avec ${selectedEmployee.name}` : ''}</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Étape {step + 1} sur {STEPS.length}
+                {preSelectedBarberId && selectedEmployee ? ` · avec ${selectedEmployee.name}` : anyBarber && step === 2 ? ' · premier créneau disponible' : ''}
+              </p>
             </motion.div>
           </AnimatePresence>
         </div>
@@ -556,12 +733,14 @@ export default function Booking() {
           {/* Step 2: Employee */}
           {step === 1 && (
             <motion.div key="barber" custom={direction} variants={stepVariants} initial="enter" animate="center" exit="exit" transition={stepTransition}>
-              <p className="text-xs text-muted-foreground mb-4">Choisissez votre barber</p>
+              <p className="text-xs text-muted-foreground mb-4">Choisissez votre barber, ou prenez le premier créneau disponible.</p>
               <div className="grid grid-cols-2 gap-3">
+                <motion.div key="any-barber" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: 'easeOut' }}>
+                  <AnyBarberCard selected={anyBarber} onClick={chooseAnyBarber} />
+                </motion.div>
                 {employees.map((emp, i) => (
-                  <motion.div key={emp.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05, duration: 0.3, ease: 'easeOut' }}>
-                    <EmployeeCard employee={emp} selected={selectedEmployee?.id === emp.id}
-                      onClick={(e) => { setSelectedEmployee(e); hapticFeedback(); setTimeout(() => goToStep(2), 250); }} />
+                  <motion.div key={emp.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: (i + 1) * 0.05, duration: 0.3, ease: 'easeOut' }}>
+                    <EmployeeCard employee={emp} selected={!anyBarber && selectedEmployee?.id === emp.id} onClick={chooseBarber} />
                   </motion.div>
                 ))}
               </div>
@@ -585,7 +764,7 @@ export default function Booking() {
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: i * 0.03, duration: 0.3, ease: 'easeOut' }}
                         whileTap={{ scale: 0.94 }}
-                        onClick={() => { setSelectedDate(date); setSelectedTime(null); hapticFeedback(); }}
+                        onClick={() => { setSelectedDate(date); setSelectedTime(null); if (anyBarber) setSelectedEmployee(null); hapticFeedback(); }}
                         className={`flex-shrink-0 w-16 py-3 rounded-2xl text-center transition-colors duration-300 ${
                           active
                             ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/25'
@@ -605,31 +784,41 @@ export default function Booking() {
                 <motion.div key={selectedDate.toISOString()} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
                   <p className="text-sm font-medium mb-3 flex items-center gap-2 text-foreground/80">
                     <Clock className="w-4 h-4 text-primary" /> Créneaux disponibles
+                    {anyBarber && <span className="text-[11px] font-normal text-muted-foreground">· tous barbers</span>}
                   </p>
-                  {availableSlots.length > 0 ? (
+                  {slotOptions.length > 0 ? (
                     <div className="grid grid-cols-3 gap-2">
-                      {availableSlots.map((slot, i) => (
-                        <motion.button
-                          key={slot}
-                          layoutId={`slot-${slot}`}
-                          initial={{ opacity: 0, y: 8, scale: 0.95 }}
-                          animate={{ opacity: 1, y: 0, scale: 1 }}
-                          transition={{ delay: Math.min(i, 14) * 0.025, duration: 0.28, ease: 'easeOut', layout: springy }}
-                          whileTap={{ scale: 0.94 }}
-                          onClick={() => { setSelectedTime(slot); hapticFeedback(); setTimeout(() => goToStep(3), 250); }}
-                          className={`py-3 rounded-xl text-sm font-semibold transition-colors duration-300 ${
-                            selectedTime === slot
-                              ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/25'
-                              : 'backdrop-blur-xl bg-white/5 border border-white/10 text-foreground hover:bg-white/10'
-                          }`}
-                        >
-                          {slot}
-                        </motion.button>
-                      ))}
+                      {slotOptions.map(({ time, employee }, i) => {
+                        const active = selectedTime === time;
+                        return (
+                          <motion.button
+                            key={time}
+                            layoutId={`slot-${time}`}
+                            initial={{ opacity: 0, y: 8, scale: 0.95 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            transition={{ delay: Math.min(i, 14) * 0.025, duration: 0.28, ease: 'easeOut', layout: springy }}
+                            whileTap={{ scale: 0.94 }}
+                            onClick={() => chooseSlot(time, employee)}
+                            className={`py-3 rounded-xl text-sm font-semibold transition-colors duration-300 ${
+                              active
+                                ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/25'
+                                : 'backdrop-blur-xl bg-white/5 border border-white/10 text-foreground hover:bg-white/10'
+                            }`}
+                          >
+                            {time}
+                            {/* « Peu importe » : nom du premier barber disponible à cette heure */}
+                            {anyBarber && employee && (
+                              <span className={`block text-[10px] font-medium leading-tight mt-0.5 px-1 truncate ${active ? 'text-primary-foreground/80' : 'text-muted-foreground'}`}>
+                                {employee.name}
+                              </span>
+                            )}
+                          </motion.button>
+                        );
+                      })}
                     </div>
                   ) : (
                     <div className="backdrop-blur-xl bg-white/5 border border-white/10 rounded-2xl p-8 text-center">
-                      <p className="text-sm text-muted-foreground">Aucun créneau disponible ce jour</p>
+                      <p className="text-sm text-muted-foreground">Aucun créneau disponible ce jour{anyBarber ? ', quel que soit le barber' : ''}</p>
                     </div>
                   )}
                 </motion.div>
@@ -644,7 +833,7 @@ export default function Booking() {
               {/* Summary card */}
               <div className="backdrop-blur-xl bg-white/5 border border-white/10 rounded-2xl p-5 space-y-4">
                 {[
-                  { icon: User, label: 'Barber', value: selectedEmployee?.name },
+                  { icon: User, label: anyBarber ? 'Barber · premier disponible' : 'Barber', value: selectedEmployee?.name },
                   {
                     icon: Calendar,
                     label: 'Date & Heure',
@@ -728,6 +917,7 @@ export default function Booking() {
                       <Chip key="services" icon={Scissors}>{selectedServices.length} prestation{selectedServices.length > 1 ? 's' : ''}</Chip>
                     )}
                     {selectedEmployee && <Chip key="barber" icon={User}>{selectedEmployee.name}</Chip>}
+                    {!selectedEmployee && anyBarber && <Chip key="any-barber" icon={Users}>Premier dispo</Chip>}
                     {selectedDate && <Chip key="date" icon={Calendar}>{format(selectedDate, 'EEE d MMM', { locale: fr })}</Chip>}
                   </AnimatePresence>
                 </div>
@@ -775,6 +965,7 @@ export default function Booking() {
             key="success"
             barberName={selectedEmployee?.name}
             detail={selectedDate && selectedTime ? `${format(selectedDate, 'EEEE d MMMM', { locale: fr })} · ${selectedTime}` : ''}
+            calendarEvent={calendarEvent}
           />
         )}
       </AnimatePresence>

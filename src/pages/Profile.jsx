@@ -1,12 +1,13 @@
 import React, { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '@/api/apiClient';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { motion } from 'framer-motion';
-import { Calendar, Star, ShoppingBag, Settings, LogOut, ChevronRight, Shield, Scissors, Bell, Camera } from 'lucide-react';
+import { Calendar, Star, ShoppingBag, Settings, LogOut, ChevronRight, Shield, Bell, Camera } from 'lucide-react';
 import { toast } from 'sonner';
 import ImageCropDialog from '@/components/shared/ImageCropDialog';
+import LoyaltyCard from '@/components/shared/LoyaltyCard';
 
 const menuItems = [
   { icon: Calendar, label: 'Mes Rendez-vous', path: '/appointments', desc: 'Historique & prochains RDV' },
@@ -18,7 +19,6 @@ const menuItems = [
 
 export default function Profile() {
   const { user, logout, refreshUser } = useAuth();
-  const queryClient = useQueryClient();
   const fileInputRef = useRef(null);
   const [cropImage, setCropImage] = useState(null);
   const [uploading, setUploading] = useState(false);
@@ -40,7 +40,7 @@ export default function Profile() {
       await api.entities.User.update(user.id, { photo_url: file_url });
       if (refreshUser) await refreshUser();
       toast.success('Photo de profil mise à jour');
-    } catch (err) {
+    } catch {
       toast.error('Erreur lors de la mise à jour de la photo');
     } finally {
       setUploading(false);
@@ -51,6 +51,14 @@ export default function Profile() {
     queryKey: ['myAppointments', user?.email],
     queryFn: () => api.entities.Appointment.filter({ client_email: user?.email }, '-date', 100),
     enabled: !!user,
+  });
+
+  // Carte de fidélité : RDV terminés du client (le serveur force le filtre sur le client connecté).
+  // Clé préfixée par 'appointments' : invalidée quand un barber valide une prestation.
+  const { data: completedAppointments = [], isLoading: loyaltyLoading } = useQuery({
+    queryKey: ['appointments', 'completed', user?.email],
+    queryFn: () => api.entities.Appointment.filter({ client_email: user.email, status: 'completed' }, '-date', 200),
+    enabled: !!user?.email,
   });
 
   const completedCount = appointments.filter(a => a.status === 'completed').length;
@@ -135,8 +143,16 @@ export default function Profile() {
           ))}
         </motion.div>
 
+        {/* Carte de fidélité (10e coupe offerte) — affichage calculé, voir LoyaltyCard.jsx */}
+        {user?.email && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
+            className="mb-8">
+            <LoyaltyCard count={completedAppointments.length} loading={loyaltyLoading} />
+          </motion.div>
+        )}
+
         {/* Menu */}
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
           className="rounded-2xl overflow-hidden border border-white/8 bg-white/4 backdrop-blur-xl mb-5">
           {menuItems.map((item, i) => (
             <Link
@@ -162,7 +178,7 @@ export default function Profile() {
 
         {/* Logout */}
         <motion.button
-          initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }}
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.25 }}
           whileTap={{ scale: 0.97 }}
           onClick={logout}
           className="w-full h-12 rounded-2xl border border-red-500/20 bg-red-500/8 text-red-400 text-sm font-semibold flex items-center justify-center gap-2 hover:bg-red-500/12 transition-colors"

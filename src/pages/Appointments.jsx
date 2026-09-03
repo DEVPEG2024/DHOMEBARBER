@@ -3,8 +3,8 @@ import { Link } from 'react-router-dom';
 import { api } from '@/api/apiClient';
 import { useAuth } from '@/lib/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Calendar, Clock, User, X, Scissors, Plus } from 'lucide-react';
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
+import { Calendar, CalendarPlus, Clock, User, X, Scissors, Plus } from 'lucide-react';
 import { format, isPast, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { toast } from 'sonner';
@@ -12,6 +12,14 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { hapticFeedback } from '@/lib/capacitor';
+import { buildAppointmentEvent, openCalendar, toLocalDate } from '@/lib/calendarLinks';
+
+/** Cibles « Ajouter au calendrier ». */
+const CALENDAR_TARGETS = [
+  { kind: 'google', label: 'Google Agenda' },
+  { kind: 'ics', label: 'Apple / Outlook' },
+];
 
 const statusConfig = {
   pending:   { label: 'En attente', bg: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' },
@@ -24,6 +32,9 @@ const statusConfig = {
 export default function Appointments() {
   const [tab, setTab] = useState('upcoming');
   const [cancelId, setCancelId] = useState(null);
+  // Rendez-vous dont le petit menu « Ajouter au calendrier » est ouvert
+  const [calendarOpenId, setCalendarOpenId] = useState(null);
+  const reduceMotion = useReducedMotion();
   const queryClient = useQueryClient();
   const { user } = useAuth();
 
@@ -47,6 +58,22 @@ export default function Appointments() {
       setCancelId(null);
     },
   });
+
+  /** Ouvre Google Agenda ou télécharge le .ics d'un rendez-vous (UID stable : réimporter met à jour au lieu de dupliquer). */
+  const addToCalendar = (kind, apt) => {
+    hapticFeedback();
+    openCalendar(kind, buildAppointmentEvent({
+      barberName: apt.employee_name,
+      services: apt.services,
+      date: apt.date,
+      startTime: apt.start_time,
+      endTime: apt.end_time,
+      totalDuration: apt.total_duration,
+      totalPrice: apt.total_price,
+      uid: `appointment-${apt.id}@dhomebarber.fr`,
+    }));
+    setCalendarOpenId(null);
+  };
 
   const upcoming = appointments.filter(a => !isPast(parseISO(a.date)) && a.status !== 'cancelled' && a.status !== 'completed');
   const past = appointments.filter(a => isPast(parseISO(a.date)) || a.status === 'cancelled' || a.status === 'completed');
@@ -137,6 +164,10 @@ export default function Appointments() {
               {list.map((apt, i) => {
                 const status = statusConfig[apt.status] || statusConfig.pending;
                 const canCancel = apt.status === 'confirmed' && !isPast(parseISO(apt.date));
+                // À venir (fin du RDV pas encore passée) et ni annulé ni terminé : proposer l'ajout au calendrier
+                const endsInFuture = toLocalDate(apt.date, apt.end_time || apt.start_time || '23:59') > new Date();
+                const canAddToCalendar = endsInFuture && !['cancelled', 'completed', 'no_show'].includes(apt.status);
+                const calendarOpen = calendarOpenId === apt.id;
                 return (
                   <motion.div
                     key={apt.id}
@@ -197,16 +228,58 @@ export default function Appointments() {
                         </div>
                       )}
 
-                      {/* Cancel */}
-                      {canCancel && (
-                        <div className="mt-3 pt-3 border-t border-white/6 flex justify-end">
-                          <button
-                            onClick={() => setCancelId(apt.id)}
-                            className="flex items-center gap-1.5 text-[11px] font-semibold text-red-400 hover:text-red-300 transition-colors"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                            Annuler le rendez-vous
-                          </button>
+                      {/* Actions : ajout au calendrier (RDV à venir) et annulation */}
+                      {(canAddToCalendar || canCancel) && (
+                        <div className="mt-3 pt-3 border-t border-white/6">
+                          <div className="flex items-center justify-between gap-3">
+                            {canAddToCalendar ? (
+                              <button
+                                type="button"
+                                aria-expanded={calendarOpen}
+                                onClick={() => { hapticFeedback(); setCalendarOpenId(calendarOpen ? null : apt.id); }}
+                                className={`flex items-center gap-1.5 text-[11px] font-semibold transition-colors ${
+                                  calendarOpen ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
+                                }`}
+                              >
+                                <CalendarPlus className="w-3.5 h-3.5" />
+                                Ajouter au calendrier
+                              </button>
+                            ) : <span />}
+                            {canCancel && (
+                              <button
+                                onClick={() => setCancelId(apt.id)}
+                                className="flex items-center gap-1.5 text-[11px] font-semibold text-red-400 hover:text-red-300 transition-colors"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                                Annuler le rendez-vous
+                              </button>
+                            )}
+                          </div>
+                          <AnimatePresence initial={false}>
+                            {calendarOpen && canAddToCalendar && (
+                              <motion.div
+                                key="calendar-menu"
+                                initial={{ opacity: 0, y: reduceMotion ? 0 : -4 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: reduceMotion ? 0 : -4 }}
+                                transition={{ duration: 0.18, ease: 'easeOut' }}
+                                className="mt-3 grid grid-cols-2 gap-2"
+                              >
+                                {CALENDAR_TARGETS.map(({ kind, label }) => (
+                                  <motion.button
+                                    key={kind}
+                                    type="button"
+                                    whileTap={{ scale: 0.96 }}
+                                    onClick={() => addToCalendar(kind, apt)}
+                                    className="flex items-center justify-center gap-1.5 h-9 rounded-xl bg-white/5 border border-white/10 text-[11px] font-semibold text-foreground hover:bg-white/10 transition-colors"
+                                  >
+                                    <CalendarPlus className="w-3.5 h-3.5 text-primary" />
+                                    {label}
+                                  </motion.button>
+                                ))}
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
                         </div>
                       )}
                     </div>

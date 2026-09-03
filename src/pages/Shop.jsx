@@ -1,8 +1,9 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useLayoutEffect } from 'react';
 import { api } from '@/api/apiClient';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
-import { motion, AnimatePresence, useScroll, useTransform } from 'framer-motion';
+import { motion, AnimatePresence, useScroll, useTransform, useMotionValue, useReducedMotion, animate } from 'framer-motion';
+import { hapticFeedback } from '@/lib/capacitor';
 import { ShoppingBag, Plus, Minus, ShoppingCart, X, Trash2, Store, CheckCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -17,6 +18,10 @@ const categoryLabels = {
   skincare: 'Soin visage',
   other: 'Autre',
 };
+
+/** Vol de la vignette produit vers le panier : taille du disque (px) et durée (s). */
+const FLY_SIZE = 56;
+const FLY_DURATION = 0.7;
 
 function GlassCard({ children }) {
   const ref = useRef(null);
@@ -64,7 +69,22 @@ export default function Shop() {
   const [ordering, setOrdering] = useState(false);
   const [orderSuccess, setOrderSuccess] = useState(false);
   const { user } = useAuth();
-  const queryClient = useQueryClient();
+  const reduceMotion = useReducedMotion();
+
+  // Vol de la vignette vers le panier : un clone par ajout (ids indépendants),
+  // retiré à la fin de son animation. La destination `to` est résolue après le
+  // rendu : le bouton panier n'est dans le DOM qu'une fois un article ajouté.
+  const [flights, setFlights] = useState([]);
+  const flightIdRef = useRef(0);
+  const imageRefs = useRef({});        // id produit → conteneur de l'image
+  const cartAnchorRef = useRef(null);  // conteneur fixe du bouton panier (jamais transformé)
+  const cartIconRef = useRef(null);    // icône panier : point d'arrivée
+
+  // Rebond du bouton panier à l'arrivée (0 → 1 → 0 à ressort), piloté sans re-render
+  const cartBump = useMotionValue(0);
+  const cartButtonScale = useTransform(cartBump, v => 1 + v * 0.05);
+  const cartIconScale = useTransform(cartBump, v => 1 + v * 0.25);
+  const cartCountScale = useTransform(cartBump, v => 1 + v * 0.2);
 
   const { data: products = [] } = useQuery({
     queryKey: ['products'],
@@ -88,6 +108,53 @@ export default function Shop() {
       }
       return { ...prev, [productId]: newQty };
     });
+  };
+
+  // Ajout depuis une vignette : même logique que updateCart, plus le clone qui s'envole.
+  // Départ : centre de l'image du produit, sinon centre du bouton cliqué.
+  const addToCart = (product, e) => {
+    updateCart(product.id, 1);
+    if (reduceMotion) return;
+    const source = imageRefs.current[product.id] || e.currentTarget;
+    const r = source?.getBoundingClientRect?.();
+    if (!r) return;
+    flightIdRef.current += 1;
+    setFlights(prev => [...prev, {
+      id: flightIdRef.current,
+      image: product.image_url || null,
+      from: { x: r.left + r.width / 2 - FLY_SIZE / 2, y: r.top + r.height / 2 - FLY_SIZE / 2 },
+      to: null,
+    }]);
+  };
+
+  // Résout la destination des nouveaux vols une fois le bouton panier monté
+  // (même commit que l'ajout). Bouton absent (tiroir ouvert…) : ajout sans animation.
+  useLayoutEffect(() => {
+    if (!flights.some(f => !f.to)) return;
+    const anchor = cartAnchorRef.current;
+    const icon = cartIconRef.current;
+    if (!anchor || !icon) {
+      setFlights(prev => prev.filter(f => f.to));
+      return;
+    }
+    // x : centre de l'icône ; y : centre du conteneur fixe, insensible à
+    // l'animation d'entrée (translateY) du bouton encore en cours au premier ajout
+    const a = anchor.getBoundingClientRect();
+    const i = icon.getBoundingClientRect();
+    const to = { x: i.left + i.width / 2 - FLY_SIZE / 2, y: a.top + a.height / 2 - FLY_SIZE / 2 };
+    setFlights(prev => prev.map(f => (f.to ? f : { ...f, to })));
+  }, [flights]);
+
+  const bumpCart = () => {
+    animate(cartBump, 1, { duration: 0.1, ease: 'easeOut' }).then(() => {
+      animate(cartBump, 0, { type: 'spring', stiffness: 520, damping: 12 });
+    });
+  };
+
+  const handleFlightComplete = (id) => {
+    setFlights(prev => prev.filter(f => f.id !== id));
+    bumpCart();
+    hapticFeedback();
   };
 
   const cartItems = Object.entries(cart);
@@ -128,7 +195,7 @@ export default function Shop() {
       setCart({});
       setNotes('');
       setOrderSuccess(true);
-    } catch (err) {
+    } catch {
       toast.error('Erreur lors de la commande');
     } finally {
       setOrdering(false);
@@ -178,7 +245,10 @@ export default function Shop() {
               transition={{ delay: i * 0.05 }}
               className="bg-card border border-border rounded-xl overflow-hidden"
             >
-              <div className="aspect-square bg-white relative">
+              <div
+                ref={el => { imageRefs.current[product.id] = el; }}
+                className="aspect-square bg-white relative"
+              >
                 {product.image_url ? (
                   <img src={product.image_url} alt={product.name} className="w-full h-full object-contain" />
                 ) : (
@@ -205,12 +275,12 @@ export default function Shop() {
                         <Minus className="w-3.5 h-3.5" />
                       </button>
                       <span className="text-sm font-bold w-4 text-center">{cart[product.id]}</span>
-                      <button onClick={() => updateCart(product.id, 1)} className="w-8 h-8 rounded-full bg-primary flex items-center justify-center active:scale-95">
+                      <button onClick={e => addToCart(product, e)} className="w-8 h-8 rounded-full bg-primary flex items-center justify-center active:scale-95">
                         <Plus className="w-3.5 h-3.5 text-primary-foreground" />
                       </button>
                     </div>
                   ) : (
-                    <button onClick={() => updateCart(product.id, 1)} className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center hover:bg-primary/20 transition-colors active:scale-95">
+                    <button onClick={e => addToCart(product, e)} className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center hover:bg-primary/20 transition-colors active:scale-95">
                       <Plus className="w-4 h-4 text-primary" />
                     </button>
                   )}
@@ -228,25 +298,64 @@ export default function Shop() {
         </div>
       )}
 
-      {/* Cart Footer Button */}
+      {/* Cart Footer Button (le conteneur fixe reste non transformé : il sert de repère au vol) */}
       {cartCount > 0 && !showCart && (
-        <motion.div
-          initial={{ y: 100, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          className="fixed bottom-20 left-4 right-4 max-w-lg mx-auto z-40"
-        >
-          <Button className="w-full rounded-xl h-14 bg-primary text-primary-foreground shadow-lg shadow-primary/20"
-            onClick={() => setShowCart(true)}>
-            <div className="flex items-center justify-between w-full px-2">
-              <div className="flex items-center gap-2">
-                <ShoppingCart className="w-4 h-4" />
-                <span className="text-xs font-semibold">{cartCount} article{cartCount > 1 ? 's' : ''}</span>
+        <div ref={cartAnchorRef} className="fixed bottom-20 left-4 right-4 max-w-lg mx-auto z-40">
+          <motion.div
+            initial={{ y: 100, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            style={{ scale: cartButtonScale }}
+          >
+            <Button className="w-full rounded-xl h-14 bg-primary text-primary-foreground shadow-lg shadow-primary/20"
+              onClick={() => setShowCart(true)}>
+              <div className="flex items-center justify-between w-full px-2">
+                {/* Icône + quantité : rebondissent à l'arrivée d'une vignette */}
+                <motion.div className="flex items-center gap-2" style={{ scale: cartIconScale, transformOrigin: 'left center' }}>
+                  <span ref={cartIconRef} className="inline-flex">
+                    <ShoppingCart className="w-4 h-4" />
+                  </span>
+                  <span className="text-xs font-semibold">
+                    <motion.span className="inline-block" style={{ scale: cartCountScale }}>{cartCount}</motion.span>
+                    {' '}article{cartCount > 1 ? 's' : ''}
+                  </span>
+                </motion.div>
+                <span className="text-sm font-bold">{cartTotal.toFixed(2)}€</span>
               </div>
-              <span className="text-sm font-bold">{cartTotal.toFixed(2)}€</span>
-            </div>
-          </Button>
-        </motion.div>
+            </Button>
+          </motion.div>
+        </div>
       )}
+
+      {/* Vignettes en vol vers le panier : trajectoire en arc (x et y sur des courbes
+          différentes), rétrécissement jusqu'à 0,3 et fondu final. Transform / opacity uniquement. */}
+      {flights.filter(f => f.to).map(f => (
+        <motion.div
+          key={f.id}
+          aria-hidden="true"
+          className="fixed left-0 top-0 z-50 pointer-events-none rounded-full bg-white border border-border shadow-lg overflow-hidden flex items-center justify-center"
+          style={{ width: FLY_SIZE, height: FLY_SIZE }}
+          initial={{ x: f.from.x, y: f.from.y, scale: 1, opacity: 1 }}
+          animate={{
+            x: f.to.x,
+            y: [f.from.y, f.from.y - 90, f.to.y],
+            scale: [1, 1.1, 0.3],
+            opacity: [1, 1, 0],
+          }}
+          transition={{
+            x: { duration: FLY_DURATION, ease: [0.45, 0, 0.55, 1] },
+            y: { duration: FLY_DURATION, times: [0, 0.3, 1], ease: ['easeOut', 'easeIn'] },
+            scale: { duration: FLY_DURATION, times: [0, 0.3, 1], ease: ['easeOut', 'easeIn'] },
+            opacity: { duration: FLY_DURATION, times: [0, 0.75, 1], ease: 'linear' },
+          }}
+          onAnimationComplete={() => handleFlightComplete(f.id)}
+        >
+          {f.image ? (
+            <img src={f.image} alt="" draggable={false} className="w-full h-full object-contain p-1.5" />
+          ) : (
+            <ShoppingBag className="w-5 h-5 text-primary" />
+          )}
+        </motion.div>
+      ))}
 
       {/* Cart Drawer */}
       <AnimatePresence>

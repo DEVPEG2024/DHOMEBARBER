@@ -4,6 +4,16 @@ module.exports = {
     content: ["./index.html", "./src/**/*.{ts,tsx,js,jsx}"],
   theme: {
   	extend: {
+  		// Opacités hors échelle par défaut utilisées dans le code (bg-white/4, border-white/8…) :
+  		// sans cette extension Tailwind 3.4 ignore silencieusement ces classes
+  		opacity: {
+  			2: '0.02',
+  			3: '0.03',
+  			4: '0.04',
+  			6: '0.06',
+  			8: '0.08',
+  			12: '0.12',
+  		},
   		fontFamily: {
   			inter: ['var(--font-inter)'],
   			display: ['var(--font-display)'],

@@ -9,6 +9,8 @@ import StarRating from '@/components/shared/StarRating';
 import { useAuth } from '@/lib/AuthContext';
 import { BARBER_PHOTO_ASPECT, BARBER_PHOTO_BG } from '@/lib/barberPhoto';
 import { barberPhotoLayoutId } from '@/components/shared/BarberCard';
+import RebookCard from '@/components/home/RebookCard';
+import OpenStatusBadge from '@/components/home/OpenStatusBadge';
 
 const IS_MOBILE = typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
@@ -649,7 +651,7 @@ export default function Home() {
           </motion.p>
 
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}
-            className="flex items-center gap-3 mb-5">
+            className="flex flex-wrap items-center justify-center gap-3 mb-5">
             <Link to="/reviews" className="flex items-center gap-1.5 backdrop-blur-xl bg-white/10 border border-white/15 rounded-full px-3 py-1.5 active:scale-95 transition-transform">
               <Star className="w-3.5 h-3.5 text-primary fill-primary" />
               <span className="text-white font-bold text-sm">{avgRating}</span>
@@ -658,6 +660,8 @@ export default function Home() {
             <div className="flex items-center gap-1.5 text-white/60 text-xs">
               <MapPin className="w-3.5 h-3.5" /> Douvaine
             </div>
+            {/* Ouvert / Fermé en direct (heure de Paris), rien tant que les horaires ne sont pas chargés */}
+            <OpenStatusBadge openingHours={settings?.opening_hours} />
           </motion.div>
 
           <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.5 }}>
@@ -688,6 +692,13 @@ export default function Home() {
 
       {/* Sections - Reorderable by admin */}
       <div className="max-w-lg mx-auto px-5 py-6">
+        {/* Relance en un tap de la dernière visite (client connecté). Bloc fixe,
+            hors de l'ordre des sections : ne rend rien sans RDV exploitable */}
+        {user?.email && (
+          <div className="mb-8 empty:hidden">
+            <RebookCard user={user} employees={employees} services={services} />
+          </div>
+        )}
         {editMode ? (
           /* Admin edit mode - drag to reorder */
           <Reorder.Group axis="y" values={sectionOrder} onReorder={setSectionOrder} className="space-y-4">
