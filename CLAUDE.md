@@ -54,7 +54,7 @@ src/
 ├── components/
 │   ├── agenda/                # DayView, WeekView, MonthView, AgendaToolbar, AppointmentDetailModal, BreakModal
 │   ├── layout/                # ClientLayout, AdminLayout, BottomNav
-│   ├── shared/                # ServiceCard, EmployeeCard, BarberCard (carte style FUT), LoyaltyCard (fidélité), StarRating, SectionHeader, ImageCropDialog, MusicToggle
+│   ├── shared/                # ServiceCard, EmployeeCard, BarberCard (carte style FUT), StarRating, SectionHeader, ImageCropDialog, MusicToggle
 │   ├── home/                  # RebookCard (« Comme la dernière fois »), OpenStatusBadge (Ouvert / Fermé heure de Paris)
 │   ├── BackgroundMusic.jsx
 │   ├── ErrorBoundary.jsx
@@ -72,7 +72,7 @@ src/
 │   ├── Feed.jsx               # Fil social "Ca dit quoi le Gang ?" (posts, réactions emoji, commentaires, menu Signaler / Bloquer, panneau admin des signalements) — aussi /admin/feed
 │   ├── Events.jsx             # Privatisation du salon : demande d'événement, acceptation/refus du devis
 │   ├── GiftCards.jsx          # Cartes cadeau : achat (code DHB + QR), affichage
-│   ├── Profile.jsx            # Profil utilisateur + carte de fidélité (LoyaltyCard, 10 tampons, calculée depuis les RDV terminés)
+│   ├── Profile.jsx            # Profil utilisateur
 │   ├── Settings.jsx           # Paramètres client (date de naissance, utilisateurs bloqués, suppression de compte, liens CGU / confidentialité)
 │   ├── Login.jsx              # Connexion, inscription, mot de passe oublié (code à 6 chiffres par email)
 │   ├── ClientNotifications.jsx # Notifications client
@@ -270,7 +270,7 @@ Règle commune : n'animer que `transform` et `opacity`, respecter `useReducedMot
 ### Fonctions client ajoutées le 3 sept. 2026 (lot multi-agents)
 - **Accueil, « Comme la dernière fois »** (`components/home/RebookCard.jsx`) : dernier RDV du client non annulé (`Appointment.filter({ client_email })`, tri date + heure), photo du barber, prestations, date de la dernière visite, prix / durée **actuels** des prestations encore actives, bouton vers `/booking?barber=<id>&services=<ids>` (Booking pré-sélectionne les deux). Bloc fixe sous le hero, hors `homepage_order`, rien sans RDV
 - **Accueil, pastille Ouvert / Fermé** (`components/home/OpenStatusBadge.jsx`) : `computeOpenStatus(opening_hours)` à l'heure de Paris (`Intl`), états open / soon / closed avec prochain jour ouvert, recalcul chaque minute et au retour au premier plan
-- **Profil, carte de fidélité** (`components/shared/LoyaltyCard.jsx`) : 10 tampons, `filled = count % 10`, carte pleine à 10, 20…, `count` = RDV `completed` du client (limite 200). Purement calculé côté client, rien en base : la récompense est honorée au salon sur présentation ; pour une validation admin il faudra une entité dédiée (à déclarer dans `applyReadPolicy` / `CREATE_RULES` / `UPDATE_RULES`)
+- **Carte de fidélité** : livrée puis **retirée le 3 sept. 2026 à la demande du client** (commit 815d581 contient la version si besoin : `components/shared/LoyaltyCard.jsx`, 10 tampons calculés depuis les RDV `completed`). Ne pas la réintroduire sans demande
 - **Ajouter au calendrier** (`lib/calendarLinks.js`) : `buildAppointmentEvent`, `buildGoogleCalendarUrl` (`ctz=Europe/Paris`), `buildIcs` (VTIMEZONE, CRLF, pliage 75 octets, UID `appointment-<id>@dhomebarber.fr` stable), `openCalendar('google' | 'ics')` (natif : `openExternalUrl` ; le `.ics` en natif passe par une URL `data:`, meilleur effort, la voie robuste serait `@capacitor/filesystem` + `@capacitor/share`). Boutons sur l'écran de succès de la réservation (prop `calendarEvent` de `SuccessOverlay`) et dans Mes rendez-vous (RDV à venir)
 - **Réservation, « Peu importe »** (`Booking.jsx`) : carte `AnyBarberCard` en tête de l'étape 2, état `anyBarber` ; à l'étape 3 les RDV du jour sont chargés pour tous les barbers (`filter({ date, status })` sans `employee_id`, autorisé par la politique de lecture) et `computeSlots` (fonction pure) donne l'union des créneaux, nom du premier barber dispo (ordre `sort_order`) sous chaque heure ; le tap fixe `selectedEmployee`. Le paramètre d'URL `barber` saute toujours l'étape 2
 - **Boutique** (`Shop.jsx`) : à l'ajout, un clone de l'image vole en arc vers le bouton panier (`position: fixed`, 0,7 s), rebond du bouton et pop du compteur via une motion value, haptique ; plusieurs ajouts = plusieurs clones
