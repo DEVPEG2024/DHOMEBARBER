@@ -257,6 +257,30 @@ body.keyboard-open {
 @keyframes nav-orbit-spin {
   to { transform: rotate(360deg); }
 }
+
+/* Même anneau orbital sur un bouton de largeur libre (boutons Réserver de
+   l'accueil) : le conteneur découpe, le pseudo-élément tourne derrière le
+   bouton, seul le liseré de 2 px laisse passer la lumière */
+.orbit-wrap {
+  position: relative;
+  display: inline-block;
+  padding: 2px;
+  overflow: hidden;
+  isolation: isolate;
+}
+.orbit-wrap::before {
+  content: '';
+  position: absolute;
+  inset: -50%;
+  z-index: 0;
+  background: conic-gradient(from 0deg, transparent 0deg, transparent 250deg, rgba(134, 247, 230, 0.9) 300deg, hsl(var(--primary)) 330deg, transparent 360deg);
+  animation: nav-orbit-spin 3.6s linear infinite;
+  will-change: transform;
+}
+.orbit-wrap > * {
+  position: relative;
+  z-index: 1;
+}
 @media (prefers-reduced-motion: reduce) {
-  .nav-orbit { animation: none; opacity: 0.5; }
+  .nav-orbit, .orbit-wrap::before { animation: none; opacity: 0.5; }
 }

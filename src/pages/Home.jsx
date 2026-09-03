@@ -599,9 +599,9 @@ export default function Home() {
               <img src={LOGO_URL} alt="D'Home Barber" className="w-16 h-16 object-contain mx-auto mb-3 opacity-80" />
               <h3 className="font-display text-lg font-bold text-foreground">Prêt pour un nouveau look ?</h3>
               <p className="text-xs text-muted-foreground mt-1 mb-4">Réservez votre créneau en quelques clics</p>
-              <Link to="/booking" className="pulse-cta rounded-2xl">
+              <Link to="/booking" className="orbit-wrap rounded-2xl shadow-lg shadow-primary/25">
                 <motion.button whileTap={{ scale: 0.97 }}
-                  className="inline-flex items-center gap-2 px-7 h-12 rounded-2xl bg-primary text-primary-foreground font-semibold text-sm shadow-lg shadow-primary/25 hover:bg-primary/90 transition-all">
+                  className="inline-flex items-center gap-2 px-7 h-12 rounded-[14px] bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors">
                   Réserver
                   <ArrowRight className="w-4 h-4" />
                 </motion.button>
@@ -661,9 +661,9 @@ export default function Home() {
           </motion.div>
 
           <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.5 }}>
-            <Link to="/booking" className="pulse-cta rounded-2xl">
+            <Link to="/booking" className="orbit-wrap rounded-2xl shadow-2xl shadow-primary/30">
               <motion.button whileTap={{ scale: 0.97 }}
-                className="flex items-center gap-2 px-7 h-12 rounded-2xl bg-primary text-primary-foreground font-semibold text-sm shadow-2xl shadow-primary/30 hover:bg-primary/90 transition-all">
+                className="flex items-center gap-2 px-7 h-12 rounded-[14px] bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors">
                 <Scissors className="w-4 h-4" /> Réserver maintenant
               </motion.button>
             </Link>
