@@ -66,7 +66,7 @@ src/
 │   ├── Orders.jsx             # Commandes client
 │   ├── Appointments.jsx       # Mes rendez-vous (client)
 │   ├── MyReviews.jsx          # Mes avis (client)
-│   ├── BarberProfile.jsx      # Profil public d'un barber (/barber/:id) : carte style FUT (BarberCard) + vidéo de présentation
+│   ├── BarberProfile.jsx      # Profil public d'un barber (/barber/:id) : carte style FUT (BarberCard) + vidéo de présentation ; swipe gauche/droite (ou flèches, boutons, points) pour passer aux autres barbers sans quitter la page
 │   ├── Feed.jsx               # Fil social "Ca dit quoi le Gang ?" (posts, réactions emoji, commentaires, menu Signaler / Bloquer, panneau admin des signalements) — aussi /admin/feed
 │   ├── Events.jsx             # Privatisation du salon : demande d'événement, acceptation/refus du devis
 │   ├── GiftCards.jsx          # Cartes cadeau : achat (code DHB + QR), affichage
@@ -254,6 +254,11 @@ Le `server.js` exécute des migrations automatiques au démarrage (`ADD COLUMN I
 - La vidéo de présentation est stockée **dans `employees.bio`** après le marqueur `\n%%VIDEO%%url` (pas dans working_hours). Ne pas écraser la bio sans préserver ce suffixe.
 - Comparer les ids employé en string (`String(a) === String(b)`) : mélange UUID / number selon la source
 - **Photos des barbers : format portrait 1748 × 2480** (ratio A4, buste centré, fond sombre, référence « KVB APP »). Les constantes sont dans `src/lib/barberPhoto.js` (`BARBER_PHOTO_ASPECT` pour le CSS, `BARBER_PHOTO_RATIO` pour le recadrage, `BARBER_PHOTO_BG`). Le recadrage à l'upload (Équipe admin, Mes paramètres) force ce ratio (`ImageCropDialog` prop `aspect`, forme `rect`, côté max 2480 px) et tous les affichages (carrousel accueil, cartes de réservation, profil public sans vidéo, admin) utilisent le même cadre. Ne pas réintroduire de vignette carrée / ronde pour un barber ; les avatars clients restent ronds.
+
+### Profil barber : navigation entre barbers (`src/pages/BarberProfile.jsx`)
+- La page charge la liste des barbers actifs avec la **même requête et la même clé de cache que l'accueil** (`['employees']`, filtre `is_active`, tri `sort_order`) et retrouve le barber courant par son id (comparaison en string)
+- Le contenu du profil (`BarberProfileContent`) est rendu dans un `motion.div` glissable (`drag="x"`, contraintes 0 / 0, élasticité 0,3) sous `AnimatePresence mode="popLayout"`, clé = id du barber. Swipe gauche = suivant, droite = précédent, en boucle ; seuils `SWIPE_OFFSET` 60 px ou `SWIPE_VELOCITY` 450 px/s, sinon retour élastique. Flèches ← / → du clavier, boutons « ‹ précédent / suivant › » et points de pagination font la même chose
+- Le changement passe par `navigate('/barber/:id', { replace: true })` : le bouton retour ramène toujours à l'accueil. `ScrollToTop` (App.jsx) remet la page en haut à chaque changement, et l'animation d'entrée / sortie suit le sens (`direction` 1 / -1). Retour haptique via `hapticFeedback`
 
 ### Carte barber style FUT (`src/components/shared/BarberCard.jsx`)
 - Affichée en tête du profil public `/barber/:id` (référence : carte FIFA « Team of the Season », bleu / or, liseré néon). Carte fixe 300 × 470 px, forme découpée en `clip-path`, police `Barlow Condensed` (classe `.font-fut`, importée dans `index.css`)

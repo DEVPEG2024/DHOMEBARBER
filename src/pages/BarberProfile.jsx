@@ -1,9 +1,10 @@
-import React, { useState, useRef } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api } from '@/api/apiClient';
 import { useQuery } from '@tanstack/react-query';
-import { motion } from 'framer-motion';
-import { ChevronLeft, Scissors, Calendar, Clock } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { ChevronLeft, ChevronRight, Scissors, Calendar, Clock } from 'lucide-react';
+import { hapticFeedback } from '@/lib/capacitor';
 import { Button } from '@/components/ui/button';
 import BarberCard, { buildCardStats, overallRating } from '@/components/shared/BarberCard';
 
@@ -109,7 +110,7 @@ function getYouTubeId(url) {
 }
 
 // Vidéo de présentation (format vertical 1080 × 1350). La photo est sur la carte.
-function MediaBlock({ videoUrl, photoUrl, name }) {
+function MediaBlock({ videoUrl, photoUrl }) {
   const videoRef = useRef(null);
   const [videoFailed, setVideoFailed] = useState(false);
 
@@ -163,50 +164,9 @@ function MediaBlock({ videoUrl, photoUrl, name }) {
   );
 }
 
-export default function BarberProfile() {
-  const { id } = useParams();
-
-  const { data: employee, isLoading } = useQuery({
-    queryKey: ['employees', 'profile', id],
-    staleTime: 5 * 60 * 1000, // catalogue : change rarement
-    queryFn: async () => {
-      const all = await api.entities.Employee.filter({ is_active: true }, 'sort_order', 100);
-      return all.find(e => e.id === id) || null;
-    },
-    enabled: !!id,
-    retry: 1,
-  });
-
-  const { data: skillCategories = [] } = useQuery({
-    queryKey: ['skillCategories'],
-    staleTime: 5 * 60 * 1000, // catalogue : change rarement
-    queryFn: async () => {
-      try {
-        return await api.entities.SkillCategory.list('sort_order', 100);
-      } catch {
-        return [];
-      }
-    },
-    retry: false,
-  });
-
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
-      </div>
-    );
-  }
-
-  if (!employee) {
-    return (
-      <div className="text-center py-20">
-        <p className="text-muted-foreground">Barber introuvable</p>
-        <Link to="/" className="text-primary text-sm mt-2 inline-block">Retour à l'accueil</Link>
-      </div>
-    );
-  }
-
+// Contenu du profil d'un barber (carte, vidéo, à propos, horaires, CTA).
+// Rendu dans un bloc glissable : un swipe gauche / droite passe au barber suivant / précédent.
+function BarberProfileContent({ employee, skillCategories }) {
   const employeeSkills = employee.skills || [];
   const allSkills = skillCategories.map(cat => {
     const s = employeeSkills.find(s => s.category_id === cat.id);
@@ -227,6 +187,185 @@ export default function BarberProfile() {
   const overall = overallRating(cardStats);
 
   return (
+    <>
+      {/* Carte du barber (style FUT) : note, titre, photo, nom, stats */}
+      <div className="flex justify-center mb-7" style={{ perspective: 1000 }}>
+        <BarberCard employee={employee} stats={cardStats} overall={overall} />
+      </div>
+
+      {/* Vidéo de présentation, si renseignée */}
+      <MediaBlock videoUrl={videoUrl} photoUrl={photoUrl} />
+
+      {/* About section - Glass card */}
+      {hasAboutContent && (
+        <GlassCard className="p-5 mb-5 space-y-5" delay={0.1}>
+          <h3 className="text-[10px] uppercase tracking-[0.2em] text-primary/60 font-semibold">À propos</h3>
+
+          {/* Bio */}
+          {displayBio && (
+            <p className="text-sm text-muted-foreground leading-relaxed">{displayBio}</p>
+          )}
+
+          {/* Experience gauge */}
+          {employee.experience_level > 0 && (
+            <ExperienceBar value={employee.experience_level} delay={0.15} />
+          )}
+
+          {/* Skills */}
+          {allSkills.length > 0 && (
+            <>
+              {(displayBio || employee.experience_level > 0) && (
+                <div className="border-t border-white/[0.06]" />
+              )}
+              <div>
+                <h4 className="text-[10px] uppercase tracking-[0.2em] text-primary/50 font-semibold mb-4">Spécialités</h4>
+                <div className="space-y-3.5">
+                  {allSkills.map(({ category, level }, i) => (
+                    <SkillBar key={category.id} category={category} level={level} delay={0.2 + i * 0.06} />
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+        </GlassCard>
+      )}
+
+      {/* Working hours - Glass card */}
+      {employee.working_hours && Object.keys(employee.working_hours).length > 0 && (
+        <GlassCard className="p-5 mb-6" delay={0.25}>
+          <h3 className="text-[10px] uppercase tracking-[0.2em] text-primary/60 font-semibold mb-3 flex items-center gap-2">
+            <Clock className="w-3.5 h-3.5" />
+            Horaires
+          </h3>
+          <div className="space-y-2">
+            {Object.entries(employee.working_hours).map(([day, hours]) => {
+              const dayLabels = { monday: 'Lundi', tuesday: 'Mardi', wednesday: 'Mercredi', thursday: 'Jeudi', friday: 'Vendredi', saturday: 'Samedi', sunday: 'Dimanche' };
+              const label = dayLabels[day] || day;
+              if (hours?.closed) {
+                return (
+                  <div key={day} className="flex justify-between text-sm">
+                    <span className="text-muted-foreground/50">{label}</span>
+                    <span className="text-muted-foreground/30 text-xs">Fermé</span>
+                  </div>
+                );
+              }
+              return (
+                <div key={day} className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">{label}</span>
+                  <span className="text-foreground/80 font-medium tabular-nums">{hours?.open || '09:00'} – {hours?.close || '19:00'}</span>
+                </div>
+              );
+            })}
+          </div>
+        </GlassCard>
+      )}
+
+      {/* CTA */}
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }}>
+        <Link to={`/booking?barber=${employee.id}`}>
+          <Button className="w-full h-12 rounded-2xl bg-primary text-primary-foreground font-semibold text-sm shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all">
+            <Calendar className="w-4 h-4 mr-2" />
+            Prendre rendez-vous avec {employee.name}
+          </Button>
+        </Link>
+      </motion.div>
+    </>
+  );
+}
+
+// Swipe entre barbers : seuils de déclenchement (distance ou vitesse)
+const SWIPE_OFFSET = 60;
+const SWIPE_VELOCITY = 450;
+
+const slideVariants = {
+  enter: (dir) => ({ x: dir > 0 ? '70%' : dir < 0 ? '-70%' : 0, opacity: 0 }),
+  center: { x: 0, opacity: 1 },
+  exit: (dir) => ({ x: dir > 0 ? '-70%' : '70%', opacity: 0 }),
+};
+const slideTransition = { x: { type: 'spring', stiffness: 320, damping: 32 }, opacity: { duration: 0.18 } };
+
+export default function BarberProfile() {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  // Sens du dernier changement de barber (1 = suivant, -1 = précédent), pour l'animation
+  const [direction, setDirection] = useState(0);
+
+  // Même requête (et même cache) que le carrousel de l'accueil
+  const { data: employees = [], isLoading } = useQuery({
+    queryKey: ['employees'],
+    staleTime: 5 * 60 * 1000, // catalogue : change rarement
+    queryFn: () => api.entities.Employee.filter({ is_active: true }, 'sort_order', 50),
+    retry: 1,
+  });
+
+  const { data: skillCategories = [] } = useQuery({
+    queryKey: ['skillCategories'],
+    staleTime: 5 * 60 * 1000, // catalogue : change rarement
+    queryFn: async () => {
+      try {
+        return await api.entities.SkillCategory.list('sort_order', 100);
+      } catch {
+        return [];
+      }
+    },
+    retry: false,
+  });
+
+  const count = employees.length;
+  const index = employees.findIndex(e => String(e.id) === String(id));
+  const employee = index >= 0 ? employees[index] : null;
+  const prev = count > 1 ? employees[(index - 1 + count) % count] : null;
+  const next = count > 1 ? employees[(index + 1) % count] : null;
+
+  const goToIndex = useCallback((target, dir) => {
+    const emp = employees[target];
+    if (!emp || String(emp.id) === String(id)) return;
+    setDirection(dir);
+    hapticFeedback();
+    // replace : le bouton retour ramène à l'accueil, pas au barber précédent
+    navigate(`/barber/${emp.id}`, { replace: true });
+  }, [employees, id, navigate]);
+
+  const goTo = useCallback((dir) => {
+    if (count < 2) return;
+    goToIndex((index + dir + count) % count, dir);
+  }, [count, index, goToIndex]);
+
+  // Flèches du clavier sur ordinateur
+  useEffect(() => {
+    if (count < 2) return undefined;
+    const onKey = (e) => {
+      if (e.key === 'ArrowRight') goTo(1);
+      else if (e.key === 'ArrowLeft') goTo(-1);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [count, goTo]);
+
+  const handleDragEnd = (_e, info) => {
+    const { offset, velocity } = info;
+    if (offset.x < -SWIPE_OFFSET || velocity.x < -SWIPE_VELOCITY) goTo(1);
+    else if (offset.x > SWIPE_OFFSET || velocity.x > SWIPE_VELOCITY) goTo(-1);
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!employee) {
+    return (
+      <div className="text-center py-20">
+        <p className="text-muted-foreground">Barber introuvable</p>
+        <Link to="/" className="text-primary text-sm mt-2 inline-block">Retour à l'accueil</Link>
+      </div>
+    );
+  }
+
+  return (
     <div className="min-h-screen relative overflow-hidden">
       {/* Subtle ambient glow */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden">
@@ -234,93 +373,66 @@ export default function BarberProfile() {
       </div>
 
       <div className="relative max-w-lg mx-auto px-4 pt-6 pb-28">
-        {/* Back button */}
-        <Link to="/" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors mb-6">
-          <ChevronLeft className="w-4 h-4" />
-          Retour
-        </Link>
-
-        {/* Carte du barber (style FUT) : note, titre, photo, nom, stats */}
-        <div className="flex justify-center mb-7" style={{ perspective: 1000 }}>
-          <BarberCard employee={employee} stats={cardStats} overall={overall} />
+        {/* Retour + position dans l'équipe */}
+        <div className="flex items-center justify-between mb-5">
+          <Link to="/" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors">
+            <ChevronLeft className="w-4 h-4" />
+            Retour
+          </Link>
+          {count > 1 && (
+            <div className="flex items-center gap-1.5" aria-label="Barbers">
+              {employees.map((e, i) => (
+                <button
+                  key={e.id}
+                  type="button"
+                  aria-label={e.name}
+                  aria-current={i === index ? 'true' : undefined}
+                  onClick={() => goToIndex(i, i > index ? 1 : -1)}
+                  className={`h-1.5 rounded-full transition-all duration-300 ${i === index ? 'w-5 bg-primary' : 'w-1.5 bg-white/25 hover:bg-white/50'}`}
+                />
+              ))}
+            </div>
+          )}
         </div>
 
-        {/* Vidéo de présentation, si renseignée */}
-        <MediaBlock videoUrl={videoUrl} photoUrl={photoUrl} name={employee.name} />
-
-        {/* About section - Glass card */}
-        {hasAboutContent && (
-          <GlassCard className="p-5 mb-5 space-y-5" delay={0.1}>
-            <h3 className="text-[10px] uppercase tracking-[0.2em] text-primary/60 font-semibold">À propos</h3>
-
-            {/* Bio */}
-            {displayBio && (
-              <p className="text-sm text-muted-foreground leading-relaxed">{displayBio}</p>
-            )}
-
-            {/* Experience gauge */}
-            {employee.experience_level > 0 && (
-              <ExperienceBar value={employee.experience_level} delay={0.15} />
-            )}
-
-            {/* Skills */}
-            {allSkills.length > 0 && (
-              <>
-                {(displayBio || employee.experience_level > 0) && (
-                  <div className="border-t border-white/[0.06]" />
-                )}
-                <div>
-                  <h4 className="text-[10px] uppercase tracking-[0.2em] text-primary/50 font-semibold mb-4">Spécialités</h4>
-                  <div className="space-y-3.5">
-                    {allSkills.map(({ category, level }, i) => (
-                      <SkillBar key={category.id} category={category} level={level} delay={0.2 + i * 0.06} />
-                    ))}
-                  </div>
-                </div>
-              </>
-            )}
-          </GlassCard>
+        {/* Barber précédent / suivant : boutons + rappel du swipe */}
+        {count > 1 && (
+          <div className="flex items-center justify-between mb-4 text-xs">
+            <button type="button" onClick={() => goTo(-1)}
+              className="inline-flex items-center gap-0.5 text-muted-foreground hover:text-foreground active:text-primary transition-colors py-1 pr-2">
+              <ChevronLeft className="w-4 h-4" />
+              {prev.name}
+            </button>
+            <span className="text-[10px] uppercase tracking-[0.25em] text-muted-foreground/40 select-none">Glissez</span>
+            <button type="button" onClick={() => goTo(1)}
+              className="inline-flex items-center gap-0.5 text-muted-foreground hover:text-foreground active:text-primary transition-colors py-1 pl-2">
+              {next.name}
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
         )}
 
-        {/* Working hours - Glass card */}
-        {employee.working_hours && Object.keys(employee.working_hours).length > 0 && (
-          <GlassCard className="p-5 mb-6" delay={0.25}>
-            <h3 className="text-[10px] uppercase tracking-[0.2em] text-primary/60 font-semibold mb-3 flex items-center gap-2">
-              <Clock className="w-3.5 h-3.5" />
-              Horaires
-            </h3>
-            <div className="space-y-2">
-              {Object.entries(employee.working_hours).map(([day, hours]) => {
-                const dayLabels = { monday: 'Lundi', tuesday: 'Mardi', wednesday: 'Mercredi', thursday: 'Jeudi', friday: 'Vendredi', saturday: 'Samedi', sunday: 'Dimanche' };
-                const label = dayLabels[day] || day;
-                if (hours?.closed) {
-                  return (
-                    <div key={day} className="flex justify-between text-sm">
-                      <span className="text-muted-foreground/50">{label}</span>
-                      <span className="text-muted-foreground/30 text-xs">Fermé</span>
-                    </div>
-                  );
-                }
-                return (
-                  <div key={day} className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">{label}</span>
-                    <span className="text-foreground/80 font-medium tabular-nums">{hours?.open || '09:00'} – {hours?.close || '19:00'}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </GlassCard>
-        )}
-
-        {/* CTA */}
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }}>
-          <Link to={`/booking?barber=${employee.id}`}>
-            <Button className="w-full h-12 rounded-2xl bg-primary text-primary-foreground font-semibold text-sm shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all">
-              <Calendar className="w-4 h-4 mr-2" />
-              Prendre rendez-vous avec {employee.name}
-            </Button>
-          </Link>
-        </motion.div>
+        {/* Profil glissable : swipe gauche = suivant, swipe droite = précédent */}
+        <div className="relative">
+          <AnimatePresence initial={false} custom={direction} mode="popLayout">
+            <motion.div
+              key={employee.id}
+              custom={direction}
+              variants={slideVariants}
+              initial="enter"
+              animate="center"
+              exit="exit"
+              transition={slideTransition}
+              drag={count > 1 ? 'x' : false}
+              dragConstraints={{ left: 0, right: 0 }}
+              dragElastic={0.3}
+              dragMomentum={false}
+              onDragEnd={handleDragEnd}
+            >
+              <BarberProfileContent employee={employee} skillCategories={skillCategories} />
+            </motion.div>
+          </AnimatePresence>
+        </div>
       </div>
     </div>
   );
