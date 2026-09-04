@@ -50,14 +50,35 @@ export const SNAP_HAIR_COLORS = [
   { id: 'cerise', name: 'Rouge cerise', hex: '#B4132E' },
   { id: 'emeraude', name: 'Vert émeraude', hex: '#1F8A5B' },
 ];
-/** Déploie la liste du groupe : la lentille couleur devient une entrée par couleur, le reste est inchangé. */
+/**
+ * Lentille « barbe » du salon : une lentille, plusieurs styles choisis par le paramètre de
+ * lancement `style`. Reconnue par sa donnée fournisseur `dhb = beard` ou par son nom.
+ */
+const isBeardLens = (lens) => lens?.vendorData?.dhb === 'beard' || /^dhb\s*barbe|d.?home.*barbe/i.test(lens?.name || '');
+export const SNAP_BEARD_STYLES = [
+  { id: 'full', name: 'Barbe fournie', emoji: '🧔' },
+  { id: 'light', name: 'Barbe de 3 jours', emoji: '🪒' },
+  { id: 'mustache', name: 'Moustache', emoji: '👨' },
+  { id: 'shaved', name: 'Rasé de près', emoji: '✨' },
+];
+
+/** Déploie la liste du groupe : les lentilles paramétrables deviennent une entrée par réglage. */
 function expandLenses(list) {
   const out = [];
   for (const lens of list) {
-    if (!isColorLens(lens)) { out.push({ key: lens.id, lens, name: lens.name, iconUrl: lens.iconUrl }); continue; }
-    for (const c of SNAP_HAIR_COLORS) {
-      out.push({ key: `${lens.id}:${c.id}`, lens, name: c.name, swatch: c.hex, launchParams: { color: c.hex, mode: 'full' } });
+    if (isColorLens(lens)) {
+      for (const c of SNAP_HAIR_COLORS) {
+        out.push({ key: `${lens.id}:${c.id}`, lens, name: c.name, swatch: c.hex, launchParams: { color: c.hex, mode: 'full' } });
+      }
+      continue;
     }
+    if (isBeardLens(lens)) {
+      for (const b of SNAP_BEARD_STYLES) {
+        out.push({ key: `${lens.id}:${b.id}`, lens, name: b.name, emoji: b.emoji, launchParams: { style: b.id } });
+      }
+      continue;
+    }
+    out.push({ key: lens.id, lens, name: lens.name, iconUrl: lens.iconUrl });
   }
   return out;
 }
@@ -124,7 +145,7 @@ export default function SnapLenses() {
         if (cancelled) return;
         // Les lentilles cheveux / barbe / couleur d'abord ; aucune lentille appliquée d'office
         // (une lentille quelconque, comme les démos de Snap, peut recouvrir la caméra de sa propre interface)
-        const relevant = (lens) => isColorLens(lens) || RELEVANT.test(lens?.name || '');
+        const relevant = (lens) => isColorLens(lens) || isBeardLens(lens) || RELEVANT.test(lens?.name || '');
         const visible = (loaded || []).filter((lens) => config.lensGroupId !== SNAP_DEMO_GROUP || DEMO_KEEP.test(lens?.name || ''));
         const sorted = [...visible].sort((a, b) => Number(relevant(b)) - Number(relevant(a)));
         const entries = expandLenses(sorted);
@@ -296,7 +317,11 @@ export default function SnapLenses() {
                   <motion.span animate={{ scale: active ? 1.1 : 1 }} transition={{ type: 'spring', stiffness: 400, damping: 22 }}
                     className={`w-14 h-14 rounded-full overflow-hidden border-2 bg-white/5 flex items-center justify-center ${active ? 'border-primary shadow-lg shadow-primary/40' : 'border-white/15'}`}
                     style={entry.swatch ? { background: `radial-gradient(circle at 35% 30%, rgba(255,255,255,0.45), transparent 45%), ${entry.swatch}` } : undefined}>
-                    {!entry.swatch && (entry.iconUrl ? <img src={entry.iconUrl} alt="" className="w-full h-full object-cover" draggable={false} /> : <Sparkles className="w-5 h-5 text-primary" />)}
+                    {!entry.swatch && (entry.emoji
+                      ? <span className="text-2xl leading-none" aria-hidden="true">{entry.emoji}</span>
+                      : entry.iconUrl
+                        ? <img src={entry.iconUrl} alt="" className="w-full h-full object-cover" draggable={false} />
+                        : <Sparkles className="w-5 h-5 text-primary" />)}
                   </motion.span>
                   <span className={`text-[10px] leading-tight text-center line-clamp-2 ${active ? 'text-foreground font-semibold' : 'text-muted-foreground'}`}>{entry.name || 'Lentille'}</span>
                 </button>
