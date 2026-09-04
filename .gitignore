@@ -34,3 +34,6 @@ dist-ssr
 # Capacitor native projects
 ios/
 android/
+
+# Harnais de vérification temporaire
+.verify/
