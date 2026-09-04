@@ -16,6 +16,21 @@ import { snapConfig, snapSupported } from '@/lib/snapLenses';
  * viennent des paramètres publics du serveur (src/lib/snapLenses.js).
  */
 
+/**
+ * Acceptation des conditions Camera Kit, exigée par la revue de Snap avant la production : la vidéo
+ * de démonstration doit montrer l'affichage **et** l'acceptation des CGU. Le SDK embarque bien son
+ * propre dialogue, mais la configuration distante de Snap le désactive — vérifié le 4 sept. 2026, la
+ * lentille s'applique sans que rien ne s'affiche. On pose donc notre propre écran, avant la caméra.
+ * Les trois liens sont ceux du SDK (`legal/legalState.js`).
+ */
+const TOS_KEY = 'dhb-snap-tos-v1';
+const SNAP_LEGAL = {
+  terms: 'https://snap.com/terms',
+  privacy: 'https://values.snap.com/privacy/privacy-policy',
+  camera: 'https://support.snapchat.com/article/camera-information-use',
+};
+const tosAccepted = () => { try { return localStorage.getItem(TOS_KEY) === '1'; } catch { return false; } };
+
 const RENDER_WIDTH = 720;
 const RENDER_HEIGHT = 960;
 // Lentilles mises en avant et appliquées d'office si présentes
@@ -93,7 +108,8 @@ export function expandLenses(list) {
 
 export default function SnapLenses() {
   const reduceMotion = useReducedMotion();
-  const [status, setStatus] = useState('init'); // init | unconfigured | unsupported | loading | ready | error
+  const [status, setStatus] = useState('init'); // init | consent | unconfigured | unsupported | loading | ready | error
+  const [accepted, setAccepted] = useState(tosAccepted);
   const [message, setMessage] = useState('');
   const [lenses, setLenses] = useState([]);
   const [activeId, setActiveId] = useState(null);
@@ -118,6 +134,8 @@ export default function SnapLenses() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      // Rien ne démarre — ni caméra, ni SDK — avant l'acceptation des conditions de Snap.
+      if (!accepted) { setStatus('consent'); return; }
       const config = await snapConfig();
       if (cancelled) return;
       if (!config) { setStatus('unconfigured'); return; }
@@ -177,7 +195,13 @@ export default function SnapLenses() {
       }
     })();
     return () => { cancelled = true; cleanup(); };
-  }, [cleanup]);
+  }, [cleanup, accepted]);
+
+  const acceptTos = () => {
+    hapticFeedback();
+    try { localStorage.setItem(TOS_KEY, '1'); } catch { /* navigation privée : on redemandera */ }
+    setAccepted(true);
+  };
 
   const selectLens = async (entry) => {
     const session = sessionRef.current;
@@ -264,6 +288,25 @@ export default function SnapLenses() {
               <p className="text-sm text-white/90 font-medium">{message || 'Préparation…'}</p>
             </div>
           )}
+          {status === 'consent' && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center px-7 bg-black/85">
+              <Sparkles className="w-7 h-7 text-yellow-300" />
+              <p className="text-sm text-white font-semibold">Filtres propulsés par Snap</p>
+              <p className="text-[11px] leading-relaxed text-white/70">
+                Ces filtres utilisent Camera Kit, la technologie des lentilles de Snapchat. L'image de
+                votre caméra est traitée par le logiciel de Snap pour appliquer le filtre. En continuant,
+                vous acceptez les{' '}
+                <a href={SNAP_LEGAL.terms} target="_blank" rel="noreferrer" className="underline text-white">conditions d'utilisation de Snap</a>{' '}
+                et sa{' '}
+                <a href={SNAP_LEGAL.privacy} target="_blank" rel="noreferrer" className="underline text-white">politique de confidentialité</a>.{' '}
+                <a href={SNAP_LEGAL.camera} target="_blank" rel="noreferrer" className="underline text-white">Comment Snap utilise les données de la caméra</a>.
+              </p>
+              <button type="button" onClick={acceptTos} className="mt-1 px-5 h-11 rounded-xl bg-primary text-primary-foreground text-sm font-semibold">
+                J'accepte et j'active la caméra
+              </button>
+              <Link to="/try-on" className="text-[11px] text-white/50 underline">Essayer plutôt la couleur par IA, sans Snap</Link>
+            </div>
+          )}
           {overlay && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center px-8 bg-black/70">
               <p className="text-sm text-white font-semibold">{overlay.title}</p>
@@ -348,7 +391,12 @@ export default function SnapLenses() {
         <Link to="/try-on" className="mt-3 w-full flex items-center justify-center gap-2 h-11 rounded-2xl glass text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors">
           <Palette className="w-4 h-4 text-primary" /> Essayer une couleur précise avec l'IA
         </Link>
-        <p className="text-[10px] text-muted-foreground/60 text-center mt-3">Propulsé par Camera Kit, la technologie des lentilles Snapchat. Les lentilles tournent sur votre appareil.</p>
+        <p className="text-[10px] text-muted-foreground/60 text-center mt-3">
+          Propulsé par Camera Kit, la technologie des lentilles Snapchat. Les lentilles tournent sur votre appareil.{' '}
+          <a href={SNAP_LEGAL.terms} target="_blank" rel="noreferrer" className="underline">Conditions Snap</a>
+          {' · '}
+          <a href={SNAP_LEGAL.privacy} target="_blank" rel="noreferrer" className="underline">Confidentialité Snap</a>
+        </p>
       </div>
     </div>
   );
