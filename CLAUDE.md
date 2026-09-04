@@ -317,8 +317,20 @@ Deux modes. **FAST** = aperçu temps réel sur l'appareil ; **AI ULTRA** = trait
   Depuis Heroku v73, `SNAP_LENS_GROUP_ID` accepte **plusieurs groupes séparés par des virgules** (`loadLensGroups` en prend
   une liste, et chaque lentille porte son `groupId`, donc le filtrage des démos reste juste) : les deux groupes y sont déjà,
   ce qui rendra les filtres visibles dès que l'un des deux redeviendra disponible, sans redéploiement. Pour les lentilles du salon : créer un groupe dans Lens Scheduler, y publier depuis Lens Studio, puis `heroku config:set SNAP_LENS_GROUP_ID=<id>` — pas à pas complet dans `docs/lens-studio-couleur-cheveux.md` (modèle « Hair Color », script de lecture des launch params, vendor data `dhb=hair-color`, publication). **Impossible d'importer une lentille publique de Snapchat** : Camera Kit ne sert que les lentilles publiées par l'organisation. Pour la production : soumettre l'app à Snap, puis remplacer le jeton par celui de production
-- **Passage en production Snap (revue)** : le jeton de production n'est délivré qu'après validation de l'app par Snap
-  (portail Snap Kit → version de l'app → *Submit for Review*). Deux pièces décisives : une **politique de confidentialité
+- **Passage en production Snap (revue)** : **soumis le 4 sept. 2026 à 18h55**, statut de « Initial Version » passé de
+  `In Development` à **`In Review`** (mutation `submitAppVersionForReview` acceptée). Contenu envoyé : icône 1024 × 1024
+  (163 Ko — la limite du portail est **400 Ko**, le `public/logo.png` d'origine de 1,4 Mo était refusé), nom, catégorie
+  *Lifestyle*, description, `https://dhomebarber.fr/privacy.html`, la vidéo de démonstration courte, et un texte
+  *How does your integration work?* de 1 744 caractères qui décrit le SDK, l'écran de CGU Camera Kit avec son timecode et
+  les cinq étapes de test avec le compte client dédié `snap.review@dhomebarber.fr` (créé le 4 sept. 2026 ; **indispensable**,
+  `/snap` est derrière `RequireAuth`, sans compte le reviewer n'atteint jamais les filtres — ne pas le supprimer avant la
+  fin de la revue ; mot de passe dans `~/Downloads/snap-review-dossier.md`, hors git). Deux pièges rencontrés : la
+  soumission est refusée tant qu'aucune **origine de confiance** n'est déclarée (Setup → *Platform Identifiers*), et le
+  champ n'accepte **pas** une URL — il faut le domaine nu `dhomebarber.fr` (`https://dhomebarber.fr` renvoie
+  `BAD_USER_INPUT`) ; l'origine est déclarée pour `STAGING` et `PROD`. Le **jeton d'API de production existe déjà** dans le
+  portail (créé le 3 sept. 2026, tableau *API Tokens*) mais *Production Version* affiche « No Approved Versions » : il ne
+  servira probablement les lentilles qu'après approbation, à tester puis
+  `heroku config:set SNAP_CAMERA_KIT_API_TOKEN=<jeton prod>`. Deux pièces décisives : une **politique de confidentialité
   publique** (`public/privacy.html`, section 6 « Caméra, filtres et essayage virtuel » ajoutée le 4 sept. 2026) et une ou
   plusieurs **vidéos de démonstration** montrant le parcours jusqu'aux filtres, la caméra en action, l'après-capture et
   **l'affichage et l'acceptation des CGU Camera Kit**. Délai annoncé : 1 à 2 jours ouvrés.
