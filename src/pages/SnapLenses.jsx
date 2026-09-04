@@ -37,6 +37,9 @@ const RENDER_HEIGHT = 960;
 const RELEVANT = /hair|cheveu|beard|barbe|colou?r|couleur|coupe|haircut/i;
 // Groupe de démonstration de Snap (23 exemples, surtout des tests pour développeurs) :
 // on n'y garde que ce qui a du sens pour un barbier. Un groupe du salon est affiché en entier.
+// `SNAP_LENS_GROUP_ID` accepte plusieurs groupes séparés par des virgules : le salon peut donc
+// afficher ses lentilles et celles de démonstration côte à côte. Chaque lentille porte son
+// `groupId`, donc le tri ci-dessous reste juste quel que soit le mélange.
 const SNAP_DEMO_GROUP = '39ed26d4-1931-4d21-98c2-eb2e29b76f6f';
 const DEMO_KEEP = /hair color|face expressions|distort/i;
 
@@ -167,12 +170,13 @@ export default function SnapLenses() {
         await session.play();
 
         setMessage('Chargement des filtres…');
-        const { lenses: loaded } = await cameraKit.lensRepository.loadLensGroups([config.lensGroupId]);
+        const groupIds = String(config.lensGroupId).split(',').map((g) => g.trim()).filter(Boolean);
+        const { lenses: loaded } = await cameraKit.lensRepository.loadLensGroups(groupIds);
         if (cancelled) return;
         // Les lentilles cheveux / barbe / couleur d'abord ; aucune lentille appliquée d'office
         // (une lentille quelconque, comme les démos de Snap, peut recouvrir la caméra de sa propre interface)
         const relevant = (lens) => isColorLens(lens) || isBeardLens(lens) || RELEVANT.test(lens?.name || '');
-        const visible = (loaded || []).filter((lens) => config.lensGroupId !== SNAP_DEMO_GROUP || DEMO_KEEP.test(lens?.name || ''));
+        const visible = (loaded || []).filter((lens) => lens?.groupId !== SNAP_DEMO_GROUP || DEMO_KEEP.test(lens?.name || ''));
         const sorted = [...visible].sort((a, b) => Number(relevant(b)) - Number(relevant(a)));
         const entries = expandLenses(sorted);
         lensesRef.current = entries;
