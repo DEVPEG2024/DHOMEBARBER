@@ -25,6 +25,43 @@ const RELEVANT = /hair|cheveu|beard|barbe|colou?r|couleur|coupe|haircut/i;
 const SNAP_DEMO_GROUP = '39ed26d4-1931-4d21-98c2-eb2e29b76f6f';
 const DEMO_KEEP = /hair color|face expressions|distort/i;
 
+/**
+ * Lentille « couleur de cheveux » du salon (créée dans Lens Studio) : une seule lentille qui lit la
+ * couleur dans les paramètres de lancement Camera Kit (`launchParams.color`, hex). L'app la déploie
+ * en une pastille par couleur. Reconnue par sa donnée fournisseur `dhb = hair-color` (Project Settings
+ * → Vendor Data dans Lens Studio) ou, à défaut, par son nom.
+ */
+const isColorLens = (lens) => lens?.vendorData?.dhb === 'hair-color' || /^dhb\s*couleur|d.?home.*couleur/i.test(lens?.name || '');
+export const SNAP_HAIR_COLORS = [
+  { id: 'platine', name: 'Blond platine', hex: '#EDE3C8' },
+  { id: 'dore', name: 'Blond doré', hex: '#D9B36A' },
+  { id: 'miel', name: 'Miel', hex: '#C68E3F' },
+  { id: 'chatain-clair', name: 'Châtain clair', hex: '#8B5A2B' },
+  { id: 'chatain', name: 'Châtain', hex: '#5B3A21' },
+  { id: 'brun', name: 'Brun', hex: '#3B2418' },
+  { id: 'noir', name: 'Noir', hex: '#141010' },
+  { id: 'cuivre', name: 'Roux cuivré', hex: '#B4471F' },
+  { id: 'auburn', name: 'Auburn', hex: '#7A2E1A' },
+  { id: 'argent', name: 'Gris argent', hex: '#B9BCC2' },
+  { id: 'blanc', name: 'Blanc polaire', hex: '#F1F1F1' },
+  { id: 'bleu', name: 'Bleu nuit', hex: '#1D3F8A' },
+  { id: 'violet', name: 'Violet', hex: '#6A2C9A' },
+  { id: 'rose', name: 'Rose', hex: '#E2559A' },
+  { id: 'cerise', name: 'Rouge cerise', hex: '#B4132E' },
+  { id: 'emeraude', name: 'Vert émeraude', hex: '#1F8A5B' },
+];
+/** Déploie la liste du groupe : la lentille couleur devient une entrée par couleur, le reste est inchangé. */
+function expandLenses(list) {
+  const out = [];
+  for (const lens of list) {
+    if (!isColorLens(lens)) { out.push({ key: lens.id, lens, name: lens.name, iconUrl: lens.iconUrl }); continue; }
+    for (const c of SNAP_HAIR_COLORS) {
+      out.push({ key: `${lens.id}:${c.id}`, lens, name: c.name, swatch: c.hex, launchParams: { color: c.hex, mode: 'full' } });
+    }
+  }
+  return out;
+}
+
 export default function SnapLenses() {
   const reduceMotion = useReducedMotion();
   const [status, setStatus] = useState('init'); // init | unconfigured | unsupported | loading | ready | error
@@ -87,18 +124,19 @@ export default function SnapLenses() {
         if (cancelled) return;
         // Les lentilles cheveux / barbe / couleur d'abord ; aucune lentille appliquée d'office
         // (une lentille quelconque, comme les démos de Snap, peut recouvrir la caméra de sa propre interface)
-        const relevant = (lens) => RELEVANT.test(lens?.name || '');
+        const relevant = (lens) => isColorLens(lens) || RELEVANT.test(lens?.name || '');
         const visible = (loaded || []).filter((lens) => config.lensGroupId !== SNAP_DEMO_GROUP || DEMO_KEEP.test(lens?.name || ''));
         const sorted = [...visible].sort((a, b) => Number(relevant(b)) - Number(relevant(a)));
-        lensesRef.current = sorted;
-        setLenses(sorted);
+        const entries = expandLenses(sorted);
+        lensesRef.current = entries;
+        setLenses(entries);
         setStatus('ready');
         setMessage('');
-        const first = sorted.find(relevant);
+        const first = entries.find((e) => relevant(e.lens));
         if (first) {
           try {
-            await session.applyLens(first);
-            setActiveId(first.id);
+            await session.applyLens(first.lens, first.launchParams ? { launchParams: first.launchParams } : undefined);
+            setActiveId(first.key);
           } catch { /* on reste sans filtre */ }
         }
       } catch (err) {
@@ -111,18 +149,18 @@ export default function SnapLenses() {
     return () => { cancelled = true; cleanup(); };
   }, [cleanup]);
 
-  const selectLens = async (lens) => {
+  const selectLens = async (entry) => {
     const session = sessionRef.current;
     if (!session || applying) return;
     hapticFeedback();
     setApplying(true);
     try {
-      if (activeId === lens.id) {
+      if (activeId === entry.key) {
         await session.removeLens();
         setActiveId(null);
       } else {
-        await session.applyLens(lens);
-        setActiveId(lens.id);
+        await session.applyLens(entry.lens, entry.launchParams ? { launchParams: entry.launchParams } : undefined);
+        setActiveId(entry.key);
       }
     } catch {
       setMessage('Impossible d\'appliquer ce filtre.');
@@ -251,15 +289,16 @@ export default function SnapLenses() {
                 <span className={`text-[10px] leading-tight text-center ${activeId ? 'text-muted-foreground' : 'text-foreground font-semibold'}`}>Sans filtre</span>
               </button>
             )}
-            {lenses.map((lens) => {
-              const active = lens.id === activeId;
+            {lenses.map((entry) => {
+              const active = entry.key === activeId;
               return (
-                <button key={lens.id} type="button" onClick={() => selectLens(lens)} disabled={applying} className="flex flex-col items-center gap-1.5 shrink-0 w-[72px]">
+                <button key={entry.key} type="button" onClick={() => selectLens(entry)} disabled={applying} className="flex flex-col items-center gap-1.5 shrink-0 w-[72px]">
                   <motion.span animate={{ scale: active ? 1.1 : 1 }} transition={{ type: 'spring', stiffness: 400, damping: 22 }}
-                    className={`w-14 h-14 rounded-full overflow-hidden border-2 bg-white/5 flex items-center justify-center ${active ? 'border-primary shadow-lg shadow-primary/40' : 'border-white/15'}`}>
-                    {lens.iconUrl ? <img src={lens.iconUrl} alt="" className="w-full h-full object-cover" draggable={false} /> : <Sparkles className="w-5 h-5 text-primary" />}
+                    className={`w-14 h-14 rounded-full overflow-hidden border-2 bg-white/5 flex items-center justify-center ${active ? 'border-primary shadow-lg shadow-primary/40' : 'border-white/15'}`}
+                    style={entry.swatch ? { background: `radial-gradient(circle at 35% 30%, rgba(255,255,255,0.45), transparent 45%), ${entry.swatch}` } : undefined}>
+                    {!entry.swatch && (entry.iconUrl ? <img src={entry.iconUrl} alt="" className="w-full h-full object-cover" draggable={false} /> : <Sparkles className="w-5 h-5 text-primary" />)}
                   </motion.span>
-                  <span className={`text-[10px] leading-tight text-center line-clamp-2 ${active ? 'text-foreground font-semibold' : 'text-muted-foreground'}`}>{lens.name || 'Lentille'}</span>
+                  <span className={`text-[10px] leading-tight text-center line-clamp-2 ${active ? 'text-foreground font-semibold' : 'text-muted-foreground'}`}>{entry.name || 'Lentille'}</span>
                 </button>
               );
             })}
