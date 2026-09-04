@@ -39,48 +39,94 @@ exact dans l'inspecteur (`baseColor`, `hairColor`, `tintColor`… selon la versi
 
 ```js
 // DHB_HairColor.js — applique la couleur envoyée par l'app D'Home Barber (Camera Kit launch params)
-// @input Asset.Material hairMaterial
-// @input string colorProperty = "baseColor"
-// @input vec4 defaultColor = {0.36, 0.23, 0.13, 1.0}
-// @input bool linearize = true   // décocher si les couleurs paraissent délavées
+//
+// @input Asset.Material hairMaterial            {"label":"Material des cheveux"}
+// @input string colorProperty                   {"label":"Propriété couleur (vide = auto)"}
+// @input vec4 defaultColor = {0.36,0.23,0.13,1.0}
+// @input string testHex                         {"label":"Hex de test (prévisualisation)"}
+// @input bool linearize = true
+// @input bool keepApplying = true               {"label":"Ré-appliquer chaque frame"}
+// @input bool debug = true
+
+var CANDIDATES = ["baseColor", "hairColor", "tintColor", "colorTint", "color", "mainColor"];
+var resolved = null;   // nom de propriété trouvé, mémorisé après le premier succès
 
 function hexToVec4(hex) {
     if (!hex) return null;
-    hex = hex.replace("#", "").trim();
+    hex = ("" + hex).replace("#", "").trim();
     if (hex.length === 3) hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
     if (hex.length !== 6) return null;
     var r = parseInt(hex.substring(0, 2), 16) / 255;
     var g = parseInt(hex.substring(2, 4), 16) / 255;
     var b = parseInt(hex.substring(4, 6), 16) / 255;
-    if (script.linearize) {   // sRGB -> linéaire
-        r = Math.pow(r, 2.2); g = Math.pow(g, 2.2); b = Math.pow(b, 2.2);
-    }
+    if (isNaN(r) || isNaN(g) || isNaN(b)) return null;
+    if (script.linearize) { r = Math.pow(r, 2.2); g = Math.pow(g, 2.2); b = Math.pow(b, 2.2); }
     return new vec4(r, g, b, 1.0);
 }
 
-var color = script.defaultColor;
-
-// `global.launchParams` n'existe que dans Camera Kit : dans Lens Studio et dans Snapchat,
-// la lentille garde la couleur par défaut. Ne jamais planter s'il est absent.
-if (typeof global.launchParams !== "undefined" && global.launchParams) {
-    var parsed = hexToVec4(global.launchParams.getString("color"));
-    if (parsed) color = parsed;
-    // var mode = global.launchParams.getString("mode"); // "full" pour l'instant
+function readColor() {
+    // 1. hex de test saisi dans l'inspecteur (prévisualisation Lens Studio)
+    var test = hexToVec4(script.testHex);
+    if (test) return test;
+    // 2. couleur envoyée par l'app. `global.launchParams` n'existe que dans Camera Kit :
+    //    dans Lens Studio et dans Snapchat, on garde la couleur par défaut.
+    if (typeof global.launchParams !== "undefined" && global.launchParams) {
+        var fromApp = hexToVec4(global.launchParams.getString("color"));
+        if (fromApp) return fromApp;
+    }
+    return script.defaultColor;
 }
 
-if (script.hairMaterial) {
-    script.hairMaterial.mainPass[script.colorProperty] = color;
+function applyColor(color) {
+    if (!script.hairMaterial) { print("DHB: material des cheveux non renseigné"); return false; }
+    var pass = script.hairMaterial.mainPass;
+    var names = resolved ? [resolved] : (script.colorProperty ? [script.colorProperty] : CANDIDATES);
+    for (var i = 0; i < names.length; i++) {
+        try {
+            pass[names[i]] = color;
+            if (!resolved) {
+                resolved = names[i];
+                if (script.debug) print("DHB: couleur appliquée sur mainPass." + resolved);
+            }
+            return true;
+        } catch (e) {}
+    }
+    print("DHB: aucune propriété couleur trouvée. Ouvre l'inspecteur du material et renseigne « Propriété couleur ».");
+    return false;
+}
+
+applyColor(readColor());
+
+// Filet de sécurité : si un script du modèle réécrit la couleur à chaque frame, on repasse derrière.
+if (script.keepApplying) {
+    script.createEvent("UpdateEvent").bind(function () { applyColor(readColor()); });
 }
 ```
 
-- Glisser le script sur un objet de la scène (ou `Scene Object` → `Add Component` → `Script`).
-- Dans l'inspecteur : glisser le **material des cheveux** dans `hairMaterial`, et écrire dans
-  `colorProperty` le nom exact relevé à l'étape 2.
-- Si le modèle a déjà son propre script de couleur (palette, boutons…), le **désactiver** :
-  sinon il écrasera la couleur reçue.
+### Brancher le script
 
-Vérification : change `defaultColor` → la prévisualisation doit changer de couleur. Les
-`launchParams` ne sont pas simulés dans Lens Studio, le vrai test se fait dans l'app.
+1. Créer un objet vide (`+` dans `Scene Hierarchy` → `Empty Object`), le nommer `DHB Color`,
+   puis `Add Component` → `Script` → choisir `DHB_HairColor.js`.
+2. Glisser le **material des cheveux** (celui repéré à l'étape 2, depuis `Resources`) dans
+   le champ **Material des cheveux**.
+3. Laisser **Propriété couleur** vide : le script essaie les noms usuels et écrit dans le
+   Logger celui qui a fonctionné (`DHB: couleur appliquée sur mainPass.baseColor`). Si le
+   Logger affiche « aucune propriété couleur trouvée », lire le nom dans l'inspecteur du
+   material et le saisir à la main.
+4. **Désactiver le script de palette du modèle** s'il y en a un (décocher sa case dans
+   l'inspecteur) : sinon il se bat avec le nôtre.
+
+### Tester avant de publier
+
+Lens Studio n'injecte pas les launch params en prévisualisation. D'où le champ
+**Hex de test** : y saisir `#B4471F` → les cheveux doivent virer au roux cuivré
+immédiatement. Essayer aussi `#EDE3C8` (blond platine) et `#141010` (noir).
+
+**Vider ce champ avant de publier**, sinon il écrase pour toujours la couleur envoyée
+par l'app.
+
+Si les couleurs paraissent délavées ou trop sombres, décocher **linearize** (le modèle
+attend alors du sRGB directement).
 
 ## 4. Nommer la lentille et poser la vendor data
 
