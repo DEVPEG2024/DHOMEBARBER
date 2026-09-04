@@ -62,20 +62,22 @@ export const SNAP_BEARD_STYLES = [
   { id: 'shaved', name: 'Rasé de près', emoji: '✨' },
 ];
 
-/** Déploie la liste du groupe : les lentilles paramétrables deviennent une entrée par réglage. */
+const colorEntries = (lens) => SNAP_HAIR_COLORS.map((c) => ({ key: `${lens.id}:${c.id}`, lens, name: c.name, swatch: c.hex, launchParams: { color: c.hex, mode: 'full' } }));
+const beardEntries = (lens) => SNAP_BEARD_STYLES.map((b) => ({ key: `${lens.id}:${b.id}`, lens, name: b.name, emoji: b.emoji, launchParams: { style: b.id } }));
+
+/**
+ * Déploie la liste du groupe : les lentilles paramétrables deviennent une entrée par réglage.
+ * La lentille du salon porte les deux effets (couleur et barbe) : les styles de barbe passent
+ * en tête, les teintes suivent. Chaque entrée relance la même lentille avec ses paramètres.
+ */
 function expandLenses(list) {
   const out = [];
   for (const lens of list) {
-    if (isColorLens(lens)) {
-      for (const c of SNAP_HAIR_COLORS) {
-        out.push({ key: `${lens.id}:${c.id}`, lens, name: c.name, swatch: c.hex, launchParams: { color: c.hex, mode: 'full' } });
-      }
-      continue;
-    }
-    if (isBeardLens(lens)) {
-      for (const b of SNAP_BEARD_STYLES) {
-        out.push({ key: `${lens.id}:${b.id}`, lens, name: b.name, emoji: b.emoji, launchParams: { style: b.id } });
-      }
+    const color = isColorLens(lens);
+    const beard = isBeardLens(lens);
+    if (color || beard) {
+      if (color) out.push(...beardEntries(lens), ...colorEntries(lens));
+      else out.push(...beardEntries(lens));
       continue;
     }
     out.push({ key: lens.id, lens, name: lens.name, iconUrl: lens.iconUrl });
@@ -153,7 +155,8 @@ export default function SnapLenses() {
         setLenses(entries);
         setStatus('ready');
         setMessage('');
-        const first = entries.find((e) => relevant(e.lens));
+        // à l'ouverture : une teinte, plus parlante qu'une barbe posée d'office
+        const first = entries.find((e) => e.swatch) || entries.find((e) => relevant(e.lens));
         if (first) {
           try {
             await session.applyLens(first.lens, first.launchParams ? { launchParams: first.launchParams } : undefined);
