@@ -28,10 +28,16 @@ const DEMO_KEEP = /hair color|face expressions|distort/i;
 /**
  * Lentille « couleur de cheveux » du salon (créée dans Lens Studio) : une seule lentille qui lit la
  * couleur dans les paramètres de lancement Camera Kit (`launchParams.color`, hex). L'app la déploie
- * en une pastille par couleur. Reconnue par sa donnée fournisseur `dhb = hair-color` (Project Settings
- * → Vendor Data dans Lens Studio) ou, à défaut, par son nom.
+ * en une pastille par couleur.
+ *
+ * La reconnaissance passe **uniquement** par la donnée fournisseur `dhb` (Project Info → Vendor Data
+ * dans Lens Studio) : `hair-color`, `beard`, ou `hair-color+beard` pour une lentille qui fait les deux.
+ * C'est une déclaration du créateur de la lentille : « je lis ce paramètre ». Le nom ne suffit pas —
+ * une lentille qui s'appelle « DHB Couleur » mais ignore `launchParams` afficherait 16 pastilles
+ * strictement identiques, ce que le client ne peut pas comprendre (constaté le 4 sept. 2026).
  */
-const isColorLens = (lens) => lens?.vendorData?.dhb === 'hair-color' || /^dhb\s*couleur|d.?home.*couleur/i.test(lens?.name || '');
+const vendorKind = (lens) => String(lens?.vendorData?.dhb || '');
+const isColorLens = (lens) => /hair-color/.test(vendorKind(lens));
 export const SNAP_HAIR_COLORS = [
   { id: 'platine', name: 'Blond platine', hex: '#EDE3C8' },
   { id: 'dore', name: 'Blond doré', hex: '#D9B36A' },
@@ -52,9 +58,9 @@ export const SNAP_HAIR_COLORS = [
 ];
 /**
  * Lentille « barbe » du salon : une lentille, plusieurs styles choisis par le paramètre de
- * lancement `style`. Reconnue par sa donnée fournisseur `dhb = beard` ou par son nom.
+ * lancement `style`. Déclarée par la donnée fournisseur `dhb` contenant `beard`.
  */
-const isBeardLens = (lens) => lens?.vendorData?.dhb === 'beard' || /^dhb\s*barbe|d.?home.*barbe/i.test(lens?.name || '');
+const isBeardLens = (lens) => /beard/.test(vendorKind(lens));
 export const SNAP_BEARD_STYLES = [
   { id: 'full', name: 'Barbe fournie', emoji: '🧔' },
   { id: 'light', name: 'Barbe de 3 jours', emoji: '🪒' },
@@ -70,14 +76,14 @@ const beardEntries = (lens) => SNAP_BEARD_STYLES.map((b) => ({ key: `${lens.id}:
  * La lentille du salon porte les deux effets (couleur et barbe) : les styles de barbe passent
  * en tête, les teintes suivent. Chaque entrée relance la même lentille avec ses paramètres.
  */
-function expandLenses(list) {
+export function expandLenses(list) {
   const out = [];
   for (const lens of list) {
     const color = isColorLens(lens);
     const beard = isBeardLens(lens);
     if (color || beard) {
-      if (color) out.push(...beardEntries(lens), ...colorEntries(lens));
-      else out.push(...beardEntries(lens));
+      if (beard) out.push(...beardEntries(lens));
+      if (color) out.push(...colorEntries(lens));
       continue;
     }
     out.push({ key: lens.id, lens, name: lens.name, iconUrl: lens.iconUrl });

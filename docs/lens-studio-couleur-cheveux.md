@@ -135,7 +135,12 @@ attend alors du sRGB directement).
 - **Nom** : `DHB Couleur cheveux` (le nom seul suffit à ce que l'app la reconnaisse).
 - **Icône** : carré, fond sombre, logo du salon.
 - **Vendor Data** (section Camera Kit) : clé `dhb`, valeur `hair-color`.
-  Si le champ est introuvable dans ta version, le nom fait le travail — ne pas bloquer là-dessus.
+  **C'est l'interrupteur de la palette**, pas un détail : sans elle l'app affiche la lentille
+  comme un filtre unique, avec elle elle déroule les 16 teintes. Elle vaut déclaration
+  « cette lentille lit `launchParams.color` » — ne la poser qu'une fois l'étape 3 en place et
+  testée, sinon le client tape 16 pastilles qui donnent le même résultat.
+  Valeurs possibles : `hair-color`, `beard`, ou `hair-color+beard` pour une lentille qui fait
+  les deux (elle lit alors aussi `launchParams.style`).
 
 ## 5. Publier dans le groupe Camera Kit du salon
 
