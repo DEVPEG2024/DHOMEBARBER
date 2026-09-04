@@ -327,6 +327,14 @@ Deux modes. **FAST** = aperçu temps réel sur l'appareil ; **AI ULTRA** = trait
   `SnapLenses.jsx` (statut `consent`, mémorisé sous `dhb-snap-tos-v1`, liens `snap.com/terms`,
   `values.snap.com/privacy/privacy-policy`, `support.snapchat.com/article/camera-information-use` — ceux du SDK) :
   **aucune caméra ni SDK ne démarre avant l'acceptation**. Ne pas le retirer, c'est une exigence de la revue.
+  **Vidéo de démonstration prête** (enregistrée sur iPhone le 4 sept. 2026, 16h04) : `~/Downloads/dhb-snap-camerakit-demo.mp4`
+  (44 s, parcours complet depuis l'écran d'accueil iOS) et `~/Downloads/dhb-snap-camerakit-demo-court.mp4` (33 s, sans la
+  partie connexion / tableau de bord admin) — H.264 884 × 1920, 30 fps, ~6 Mo, transcodées depuis le HEVC 60 fps que les
+  portails refusent. Elles montrent dans l'ordre : accueil client → bloc « Filtres Snap » → écran d'acceptation des CGU
+  Camera Kit (3 s à l'écran, trois liens visibles) → permission caméra iOS → « Chargement de Camera Kit » → caméra en direct
+  avec le filigrane « Camera Kit Staging » et la lentille « DHB Couleur » appliquée → capture → « Reprendre / Partager » →
+  « Réserver ce look » → réservation confirmée. Réserve : la lentille n'a **aucun effet visible** (vendor data absente,
+  launch params ignorés, publication bloquée) et le sujet porte une casquette — à refilmer si Snap demande à voir l'effet.
 - **Prérequis navigateur** : Safari 16+ (iOS 15+), Chrome 95+, WebGL, caméra (`snapSupported`). CSP si un jour ajoutée au frontend : `connect-src https://*.snapar.com`, `script-src https://cf-st.sc-cdn.net blob: 'wasm-unsafe-eval'`. Dans la WebView Capacitor iOS, `getUserMedia` fonctionne (iOS 14.3+) ; en cas de problème de performance, la voie officielle est le SDK natif iOS / Android via un plugin Capacitor, non fait
 - **Styles de barbe** (`SNAP_BEARD_STYLES`) : même mécanique que la palette, quatre pastilles à emoji (barbe fournie, barbe de 3 jours, moustache, rasé de près) qui relancent la lentille avec `launchParams: { style }`. La lentille du salon portant les deux effets, `expandLenses` émet les barbes puis les teintes ; à l'ouverture c'est une teinte qui est appliquée
 - **Palette de couleurs** (`SNAP_HAIR_COLORS` dans `SnapLenses.jsx`) : la lentille couleur du salon est reconnue par sa donnée fournisseur `dhb = hair-color` ou par son nom (`/^dhb\s*couleur/i`), puis déployée en une pastille par teinte (16 : platine, doré, miel, châtain clair, châtain, brun, noir, cuivré, auburn, argent, blanc, bleu nuit, violet, rose, cerise, émeraude). Chaque pastille applique la **même** lentille avec `applyLens(lens, { launchParams: { color, mode } })` ; la pastille affiche la couleur au lieu de l'icône. Ajouter une teinte = une ligne dans ce tableau, aucune republication de lentille
