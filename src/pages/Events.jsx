@@ -8,8 +8,8 @@ import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 
+// Le salon reçoit exclusivement une clientèle masculine : pas d'EVJF dans les formules.
 const EVENT_TYPES = [
-  { id: 'evjf', label: 'EVJF', emoji: '👰', desc: 'Enterrement de vie de jeune fille' },
   { id: 'evjg', label: 'EVJG', emoji: '🤵', desc: 'Enterrement de vie de jeune garçon' },
   { id: 'anniversaire', label: 'Anniversaire', emoji: '🎂', desc: 'Fête d\'anniversaire' },
   { id: 'team_building', label: 'Team Building', emoji: '🤝', desc: 'Événement d\'entreprise' },

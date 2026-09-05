@@ -8,8 +8,8 @@ import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 
+// Doit rester aligné sur EVENT_TYPES de src/pages/Events.jsx (pas d'EVJF : clientèle masculine).
 const EVENT_TYPES = {
-  evjf: { label: 'EVJF', emoji: '👰' },
   evjg: { label: 'EVJG', emoji: '🤵' },
   anniversaire: { label: 'Anniversaire', emoji: '🎂' },
   team_building: { label: 'Team Building', emoji: '🤝' },
