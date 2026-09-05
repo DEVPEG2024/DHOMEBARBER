@@ -51,6 +51,32 @@ function generateTimeSlots(start, end, interval = 30) {
 }
 
 /**
+ * Décalage de Paris (en minutes) à un instant donné.
+ * Le salon est à Paris, l'appareil du client peut être n'importe où : sans ça, un client en
+ * voyage voit des créneaux que le serveur refuse.
+ */
+function parisOffsetMinutes(instant) {
+  const tz = new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Paris', timeZoneName: 'shortOffset' })
+    .formatToParts(instant).find(p => p.type === 'timeZoneName')?.value || 'GMT';
+  const m = /GMT([+-])(\d{1,2})(?::(\d{2}))?/.exec(tz);
+  if (!m) return 0;
+  return (m[1] === '-' ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3] || 0));
+}
+
+/**
+ * Instant réel d'un couple date + heure exprimé en heure de Paris.
+ * Deux passes : l'offset lu à l'instant « naïf » est faux dans l'heure qui borde une bascule
+ * d'heure d'été. Même calcul que `parisToUtc` côté serveur, pour que les deux soient d'accord.
+ */
+function parisInstant(dateStr, time) {
+  const [y, mo, d] = dateStr.split('-').map(Number);
+  const [h, mi] = time.split(':').map(Number);
+  const naive = Date.UTC(y, mo - 1, d, h, mi);
+  const first = naive - parisOffsetMinutes(new Date(naive)) * 60000;
+  return naive - parisOffsetMinutes(new Date(first)) * 60000;
+}
+
+/**
  * Créneaux disponibles d'un barber pour une date (fonction pure, réutilisée pour un barber précis
  * comme pour l'union « peu importe »).
  * Règles : congé approuvé → aucun créneau ; horaires du jour `working_hours[jour]` (`start` / `end` /
@@ -63,19 +89,6 @@ function generateTimeSlots(start, end, interval = 30) {
  * @param {number} totalDuration  durée totale des prestations en minutes
  * @returns {string[]} heures `HH:mm` triées
  */
-/** Date du jour au salon (heure de Paris), 'yyyy-MM-dd' — l'appareil du client peut être ailleurs. */
-function parisDateNow(now = new Date()) {
-  const p = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit' });
-  return p.format(now);
-}
-
-/** Minutes écoulées depuis minuit, heure de Paris. */
-function parisMinutesNow(now = new Date()) {
-  const p = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit', hour12: false });
-  const [h, m] = p.format(now).split(':').map(Number);
-  return h * 60 + m;
-}
-
 function computeSlots(employee, date, appointmentsOfEmployee, timeOffs, totalDuration) {
   if (!employee || !date) return [];
   const dateStr = format(date, 'yyyy-MM-dd');
@@ -96,14 +109,15 @@ function computeSlots(employee, date, appointmentsOfEmployee, timeOffs, totalDur
       const [bh, bm] = apt.end_time.split(':').map(Number);
       return [ah * 60 + am, bh * 60 + bm];
     });
-  // Aujourd'hui, les créneaux déjà passés sont retirés : le serveur les refuse
-  // (« Ce créneau est déjà passé »), les afficher mènerait droit à une erreur.
-  const minutesNow = dateStr === parisDateNow() ? parisMinutesNow() : -1;
+  // Les créneaux déjà passés sont retirés : le serveur les refuse (« Ce créneau est déjà
+  // passé »), les afficher mènerait droit à une erreur. La comparaison se fait sur l'instant
+  // réel, donc elle reste juste quel que soit le fuseau de l'appareil.
+  const nowMs = Date.now();
   return generateTimeSlots(hours.start || '09:00', hours.end || '19:00', 30).filter(slot => {
     const [sh, sm] = slot.split(':').map(Number);
     const slotStart = sh * 60 + sm;
     const slotEnd = slotStart + totalDuration;
-    if (slotStart < minutesNow) return false;
+    if (parisInstant(dateStr, slot) < nowMs) return false;
     return !busy.some(([aptStart, aptEnd]) => slotStart < aptEnd && slotEnd > aptStart);
   });
 }
@@ -628,8 +642,20 @@ export default function Booking() {
       hapticFeedback();
       setTimeout(() => navigate('/appointments'), SUCCESS_DURATION);
     },
-    onError: () => {
-      toast.error('Erreur lors de la création du rendez-vous');
+    onError: (err) => {
+      // Le serveur vérifie désormais la disponibilité et refuse pour des raisons précises
+      // (créneau passé, hors horaires, congé, chevauchement, plafond de rendez-vous).
+      // Afficher son message : « Erreur lors de la création » laissait l'utilisateur sans
+      // rien à faire, et sur un créneau pris entre-temps il retentait le même en boucle.
+      const message = err?.data?.error || err?.message;
+      toast.error(message && !/^HTTP \d+$/.test(message) ? message : 'Erreur lors de la création du rendez-vous');
+      if (err?.status === 409 || err?.status === 400) {
+        // Les créneaux affichés datent d'au plus une minute : on les recharge et on
+        // désélectionne l'horaire refusé pour que le client en choisisse un autre.
+        queryClient.invalidateQueries({ queryKey: ['appointments-confirmed'] });
+        queryClient.invalidateQueries({ queryKey: ['appointments-breaks'] });
+        if (err?.status === 409) setSelectedTime(null);
+      }
     },
   });
 

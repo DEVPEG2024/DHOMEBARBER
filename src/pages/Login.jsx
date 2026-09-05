@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { motion } from 'framer-motion';
@@ -32,6 +32,14 @@ export default function Login() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const redirect = searchParams.get('redirect') || '/';
+
+  // Session expirée en cours d'utilisation (voir AuthContext) : dire pourquoi on est ici,
+  // plutôt que de renvoyer l'utilisateur sur un écran de connexion sans explication.
+  useEffect(() => {
+    if (searchParams.get('expired') === '1') {
+      toast.info('Votre session a expiré, reconnectez-vous.');
+    }
+  }, [searchParams]);
 
   const handleLogin = async (e) => {
     e.preventDefault();

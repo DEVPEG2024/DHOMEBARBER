@@ -62,6 +62,13 @@ async function request(method, url, body) {
     const err = new Error(data?.error || data?.message || `HTTP ${res.status}`);
     err.status = res.status;
     err.data = data;
+    // Jeton expiré ou révoqué en cours d'utilisation : AuthContext écoute cet événement
+    // pour refermer la session et renvoyer vers la connexion, au lieu de laisser
+    // l'interface afficher des listes vides en se croyant connectée.
+    // (les routes d'authentification sont exclues : un mot de passe erroné répond 401 aussi)
+    if (res.status === 401 && typeof window !== 'undefined' && !url.includes('/auth/')) {
+      window.dispatchEvent(new CustomEvent('dhb:unauthorized'));
+    }
     throw err;
   }
 
@@ -170,10 +177,21 @@ const integrations = {
   Core: {
     /**
      * POST /integration-endpoints/Core/UploadFile (multipart).
-     * Les images sont compressées côté client avant l'envoi (voir lib/imageCompress.js) :
-     * le serveur les stocke en base64 et les renvoie inline dans chaque liste.
+     * Les images sont compressées côté client avant l'envoi (voir lib/imageCompress.js).
+     * Le serveur renvoie une URL vers /api/media/<id> : les listes ne transportent plus d'images.
      */
     async UploadFile({ file }) {
+      // Le HEIC des iPhone n'est décodable par aucun navigateur hors Safari : la compression
+      // le laisse passer tel quel et le serveur le refuse avec « Fichier non reconnu comme
+      // image ». On le dit ici, avec le réglage à changer, plutôt que de laisser deviner.
+      const name = String(file?.name || '').toLowerCase();
+      const type = String(file?.type || '').toLowerCase();
+      if (/\.(heic|heif)$/.test(name) || type.includes('heic') || type.includes('heif')) {
+        throw new Error(
+          "Cette photo est au format HEIC, que l'app ne sait pas lire. Sur iPhone : Réglages → "
+          + 'Appareil photo → Formats → « Le plus compatible », puis reprenez la photo.'
+        );
+      }
       const upload = await compressImage(file);
       const formData = new FormData();
       formData.append('file', upload, upload.name || file.name);
