@@ -23,7 +23,7 @@
 - Init DB : `heroku run node init-db.js --app dhomebarber-api`
 - PostgreSQL addon : `postgresql-deep-70510` (plan essential-0)
 - La session Heroku CLI expire régulièrement : relancer `heroku login` si les commandes renvoient `Invalid credentials`
-- Variables d'environnement attendues : `DATABASE_URL`, `JWT_SECRET`, `FRONTEND_URL`, `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_EMAIL`, `SMTP_HOST` (défaut smtp.hostinger.com), `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` ; optionnelles : `FAL_KEY` (active le mode AI ULTRA de l'essayage couleur, release v69), `HAIR_ULTRA_EDIT_MODEL`, `SNAP_CAMERA_KIT_API_TOKEN` + `SNAP_LENS_GROUP_ID` (activent les filtres Snap), `APNS_KEY_P8` + `APNS_KEY_ID` + `APNS_TEAM_ID` + `APNS_BUNDLE_ID` (push natif iOS) et `FCM_SERVICE_ACCOUNT` (push natif Android)
+- Variables d'environnement attendues : `NODE_ENV=production` (**obligatoire** : sans elle les origines `localhost` restent autorisées par CORS, et le serveur accepte un `JWT_SECRET` de repli), `DATABASE_URL`, `JWT_SECRET` (le serveur **refuse de démarrer** en production sans), `API_PUBLIC_URL` (base des URL d'images renvoyées par l'upload), `FRONTEND_URL`, `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_EMAIL`, `SMTP_HOST` (défaut smtp.hostinger.com), `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` ; optionnelles : `FAL_KEY` (active le mode AI ULTRA de l'essayage couleur, release v69), `HAIR_ULTRA_EDIT_MODEL`, `SNAP_CAMERA_KIT_API_TOKEN` + `SNAP_LENS_GROUP_ID` (activent les filtres Snap), `APNS_KEY_P8` + `APNS_KEY_ID` + `APNS_TEAM_ID` + `APNS_BUNDLE_ID` (push natif iOS) et `FCM_SERVICE_ACCOUNT` (push natif Android)
 
 ### Apps natives (Capacitor)
 - Scripts : `npm run cap:sync` (build + sync), `npm run cap:ios`, `npm run cap:android` (build + sync + ouverture Xcode / Android Studio)
@@ -125,8 +125,11 @@ dhomebarber-api/
 ├── migrate.js         # Migrations DB
 ├── seed-admin.js      # Seed admin user
 ├── Procfile           # web: node server.js
+├── migrate-media.js   # Convertit les anciennes URL `data:` en lignes `media` (idempotent, --dry-run)
 ├── lib/
-│   ├── accessControl.js # Politique de lecture par rôle (applyReadPolicy), validation, identité du compte, code carte cadeau
+│   ├── accessControl.js # Politique de lecture par rôle (applyReadPolicy), validation, identité du compte, code carte cadeau, disponibilité des créneaux
+│   ├── publicKey.js   # Identifiant public d'un compte (HMAC de l'email) : le fil ne diffuse plus d'emails
+│   ├── nativePush.js  # Push natif APNs (iOS) + FCM HTTP v1 (Android)
 │   ├── emailHelper.js # Nodemailer SMTP : bienvenue, confirmation/rappel/annulation RDV, commande, événements, avis, anniversaire, relance
 │   ├── pushHelper.js  # sendPushToRole, sendPushToEmail, sendPushToEmployee, sendToSubscriptions (Web Push, lots de 50)
 │   └── hairUltra.js   # AI ULTRA : SAM 3 + FLUX Kontext (fal.ai) + fusion gardée par le masque (sharp)
@@ -136,6 +139,7 @@ dhomebarber-api/
 │   ├── birthdayReminder.js     # Tous les jours 8h : notif + email anniversaire (users.birth_date)
 │   └── comebackReminder.js     # Tous les jours 10h Paris : relance « il est temps de revenir » (comeback_reminder_sent), --dry-run
 └── routes/
+    ├── media.js       # GET /api/media/:id : sert une image stockée en base (cache 1 an, ETag / 304)
     ├── hairUltra.js   # POST /ai/hair-ultra : recoloration HD (lib/hairUltra.js, fal.ai, FAL_KEY)
     ├── entities.js    # CRUD générique : politique d'accès par rôle (CREATE_RULES / UPDATE_RULES), emails sur création RDV / commande / événement
     ├── auth.js        # register, login, /me, forgot-password, reset-password, delete-account, logout
@@ -209,18 +213,29 @@ Mapping entité → table dans `routes/entities.js`.
 - **auth.me** → `GET /api/apps/:appId/entities/User/me`
 - **auth.loginViaEmailPassword** → `POST /api/apps/:appId/auth/login`
 - **auth.register** → `POST /api/apps/:appId/auth/register`
-- **UploadFile** → `POST /api/apps/:appId/integration-endpoints/Core/UploadFile`. Les images sont **compressées côté client avant l'envoi** (`src/lib/imageCompress.js` : côté ≤ 1280 px, JPEG, cible 400 Ko) car le serveur les stocke en base64 dans PostgreSQL et les renvoie inline dans chaque liste. Ne jamais appeler l'endpoint sans passer par `UploadFile`
+- **UploadFile** → `POST /api/apps/:appId/integration-endpoints/Core/UploadFile`. Depuis le 5 sept. 2026 (backend v76) le serveur **stocke le fichier dans la table `media`** et renvoie une **URL absolue** vers `GET /api/media/<id>` : les listes ne transportent plus d'images. Le type est déduit des **octets magiques**, pas du `Content-Type` déclaré, et le SVG est refusé. Les images restent **compressées côté client avant l'envoi** (`src/lib/imageCompress.js` : côté ≤ 1280 px, JPEG, cible 400 Ko). Ne jamais appeler l'endpoint sans passer par `UploadFile`
 - `appId` est fixé à `prod`
 - **Cache React Query** (`src/lib/query-client.js`) : `staleTime` 60 s par défaut, 5 min sur les catalogues (Employee, Service, ServiceCategory, Product, SalonSettings, SkillCategory). Les listes admin complètes utilisent des clés préfixées (`['employees','all']`, `['products','all']`, `['services','all']`…) distinctes des listes client filtrées `is_active`, mais invalidées par le même préfixe. Le cache est vidé au login / à l'inscription (réponses différentes selon le rôle)
 
 ### Endpoints spécifiques (hors CRUD)
 - `POST /auth/forgot-password` → envoie un code à 6 chiffres par email ; `POST /auth/reset-password` le vérifie
 - `DELETE /auth/delete-account` → transaction : supprime l'utilisateur, ses abonnements push, ses avis, ses posts / commentaires / réactions et blocages ; anonymise ses RDV, commandes, événements, cartes cadeau envoyées et signalements ("Compte supprimé") (exigence App Store / Play Store)
-- `POST /last-minute` (auth requise, barbers autorisés) → push "Créneau Last Minute" à tous les clients (rôle `user`)
+- `POST /last-minute` (**staff uniquement**, quota 6/heure par compte) → push « Créneau Last Minute » à tous les clients (rôle `user`). Était ouvert à tout compte connecté jusqu'au 5 sept. 2026 : n'importe quel client pouvait notifier tout le salon avec un texte libre. Les champs repris dans le texte sont bornés et nettoyés
+- `GET /api/media/:id` (public) → sert une image stockée en base : `Cache-Control` d'un an, `ETag`, `If-None-Match` → 304, type MIME filtré par liste blanche. Exempté du quota global (ouvrir le fil = une centaine de requêtes depuis la même IP)
 - `POST /push/subscribe-native` → enregistre un token FCM/APNs (iOS/Android)
 - `PATCH /leave/:id/status` → admin approuve/refuse un congé, push au barber
 - `GET /apps/public/prod/public-settings/by-id/:appId` → paramètres publics du salon (utile pour vérifier que l'API répond)
 - WebSocket `/ws/live` → diffuse le nombre d'utilisateurs connectés (hook `useLiveCount`)
+
+### Revue de sécurité et de charge du 5 septembre 2026 (backend v76, frontend c6ce8c7)
+Rapport complet : https://claude.ai/code/artifact/406820a6-13b7-43f2-bd32-65cd3e376f1b
+- **Images hors du chemin critique** : elles vivaient en base64 dans les colonnes et repartaient en entier dans chaque liste (183 ko par photo de profil, 418 ko par image de publication ; le fil demandait 100 publications, soit ~42 Mo de JSON par ouverture). Elles sont désormais dans la table `media` (BYTEA, ~25 % plus compact que le base64) et servies par URL. Mesuré après migration : la liste des barbers est passée de ~310 ko à **3,4 ko**, celle des publications à **810 octets**. Les anciennes URL `data:` restent affichables ; `migrate-media.js` a converti l'existant (10 lignes, 9 médias, 1 image dédupliquée)
+- **Réservation vérifiée côté serveur** (`assertSlotAvailable` dans `routes/entities.js`) : créneau passé (heure de Paris), horaires du barber, congé approuvé, chevauchement — les règles sont un portage fidèle de `computeSlots` de `Booking.jsx`, validé par une équivalence sur 4 000 cas aléatoires. Index unique partiel `idx_appointments_unique_slot` contre la course entre deux clients (409 « Ce créneau vient d'être réservé »). Plafond de 3 RDV `confirmed` à venir par compte. `Booking.jsx` filtre maintenant les créneaux passés du jour, sinon le serveur les refuse
+- **Avis** : exigent un RDV `completed` (403) et sont plafonnés à 5 par compte
+- **Le fil ne diffuse plus d'emails** : `posts` / `post_comments` portent `author_key`, `post_likes` porte `user_key` (`lib/publicKey.js`, HMAC du `JWT_SECRET`), l'email n'est renvoyé qu'au staff. Le compte connecté reçoit sa clé dans `public_key` (`/me` **et** la réponse de `register`). Les blocages passent par `blocked_key` (colonne ajoutée), avec repli sur l'email pour les lignes antérieures. Quand la cible n'est connue que par sa clé, `blocked_email` reçoit le repère interne `key:<clé>`, jamais renvoyé par l'API — ne pas lever le `NOT NULL` sans revoir ce point
+- **Rappels** : `appointmentReminder` et `reviewReminder` comparaient une heure de Paris à `NOW()` en UTC, les rappels partaient avec 1 à 2 h de décalage. La fenêtre est calculée en instants réels et la requête filtre par `date = ANY(...)` (indexable). `reviewReminder` filtrait en plus sur `CURRENT_DATE` en UTC, ce qui privait de demande d'avis **toutes les prestations de fin de soirée** — corrigé, ces demandes partent donc désormais entre minuit et 4 h. `parisToUtc` se trompait d'une heure autour des bascules d'heure d'été (deux passes maintenant)
+- Divers : `requireStaff` ajouté et exporté ; historique de ménage et `toggle` réservés au staff (le contrôle de rôle arrivait après le `SELECT`, oracle d'existence) ; `SendEmail` échappe `subject` et `body` ; compteur WebSocket regroupé (une diffusion par seconde max) ; `qs` forcé en 6.16.0 par `overrides` (Express 4.22.2 épingle une version vulnérable) → `npm audit` : 0 vulnérabilité
+- **Restes connus** : pas de ramasse-miettes sur `media` (supprimer une publication laisse la ligne orpheline) ; `Clients.jsx` charge encore 1 000 RDV ; la recherche client complète la liste côté client faute d'opérateur `LIKE` dans `buildConditions` ; `POST /cleaning/notify-today` utilise la date UTC ; frontend `quill` et `react-router` restent en majeures non montées
 
 ### Types de données
 - Les colonnes `decimal` de PostgreSQL sont converties en nombres dans `normalizeRow()`
