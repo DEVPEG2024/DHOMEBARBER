@@ -23,7 +23,7 @@
 - Init DB : `heroku run node init-db.js --app dhomebarber-api`
 - PostgreSQL addon : `postgresql-deep-70510` (plan essential-0)
 - La session Heroku CLI expire régulièrement : relancer `heroku login` si les commandes renvoient `Invalid credentials`
-- Variables d'environnement attendues : `DATABASE_URL`, `JWT_SECRET`, `FRONTEND_URL`, `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_EMAIL`, `SMTP_HOST` (défaut smtp.hostinger.com), `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` ; optionnelles : `FAL_KEY` (active le mode AI ULTRA de l'essayage couleur, release v69), `HAIR_ULTRA_EDIT_MODEL`, `SNAP_CAMERA_KIT_API_TOKEN` + `SNAP_LENS_GROUP_ID` (activent les filtres Snap)
+- Variables d'environnement attendues : `DATABASE_URL`, `JWT_SECRET`, `FRONTEND_URL`, `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_EMAIL`, `SMTP_HOST` (défaut smtp.hostinger.com), `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` ; optionnelles : `FAL_KEY` (active le mode AI ULTRA de l'essayage couleur, release v69), `HAIR_ULTRA_EDIT_MODEL`, `SNAP_CAMERA_KIT_API_TOKEN` + `SNAP_LENS_GROUP_ID` (activent les filtres Snap), `APNS_KEY_P8` + `APNS_KEY_ID` + `APNS_TEAM_ID` + `APNS_BUNDLE_ID` (push natif iOS) et `FCM_SERVICE_ACCOUNT` (push natif Android)
 
 ### Apps natives (Capacitor)
 - Scripts : `npm run cap:sync` (build + sync), `npm run cap:ios`, `npm run cap:android` (build + sync + ouverture Xcode / Android Studio)
@@ -240,7 +240,11 @@ Le `server.js` exécute des migrations automatiques au démarrage (`ADD COLUMN I
 
 ### Notifications
 - **Push web** : Web Push (VAPID) via `lib/pushHelper.js` (`sendToSubscriptions` : lots de 50 en parallèle, timeout 10 s, abonnements 410/404 supprimés), service worker `public/sw.js`. VAPID est configuré une seule fois dans `pushHelper.js` : les routes et jobs passent par ses fonctions
-- **Push natif** : token enregistré via `subscribe-native` (endpoint `native://<platform>/<token>`), déclenché par `src/lib/capacitor.js` sur iOS/Android. **Aucun envoi APNs / FCM n'est implémenté** : ces tokens sont ignorés (`skippedNative`) par `sendToSubscriptions`. Pour activer le push natif il faut Firebase Admin (clé de service) et un envoi dédié
+- **Push natif** (`dhomebarber-api/lib/nativePush.js`, ajouté le 5 sept. 2026, release v74) : token enregistré via `subscribe-native` (endpoint `native://<platform>/<token>`), déclenché par `src/lib/pushNotifications.js` sur iOS/Android. `sendToSubscriptions` route désormais ces endpoints vers **APNs** (iOS, le jeton de `@capacitor/push-notifications` est un jeton APNs brut) et **FCM HTTP v1** (Android). Aucune dépendance npm ajoutée : `node:http2`, `node:crypto` et `fetch` suffisent.
+  - APNs : JWT ES256 signé avec la clé `.p8`, mis en cache 40 min (Apple refuse un rafraîchissement plus fréquent que 20 min et un jeton de plus d'1 h), une session HTTP/2 par lot, en-têtes `apns-topic` = bundle id et `apns-push-type: alert`. Un `410`, `Unregistered` ou `BadDeviceToken` supprime l'abonnement
+  - FCM : JWT RS256 du compte de service échangé contre un jeton OAuth mis en cache jusqu'à expiration, envoi par lots de 50 en parallèle. Un `404`, `UNREGISTERED` ou `INVALID_ARGUMENT` supprime l'abonnement
+  - **Variables à poser sur Heroku pour l'activer** — iOS : `APNS_KEY_P8` (contenu de la clé, les `\n` littéraux sont acceptés), `APNS_KEY_ID`, `APNS_TEAM_ID` (`3NXH4CTJM3`), `APNS_BUNDLE_ID` (`fr.dhomebarber.app`), optionnel `APNS_ENV=sandbox` pour tester en développement ; Android : `FCM_SERVICE_ACCOUNT` (le JSON du compte de service sur une ligne) ou `FCM_PROJECT_ID` + `FCM_CLIENT_EMAIL` + `FCM_PRIVATE_KEY`. **Sans ces variables le comportement est strictement identique à avant** : les endpoints natifs sont comptés dans `skippedNative`, rien n'est envoyé. La clé APNs se crée dans Apple Developer → Certificates, Identifiers & Profiles → Keys (type *Apple Push Notifications service*) ; elle n'a rien à voir avec la clé App Store Connect K79WY8DX6N
+  - `isConfigured()` de `pushHelper` est vrai dès qu'**un** transport est disponible (VAPID, APNs ou FCM), ce qui débloque les jobs même sans VAPID
 - **Email** : Nodemailer SMTP (`lib/emailHelper.js`), silencieux si `SMTP_*` absents (`isConfigured`). Envoyé à l'inscription, création/rappel/annulation de RDV, commande, demande/devis/acceptation/refus d'événement, demande d'avis, anniversaire
 
 ### Jobs automatiques (node-cron)
