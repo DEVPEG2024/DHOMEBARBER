@@ -1,12 +1,47 @@
 import React, { useState, useEffect } from 'react';
 import { api, apiRequest, apiUrl } from '@/api/apiClient';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Send, Users, User, Bell, CheckCircle, Smartphone, Mail } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
+
+// La liste des destinataires n'est chargée que lorsqu'on en a besoin (choix d'un client ou
+// envoi), et par lots : le serveur renvoie chaque photo de profil dans la liste des comptes.
+const RECIPIENTS_PAGE_SIZE = 200;
+const RECIPIENTS_MAX_PAGES = 25; // garde-fou : 5 000 comptes
+const RECIPIENT_USERS_KEY = ['registeredUsers', 'recipients'];
+const RECIPIENT_APPOINTMENTS_KEY = ['appointments', 'recipients'];
+
+async function fetchRecipientUsers() {
+  const all = [];
+  for (let i = 0; i < RECIPIENTS_MAX_PAGES; i++) {
+    const page = await api.entities.User.list('-created_at', RECIPIENTS_PAGE_SIZE, i * RECIPIENTS_PAGE_SIZE);
+    all.push(...page);
+    if (page.length < RECIPIENTS_PAGE_SIZE) break;
+  }
+  return all;
+}
+
+const fetchRecipientAppointments = () => api.entities.Appointment.list('-created_date', 200);
+
+/** Clients joignables : comptes clients + emails vus dans les derniers rendez-vous */
+function buildClients(registeredUsers, appointments) {
+  const map = {};
+  registeredUsers.forEach(u => {
+    if (u.email && u.role === 'user') {
+      map[u.email.toLowerCase()] = { email: u.email, name: u.full_name || u.email };
+    }
+  });
+  appointments.forEach(a => {
+    if (a.client_email && !map[a.client_email.toLowerCase()]) {
+      map[a.client_email.toLowerCase()] = { email: a.client_email, name: a.client_name || a.client_email };
+    }
+  });
+  return Object.values(map).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+}
 
 export default function Notifications() {
   const [target, setTarget] = useState('all');
@@ -19,30 +54,42 @@ export default function Notifications() {
   const [pushSubscribers, setPushSubscribers] = useState([]);
   const [clientSearch, setClientSearch] = useState('');
 
-  const { data: appointments = [] } = useQuery({
-    queryKey: ['appointments'],
-    queryFn: () => api.entities.Appointment.list('-created_date', 200),
+  const queryClient = useQueryClient();
+  // Rien n'est chargé à l'ouverture : la liste des clients ne part que sur une action
+  // (choix des destinataires ou envoi), et l'envoi la réclame de toute façon.
+  const [clientsNeeded, setClientsNeeded] = useState(false);
+
+  const { data: appointments = [], isSuccess: appointmentsReady } = useQuery({
+    queryKey: RECIPIENT_APPOINTMENTS_KEY,
+    queryFn: fetchRecipientAppointments,
+    enabled: clientsNeeded,
+    staleTime: 5 * 60 * 1000,
   });
 
-  const { data: registeredUsers = [] } = useQuery({
-    queryKey: ['registeredUsers'],
-    queryFn: () => api.entities.User.list('-created_at', 1000),
+  const { data: registeredUsers = [], isSuccess: usersReady } = useQuery({
+    queryKey: RECIPIENT_USERS_KEY,
+    queryFn: fetchRecipientUsers,
+    enabled: clientsNeeded,
+    staleTime: 5 * 60 * 1000,
   });
 
-  const clients = React.useMemo(() => {
-    const map = {};
-    registeredUsers.forEach(u => {
-      if (u.email && u.role === 'user') {
-        map[u.email.toLowerCase()] = { email: u.email, name: u.full_name || u.email };
-      }
-    });
-    appointments.forEach(a => {
-      if (a.client_email && !map[a.client_email.toLowerCase()]) {
-        map[a.client_email.toLowerCase()] = { email: a.client_email, name: a.client_name || a.client_email };
-      }
-    });
-    return Object.values(map).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-  }, [appointments, registeredUsers]);
+  const clientsLoaded = clientsNeeded && usersReady && appointmentsReady;
+  const clientsLoading = clientsNeeded && !clientsLoaded;
+
+  const clients = React.useMemo(
+    () => buildClients(registeredUsers, appointments),
+    [appointments, registeredUsers]
+  );
+
+  /** Garantit la liste complète des destinataires (utilisée par l'envoi) */
+  const ensureClients = async () => {
+    setClientsNeeded(true);
+    const [users, appts] = await Promise.all([
+      queryClient.fetchQuery({ queryKey: RECIPIENT_USERS_KEY, queryFn: fetchRecipientUsers, staleTime: 5 * 60 * 1000 }),
+      queryClient.fetchQuery({ queryKey: RECIPIENT_APPOINTMENTS_KEY, queryFn: fetchRecipientAppointments, staleTime: 5 * 60 * 1000 }),
+    ]);
+    return buildClients(users, appts);
+  };
 
   const filteredClients = clients.filter(c => {
     if (!clientSearch) return true;
@@ -84,8 +131,9 @@ export default function Notifications() {
         target_email: target === 'one' ? clientEmail : undefined,
       });
 
-      // Send emails
-      const targets = target === 'all' ? clients : clients.filter(c => c.email === clientEmail);
+      // Send emails (la liste complète est chargée ici si elle ne l'était pas encore)
+      const allClients = await ensureClients();
+      const targets = target === 'all' ? allClients : allClients.filter(c => c.email === clientEmail);
       let emailCount = 0;
       for (const client of targets) {
         try {
@@ -132,13 +180,21 @@ export default function Notifications() {
           <p className="text-2xl font-bold text-primary font-display">{pushSubCount}</p>
           <p className="text-[10px] uppercase tracking-widest text-muted-foreground mt-0.5">Push abonnés</p>
         </div>
-        <div className="rounded-2xl bg-white/4 border border-white/8 backdrop-blur-xl p-4 text-center">
+        <button
+          type="button"
+          onClick={() => setClientsNeeded(true)}
+          className="w-full rounded-2xl bg-white/4 border border-white/8 backdrop-blur-xl p-4 text-center"
+        >
           <div className="flex items-center justify-center gap-2 mb-1">
             <Mail className="w-4 h-4 text-primary" />
           </div>
-          <p className="text-2xl font-bold text-primary font-display">{clients.length}</p>
-          <p className="text-[10px] uppercase tracking-widest text-muted-foreground mt-0.5">Clients email</p>
-        </div>
+          <p className="text-2xl font-bold text-primary font-display">
+            {clientsLoaded ? clients.length : clientsLoading ? '...' : '—'}
+          </p>
+          <p className="text-[10px] uppercase tracking-widest text-muted-foreground mt-0.5">
+            {clientsNeeded ? 'Clients email' : 'Clients (afficher)'}
+          </p>
+        </button>
         <div className="rounded-2xl bg-white/4 border border-white/8 backdrop-blur-xl p-4 text-center">
           <div className="flex items-center justify-center gap-2 mb-1">
             <CheckCircle className="w-4 h-4 text-green-400" />
@@ -175,15 +231,15 @@ export default function Notifications() {
                 <Label className="text-xs mb-1.5 block">Destinataires</Label>
                 <div className="flex gap-1 p-1 rounded-xl bg-white/5 border border-white/8">
                   <button
-                    onClick={() => { setTarget('all'); setClientEmail(''); }}
+                    onClick={() => { setTarget('all'); setClientEmail(''); setClientsNeeded(true); }}
                     className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-semibold transition-all ${
                       target === 'all' ? 'bg-primary text-primary-foreground shadow' : 'text-muted-foreground'
                     }`}
                   >
-                    <Users className="w-3.5 h-3.5" /> Tous les clients ({clients.length})
+                    <Users className="w-3.5 h-3.5" /> Tous les clients{clientsLoaded ? ` (${clients.length})` : ''}
                   </button>
                   <button
-                    onClick={() => setTarget('one')}
+                    onClick={() => { setTarget('one'); setClientsNeeded(true); }}
                     className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-semibold transition-all ${
                       target === 'one' ? 'bg-primary text-primary-foreground shadow' : 'text-muted-foreground'
                     }`}
@@ -204,7 +260,10 @@ export default function Notifications() {
                     className="bg-secondary border-border mb-2"
                   />
                   <div className="max-h-40 overflow-y-auto rounded-lg border border-border bg-secondary/50">
-                    {filteredClients.length === 0 && (
+                    {clientsLoading && (
+                      <p className="text-xs text-muted-foreground p-3 text-center">Chargement des clients...</p>
+                    )}
+                    {!clientsLoading && filteredClients.length === 0 && (
                       <p className="text-xs text-muted-foreground p-3 text-center">Aucun client trouvé</p>
                     )}
                     {filteredClients.map(c => (
@@ -243,7 +302,9 @@ export default function Notifications() {
               <div className="bg-secondary/50 rounded-lg p-3 text-xs text-muted-foreground">
                 <p className="font-medium text-foreground mb-1">Canaux d'envoi :</p>
                 <p>• <strong>Push</strong> — notification sur le téléphone ({pushSubCount} abonné{pushSubCount > 1 ? 's' : ''})</p>
-                <p>• <strong>Email</strong> — envoi par email ({target === 'all' ? clients.length : clientEmail ? 1 : 0} destinataire{target === 'all' && clients.length > 1 ? 's' : ''})</p>
+                <p>• <strong>Email</strong> — envoi par email ({target === 'all'
+                  ? (clientsLoaded ? `${clients.length} destinataire${clients.length > 1 ? 's' : ''}` : 'tous les clients')
+                  : `${clientEmail ? 1 : 0} destinataire`})</p>
               </div>
 
               <Button onClick={handleSend} disabled={sending || !subject || !message}

@@ -1,6 +1,6 @@
-import React, { useMemo, useState, useRef } from 'react';
+import React, { useMemo, useState, useRef, useEffect, useCallback } from 'react';
 import { api } from '@/api/apiClient';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { UserPlus, AlertTriangle, Download, Upload, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -19,6 +19,71 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Label } from '@/components/ui/label';
+
+// Les comptes arrivent par lots (le serveur renvoie chaque photo de profil dans la liste :
+// 1 000 comptes d'un coup, c'était des dizaines de Mo à chaque ouverture de l'écran).
+const USERS_PAGE_SIZE = 50;
+const USERS_MAX_PAGES = 60; // garde-fou : 3 000 comptes
+const USERS_QUERY_KEY = ['registeredUsers', 'paged'];
+// Nombre de fiches rendues avant « Afficher plus »
+const ROWS_STEP = 50;
+
+/** Fusionne comptes inscrits et rendez-vous en fiches clients (fonction pure : réutilisée
+ *  par les actions groupées, qui travaillent sur la liste complète et non sur les lots chargés). */
+function buildClients(registeredUsers, appointments, employees) {
+  const map = {};
+
+  // D'abord, ajouter tous les utilisateurs inscrits
+  registeredUsers.forEach(user => {
+    if (!user.email) return;
+    // Pour les barbers/admins, chercher la photo dans le profil employé
+    let photo = user.photo_url || '';
+    if (user.employee_id) {
+      const emp = employees.find(e => e.id === user.employee_id);
+      if (emp?.photo_url) photo = emp.photo_url;
+    }
+    map[user.email.toLowerCase()] = {
+      email: user.email,
+      name: user.full_name || user.email,
+      phone: user.phone || '',
+      photo_url: photo,
+      role: user.role,
+      visits: 0,
+      noShows: 0,
+      totalSpent: 0,
+      lastVisit: null,
+      registeredAt: user.created_at,
+    };
+  });
+
+  // Ensuite, enrichir/ajouter avec les données des rendez-vous
+  appointments.forEach(apt => {
+    if (!apt.client_email) return;
+    const key = apt.client_email.toLowerCase();
+    if (!map[key]) {
+      map[key] = {
+        email: apt.client_email,
+        name: apt.client_name,
+        phone: apt.client_phone,
+        visits: 0,
+        noShows: 0,
+        totalSpent: 0,
+        lastVisit: null,
+      };
+    }
+    const c = map[key];
+    // Mettre à jour le nom/téléphone depuis le RDV si manquant
+    if (!c.name || c.name === c.email) c.name = apt.client_name || c.name;
+    if (!c.phone) c.phone = apt.client_phone || '';
+    if (apt.status === 'completed') {
+      c.visits++;
+      c.totalSpent += apt.total_price || 0;
+    }
+    if (apt.status === 'no_show') c.noShows++;
+    if (!c.lastVisit || apt.date > c.lastVisit) c.lastVisit = apt.date;
+  });
+  return Object.values(map).sort((a, b) => (b.lastVisit || b.registeredAt || '').localeCompare(a.lastVisit || a.registeredAt || ''));
+}
 
 export default function Clients() {
   const [search, setSearch] = React.useState('');
@@ -41,70 +106,75 @@ export default function Clients() {
     queryFn: () => api.entities.Employee.filter({ is_active: true }),
   });
 
-  const { data: registeredUsers = [] } = useQuery({
-    queryKey: ['registeredUsers'],
-    queryFn: () => api.entities.User.list('-created_at', 1000),
+  // Comptes inscrits chargés par lots de 50 (`skip` = OFFSET côté serveur)
+  const {
+    data: usersPages,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
+    queryKey: USERS_QUERY_KEY,
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) => api.entities.User.list('-created_at', USERS_PAGE_SIZE, pageParam),
+    getNextPageParam: (lastPage, allPages) =>
+      (lastPage?.length || 0) < USERS_PAGE_SIZE || allPages.length >= USERS_MAX_PAGES
+        ? undefined
+        : allPages.length * USERS_PAGE_SIZE,
   });
 
-  const clients = useMemo(() => {
-    const map = {};
+  const registeredUsers = useMemo(() => usersPages?.pages.flat() ?? [], [usersPages]);
 
-    // D'abord, ajouter tous les utilisateurs inscrits
-    registeredUsers.forEach(user => {
-      if (!user.email) return;
-      // Pour les barbers/admins, chercher la photo dans le profil employé
-      let photo = user.photo_url || '';
-      if (user.employee_id) {
-        const emp = employees.find(e => e.id === user.employee_id);
-        if (emp?.photo_url) photo = emp.photo_url;
+  /**
+   * Complète le chargement des comptes puis renvoie la liste entière.
+   * Utilisé par la recherche (elle doit porter sur toute la base, pas sur les lots affichés)
+   * et par les actions groupées (export, import, suppression). Les lots déjà en cache
+   * sont conservés, et le cache de la requête paginée est mis à jour pour que l'écran suive.
+   */
+  const allUsersPromise = useRef(null);
+  const ensureAllUsers = useCallback(() => {
+    if (allUsersPromise.current) return allUsersPromise.current;
+    const run = async () => {
+      await queryClient.cancelQueries({ queryKey: USERS_QUERY_KEY });
+      const cached = queryClient.getQueryData(USERS_QUERY_KEY);
+      const pages = cached?.pages ? [...cached.pages] : [];
+      const complete = pages.length > 0 && pages[pages.length - 1].length < USERS_PAGE_SIZE;
+      if (!complete) {
+        for (let i = pages.length; i < USERS_MAX_PAGES; i++) {
+          const page = await api.entities.User.list('-created_at', USERS_PAGE_SIZE, i * USERS_PAGE_SIZE);
+          pages.push(page);
+          if (page.length < USERS_PAGE_SIZE) break;
+        }
+        queryClient.setQueryData(USERS_QUERY_KEY, {
+          pages,
+          pageParams: pages.map((_, i) => i * USERS_PAGE_SIZE),
+        });
       }
-      map[user.email.toLowerCase()] = {
-        email: user.email,
-        name: user.full_name || user.email,
-        phone: user.phone || '',
-        photo_url: photo,
-        role: user.role,
-        visits: 0,
-        noShows: 0,
-        totalSpent: 0,
-        lastVisit: null,
-        registeredAt: user.created_at,
-      };
-    });
+      return pages.flat();
+    };
+    allUsersPromise.current = run().finally(() => { allUsersPromise.current = null; });
+    return allUsersPromise.current;
+  }, [queryClient]);
 
-    // Ensuite, enrichir/ajouter avec les données des rendez-vous
-    appointments.forEach(apt => {
-      if (!apt.client_email) return;
-      const key = apt.client_email.toLowerCase();
-      if (!map[key]) {
-        map[key] = {
-          email: apt.client_email,
-          name: apt.client_name,
-          phone: apt.client_phone,
-          visits: 0,
-          noShows: 0,
-          totalSpent: 0,
-          lastVisit: null,
-        };
-      }
-      const c = map[key];
-      // Mettre à jour le nom/téléphone depuis le RDV si manquant
-      if (!c.name || c.name === c.email) c.name = apt.client_name || c.name;
-      if (!c.phone) c.phone = apt.client_phone || '';
-      if (apt.status === 'completed') {
-        c.visits++;
-        c.totalSpent += apt.total_price || 0;
-      }
-      if (apt.status === 'no_show') c.noShows++;
-      if (!c.lastVisit || apt.date > c.lastVisit) c.lastVisit = apt.date;
-    });
-    return Object.values(map).sort((a, b) => (b.lastVisit || b.registeredAt || '').localeCompare(a.lastVisit || a.registeredAt || ''));
-  }, [appointments, registeredUsers, employees]);
+  // Dès qu'une recherche est saisie, on complète le chargement en tâche de fond
+  useEffect(() => {
+    if (search.trim() && hasNextPage) ensureAllUsers().catch(() => {});
+  }, [search, hasNextPage, ensureAllUsers]);
 
-  const filtered = clients.filter(c =>
+  const clients = useMemo(
+    () => buildClients(registeredUsers, appointments, employees),
+    [appointments, registeredUsers, employees]
+  );
+
+  const filtered = useMemo(() => clients.filter(c =>
     c.name?.toLowerCase().includes(search.toLowerCase()) ||
     c.email?.toLowerCase().includes(search.toLowerCase())
-  );
+  ), [clients, search]);
+
+  // Le rendu est lui aussi progressif : 300 fiches animées d'un coup, c'est une page qui rame
+  const [visibleCount, setVisibleCount] = useState(ROWS_STEP);
+  useEffect(() => { setVisibleCount(ROWS_STEP); }, [search]);
+  const visibleClients = filtered.slice(0, visibleCount);
+  const canShowMore = filtered.length > visibleCount;
 
   const handleDeleteClient = async () => {
     if (!clientToDelete) return;
@@ -117,10 +187,10 @@ export default function Clients() {
       await Promise.all(
         clientAppointments.map(apt => api.entities.Appointment.delete(apt.id))
       );
-      // Supprimer le compte utilisateur s'il existe
-      const registeredUser = registeredUsers.find(
-        u => u.email?.toLowerCase() === clientToDelete.email?.toLowerCase()
-      );
+      // Supprimer le compte utilisateur s'il existe (il peut être dans un lot non encore chargé)
+      const sameEmail = u => u.email?.toLowerCase() === clientToDelete.email?.toLowerCase();
+      const registeredUser = registeredUsers.find(sameEmail)
+        || (hasNextPage ? (await ensureAllUsers()).find(sameEmail) : undefined);
       if (registeredUser) {
         await api.entities.User.delete(registeredUser.id);
       }
@@ -142,14 +212,16 @@ export default function Clients() {
       await Promise.all(
         appointments.map(apt => api.entities.Appointment.delete(apt.id))
       );
-      // Supprimer tous les comptes utilisateurs (sauf admins et barbers)
-      const clientUsers = registeredUsers.filter(u => u.role === 'user');
+      // Supprimer tous les comptes utilisateurs (sauf admins et barbers) : on charge
+      // d'abord tous les lots, sinon seuls les comptes affichés seraient supprimés
+      const allUsers = await ensureAllUsers();
+      const removed = buildClients(allUsers, appointments, employees).length;
       await Promise.all(
-        clientUsers.map(u => api.entities.User.delete(u.id))
+        allUsers.filter(u => u.role === 'user').map(u => api.entities.User.delete(u.id))
       );
       queryClient.invalidateQueries({ queryKey: ['allAppointments'] });
       queryClient.invalidateQueries({ queryKey: ['registeredUsers'] });
-      toast.success(`${clients.length} client(s) supprimé(s)`);
+      toast.success(`${removed} client(s) supprimé(s)`);
     } catch (err) {
       toast.error('Erreur lors de la suppression des clients');
     } finally {
@@ -163,12 +235,14 @@ export default function Clients() {
       toast.error('L\'email est obligatoire');
       return;
     }
-    if (clients.some(c => c.email?.toLowerCase() === newClient.email.trim().toLowerCase())) {
-      toast.error('Ce client existe déjà');
-      return;
-    }
     setSaving(true);
     try {
+      // Doublon : on vérifie sur toute la base, pas seulement sur les comptes déjà chargés
+      const allClients = buildClients(await ensureAllUsers(), appointments, employees);
+      if (allClients.some(c => c.email?.toLowerCase() === newClient.email.trim().toLowerCase())) {
+        toast.error('Ce client existe déjà');
+        return;
+      }
       const emp = employees[0] || {};
       await api.entities.Appointment.create({
         client_name: newClient.name.trim(),
@@ -195,8 +269,23 @@ export default function Clients() {
     }
   };
 
-  const handleExportJSON = () => {
-    const data = clients.map(c => ({
+  // Les exports portent sur toute la base : on complète d'abord les lots de comptes
+  const handleExportCSV = async () => {
+    const allClients = buildClients(await ensureAllUsers(), appointments, employees);
+    exportToCSV(allClients.map(c => ({
+      nom: c.name,
+      email: c.email,
+      telephone: c.phone || '',
+      visites: c.visits,
+      depense_eur: c.totalSpent,
+      no_shows: c.noShows,
+      derniere_visite: c.lastVisit || '',
+    })), 'clients');
+  };
+
+  const handleExportJSON = async () => {
+    const allClients = buildClients(await ensureAllUsers(), appointments, employees);
+    const data = allClients.map(c => ({
       nom: c.name,
       email: c.email,
       telephone: c.phone || '',
@@ -259,8 +348,9 @@ export default function Clients() {
           return;
         }
 
-        // Filter out clients that already exist
-        const existingEmails = new Set(clients.map(c => c.email.toLowerCase()));
+        // Filter out clients that already exist (sur toute la base, pas sur les lots chargés)
+        const allClients = buildClients(await ensureAllUsers(), appointments, employees);
+        const existingEmails = new Set(allClients.map(c => c.email.toLowerCase()));
         const newClients = importedClients.filter(
           c => c.email && !existingEmails.has(c.email.toLowerCase())
         );
@@ -307,7 +397,9 @@ export default function Clients() {
         <div className="shrink-0">
           <p className="text-[11px] uppercase tracking-[0.2em] text-primary font-medium mb-1">CRM</p>
           <h1 className="font-display text-2xl font-bold">Clients</h1>
-          <p className="text-xs text-muted-foreground mt-1">{clients.length} clients enregistrés</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            {clients.length}{hasNextPage ? '+' : ''} clients enregistrés
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 justify-end">
           <input
@@ -332,7 +424,7 @@ export default function Clients() {
             <Upload className="w-3.5 h-3.5" /> Importer
           </Button>
           <Button variant="outline" size="sm" className="border-border gap-1.5"
-            onClick={() => exportToCSV(clients.map(c => ({ nom: c.name, email: c.email, telephone: c.phone || '', visites: c.visits, depense_eur: c.totalSpent, no_shows: c.noShows, derniere_visite: c.lastVisit || '' })), 'clients')}>
+            onClick={handleExportCSV}>
             <Download className="w-3.5 h-3.5" /> CSV
           </Button>
           <Button variant="outline" size="sm" className="border-border gap-1.5"
@@ -349,19 +441,25 @@ export default function Clients() {
         className="bg-card border-border mb-4"
       />
 
+      {search.trim() && hasNextPage && (
+        <p className="text-[11px] text-muted-foreground -mt-3 mb-3">
+          Chargement des comptes restants pour chercher dans toute la base...
+        </p>
+      )}
+
       <div className="space-y-2">
-        {filtered.map((client, i) => (
+        {visibleClients.map((client, i) => (
           <motion.div
             key={client.email}
             initial={{ opacity: 0, y: 5 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.02 }}
+            transition={{ delay: Math.min(i, 20) * 0.02 }}
             className="bg-card border border-border rounded-xl p-4"
           >
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 overflow-hidden">
                 {client.photo_url ? (
-                  <img src={client.photo_url} alt="" className="w-full h-full object-cover" />
+                  <img src={client.photo_url} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover" />
                 ) : (
                   <span className="text-sm font-bold text-primary">{client.name?.charAt(0) || '?'}</span>
                 )}
@@ -399,9 +497,24 @@ export default function Clients() {
         ))}
       </div>
 
+      {/* Affichage progressif : d'abord les fiches déjà chargées, puis le lot de comptes suivant */}
+      {filtered.length > 0 && (canShowMore || hasNextPage) && (
+        <div className="flex justify-center py-5">
+          <Button
+            variant="outline"
+            size="sm"
+            className="border-border"
+            disabled={isFetchingNextPage}
+            onClick={() => (canShowMore ? setVisibleCount(v => v + ROWS_STEP) : fetchNextPage())}
+          >
+            {isFetchingNextPage ? 'Chargement...' : `Afficher plus (${visibleClients.length}/${filtered.length}${hasNextPage ? '+' : ''})`}
+          </Button>
+        </div>
+      )}
+
       {filtered.length === 0 && (
         <div className="text-center py-16 text-muted-foreground text-sm">
-          Aucun client trouvé
+          {search.trim() && hasNextPage ? 'Recherche dans tous les comptes...' : 'Aucun client trouvé'}
         </div>
       )}
 
@@ -450,7 +563,7 @@ export default function Clients() {
           <AlertDialogHeader>
             <AlertDialogTitle>Supprimer tous les clients</AlertDialogTitle>
             <AlertDialogDescription>
-              Êtes-vous sûr de vouloir supprimer <strong>tous les {clients.length} clients</strong> ?
+              Êtes-vous sûr de vouloir supprimer <strong>tous les {clients.length}{hasNextPage ? '+' : ''} clients</strong> ?
               Tous les rendez-vous ({appointments.length}) seront également supprimés. Cette action est irréversible.
             </AlertDialogDescription>
           </AlertDialogHeader>

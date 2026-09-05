@@ -38,15 +38,33 @@ function reducer(state, action) {
   }
 }
 
+// Les comptes ne sont chargés que si le barber cherche vraiment un client, et par lots :
+// le serveur renvoie la photo de profil de chaque compte dans la liste.
+const USERS_PAGE_SIZE = 200;
+const USERS_MAX_PAGES = 25; // garde-fou : 5 000 comptes
+
+async function fetchUsersForSearch() {
+  const all = [];
+  for (let i = 0; i < USERS_MAX_PAGES; i++) {
+    const page = await api.entities.User.list('full_name', USERS_PAGE_SIZE, i * USERS_PAGE_SIZE);
+    all.push(...page);
+    if (page.length < USERS_PAGE_SIZE) break;
+  }
+  return all;
+}
+
 function ModalInner({ appointment, onUpdate, onDelete }) {
   const [state, dispatch] = useReducer(reducer, appointment, initialState);
   const [clientSearch, setClientSearch] = React.useState('');
   const [assignedClient, setAssignedClient] = React.useState(null);
   const isLastMinute = appointment.status === 'last_minute';
+  const isCompleted = appointment.status === 'completed';
 
+  // Le catalogue produits ne sert qu'à la validation : inutile sur une prestation déjà terminée
   const { data: products = [] } = useQuery({
     queryKey: ['products'],
     queryFn: () => api.entities.Product.filter({ is_active: true }, 'name', 100),
+    enabled: !isCompleted,
   });
 
   const { data: allServices = [] } = useQuery({
@@ -57,18 +75,21 @@ function ModalInner({ appointment, onUpdate, onDelete }) {
 
   const [selectedServices, setSelectedServices] = React.useState([]);
 
-  const { data: allUsers = [] } = useQuery({
+  // Chargement à la première recherche seulement (2 caractères) : ouvrir une fiche
+  // ne télécharge plus aucun compte. Le résultat est mis en cache pour la session.
+  const searchActive = clientSearch.trim().length >= 2;
+  const { data: allUsers = [], isFetching: usersFetching } = useQuery({
     queryKey: ['allUsersForSearch'],
-    queryFn: () => api.entities.User.list('full_name', 1000),
-    enabled: !appointment.client_email && appointment.status !== 'completed',
+    queryFn: fetchUsersForSearch,
+    enabled: searchActive && !appointment.client_email && !isCompleted,
+    staleTime: 5 * 60 * 1000,
   });
 
-  const filteredUsers = clientSearch.length >= 2
+  const filteredUsers = searchActive
     ? allUsers.filter(u => u.full_name?.toLowerCase().includes(clientSearch.toLowerCase()) || u.email?.toLowerCase().includes(clientSearch.toLowerCase()))
     : [];
 
   const status = statusLabel[appointment.status] || statusLabel.confirmed;
-  const isCompleted = appointment.status === 'completed';
   const tipValue = isCompleted ? (appointment.tip || 0) : (parseFloat(state.tip) || 0);
   const prodValue = isCompleted ? (appointment.product_price || 0) : (parseFloat(state.productPrice) || 0);
   const manualServiceTotal = selectedServices.reduce((sum, s) => sum + (s.price || 0), 0);
@@ -174,7 +195,10 @@ function ModalInner({ appointment, onUpdate, onDelete }) {
               ))}
             </div>
           )}
-          {clientSearch.length >= 2 && filteredUsers.length === 0 && (
+          {searchActive && usersFetching && (
+            <p className="text-[11px] text-muted-foreground text-center py-1">Recherche...</p>
+          )}
+          {searchActive && !usersFetching && filteredUsers.length === 0 && (
             <p className="text-[11px] text-muted-foreground text-center py-1">Aucun client trouvé</p>
           )}
           {/* Walk-in: manual name/phone for last minute */}

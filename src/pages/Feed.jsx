@@ -1,6 +1,6 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { api } from '@/api/apiClient';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { motion, AnimatePresence, useScroll, useTransform } from 'framer-motion';
 import { Send, Heart, Trash2, Loader2, Camera, MessageCircle, Plus, X, MoreHorizontal, Flag, Ban, ShieldAlert, Check } from 'lucide-react';
@@ -28,10 +28,41 @@ function getRoleBadge(role) {
   return null;
 }
 
+// 20 publications par page : le fil en chargeait 100 d'un coup (des dizaines de Mo d'images)
+const POSTS_PAGE_SIZE = 20;
+// Le filtre `post_id IN (...)` part dans l'URL : on le découpe pour ne pas fabriquer
+// une adresse démesurée quand beaucoup de pages sont affichées
+const ID_CHUNK = 60;
+
+/** Réactions / commentaires des seules publications affichées */
+async function fetchForPosts(entity, postIds, sort, perPost) {
+  const groups = [];
+  for (let i = 0; i < postIds.length; i += ID_CHUNK) groups.push(postIds.slice(i, i + ID_CHUNK));
+  const results = await Promise.all(
+    groups.map(ids => entity.filter({ post_id: ids }, sort, Math.min(2000, ids.length * perPost)))
+  );
+  return results.flat();
+}
+
+/**
+ * Le serveur ne renvoie plus l'email des auteurs aux clients : les publications et les
+ * commentaires portent `author_key` (les réactions `user_key`), et chacun reçoit la sienne
+ * dans `user.public_key` via /me. On compare d'abord les clés, et on retombe sur l'email
+ * pour le staff (qui le reçoit toujours) et pour d'anciennes réponses encore en cache.
+ */
+function isMine(row, user, keyField = 'author_key', emailField = 'author_email') {
+  if (!row || !user) return false;
+  const key = row[keyField];
+  if (key && user.public_key) return key === user.public_key;
+  const email = row[emailField];
+  if (!email || !user.email) return false;
+  return String(email).toLowerCase() === String(user.email).toLowerCase();
+}
+
 function CommentItem({ comment, currentUser, onDelete, onOpenMenu }) {
   const badge = getRoleBadge(comment.author_role);
   const initials = comment.author_name?.split(' ').map(n => n[0]).join('').slice(0, 2) || '?';
-  const isOwner = currentUser?.role === 'admin' || (!!currentUser?.email && currentUser.email === comment.author_email);
+  const isOwner = currentUser?.role === 'admin' || isMine(comment, currentUser);
 
   return (
     <motion.div
@@ -41,7 +72,7 @@ function CommentItem({ comment, currentUser, onDelete, onOpenMenu }) {
     >
       <div className="w-7 h-7 rounded-full overflow-hidden bg-secondary border border-border flex items-center justify-center flex-shrink-0">
         {comment.author_photo_url ? (
-          <img src={comment.author_photo_url} alt="" className="w-full h-full object-cover" />
+          <img src={comment.author_photo_url} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover" />
         ) : (
           <span className="text-[10px] font-bold text-muted-foreground">{initials}</span>
         )}
@@ -67,7 +98,7 @@ function CommentItem({ comment, currentUser, onDelete, onOpenMenu }) {
           )}
           {!isOwner && currentUser && (
             <button
-              onClick={() => onOpenMenu({ type: 'comment', id: comment.id, authorEmail: comment.author_email, authorName: comment.author_name, content: comment.content })}
+              onClick={() => onOpenMenu({ type: 'comment', id: comment.id, authorKey: comment.author_key, authorEmail: comment.author_email, authorName: comment.author_name, content: comment.content })}
               className="text-[10px] text-muted-foreground hover:text-amber-400 transition-colors"
             >
               Signaler
@@ -167,7 +198,7 @@ function PostCard({ post, currentUser, onLike, onDelete, likes, comments, onComm
   const [heartPop, setHeartPop] = useState(null);
 
   const postLikes = likes.filter(l => l.post_id === post.id);
-  const userLike = currentUser?.email ? postLikes.find(l => l.user_email === currentUser.email) : undefined;
+  const userLike = currentUser ? postLikes.find(l => isMine(l, currentUser, 'user_key', 'user_email')) : undefined;
   const likeCount = postLikes.length;
 
   // Group reactions by emoji
@@ -180,7 +211,7 @@ function PostCard({ post, currentUser, onLike, onDelete, likes, comments, onComm
   const commentCount = postComments.length;
   const badge = getRoleBadge(post.author_role);
   const initials = post.author_name?.split(' ').map(n => n[0]).join('').slice(0, 2) || '?';
-  const isOwner = currentUser?.role === 'admin' || (!!currentUser?.email && currentUser.email === post.author_email);
+  const isOwner = currentUser?.role === 'admin' || isMine(post, currentUser);
 
   const react = (emoji) => {
     setBurst({ emoji, key: Date.now() });
@@ -215,7 +246,7 @@ function PostCard({ post, currentUser, onLike, onDelete, likes, comments, onComm
       <div className="flex items-center gap-3 p-4 pb-2">
         <div className="w-10 h-10 rounded-full overflow-hidden bg-secondary border border-border flex items-center justify-center flex-shrink-0">
           {post.author_photo_url ? (
-            <img src={post.author_photo_url} alt="" className="w-full h-full object-cover" />
+            <img src={post.author_photo_url} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover" />
           ) : (
             <span className="text-sm font-bold text-muted-foreground">{initials}</span>
           )}
@@ -237,7 +268,7 @@ function PostCard({ post, currentUser, onLike, onDelete, likes, comments, onComm
           </button>
         ) : currentUser ? (
           <button
-            onClick={() => onOpenMenu({ type: 'post', id: post.id, authorEmail: post.author_email, authorName: post.author_name, content: post.content })}
+            onClick={() => onOpenMenu({ type: 'post', id: post.id, authorKey: post.author_key, authorEmail: post.author_email, authorName: post.author_name, content: post.content })}
             className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground/60 hover:text-foreground hover:bg-secondary transition-colors"
             aria-label="Signaler ou bloquer"
           >
@@ -255,7 +286,7 @@ function PostCard({ post, currentUser, onLike, onDelete, likes, comments, onComm
       {post.image_url && (
         <div className="px-4 pb-3">
           <div className="relative w-full rounded-xl overflow-hidden select-none" style={{ aspectRatio: '4/5' }} onDoubleClick={handleImageDoubleTap}>
-            <img src={post.image_url} alt="" draggable={false} className="absolute inset-0 w-full h-full object-cover" />
+            <img src={post.image_url} alt="" draggable={false} loading="lazy" decoding="async" className="absolute inset-0 w-full h-full object-cover" />
             <AnimatePresence>
               {heartPop && (
                 <motion.span
@@ -416,7 +447,7 @@ function PostCard({ post, currentUser, onLike, onDelete, likes, comments, onComm
 }
 
 export default function Feed() {
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const queryClient = useQueryClient();
   const [content, setContent] = useState('');
   const [imageUrl, setImageUrl] = useState('');
@@ -435,19 +466,42 @@ export default function Feed() {
   const [blocking, setBlocking] = useState(false);
   const [handlingReport, setHandlingReport] = useState(null);
 
-  const { data: posts = [], isLoading } = useQuery({
+  // Défilement infini : 20 publications par page (`skip` = OFFSET côté serveur).
+  // À la création ou à la suppression d'une publication les offsets bougent :
+  // invalider ['posts'] recharge toutes les pages déjà affichées, donc le fil reste cohérent.
+  const {
+    data: postsPages,
+    isLoading,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
     queryKey: ['posts'],
-    queryFn: () => api.entities.Post.list('-created_at', 100),
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) => api.entities.Post.list('-created_at', POSTS_PAGE_SIZE, pageParam),
+    getNextPageParam: (lastPage, allPages) =>
+      (lastPage?.length || 0) < POSTS_PAGE_SIZE ? undefined : allPages.length * POSTS_PAGE_SIZE,
   });
 
+  const posts = useMemo(() => postsPages?.pages.flat() ?? [], [postsPages]);
+
+  // Réactions et commentaires : uniquement ceux des publications affichées (post_id IN (...)),
+  // au lieu des 500 derniers du salon. La clé contient les ids pour que le cache suive les pages.
+  const postIds = useMemo(() => posts.map(p => p.id), [posts]);
+  const postIdsKey = postIds.join(',');
+
   const { data: likes = [] } = useQuery({
-    queryKey: ['postLikes'],
-    queryFn: () => api.entities.PostLike.list('-created_at', 500),
+    queryKey: ['postLikes', postIdsKey],
+    queryFn: () => fetchForPosts(api.entities.PostLike, postIds, '-created_at', 30),
+    enabled: postIds.length > 0,
+    placeholderData: (prev) => prev,
   });
 
   const { data: comments = [] } = useQuery({
-    queryKey: ['postComments'],
-    queryFn: () => api.entities.PostComment.list('created_at', 500),
+    queryKey: ['postComments', postIdsKey],
+    queryFn: () => fetchForPosts(api.entities.PostComment, postIds, 'created_at', 25),
+    enabled: postIds.length > 0,
+    placeholderData: (prev) => prev,
   });
 
   const { data: employees = [] } = useQuery({
@@ -470,10 +524,40 @@ export default function Feed() {
     enabled: user?.role === 'admin',
   });
 
-  const blockedEmails = new Set(blocks.map(b => (b.blocked_email || '').toLowerCase()));
-  const isBlocked = (email) => blockedEmails.has((email || '').toLowerCase());
-  const visiblePosts = posts.filter(p => !isBlocked(p.author_email));
-  const visibleComments = comments.filter(c => !isBlocked(c.author_email));
+  // Les blocages portent désormais sur la clé publique (l'email n'est plus renvoyé aux clients),
+  // mais on garde la comparaison par email pour le staff et les blocages déjà enregistrés.
+  const blockedKeys = new Set(blocks.map(b => b.blocked_key).filter(Boolean));
+  const blockedEmails = new Set(blocks.map(b => (b.blocked_email || '').toLowerCase()).filter(Boolean));
+  const isBlocked = (row) =>
+    (!!row.author_key && blockedKeys.has(row.author_key)) ||
+    (!!row.author_email && blockedEmails.has(String(row.author_email).toLowerCase()));
+  const visiblePosts = posts.filter(p => !isBlocked(p));
+  const visibleComments = comments.filter(c => !isBlocked(c));
+
+  // La clé publique arrive par /me : si l'objet utilisateur ne l'a pas encore
+  // (inscription, session ouverte avant le déploiement), on le rafraîchit une fois.
+  const keyRefreshed = useRef(false);
+  useEffect(() => {
+    if (user && !user.public_key && !keyRefreshed.current && refreshUser) {
+      keyRefreshed.current = true;
+      refreshUser();
+    }
+  }, [user, refreshUser]);
+
+  // Défilement infini : on charge la page suivante quand la sentinelle approche du viewport
+  const loadMoreRef = useRef(null);
+  useEffect(() => {
+    const el = loadMoreRef.current;
+    if (!el || !hasNextPage || typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting && !isFetchingNextPage) fetchNextPage();
+      },
+      { rootMargin: '400px' }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   const getAuthorPhoto = () => {
     if (user?.role === 'barber' || user?.role === 'admin') {
@@ -523,7 +607,7 @@ export default function Feed() {
   const handleLike = async (postId, alreadyLiked, reaction = '❤️') => {
     try {
       if (alreadyLiked) {
-        const like = likes.find(l => l.post_id === postId && l.user_email === user.email);
+        const like = likes.find(l => l.post_id === postId && isMine(l, user, 'user_key', 'user_email'));
         if (like) await api.entities.PostLike.delete(like.id);
       } else {
         await api.entities.PostLike.create({ post_id: postId, user_email: user.email, reaction });
@@ -598,9 +682,21 @@ export default function Feed() {
 
   const confirmBlock = async () => {
     if (!blockTarget) return;
+    // On bloque sur la clé publique de l'auteur ; l'email ne sert plus que de repli
+    // (staff, ou contenu venant d'une réponse mise en cache avant le déploiement).
+    const payload = blockTarget.key
+      ? { blocked_key: blockTarget.key, blocked_name: blockTarget.name }
+      : blockTarget.email
+        ? { blocked_email: blockTarget.email, blocked_name: blockTarget.name }
+        : null;
+    if (!payload) {
+      toast.error('Impossible de bloquer cet utilisateur');
+      setBlockTarget(null);
+      return;
+    }
     setBlocking(true);
     try {
-      await api.entities.UserBlock.create({ blocked_email: blockTarget.email, blocked_name: blockTarget.name });
+      await api.entities.UserBlock.create(payload);
       queryClient.invalidateQueries({ queryKey: ['userBlocks'] });
       queryClient.invalidateQueries({ queryKey: ['posts'] });
       queryClient.invalidateQueries({ queryKey: ['postComments'] });
@@ -829,7 +925,7 @@ export default function Feed() {
                 Signaler {menuTarget.type === 'comment' ? 'ce commentaire' : 'cette publication'}
               </button>
               <button
-                onClick={() => { setMenuTarget(null); setBlockTarget({ email: menuTarget.authorEmail, name: menuTarget.authorName }); }}
+                onClick={() => { setMenuTarget(null); setBlockTarget({ key: menuTarget.authorKey, email: menuTarget.authorEmail, name: menuTarget.authorName }); }}
                 className="flex items-center gap-3 w-full px-4 py-3.5 mt-2 rounded-xl bg-secondary/60 hover:bg-secondary text-sm font-semibold text-red-400 transition-colors"
               >
                 <Ban className="w-4 h-4" />
@@ -963,7 +1059,7 @@ export default function Feed() {
         <div className="flex justify-center py-12">
           <Loader2 className="w-6 h-6 animate-spin text-primary" />
         </div>
-      ) : visiblePosts.length === 0 ? (
+      ) : visiblePosts.length === 0 && !hasNextPage ? (
         <div className="text-center py-16">
           <MessageCircle className="w-12 h-12 text-muted-foreground/20 mx-auto mb-3" />
           <p className="text-sm text-muted-foreground">Aucune publication pour le moment</p>
@@ -989,6 +1085,22 @@ export default function Feed() {
               </GlassCard>
             ))}
           </AnimatePresence>
+
+          {/* Sentinelle du défilement infini (+ bouton de repli si l'observateur ne se déclenche pas) */}
+          {hasNextPage && (
+            <div ref={loadMoreRef} className="flex justify-center py-4">
+              {isFetchingNextPage ? (
+                <Loader2 className="w-5 h-5 animate-spin text-primary" />
+              ) : (
+                <button
+                  onClick={() => fetchNextPage()}
+                  className="text-xs font-semibold text-muted-foreground hover:text-primary transition-colors px-4 py-2 rounded-full bg-secondary/60"
+                >
+                  Voir plus
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

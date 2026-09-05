@@ -28,6 +28,15 @@ export default function Settings() {
     enabled: !!user,
   });
 
+  // Un blocage porte sur la clé publique du membre : l'email n'est plus renvoyé aux clients.
+  // On affiche donc le nom, et l'email seulement quand il est présent (staff, anciens blocages).
+  const blockedLabel = (b) => b.blocked_name || b.blocked_email || 'Utilisateur';
+  const blockedSubLabel = (b) => {
+    if (b.blocked_email) return b.blocked_email;
+    if (!b.created_at) return 'Membre bloqué';
+    return `Bloqué le ${new Date(b.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })}`;
+  };
+
   const unblock = async (b) => {
     setUnblocking(b.id);
     try {
@@ -35,7 +44,7 @@ export default function Settings() {
       queryClient.invalidateQueries({ queryKey: ['userBlocks'] });
       queryClient.invalidateQueries({ queryKey: ['posts'] });
       queryClient.invalidateQueries({ queryKey: ['postComments'] });
-      toast.success(`${b.blocked_name || b.blocked_email} débloqué`);
+      toast.success(`${blockedLabel(b)} débloqué`);
     } catch (err) {
       toast.error(err?.message || 'Erreur lors du déblocage');
     } finally {
@@ -221,8 +230,8 @@ export default function Settings() {
                     <Ban className="w-4 h-4 text-red-400" />
                   </div>
                   <div className="min-w-0">
-                    <p className="text-sm font-semibold text-foreground truncate">{b.blocked_name || b.blocked_email}</p>
-                    <p className="text-[11px] text-muted-foreground truncate">{b.blocked_email}</p>
+                    <p className="text-sm font-semibold text-foreground truncate">{blockedLabel(b)}</p>
+                    <p className="text-[11px] text-muted-foreground truncate">{blockedSubLabel(b)}</p>
                   </div>
                 </div>
                 <button

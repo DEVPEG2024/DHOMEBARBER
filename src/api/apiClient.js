@@ -2,8 +2,8 @@
  * D'Home Barber API client.
  *
  * Exposes the interface used across the app:
- *   api.entities.<Entity>.list(sort, limit)
- *   api.entities.<Entity>.filter(query, sort, limit)
+ *   api.entities.<Entity>.list(sort, limit, skip)
+ *   api.entities.<Entity>.filter(query, sort, limit, skip)
  *   api.entities.<Entity>.create(data)
  *   api.entities.<Entity>.update(id, data)
  *   api.entities.<Entity>.delete(id)
@@ -74,26 +74,31 @@ function createEntityHandler(entityName) {
 
   return {
     /**
-     * list(sort?, limit?)
-     * GET /entities/:name?sort=X&limit=N
+     * list(sort?, limit?, skip?)
+     * GET /entities/:name?sort=X&limit=N&skip=M
+     * `skip` (OFFSET côté serveur) sert à la pagination : on ne rapatrie
+     * plus des listes entières (le fil et les écrans admin chargeaient
+     * des centaines de lignes avec leurs images).
      */
-    async list(sort, limit) {
+    async list(sort, limit, skip) {
       const params = new URLSearchParams();
       if (sort) params.set('sort', sort);
       if (limit != null) params.set('limit', String(limit));
+      if (skip) params.set('skip', String(skip));
       const qs = params.toString();
       return request('GET', qs ? `${base}?${qs}` : base);
     },
 
     /**
-     * filter(query, sort?, limit?)
-     * GET /entities/:name?q=JSON&sort=X&limit=N
+     * filter(query, sort?, limit?, skip?)
+     * GET /entities/:name?q=JSON&sort=X&limit=N&skip=M
      */
-    async filter(query, sort, limit) {
+    async filter(query, sort, limit, skip) {
       const params = new URLSearchParams();
       if (query) params.set('q', JSON.stringify(query));
       if (sort) params.set('sort', sort);
       if (limit != null) params.set('limit', String(limit));
+      if (skip) params.set('skip', String(skip));
       const qs = params.toString();
       return request('GET', qs ? `${base}?${qs}` : base);
     },

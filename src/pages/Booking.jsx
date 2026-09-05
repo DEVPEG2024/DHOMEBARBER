@@ -63,6 +63,19 @@ function generateTimeSlots(start, end, interval = 30) {
  * @param {number} totalDuration  durée totale des prestations en minutes
  * @returns {string[]} heures `HH:mm` triées
  */
+/** Date du jour au salon (heure de Paris), 'yyyy-MM-dd' — l'appareil du client peut être ailleurs. */
+function parisDateNow(now = new Date()) {
+  const p = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit' });
+  return p.format(now);
+}
+
+/** Minutes écoulées depuis minuit, heure de Paris. */
+function parisMinutesNow(now = new Date()) {
+  const p = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit', hour12: false });
+  const [h, m] = p.format(now).split(':').map(Number);
+  return h * 60 + m;
+}
+
 function computeSlots(employee, date, appointmentsOfEmployee, timeOffs, totalDuration) {
   if (!employee || !date) return [];
   const dateStr = format(date, 'yyyy-MM-dd');
@@ -83,10 +96,14 @@ function computeSlots(employee, date, appointmentsOfEmployee, timeOffs, totalDur
       const [bh, bm] = apt.end_time.split(':').map(Number);
       return [ah * 60 + am, bh * 60 + bm];
     });
+  // Aujourd'hui, les créneaux déjà passés sont retirés : le serveur les refuse
+  // (« Ce créneau est déjà passé »), les afficher mènerait droit à une erreur.
+  const minutesNow = dateStr === parisDateNow() ? parisMinutesNow() : -1;
   return generateTimeSlots(hours.start || '09:00', hours.end || '19:00', 30).filter(slot => {
     const [sh, sm] = slot.split(':').map(Number);
     const slotStart = sh * 60 + sm;
     const slotEnd = slotStart + totalDuration;
+    if (slotStart < minutesNow) return false;
     return !busy.some(([aptStart, aptEnd]) => slotStart < aptEnd && slotEnd > aptStart);
   });
 }
