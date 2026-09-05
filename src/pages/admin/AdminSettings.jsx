@@ -244,6 +244,27 @@ export default function AdminSettings() {
           </div>
         </div>
 
+        {/* Fonctionnalités */}
+        <div className="bg-card border border-border rounded-xl p-5">
+          <h3 className="text-sm font-semibold mb-4">Fonctionnalités</h3>
+          <div className="space-y-4">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <Label className="text-xs">Filtres Snap</Label>
+                <p className="text-[11px] text-muted-foreground mt-1 max-w-md">
+                  Affiche « Nouvelle tête » sur l'accueil et donne accès aux lentilles Snapchat.
+                  Laissez éteint tant que vos lentilles ne produisent pas d'effet visible : la carte
+                  disparaît de l'accueil et la caméra n'est jamais demandée.
+                </p>
+              </div>
+              <Switch
+                checked={settings.snap_lenses_enabled === true}
+                onCheckedChange={v => setSettings({ ...settings, snap_lenses_enabled: v })}
+              />
+            </div>
+          </div>
+        </div>
+
         {/* Social */}
         <div className="bg-card border border-border rounded-xl p-5">
           <h3 className="text-sm font-semibold mb-4">Réseaux sociaux</h3>

@@ -12,6 +12,7 @@ import { BARBER_PHOTO_ASPECT, BARBER_PHOTO_BG } from '@/lib/barberPhoto';
 import { barberPhotoLayoutId } from '@/components/shared/BarberCard';
 import RebookCard from '@/components/home/RebookCard';
 import OpenStatusBadge from '@/components/home/OpenStatusBadge';
+import { snapFeatureEnabled } from '@/lib/snapLenses';
 
 const IS_MOBILE = typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
@@ -303,6 +304,16 @@ export default function Home() {
   const [showHours, setShowHours] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [sectionOrder, setSectionOrder] = useState(DEFAULT_SECTION_ORDER);
+  // Filtres Snap : allumés par l'admin dans Paramètres du salon (et seulement si Camera Kit est
+  // configuré côté serveur). Tant qu'on ne sait pas, on n'affiche pas la carte : mieux vaut
+  // qu'elle apparaisse une seconde plus tard que de mener à « bientôt disponibles ».
+  const [snapEnabled, setSnapEnabled] = useState(null);
+
+  useEffect(() => {
+    let alive = true;
+    snapFeatureEnabled().then((on) => { if (alive) setSnapEnabled(on); });
+    return () => { alive = false; };
+  }, []);
   const [saving, setSaving] = useState(false);
   const { user } = useAuth();
   const { playing: musicPlaying, toggle: toggleMusic } = useMusic();
@@ -435,6 +446,9 @@ export default function Home() {
         );
 
       case 'try-on':
+        // En mode édition l'admin garde la carte sous les yeux pour la positionner,
+        // même si la fonctionnalité est éteinte pour les clients.
+        if (!snapEnabled && !editMode) return null;
         return (
           <Link to="/snap">
             <motion.div whileTap={{ scale: 0.98 }} className="relative overflow-hidden rounded-3xl cursor-pointer group glass p-5">
