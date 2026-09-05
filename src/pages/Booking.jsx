@@ -113,10 +113,15 @@ function computeSlots(employee, date, appointmentsOfEmployee, timeOffs, totalDur
   // passé »), les afficher mènerait droit à une erreur. La comparaison se fait sur l'instant
   // réel, donc elle reste juste quel que soit le fuseau de l'appareil.
   const nowMs = Date.now();
+  // La prestation doit tenir avant la fermeture : un créneau qui déborde faisait finir le
+  // barber après son horaire. Le serveur applique la même règle et refuse le cas échéant.
+  const [ch, cm] = (hours.end || '19:00').split(':').map(Number);
+  const closeMinutes = ch * 60 + cm;
   return generateTimeSlots(hours.start || '09:00', hours.end || '19:00', 30).filter(slot => {
     const [sh, sm] = slot.split(':').map(Number);
     const slotStart = sh * 60 + sm;
     const slotEnd = slotStart + totalDuration;
+    if (slotEnd > closeMinutes) return false;
     if (parisInstant(dateStr, slot) < nowMs) return false;
     return !busy.some(([aptStart, aptEnd]) => slotStart < aptEnd && slotEnd > aptStart);
   });
@@ -862,6 +867,15 @@ export default function Booking() {
                   ) : (
                     <div className="backdrop-blur-xl bg-white/5 border border-white/10 rounded-2xl p-8 text-center">
                       <p className="text-sm text-muted-foreground">Aucun créneau disponible ce jour{anyBarber ? ', quel que soit le barber' : ''}</p>
+                      {/* Une sélection longue peut ne plus tenir avant la fermeture : le dire,
+                          plutôt que de laisser croire que la journée est complète. */}
+                      {totalDuration > 30 && (
+                        <p className="mt-2 text-xs text-muted-foreground/80">
+                          Vos prestations durent {totalDuration >= 60
+                            ? `${Math.floor(totalDuration / 60)} h${totalDuration % 60 ? String(totalDuration % 60).padStart(2, '0') : ''}`
+                            : `${totalDuration} min`} : essayez une autre date, ou retirez une prestation.
+                        </p>
+                      )}
                     </div>
                   )}
                 </motion.div>
