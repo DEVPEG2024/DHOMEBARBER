@@ -237,6 +237,17 @@ Rapport complet : https://claude.ai/code/artifact/406820a6-13b7-43f2-bd32-65cd3e
 - Divers : `requireStaff` ajouté et exporté ; historique de ménage et `toggle` réservés au staff (le contrôle de rôle arrivait après le `SELECT`, oracle d'existence) ; `SendEmail` échappe `subject` et `body` ; compteur WebSocket regroupé (une diffusion par seconde max) ; `qs` forcé en 6.16.0 par `overrides` (Express 4.22.2 épingle une version vulnérable) → `npm audit` : 0 vulnérabilité
 - **Restes connus** : pas de ramasse-miettes sur `media` (supprimer une publication laisse la ligne orpheline) ; `Clients.jsx` charge encore 1 000 RDV ; la recherche client complète la liste côté client faute d'opérateur `LIKE` dans `buildConditions` ; `POST /cleaning/notify-today` utilise la date UTC ; frontend `quill` et `react-router` restent en majeures non montées
 
+### Bugs déclenchables par l'utilisateur, corrigés le 5 septembre 2026 (backend v78, frontend 479dd6f)
+- **Ouvrir l'app sans réseau déconnectait définitivement** : `AuthContext.checkAuth` effaçait le jeton sur *toute* erreur, panne réseau comprise (métro, avion, sous-sol → mot de passe à retaper). Le jeton n'est plus effacé que sur un `401` / `403` du serveur ; hors ligne, la session est simplement inactive jusqu'au prochain lancement
+- **Session expirée en cours d'usage** : le JWT vit 24 h et n'était vérifié qu'au démarrage. Passé ce délai tout répondait 401 alors que l'interface se croyait connectée. `apiClient` émet `dhb:unauthorized` sur le premier 401 (hors routes `/auth/`, où un mot de passe erroné répond 401 aussi), `AuthContext` referme la session et renvoie vers `/login?expired=1`, où un message explique
+- **Réservation : message du serveur affiché** au lieu d'« Erreur lors de la création ». Le serveur refuse maintenant pour cinq raisons distinctes ; sur un `409` les créneaux sont rechargés et l'horaire désélectionné, sinon le client retentait le même en boucle
+- **Créneaux passés** : la comparaison se fait sur l'instant réel (`parisInstant` dans `Booking.jsx`, même calcul à deux passes que `parisToUtc` côté serveur), donc juste depuis n'importe quel fuseau
+- **Photo HEIC** : refusée avec le réglage iPhone à changer (Réglages → Appareil photo → Formats → « Le plus compatible »), au lieu du « Fichier non reconnu comme image » du serveur
+- **Apps natives déjà publiées** : leur bundle reconnaît ses contenus par l'email. Retirer sa réaction retombait sur une création, refusée par `UNIQUE(post_id, user_email)`. Le serveur renvoie de nouveau l'email **sur les lignes du demandeur uniquement** — ce n'est pas une fuite, c'est le sien — et elles refonctionnent sans nouveau build. `npm run cap:sync` a tout de même été fait
+- **Avis** : un rendez-vous passé et non annulé suffit désormais. Exiger `completed` faisait dépendre l'avis du bouton « Valider la prestation », que le salon n'utilise pas (0 RDV `completed` en base) : plus personne n'aurait pu publier
+- **Plafond de rendez-vous à venir** porté de 3 à 6 : une famille réserve depuis un seul compte
+- **Tests dans le dépôt** : `cd dhomebarber-api && npm test` — 7 harnais, 236 vérifications, sans dépendance ni accès à la base de production (le pool, `http2` et `fetch` sont remplacés avant le chargement du code testé)
+
 ### Types de données
 - Les colonnes `decimal` de PostgreSQL sont converties en nombres dans `normalizeRow()`
 - Les colonnes `date` sont converties en format `YYYY-MM-DD` (pas ISO timestamp)
