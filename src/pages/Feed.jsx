@@ -764,7 +764,7 @@ export default function Feed() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               className="fixed inset-0 z-[60] bg-black/60"
-              onClick={() => setShowComposer(false)}
+              aria-hidden="true"
             />
             <motion.div
               initial={{ y: '100%' }}
@@ -902,7 +902,7 @@ export default function Feed() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               className="fixed inset-0 z-[60] bg-black/60"
-              onClick={() => setMenuTarget(null)}
+              aria-hidden="true"
             />
             <motion.div
               initial={{ y: '100%' }}
@@ -948,7 +948,7 @@ export default function Feed() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               className="fixed inset-0 z-[60] bg-black/60"
-              onClick={() => !reportSending && setReportTarget(null)}
+              aria-hidden="true"
             />
             <motion.div
               initial={{ y: '100%' }}
@@ -1016,7 +1016,7 @@ export default function Feed() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               className="fixed inset-0 z-[60] bg-black/60"
-              onClick={() => !blocking && setBlockTarget(null)}
+              aria-hidden="true"
             />
             <div className="fixed inset-0 z-[60] flex items-center justify-center p-5 pointer-events-none">
               <motion.div

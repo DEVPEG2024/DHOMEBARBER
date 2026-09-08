@@ -868,7 +868,7 @@ export default function Home() {
 
       {/* Modal horaires */}
       {showHours && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-5" onClick={() => setShowHours(false)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-5">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
           <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.2 }}
             onClick={e => e.stopPropagation()} className="relative w-full max-w-sm rounded-3xl bg-card border border-border p-6 shadow-2xl">

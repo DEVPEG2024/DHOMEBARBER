@@ -289,7 +289,7 @@ export default function ConceptSheet({
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         className="fixed inset-0 z-[60] bg-black/65"
-        onClick={onClose}
+        aria-hidden="true"
       />
       <motion.div
         role="dialog"

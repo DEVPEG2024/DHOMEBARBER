@@ -366,7 +366,7 @@ export default function Shop() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               className="fixed inset-0 z-[60] bg-black/60"
-              onClick={closeCart}
+              aria-hidden="true"
             />
             <motion.div
               initial={{ y: '100%' }}

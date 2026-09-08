@@ -129,7 +129,7 @@ function ValidateModal({ card, onClose, onValidated }) {
   const StatusIcon = statusConf.icon;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
       <motion.div
         initial={{ opacity: 0, scale: 0.9 }}
@@ -461,7 +461,7 @@ function QRScannerModal({ onClose, onScanned }) {
   const handleClose = () => { stopCamera(); onClose(); };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center px-4 pb-4" onClick={handleClose}>
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center px-4 pb-4">
       <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
       <motion.div
         initial={{ opacity: 0, y: 40 }}
