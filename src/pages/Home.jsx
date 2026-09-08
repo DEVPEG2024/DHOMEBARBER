@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { Link } from 'react-router-dom';
 import { api } from '@/api/apiClient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { MapPin, Clock, Phone, Star, ArrowRight, Scissors, ShoppingBag, Newspaper, Sparkles, Gift, GripVertical, Pencil, Check, X, Volume2, VolumeX } from 'lucide-react';
+import { MapPin, Clock, Phone, Star, ArrowRight, Scissors, ShoppingBag, Newspaper, Sparkles, Gift, GripVertical, Pencil, Check, X, Volume2, VolumeX, Shirt } from 'lucide-react';
 import { motion, useMotionValue, useSpring, useTransform, Reorder } from 'framer-motion';
 import SectionHeader from '@/components/shared/SectionHeader';
 import StarRating from '@/components/shared/StarRating';
@@ -13,6 +13,8 @@ import { barberPhotoLayoutId } from '@/components/shared/BarberCard';
 import RebookCard from '@/components/home/RebookCard';
 import OpenStatusBadge from '@/components/home/OpenStatusBadge';
 import { snapFeatureEnabled } from '@/lib/snapLenses';
+import TextileHomeCard from '@/components/textile/TextileHomeCard';
+import { TEXTILE_QUERY_KEY, fetchTextileOverview } from '@/lib/textileApi';
 
 const IS_MOBILE = typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
@@ -286,7 +288,7 @@ function BarberMarquee({ employees }) {
   );
 }
 
-const DEFAULT_SECTION_ORDER = ['quick-info', 'barbers', 'try-on', 'news', 'services', 'shop', 'reviews', 'gift-card', 'cta'];
+const DEFAULT_SECTION_ORDER = ['quick-info', 'barbers', 'try-on', 'news', 'services', 'shop', 'textile', 'reviews', 'gift-card', 'cta'];
 
 const SECTION_LABELS = {
   'quick-info': 'Infos rapides',
@@ -294,6 +296,7 @@ const SECTION_LABELS = {
   'news': 'News Gang',
   'services': 'Prestations',
   'shop': 'Boutique',
+  'textile': 'Textile & Drops',
   'reviews': 'Avis Clients',
   'gift-card': 'Carte Cadeau',
   'try-on': 'Filtres Snap',
@@ -354,6 +357,19 @@ export default function Home() {
     staleTime: 5 * 60 * 1000, // catalogue : change rarement
     queryFn: () => api.entities.SalonSettings.list(),
   });
+
+  // Textile & drops : la section n'apparaît que s'il y a un drop annoncé / ouvert ou des
+  // pièces du Labo à faire voter (même requête que la page /textile, dédupliquée par React Query)
+  const { data: textile } = useQuery({
+    queryKey: TEXTILE_QUERY_KEY,
+    queryFn: fetchTextileOverview,
+    staleTime: 60 * 1000,
+  });
+  const textileVisible = useMemo(() => {
+    const drops = textile?.drops || [];
+    const concepts = textile?.concepts || [];
+    return drops.some(d => d.status === 'teasing' || d.status === 'live') || concepts.some(c => !c.drop_id && c.is_active !== false);
+  }, [textile]);
 
   const latestPost = posts[0] || null;
   const settings = settingsData[0] || null;
@@ -572,6 +588,23 @@ export default function Home() {
                 </Link>
               ))}
             </div>
+          </div>
+        );
+
+      case 'textile':
+        // En mode édition l'admin garde la section sous les yeux pour la positionner
+        if (!textileVisible && !editMode) return null;
+        return (
+          <div>
+            <SectionHeader title="DHB Textile" subtitle="Drops & concepts" linkTo="/textile" />
+            {textileVisible ? (
+              <TextileHomeCard />
+            ) : (
+              <div className="glass rounded-3xl p-5 text-center">
+                <Shirt className="w-6 h-6 text-muted-foreground/40 mx-auto mb-2" />
+                <p className="text-xs text-muted-foreground">Aucun drop annoncé ni pièce du Labo pour l'instant : la section reste cachée aux clients.</p>
+              </div>
+            )}
           </div>
         );
 

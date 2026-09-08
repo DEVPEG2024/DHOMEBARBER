@@ -2,7 +2,7 @@ import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { Outlet, Link, useLocation, Navigate } from 'react-router-dom';
 import {
   LayoutDashboard, Calendar, Users, Scissors, UserCircle,
-  BarChart3, Settings, Menu, X, ChevronLeft, ChevronDown, ShoppingBag, Star, Bell, Brain, Sun, Moon, ClipboardList, ShieldCheck, Sparkles, CalendarDays, Newspaper, Warehouse, PartyPopper, LogOut, Gift, GripVertical
+  BarChart3, Settings, Menu, X, ChevronLeft, ChevronDown, ShoppingBag, Star, Bell, Brain, Sun, Moon, ClipboardList, ShieldCheck, Sparkles, CalendarDays, Newspaper, Warehouse, PartyPopper, LogOut, Gift, GripVertical, Shirt
 } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { useTheme } from '@/lib/ThemeContext';
@@ -21,6 +21,8 @@ const allNavItems = [
   { path: '/admin/stock', icon: Warehouse, label: 'Stock Produits', perm: 'products', category: 'Commerce' },
   { path: '/admin/orders', icon: ClipboardList, label: 'Commandes', perm: 'orders', category: 'Commerce' },
   { path: '/admin/gift-cards', icon: Gift, label: 'Cartes Cadeau', adminOnly: true, category: 'Commerce' },
+  // Textile & drops : l'admin gère drops et pièces, un barber avec la permission produits suit les retraits
+  { path: '/admin/textile', icon: Shirt, label: 'Textile & Drops', perm: 'products', category: 'Commerce' },
   { path: '/admin/team', icon: Users, label: 'Équipe', perm: 'team', category: 'Équipe' },
   { path: '/admin/barber-accounts', icon: ShieldCheck, label: 'Comptes Barbers', adminOnly: true, category: 'Équipe' },
   { path: '/admin/leave', icon: CalendarDays, label: 'Congés', adminOnly: true, category: 'Équipe' },

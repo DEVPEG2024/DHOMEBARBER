@@ -36,6 +36,8 @@ import GiftCards from '@/pages/GiftCards';
 const TryOn = React.lazy(() => import('@/pages/TryOn'));
 // Filtres Snap (Camera Kit, lazy)
 const SnapLenses = React.lazy(() => import('@/pages/SnapLenses'));
+// Textile & drops (lazy : page riche, hors du parcours de réservation)
+const Textile = React.lazy(() => import('@/pages/Textile'));
 
 // Admin pages (lazy-loaded - only for admin/barber users)
 const AdminDashboard = React.lazy(() => import('@/pages/admin/Dashboard'));
@@ -59,6 +61,7 @@ const BarberLeave = React.lazy(() => import('@/pages/admin/BarberLeave'));
 const BarberSettings = React.lazy(() => import('@/pages/admin/BarberSettings'));
 const AdminEvents = React.lazy(() => import('@/pages/admin/AdminEvents'));
 const AdminGiftCards = React.lazy(() => import('@/pages/admin/AdminGiftCards'));
+const AdminTextile = React.lazy(() => import('@/pages/admin/AdminTextile'));
 
 const LazyFallback = () => (
   <div className="fixed inset-0 flex items-center justify-center bg-background">
@@ -204,6 +207,7 @@ const AppRoutes = () => {
           <Route path="/gift-cards" element={<GiftCards />} />
           <Route path="/try-on" element={<Suspense fallback={<LazyFallback />}><TryOn /></Suspense>} />
           <Route path="/snap" element={<Suspense fallback={<LazyFallback />}><SnapLenses /></Suspense>} />
+          <Route path="/textile" element={<Suspense fallback={<LazyFallback />}><Textile /></Suspense>} />
         </Route>
       </Route>
 
@@ -231,6 +235,7 @@ const AppRoutes = () => {
           <Route path="/admin/feed" element={<Feed />} />
           <Route path="/admin/events" element={<Suspense fallback={<LazyFallback />}><AdminEvents /></Suspense>} />
           <Route path="/admin/gift-cards" element={<Suspense fallback={<LazyFallback />}><AdminGiftCards /></Suspense>} />
+          <Route path="/admin/textile" element={<Suspense fallback={<LazyFallback />}><AdminTextile /></Suspense>} />
           <Route path="/admin/my-settings" element={<Suspense fallback={<LazyFallback />}><BarberSettings /></Suspense>} />
         </Route>
       </Route>

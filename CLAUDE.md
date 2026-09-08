@@ -51,6 +51,7 @@ src/
 │   ├── hairColor.js           # Essayage couleur : MediaPipe (cheveux + visage), palette Oklab, masques barbe / racines, repli canvas 2D
 │   ├── hairGl.js              # Essayage couleur : shader WebGL Oklab (mode FAST)
 │   ├── hairUltra.js           # Essayage couleur : appel du mode AI ULTRA (backend)
+│   ├── textileApi.js          # Textile & drops : client des routes /textile (overview, vote, alerte, réservation, notify), constantes et helpers partagés
 │   ├── app-params.js          # Paramètres app (appId, token, etc.)
 │   ├── pushNotifications.js   # Service Worker push notifications (web)
 │   ├── query-client.js        # React Query config
@@ -77,6 +78,7 @@ src/
 │   ├── Feed.jsx               # Fil social "Ca dit quoi le Gang ?" (posts, réactions emoji, commentaires, menu Signaler / Bloquer, panneau admin des signalements) — aussi /admin/feed
 │   ├── Events.jsx             # Privatisation du salon : demande d'événement, acceptation/refus du devis
 │   ├── GiftCards.jsx          # Cartes cadeau : achat (code DHB + QR), affichage
+│   ├── Textile.jsx            # « DHB Textile » (/textile, lazy) : drop en vedette (compte à rebours, alerte), pièces (vote 🔥 + taille, réservation), Labo, mes réservations — composants dans components/textile/
 │   ├── TryOn.jsx              # « Nouvelle tête » (/try-on, lazy) : essayage couleur cheveux / barbe, FAST sur l'appareil + AI ULTRA serveur
 │   ├── SnapLenses.jsx         # « Filtres Snap » (/snap, lazy) : lentilles Snapchat du salon via Camera Kit
 │   ├── Profile.jsx            # Profil utilisateur
@@ -95,6 +97,7 @@ src/
 │       ├── AdminReviews.jsx   # Gestion des avis
 │       ├── AdminEvents.jsx    # Événements / privatisations : devis, statut, notes admin
 │       ├── AdminGiftCards.jsx # Cartes cadeau : validation (scan QR ou code), solde restant
+│       ├── AdminTextile.jsx   # Textile & drops (/admin/textile) : drops, pièces (stock par taille, votes), réservations (payée / retirée), push aux abonnés — composants dans components/textile-admin/
 │       ├── AdminSettings.jsx  # Paramètres du salon
 │       ├── BarberSettings.jsx # Paramètres du barber connecté (/admin/my-settings) : photo, vidéo, compétences
 │       ├── AdminLeave.jsx     # Gestion congés (admin)
@@ -114,8 +117,8 @@ public/
 ├── manifest.json, sw.js       # PWA + service worker push
 ```
 
-Routes client : `/`, `/services`, `/booking`, `/shop`, `/appointments`, `/orders`, `/reviews`, `/settings`, `/notifications`, `/profile`, `/barber/:id`, `/feed`, `/events`, `/gift-cards`, `/try-on`, `/snap`, `/login`.
-Routes admin : `/admin`, `/admin/agenda`, `/admin/smart-agenda`, `/admin/services`, `/admin/team`, `/admin/clients`, `/admin/products`, `/admin/stock`, `/admin/orders`, `/admin/reviews`, `/admin/stats`, `/admin/settings`, `/admin/my-settings`, `/admin/notifications`, `/admin/cleaning`, `/admin/my-cleaning`, `/admin/barber-accounts`, `/admin/leave`, `/admin/my-leave`, `/admin/feed`, `/admin/events`, `/admin/gift-cards`.
+Routes client : `/`, `/services`, `/booking`, `/shop`, `/appointments`, `/orders`, `/reviews`, `/settings`, `/notifications`, `/profile`, `/barber/:id`, `/feed`, `/events`, `/gift-cards`, `/textile`, `/try-on`, `/snap`, `/login`.
+Routes admin : `/admin`, `/admin/agenda`, `/admin/smart-agenda`, `/admin/services`, `/admin/team`, `/admin/clients`, `/admin/products`, `/admin/stock`, `/admin/orders`, `/admin/reviews`, `/admin/stats`, `/admin/settings`, `/admin/my-settings`, `/admin/notifications`, `/admin/cleaning`, `/admin/my-cleaning`, `/admin/barber-accounts`, `/admin/leave`, `/admin/my-leave`, `/admin/feed`, `/admin/events`, `/admin/gift-cards`, `/admin/textile`.
 
 ## Structure Backend
 
@@ -139,7 +142,8 @@ dhomebarber-api/
 │   ├── appointmentReminder.js  # Toutes les 30 min : rappel RDV (push + email)
 │   ├── reviewReminder.js       # Toutes les 30 min : demande d'avis après prestation (review_reminder_sent)
 │   ├── birthdayReminder.js     # Tous les jours 8h : notif + email anniversaire (users.birth_date)
-│   └── comebackReminder.js     # Tous les jours 10h Paris : relance « il est temps de revenir » (comeback_reminder_sent), --dry-run
+│   ├── comebackReminder.js     # Tous les jours 10h Paris : relance « il est temps de revenir » (comeback_reminder_sent), --dry-run
+│   └── textileDrop.js          # Chaque minute : ouvre les drops à l'heure (teasing → live + push aux abonnés), clôt (ends_at), rappelle / expire les réservations
 └── routes/
     ├── media.js       # GET /api/media/:id : sert une image stockée en base (cache 1 an, ETag / 304)
     ├── hairUltra.js   # POST /ai/hair-ultra : recoloration HD (lib/hairUltra.js, fal.ai, FAL_KEY)
@@ -150,7 +154,8 @@ dhomebarber-api/
     ├── upload.js      # Upload fichiers (images)
     ├── barberAccounts.js  # Gestion comptes barbers
     ├── cleaning.js    # generate-schedule, notify-today, toggle, history
-    └── leave.js       # PATCH /leave/:id/status : admin approuve/refuse un congé + push au barber
+    ├── leave.js       # PATCH /leave/:id/status : admin approuve/refuse un congé + push au barber
+    └── textile.js     # Textile & drops : GET /textile/overview, vote, alerte, réservation (transaction + stock), cancel, notify (staff) — lib/textileNotify.js pour le push d'ouverture
 ```
 
 ## Entités (Tables PostgreSQL)
@@ -175,6 +180,11 @@ Mapping entité → table dans `routes/entities.js`.
 | PostReport | post_reports | post_id / comment_id (SET NULL à la suppression), reporter_email (forcé serveur), reporter_name, reported_email, reported_name, reason, details, content_snapshot (copie serveur), status (pending / handled / dismissed), handled_by, handled_at |
 | UserBlock | user_blocks | blocker_email (forcé serveur), blocked_email, blocked_name, UNIQUE(blocker, blocked) |
 | GiftCard | gift_cards | code (DHB…, généré côté serveur), amount, remaining_balance, sender_*, recipient_name, recipient_message, status (pending → validé par admin), valid_until, validated_at, validated_by, used_at |
+| TextileDrop | textile_drops | name, tagline, description, cover_image_url, status (draft / teasing / live / ended), starts_at, ends_at (TIMESTAMPTZ), reservation_hours (72), alerts_sent_at, sort_order |
+| TextileConcept | textile_concepts | drop_id (NULL = Labo), name, description, category (tshirt / hoodie / sweat / cap / beanie / jacket / accessory), price, images (JSONB, ≤ 8 URLs), colors (JSONB [{name, hex}]), sizes (JSONB), stock (JSONB {taille: qté}, taille absente = non suivie), max_per_client (2), is_active, sort_order |
+| — (routes dédiées) | textile_votes | concept_id, user_email, size, UNIQUE(concept_id, user_email) |
+| — (routes dédiées) | textile_alerts | drop_id, user_email, UNIQUE(drop_id, user_email) |
+| TextileReservation | textile_reservations | drop_id, concept_id, concept_name, client_* (forcés serveur), size, quantity, unit_price, status (reserved / paid / picked_up / cancelled / expired), expires_at, expiry_reminder_sent, notes |
 | SalonSettings | salon_settings | salon_name, tagline, description, phone, email, address, city, opening_hours (JSONB), social_*, cancellation_hours, require_deposit, deposit_percentage, homepage_order (JSONB), comeback_weeks (défaut 5) |
 | PushSubscription | push_subscriptions | user_id, user_email, endpoint, keys_p256dh, keys_auth (+ tokens natifs via subscribe-native) |
 | TimeOff | time_offs | employee_id, employee_name, start_date, end_date, reason, type, status (pending/approved/declined), requested_at |
@@ -252,7 +262,7 @@ Rapport complet : https://claude.ai/code/artifact/406820a6-13b7-43f2-bd32-65cd3e
 - **Battement de cœur WebSocket** (backend v80) : le routeur Heroku ferme toute connexion sans trafic au bout de 55 s. Le compteur `/ws/live` n'envoyant rien quand le nombre de connectés ne bouge pas, la socket était tuée (`H15 Idle connection`, visible dans les journaux depuis au moins le 3 sept.) et `useLiveCount` se reconnectait 3 s plus tard, en boucle — une poignée de main par client et par minute. Un `ws.ping()` toutes les 30 s la maintient ouverte ; le `pong` (renvoyé automatiquement par les navigateurs, aucun code client) sert à terminer les sockets réellement mortes. Minuteur annulé dans `gracefulShutdown`
 - **`POST /cleaning/notify-today`** utilise désormais `ac.parisToday()` : avec `toISOString()` il notifiait le ménage de la veille entre minuit et 2 h du matin à Paris
 - **Ramasse-miettes des médias** : `cleanup-media.js` supprime les images que plus aucune colonne ne cite (une image est référencée par une URL dans du texte, aucune clé étrangère ne peut le faire). **Simulation par défaut**, suppression avec `--apply`, délai de grâce de 7 jours (`--days=N`) pour ne pas emporter un fichier envoyé mais pas encore rattaché à une entité. `heroku run "node cleanup-media.js" --app dhomebarber-api`. La logique vit dans `jobs/mediaCleanup.js` et tourne **automatiquement le dimanche à 03h30 heure de Paris** (backend v81) ; le script en ligne de commande reste disponible pour un passage à la demande
-- **Tests dans le dépôt** : `cd dhomebarber-api && npm test` — 9 harnais, 268 vérifications, sans dépendance ni accès à la base de production (le pool, `http2` et `fetch` sont remplacés avant le chargement du code testé)
+- **Tests dans le dépôt** : `cd dhomebarber-api && npm test` — 10 harnais (370 vérifications depuis le textile, 8 sept. 2026), sans dépendance ni accès à la base de production (le pool, `http2` et `fetch` sont remplacés avant le chargement du code testé)
 
 ### Types de données
 - Les colonnes `decimal` de PostgreSQL sont converties en nombres dans `normalizeRow()`
@@ -390,6 +400,17 @@ Deux modes. **FAST** = aperçu temps réel sur l'appareil ; **AI ULTRA** = trait
 - **Styles de barbe** (`SNAP_BEARD_STYLES`) : même mécanique que la palette, quatre pastilles à emoji (barbe fournie, barbe de 3 jours, moustache, rasé de près) qui relancent la lentille avec `launchParams: { style }`. La lentille du salon portant les deux effets, `expandLenses` émet les barbes puis les teintes ; à l'ouverture c'est une teinte qui est appliquée
 - **Palette de couleurs** (`SNAP_HAIR_COLORS` dans `SnapLenses.jsx`) : la lentille couleur du salon est reconnue par sa donnée fournisseur `dhb = hair-color` ou par son nom (`/^dhb\s*couleur/i`), puis déployée en une pastille par teinte (16 : platine, doré, miel, châtain clair, châtain, brun, noir, cuivré, auburn, argent, blanc, bleu nuit, violet, rose, cerise, émeraude). Chaque pastille applique la **même** lentille avec `applyLens(lens, { launchParams: { color, mode } })` ; la pastille affiche la couleur au lieu de l'icône. Ajouter une teinte = une ligne dans ce tableau, aucune republication de lentille
 - Page : caméra pleine hauteur (rendu 720 × 960), carrousel des lentilles du groupe (pastille « Sans filtre » en tête, lentilles cheveux / barbe / couleur `RELEVANT` d'abord et appliquées d'office, jamais une autre : les démos de Snap recouvrent la caméra de leur interface), capture (`canvas.toDataURL`), partage, « Réserver ce look », lien vers l'essayage couleur IA. Sur le groupe de démonstration de Snap (`SNAP_DEMO_GROUP`), seules « Hair Color », « Face Expressions » et « Distort » sont affichées (`DEMO_KEEP`) ; un groupe du salon est affiché en entier. Erreurs du SDK (`LensExecutionError`) affichées sans casser la session. Filigrane « Camera Kit Staging » normal avec le jeton de staging
+
+### Textile & drops « DHB Textile » (ajouté le 8 sept. 2026, backend v85)
+Le salon présente des **concepts** de textile (t-shirt, hoodie, sweat, casquette, bonnet, veste, accessoire) et les sort par **drops** (séries limitées ouvertes à une date). Aucune vente en ligne : la pièce se **réserve** dans l'app puis se **retire et se paie au salon** dans le délai du drop (`reservation_hours`, 72 h par défaut). Contrat d'origine : `scratchpad/textile-contract.md` de la session (les tables sont dans le tableau des entités ci-dessus).
+- **Cycle d'un drop** : `draft` (invisible des clients) → `teasing` (annoncé : compte à rebours vers `starts_at`, votes 🔥 + taille, bouton « Me prévenir ») → `live` (réservations ouvertes, restant par taille) → `ended`. Les passages `teasing → live` (à `starts_at`) et `live → ended` (à `ends_at`) sont **automatiques** (`jobs/textileDrop.js`, chaque minute, comparaisons à `NOW()` sur des TIMESTAMPTZ : aucun calcul de fuseau). L'admin peut aussi changer le statut à la main (« Ouvrir maintenant »)
+- **Push d'ouverture** (`lib/textileNotify.js`, `notifyDropOpen`) : envoyé **une seule fois** aux abonnés de l'alerte (`textile_alerts` × `push_subscriptions`), par le job à l'heure prévue, par le hook d'`entities.js` quand l'admin passe le drop à `live`, ou à la demande via `POST /textile/drops/:id/notify` (staff, 6/heure/compte, option `everyone` = tous les clients, message ≤ 200). `alerts_sent_at` est posé dans la fonction partagée, quel que soit le résultat du push
+- **Le Labo** = concepts sans `drop_id` : idées à faire voter avant de programmer un drop. Un vote = un compte par concept (`UNIQUE`), avec une **taille optionnelle** (sondage pour dimensionner la production, répartition `size_votes` visible du staff seulement). Barre de « hype » côté client = part des votes du concept sur le total du Labo, badges Top 1-3
+- **Réservation** (`POST /textile/concepts/:id/reserve`, transaction) : concept `is_active` d'un drop `live` (et `ends_at` futur), taille ∈ `sizes`, quantité ≤ `max_per_client` en cumul des réservations actives du compte (`reserved` / `paid` / `picked_up`), stock par taille compté **sous verrou `FOR UPDATE` sur le concept** (409 « Plus que X pièce(s) en taille M » / « Épuisé en taille M » ; une taille absente de `stock` est illimitée). Identité et `unit_price` forcés côté serveur. Puis push aux admins + email de confirmation (`sendTextileReservationConfirmation`, échéance en heure de Paris). Le client ne peut qu'**annuler** une réservation `reserved` (`POST /textile/reservations/:id/cancel`) ; le staff passe les statuts `paid` / `picked_up` / `cancelled` via `TextileReservation.update`. Le job envoie un **rappel push 24 h avant l'expiration** (`expiry_reminder_sent`) puis passe la réservation à `expired` (la pièce revient au stock) avec un push
+- **Lecture** : la page client passe **uniquement** par `GET /textile/overview` (drops + concepts avec agrégats `votes_count`, `reserved`, `remaining`, `sold_out`, `alerts_count`, `reservations_count`, et `me` = mes votes / alertes / réservations) — trois `GROUP BY`, pas de N+1. Hors staff : pas de drop `draft`, cinq drops `ended` au plus, concepts `is_active` seulement. Les entités génériques `TextileDrop` / `TextileConcept` (admin en écriture, validation de chaque champ dans `entities.js` : statut, catégorie, prix, ≤ 12 tailles, stock d'entiers, ≤ 8 images, ≤ 12 couleurs hex, `max_per_client` 1..10, `reservation_hours` 1..720 ; dates sans fuseau interprétées en heure de Paris par `isoDateTimeOrNull`) et `TextileReservation` (création / modification staff, suppression admin) servent à l'admin. Suppression de compte : votes et alertes effacés, réservations anonymisées
+- **Frontend client** (`src/pages/Textile.jsx`, `src/components/textile/`, `src/lib/textileApi.js`) : clé React Query `TEXTILE_QUERY_KEY = ['textile','overview']`, `useTextileActions` (vote / alerte optimistes avec rollback, réservation avec message serveur en toast et refetch sur 409). Le **compte à rebours suit l'horloge serveur** (`data.now` − `dataUpdatedAt`) ; à zéro, l'overview est rechargée toutes les 5 s jusqu'à la bascule du statut. Fiche de pièce en bottom sheet (carrousel drag, tailles avec restant, quantité, `pulse-cta` sur un wrapper autour du bouton motion), overlay de succès, « Mes réservations » avec annulation en deux taps, drops passés repliés. `TextileHomeCard` (carte de l'accueil, section `textile` de `homepage_order`, après `shop`) rend `null` sans drop annoncé / ouvert ni concept du Labo ; `Home.jsx` cache alors la section (visible en mode édition avec un texte explicatif). Accès : section d'accueil et menu Profil → « Textile & Drops » (pas d'onglet dans la barre du bas, déjà à cinq entrées)
+- **Frontend admin** (`src/pages/admin/AdminTextile.jsx`, `src/components/textile-admin/`, entrée « Textile & Drops » de la catégorie Commerce, permission `products`) : onglets Drops / Pièces / Réservations (`?tab=`), fusion overview + listes d'entités par id, boutons d'édition réservés à `role === 'admin'` (un barber est en lecture seule sur drops et pièces, il traite les réservations : Payée / Retirée / Annuler, note interne). Pièces : images multi-upload (`UploadFile`, la première = couverture), couleurs `<input type="color">`, tailles + stock par taille (champ vide = non suivi), répartition des tailles votées. La duplication crée la copie **inactive**. Champs `datetime-local` convertis en ISO à l'envoi
+- **Tests backend** : `test/test-textile.js` (102 vérifications : accès, projection client, vote, alerte, réservation avec faux pool transactionnel, cancel, notify, `runTextileTick`). `npm test` → 10 harnais
 
 ### Profil barber : navigation entre barbers (`src/pages/BarberProfile.jsx`)
 - La page charge la liste des barbers actifs avec la **même requête et la même clé de cache que l'accueil** (`['employees']`, filtre `is_active`, tri `sort_order`) et retrouve le barber courant par son id (comparaison en string)
