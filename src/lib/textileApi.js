@@ -26,9 +26,19 @@ export const reserveConcept = (conceptId, { size, quantity }) =>
 export const cancelReservation = (reservationId) =>
   apiRequest('POST', apiUrl(`/textile/reservations/${reservationId}/cancel`));
 
-/** Staff : push d'ouverture aux abonnés du drop (ou à tous les clients avec `everyone`). */
-export const notifyDrop = (dropId, { everyone = false, message = '' } = {}) =>
-  apiRequest('POST', apiUrl(`/textile/drops/${dropId}/notify`), { everyone, message });
+/**
+ * Staff : push manuel sur un drop. `audience` :
+ *  - 'subscribers' (défaut) : abonnés à l'alerte, push d'ouverture ;
+ *  - 'everyone' : tous les clients, même push ;
+ *  - 'paid' : clients ayant payé leur précommande → « ta commande est prête », et leurs
+ *    réservations payées passent à « prête ».
+ */
+export const NOTIFY_AUDIENCES = ['subscribers', 'everyone', 'paid'];
+export const notifyDrop = (dropId, { audience = 'subscribers', everyone = false, message = '' } = {}) =>
+  apiRequest('POST', apiUrl(`/textile/drops/${dropId}/notify`), {
+    audience: everyone && audience === 'subscribers' ? 'everyone' : audience,
+    message,
+  });
 
 // ─── Constantes partagées ───
 export const TEXTILE_CATEGORIES = [

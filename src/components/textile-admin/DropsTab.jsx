@@ -42,7 +42,7 @@ function OpenNowDialog({ drop, onClose, onConfirm, pending }) {
           {alreadySent ? (
             <p className="rounded-lg border border-border bg-secondary/50 p-3 text-xs text-muted-foreground">
               Le push d'ouverture est déjà parti le {formatParisDateTime(drop.alerts_sent_at)} : il ne sera pas renvoyé.
-              Utilisez « Prévenir les abonnés » pour relancer.
+              Utilisez « Prévenir » pour relancer, ou pour annoncer aux clients ayant payé que leur commande est prête.
             </p>
           ) : (
             <p className="rounded-lg border border-green-500/25 bg-green-500/10 p-3 text-xs text-green-300">
@@ -208,7 +208,7 @@ export default function DropsTab({ drops, concepts, reservations, isAdmin, isLoa
                         <ActionButton icon={Rocket} label="Ouvrir maintenant" onClick={() => setOpenTarget(drop)} disabled={busy}
                           className="border-green-500/30 text-green-400 hover:bg-green-500/10" />
                       )}
-                      <ActionButton icon={Bell} label="Prévenir les abonnés" onClick={() => setNotifyTarget(drop)} disabled={busy}
+                      <ActionButton icon={Bell} label="Prévenir" onClick={() => setNotifyTarget(drop)} disabled={busy}
                         className="border-primary/30 text-primary hover:bg-primary/10" />
                       {canEnd && (
                         <TwoTapButton icon={Flag} label="Terminer" confirmLabel="Terminer ce drop ?" disabled={busy}
@@ -230,7 +230,7 @@ export default function DropsTab({ drops, concepts, reservations, isAdmin, isLoa
       {isAdmin && (
         <>
           <DropDialog open={dialogOpen} onOpenChange={setDialogOpen} drop={editingDrop} />
-          <NotifyDialog drop={notifyTarget} onClose={() => setNotifyTarget(null)} />
+          <NotifyDialog drop={notifyTarget} reservations={reservations} onClose={() => setNotifyTarget(null)} />
           <OpenNowDialog
             drop={openTarget}
             onClose={() => setOpenTarget(null)}
