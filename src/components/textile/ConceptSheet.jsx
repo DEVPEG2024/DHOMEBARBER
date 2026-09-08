@@ -87,7 +87,7 @@ function ImageCarousel({ images, name, category, reduceMotion }) {
   );
 }
 
-/** Écran de succès de la réservation : ondes, coche qui se dessine, rappel du retrait. */
+/** Écran de succès de la réservation : ondes, coche qui se dessine, rappel du délai de paiement. */
 function ReserveSuccess({ concept, reservation, size, quantity, onShowReservations, onClose, reduceMotion }) {
   const expires = reservation?.expires_at ? formatDropDate(reservation.expires_at) : null;
   return (
@@ -168,8 +168,8 @@ function ReserveSuccess({ concept, reservation, size, quantity, onShowReservatio
         >
           <Store className="w-4 h-4 text-primary mt-0.5 shrink-0" />
           <p className="text-xs text-white/80 leading-relaxed">
-            Retrait et paiement au salon{expires ? <> avant le <span className="font-semibold text-white">{expires}</span></> : ''}.
-            Passé ce délai, la pièce est remise en vente.
+            Précommande : paiement au salon{expires ? <> avant le <span className="font-semibold text-white">{expires}</span></> : ''}.
+            Passé ce délai, la pièce est remise en vente. La fabrication démarre à la fin du drop, on te prévient quand ta pièce est prête.
           </p>
         </motion.div>
         <motion.div
@@ -454,8 +454,8 @@ export default function ConceptSheet({
               <p className="text-xs text-muted-foreground flex items-start gap-1.5 min-w-0">
                 <Store className="w-3.5 h-3.5 shrink-0 mt-0.5" />
                 <span>
-                  Retrait et paiement au salon
-                  {drop?.reservation_hours ? ` · sous ${formatReservationWindow(drop.reservation_hours)}` : ''}
+                  Précommande · paiement au salon
+                  {drop?.reservation_hours ? ` sous ${formatReservationWindow(drop.reservation_hours)}` : ''}
                 </span>
               </p>
               {!soldOut && !quotaReached && (

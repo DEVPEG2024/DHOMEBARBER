@@ -182,7 +182,7 @@ export default function DropDialog({ open, onOpenChange, drop }) {
           </div>
 
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Délai de retrait (heures)" hint="Une réservation non retirée expire après ce délai.">
+            <Field label="Délai de paiement (heures)" hint="Précommande : une réservation non payée au salon dans ce délai expire et la pièce est remise en vente.">
               <Input type="number" min={1} max={720} value={form.reservation_hours}
                 onChange={(e) => set({ reservation_hours: e.target.value })} className={INPUT_CLASS} />
             </Field>

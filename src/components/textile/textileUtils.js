@@ -39,7 +39,7 @@ export function formatRemaining(ms) {
   return "moins d'une minute";
 }
 
-/** Fenêtre de retrait d'un drop : « 72 h » → « 3 jours ». */
+/** Délai de paiement d'un drop : « 72 h » → « 3 jours ». */
 export function formatReservationWindow(hours) {
   const h = Number(hours) || 0;
   if (h <= 0) return '';
@@ -64,10 +64,11 @@ export function myActiveQuantity(me, conceptId) {
     .reduce((sum, r) => sum + (Number(r.quantity) || 0), 0);
 }
 
-/** Styles des statuts de réservation (couleurs demandées : amber / blue / green / gris). */
+/** Styles des statuts de réservation (précommande : à payer → payée → prête → retirée). */
 export const RESERVATION_STYLE = {
-  reserved: { label: 'Réservée', text: 'text-amber-400', bg: 'bg-amber-500/12 border-amber-500/25', dot: 'bg-amber-400' },
+  reserved: { label: 'À payer', text: 'text-amber-400', bg: 'bg-amber-500/12 border-amber-500/25', dot: 'bg-amber-400' },
   paid: { label: 'Payée', text: 'text-blue-400', bg: 'bg-blue-500/12 border-blue-500/25', dot: 'bg-blue-400' },
+  ready: { label: 'Prête', text: 'text-violet-400', bg: 'bg-violet-500/12 border-violet-500/25', dot: 'bg-violet-400' },
   picked_up: { label: 'Retirée', text: 'text-green-400', bg: 'bg-green-500/12 border-green-500/25', dot: 'bg-green-400' },
   cancelled: { label: 'Annulée', text: 'text-muted-foreground', bg: 'bg-white/5 border-white/10', dot: 'bg-muted-foreground' },
   expired: { label: 'Expirée', text: 'text-muted-foreground', bg: 'bg-white/5 border-white/10', dot: 'bg-muted-foreground' },

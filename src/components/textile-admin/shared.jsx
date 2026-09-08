@@ -36,6 +36,7 @@ export const dropStatusLabel = (value) => DROP_STATUSES.find((s) => s.value === 
 export const RESERVATION_STATUS_STYLES = {
   reserved: 'bg-amber-500/15 text-amber-400 border-amber-500/25',
   paid: 'bg-blue-500/15 text-blue-400 border-blue-500/25',
+  ready: 'bg-violet-500/15 text-violet-400 border-violet-500/25',
   picked_up: 'bg-green-500/15 text-green-400 border-green-500/25',
   cancelled: 'bg-red-500/15 text-red-400 border-red-500/25',
   expired: 'bg-zinc-500/15 text-zinc-400 border-zinc-500/25',

@@ -239,9 +239,9 @@ export default function Textile() {
             <Section reduceMotion={reduceMotion}>
               <div ref={reservationsRef} className="scroll-mt-24">
                 <SectionTitle
-                  eyebrow="Retrait au salon"
+                  eyebrow="Précommandes"
                   title="Mes réservations"
-                  hint="Paiement sur place. Une réservation non retirée dans le délai est remise en vente."
+                  hint="À payer au salon dans le délai, sinon la pièce est remise en vente. Fabrication à la fin du drop, retrait dès qu'elle est prête."
                 />
                 <div className="space-y-3">
                   {view.reservations.map(r => (

@@ -50,16 +50,22 @@ export const DROP_STATUSES = [
   { value: 'ended', label: 'Terminé', hint: 'Archivé' },
 ];
 
+/**
+ * Un drop est une PRÉCOMMANDE : la réservation doit être payée au salon avant `expires_at`
+ * (sinon elle expire et la pièce revient au stock), la fabrication démarre à la fin du drop,
+ * puis le salon marque la pièce « prête » (push au client) et enfin « retirée ».
+ */
 export const RESERVATION_STATUSES = [
-  { value: 'reserved', label: 'Réservée' },
+  { value: 'reserved', label: 'À payer' },
   { value: 'paid', label: 'Payée' },
+  { value: 'ready', label: 'Prête' },
   { value: 'picked_up', label: 'Retirée' },
   { value: 'cancelled', label: 'Annulée' },
   { value: 'expired', label: 'Expirée' },
 ];
 export const reservationStatusLabel = (value) => RESERVATION_STATUSES.find(s => s.value === value)?.label || value;
 /** Statuts qui « prennent » du stock. */
-export const ACTIVE_RESERVATION_STATUSES = ['reserved', 'paid', 'picked_up'];
+export const ACTIVE_RESERVATION_STATUSES = ['reserved', 'paid', 'ready', 'picked_up'];
 
 export const DEFAULT_SIZES = ['S', 'M', 'L', 'XL'];
 export const ALL_SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'Unique'];

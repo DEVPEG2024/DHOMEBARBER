@@ -143,7 +143,7 @@ export default function DropHero({
           <div className="mt-2 rounded-2xl bg-primary/12 border border-primary/25 px-4 py-3 flex items-center gap-3">
             <LiveDot />
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-bold text-white">Réserve ta pièce, retrait au salon</p>
+              <p className="text-sm font-bold text-white">Précommande ta pièce, paiement au salon</p>
               <p className="text-[11px] text-white/60">
                 {drop.ends_at ? `Ouvert jusqu'au ${formatDropDate(drop.ends_at)}` : 'Ouvert tant qu\'il y a du stock'}
               </p>

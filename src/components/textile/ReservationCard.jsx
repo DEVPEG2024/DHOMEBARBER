@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Clock, Ban, Store, X, Check } from 'lucide-react';
+import { Clock, Ban, Store, X, Check, Scissors, PackageCheck } from 'lucide-react';
 import { categoryEmoji, formatDropDate, formatPrice } from '@/lib/textileApi';
 import { RESERVATION_STYLE, conceptCover, formatRemaining } from './textileUtils';
 
 /**
- * Une réservation du client : pièce, taille × quantité, prix, statut, délai de retrait, et
- * pour un statut `reserved` un bouton « Annuler » qui demande confirmation en deux taps.
+ * Une réservation du client (précommande) : pièce, taille × quantité, prix, statut, délai de
+ * paiement, et pour un statut `reserved` un bouton « Annuler » qui demande confirmation en deux taps.
+ * Parcours : à payer au salon → payée (fabrication à la fin du drop) → prête → retirée.
  */
 export default function ReservationCard({ reservation, concept, nowMs, onCancel, cancelling = false }) {
   const [confirm, setConfirm] = useState(false);
@@ -45,14 +46,26 @@ export default function ReservationCard({ reservation, concept, nowMs, onCancel,
       {isReserved && reservation.expires_at && (
         <p className="mt-3 text-[11px] inline-flex items-center gap-1.5 text-amber-400/90">
           <Clock className="w-3.5 h-3.5" />
-          À retirer avant le {formatDropDate(reservation.expires_at)}
+          À payer au salon avant le {formatDropDate(reservation.expires_at)}
           {remainingMs != null && <span className="text-muted-foreground">· {remainingMs > 0 ? `dans ${formatRemaining(remainingMs)}` : formatRemaining(remainingMs)}</span>}
         </p>
       )}
       {reservation.status === 'paid' && (
         <p className="mt-3 text-[11px] inline-flex items-center gap-1.5 text-blue-400/90">
+          <Scissors className="w-3.5 h-3.5" />
+          Payée · fabrication à la fin du drop, on te prévient quand elle est prête
+        </p>
+      )}
+      {reservation.status === 'ready' && (
+        <p className="mt-3 text-[11px] inline-flex items-center gap-1.5 text-violet-400/90">
+          <PackageCheck className="w-3.5 h-3.5" />
+          Prête ! Passe la récupérer au salon
+        </p>
+      )}
+      {reservation.status === 'expired' && (
+        <p className="mt-3 text-[11px] inline-flex items-center gap-1.5 text-muted-foreground">
           <Store className="w-3.5 h-3.5" />
-          Payée · à retirer au salon
+          Non payée dans le délai, la pièce a été remise en vente
         </p>
       )}
       {reservation.status === 'picked_up' && (
