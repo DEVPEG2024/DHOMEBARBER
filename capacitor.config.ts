@@ -26,7 +26,12 @@ const config: CapacitorConfig = {
       presentationOptions: ['badge', 'sound', 'alert'],
     },
     Keyboard: {
-      resize: 'body',
+      // `native` : la WKWebView elle-même est réduite de la hauteur du clavier. Avec `body`,
+      // Apple a constaté (review du 9 sept. 2026, iPad Air 11" en mode compatibilité iPhone)
+      // que le clavier recouvrait les champs de connexion : la hauteur rapportée au JS ne
+      // correspondait pas à la fenêtre réduite. Complété par src/lib/capacitor.js (défilement
+      // du champ actif, repli visualViewport).
+      resize: 'native',
       resizeOnFullScreen: true,
     },
   },
