@@ -13,6 +13,7 @@ import { fr } from 'date-fns/locale';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { exportToCSV } from '@/utils/exportCSV';
+import SalesOverview from '@/components/admin/SalesOverview';
 
 function StatCard({ title, value, subtitle, icon: Icon, trend, color = 'primary', onClick }) {
   const isUp = trend > 0;
@@ -310,10 +311,16 @@ export default function AdminDashboard() {
         </button>
       </div>
 
-      {/* Main Stats Row */}
+      {/* Tous les canaux de vente : CA global, répartition, boutique, cartes cadeau, privatisations, textile */}
+      <SalesOverview appointments={{ today: todayRevenue, month: monthRevenue, unpaidToday: todayUnpaid, unpaidMonth: monthUnpaid }} />
+
+      {/* Rendez-vous : prestations + produits vendus en RDV */}
+      <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
+        <Calendar className="w-3.5 h-3.5" /> Rendez-vous
+      </h2>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
         <StatCard
-          title="CA Aujourd'hui"
+          title="CA RDV Aujourd'hui"
           value={`${todayRevenue}€`}
           subtitle={todayUnpaid > 0 ? `+ ${todayUnpaid}€ non encaissés ▸` : `${paidToday.length} RDV encaissés`}
           icon={Euro}
@@ -328,7 +335,7 @@ export default function AdminDashboard() {
           onClick={confirmedToday.length > 0 ? () => navigate('/admin/agenda') : undefined}
         />
         <StatCard
-          title="CA du Mois"
+          title="CA RDV du Mois"
           value={`${monthRevenue}€`}
           subtitle={monthUnpaid > 0 ? `+ ${monthUnpaid}€ non encaissés` : `${monthPaid.length} RDV encaissés`}
           icon={TrendingUp}

@@ -304,6 +304,8 @@ Le `server.js` exécute des migrations automatiques au démarrage (`ADD COLUMN I
 - Vue MonthView disponible en plus de DayView et WeekView
 
 ### Dashboard
+- **Tous les canaux de vente** (`src/components/admin/SalesOverview.jsx`, ajouté le 9 sept. 2026 à la demande du client) : en tête, CA global aujourd'hui / du mois (tous canaux), montant à encaisser, drop textile en cours ; répartition du CA du mois par canal (barres) ; puis un panneau par canal avec lien « Gérer ». Règles de comptage : prestations = RDV encaissés (calcul de `Dashboard.jsx`, passé en props) ; boutique = commandes `delivered` (payées au retrait), en cours = pending / confirmed / ready ; cartes cadeau = `validated` / `used` à la date `validated_at`, en attente = `pending`, solde en circulation = reste des cartes validées ; privatisations = événements `accepted` / `confirmed` avec prix, à la date de l'événement ; textile = précommandes `paid` / `ready` / `picked_up` (prix × quantité), à payer = `reserved`. Sans horodatage d'encaissement (commandes, textile), la date de création sert d'approximation. Clés React Query dédiées `['dashboard', …]` (commandes, cartes, événements) ; textile via `TEXTILE_QUERY_KEY` et `['textileReservations','all']`
+- Les cartes « CA RDV » ne couvrent que les rendez-vous (prestations + produits vendus en RDV) ; le global est au-dessus
 - Les encaissements CB/Espèces sont **séparés des pourboires**
 - Les pourboires ont leur propre section avec CB/Espèces (via tip_method)
 - Le CA utilise `grand_total || total_price` pour le total
