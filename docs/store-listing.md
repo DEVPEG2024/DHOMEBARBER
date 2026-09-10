@@ -44,13 +44,13 @@ FONCTIONNALITÉS
 • Vos rendez-vous passés et à venir, annulables à tout moment
 • Boutique : commandez vos produits de soin et retirez-les au salon
 • Cartes cadeau à offrir, avec QR code à présenter au salon
-• Privatisation du salon pour vos événements : EVJF, anniversaires, séminaires
+• Privatisation du salon pour vos événements : anniversaires, enterrements de vie de garçon, team building
 • Le fil du salon : actualités, photos et réactions de la communauté
-• Profils des barbers avec vidéo de présentation et avis clients
+• Profils des barbers avec leur carte de présentation
 • Créneaux de dernière minute : soyez prévenu quand une place se libère
 
 LE SALON
-D'Home Barber est situé à Douvaine, en Haute-Savoie, au 3 rue du Bois Arquet, sur le côté gauche du bâtiment Odyssée. Cinq barbers vous accueillent : Dom, Kevin, Denis, Romain et Sacha.
+D'Home Barber est situé à Douvaine, en Haute-Savoie, au 3 rue du Bois Arquet, sur le côté gauche du bâtiment Odyssée.
 
 Un compte gratuit suffit pour réserver.
 
