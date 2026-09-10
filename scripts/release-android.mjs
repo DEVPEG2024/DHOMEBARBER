@@ -172,7 +172,10 @@ async function upload(version) {
   });
   info(`piste « ${track} » mise à jour`);
 
-  await play(token, 'POST', `/edits/${edit.id}:commit`);
+  // changesNotSentForReview : dès que l'app a des modifications en attente d'examen (ou refusées),
+  // l'API refuse un commit « simple ». La release de test interne est quand même publiée aux
+  // testeurs ; seul l'envoi pour examen reste à faire dans la console (constaté le 10 sept. 2026).
+  await play(token, 'POST', `/edits/${edit.id}:commit?changesNotSentForReview=true`);
   info('édition validée — la version est en ligne sur la piste');
   return true;
 }
