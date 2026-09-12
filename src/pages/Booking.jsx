@@ -9,7 +9,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { format, addDays, isSameDay, startOfDay } from 'date-fns';
 import { fr } from 'date-fns/locale';
-import ServiceCard from '@/components/shared/ServiceCard';
+import ServicePicker from '@/components/services/ServicePicker';
 import EmployeeCard from '@/components/shared/EmployeeCard';
 import { hapticFeedback } from '@/lib/capacitor';
 import { BARBER_PHOTO_ASPECT } from '@/lib/barberPhoto';
@@ -466,7 +466,7 @@ export default function Booking() {
   const preSelectedIds = urlParams.get('services')?.split(',') || [];
   const preSelectedBarberId = urlParams.get('barber') || null;
 
-  const { data: services = [] } = useQuery({
+  const { data: services = [], isPending: servicesPending } = useQuery({
     queryKey: ['services'],
     staleTime: 5 * 60 * 1000, // catalogue : change rarement
     queryFn: () => api.entities.Service.filter({ is_active: true }, 'sort_order', 100),
@@ -579,6 +579,16 @@ export default function Booking() {
         ? prev.filter(s => s.id !== service.id)
         : [...prev, service]
     );
+  };
+
+  // Suggestion du sélecteur (ex. passer à une formule) : retire et ajoute en un seul rendu
+  const swapServices = (remove, add) => {
+    const removeIds = new Set(remove.map(s => String(s.id)));
+    setSelectedServices(prev => {
+      const kept = prev.filter(s => !removeIds.has(String(s.id)));
+      const known = new Set(kept.map(s => String(s.id)));
+      return [...kept, ...add.filter(s => !known.has(String(s.id)))];
+    });
   };
 
   const goToStep = (next) => {
@@ -767,14 +777,15 @@ export default function Booking() {
           {/* Step 1: Services */}
           {step === 0 && (
             <motion.div key="services" custom={direction} variants={stepVariants} initial="enter" animate="center" exit="exit" transition={stepTransition}>
-              <p className="text-xs text-muted-foreground mb-4">Sélectionnez vos prestations puis appuyez sur Suivant.</p>
-              <div className="space-y-3">
-                {services.map((service, i) => (
-                  <motion.div key={service.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(i, 8) * 0.04, duration: 0.3, ease: 'easeOut' }}>
-                    <ServiceCard service={service} selected={!!selectedServices.find(s => s.id === service.id)} onClick={toggleService} />
-                  </motion.div>
-                ))}
-              </div>
+              <p className="text-xs text-muted-foreground mb-4">Choisis une ou plusieurs prestations : le total et la durée se calculent tout seuls.</p>
+              {/* Même sélecteur que la page Prestations (catégories, formules, recherche) + suggestions selon la sélection */}
+              <ServicePicker
+                services={services}
+                loading={servicesPending}
+                selectedIds={selectedServices.map(s => String(s.id))}
+                onToggle={toggleService}
+                onSwap={swapServices}
+              />
             </motion.div>
           )}
 
