@@ -62,6 +62,63 @@ function OpenNowDialog({ drop, onClose, onConfirm, pending }) {
   );
 }
 
+/**
+ * Suppression d'un drop (annulé, terminé ou brouillon) : le drop disparaît partout, y compris de
+ * « Drops passés » côté client. Ses pièces, elles, ont deux sorts possibles : rejoindre le Labo
+ * (elles restent votables, sans drop) ou être supprimées avec lui. Les réservations existantes
+ * sont conservées dans l'onglet Réservations (elles gardent le nom de la pièce).
+ */
+function DeleteDropDialog({ drop, pieces, reservationsCount, onClose, onConfirm, pending }) {
+  const [mode, setMode] = useState('labo');
+  if (!drop) return null;
+  const n = pieces.length;
+  const choices = [
+    { key: 'labo', label: `Envoyer ${n > 1 ? `les ${n} pièces` : 'la pièce'} au Labo`, hint: 'Elles restent visibles des clients comme idées à voter, sans drop.' },
+    { key: 'delete', label: `Supprimer aussi ${n > 1 ? `les ${n} pièces` : 'la pièce'}`, hint: 'Photos, votes et stock disparaissent avec le drop.' },
+  ];
+  return (
+    <Dialog open={!!drop} onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="bg-card border-border max-w-md">
+        <DialogHeader>
+          <DialogTitle className="font-display flex items-center gap-2">
+            <Trash2 className="w-4 h-4 text-red-400" /> Supprimer « {drop.name} » ?
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3 text-sm">
+          <p className="text-muted-foreground">
+            Le drop est effacé définitivement et n'apparaît plus nulle part, ni dans l'admin ni dans « Drops passés » côté client.
+            {reservationsCount > 0 && (
+              <> Les {reservationsCount} réservation{reservationsCount > 1 ? 's' : ''} déjà prises restent consultables dans l'onglet Réservations.</>
+            )}
+          </p>
+          {n > 0 ? (
+            <div className="space-y-1.5">
+              {choices.map((c) => {
+                const active = mode === c.key;
+                return (
+                  <button key={c.key} type="button" onClick={() => setMode(c.key)}
+                    className={`w-full text-left rounded-xl border p-3 transition-colors ${active ? 'border-primary/50 bg-primary/10' : 'border-border bg-secondary/40 hover:bg-secondary'}`}>
+                    <span className="text-sm font-medium block">{c.label}</span>
+                    <span className="text-[11px] text-muted-foreground">{c.hint}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="rounded-lg border border-border bg-secondary/50 p-3 text-xs text-muted-foreground">Aucune pièce n'est rattachée à ce drop.</p>
+          )}
+          <div className="flex gap-2 pt-1">
+            <Button variant="outline" className="flex-1" onClick={onClose} disabled={pending}>Annuler</Button>
+            <Button className="flex-1 bg-red-500 hover:bg-red-600 text-white" onClick={() => onConfirm(n > 0 && mode === 'delete')} disabled={pending}>
+              <Trash2 className="w-4 h-4 mr-1.5" /> {pending ? 'Suppression…' : 'Supprimer le drop'}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function Stat({ icon: Icon, value, label, className = '' }) {
   return (
     <div className={`flex items-center gap-1.5 text-xs text-muted-foreground ${className}`}>
@@ -85,6 +142,7 @@ export default function DropsTab({ drops, concepts, reservations, isAdmin, isLoa
   const [editingDrop, setEditingDrop] = useState(null);
   const [notifyTarget, setNotifyTarget] = useState(null);
   const [openTarget, setOpenTarget] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
   const perDrop = useMemo(() => {
     const map = new Map();
@@ -109,14 +167,40 @@ export default function DropsTab({ drops, concepts, reservations, isAdmin, isLoa
     onError: (err) => toast.error(err?.message || 'Erreur lors du changement de statut'),
   });
 
+  // Suppression : les pièces d'abord si demandé (une par une, le serveur n'a pas de suppression
+  // en lot), puis le drop lui-même (ses pièces restantes passent au Labo : drop_id → NULL)
   const deleteMutation = useMutation({
-    mutationFn: (id) => api.entities.TextileDrop.delete(id),
-    onSuccess: () => {
-      invalidateTextile(queryClient);
-      toast.success('Drop supprimé (ses pièces rejoignent le Labo)');
+    mutationFn: async ({ id, pieceIds }) => {
+      for (const pieceId of pieceIds) await api.entities.TextileConcept.delete(pieceId);
+      return api.entities.TextileDrop.delete(id);
     },
-    onError: (err) => toast.error(err?.message || 'Erreur lors de la suppression'),
+    onSuccess: (_data, { pieceIds, keptPieces }) => {
+      invalidateTextile(queryClient);
+      setDeleteTarget(null);
+      const deleted = pieceIds.length;
+      toast.success(
+        deleted > 0
+          ? `Drop supprimé avec ${deleted} pièce${deleted > 1 ? 's' : ''}`
+          : keptPieces > 0
+            ? `Drop supprimé, ${keptPieces} pièce${keptPieces > 1 ? 's' : ''} envoyée${keptPieces > 1 ? 's' : ''} au Labo`
+            : 'Drop supprimé',
+      );
+    },
+    onError: (err) => {
+      invalidateTextile(queryClient);
+      toast.error(err?.message || 'Erreur lors de la suppression');
+    },
   });
+
+  const confirmDelete = (deletePieces) => {
+    if (!deleteTarget) return;
+    const pieces = (concepts || []).filter((c) => String(c.drop_id) === String(deleteTarget.id));
+    deleteMutation.mutate({
+      id: deleteTarget.id,
+      pieceIds: deletePieces ? pieces.map((c) => c.id) : [],
+      keptPieces: deletePieces ? 0 : pieces.length,
+    });
+  };
 
   const openNew = () => { setEditingDrop(null); setDialogOpen(true); };
   const openEdit = (drop) => { setEditingDrop(drop); setDialogOpen(true); };
@@ -216,8 +300,8 @@ export default function DropsTab({ drops, concepts, reservations, isAdmin, isLoa
                           armedClassName="border-blue-500 bg-blue-500 text-white animate-pulse"
                           onConfirm={() => statusMutation.mutate({ id: drop.id, status: 'ended' })} />
                       )}
-                      <TwoTapButton icon={Trash2} label="Supprimer" confirmLabel="Supprimer ?" disabled={busy}
-                        onConfirm={() => deleteMutation.mutate(drop.id)} />
+                      <ActionButton icon={Trash2} label="Supprimer" onClick={() => setDeleteTarget(drop)} disabled={busy}
+                        className="border-red-500/30 text-red-400 hover:bg-red-500/10" />
                     </div>
                   )}
                 </div>
@@ -236,6 +320,14 @@ export default function DropsTab({ drops, concepts, reservations, isAdmin, isLoa
             onClose={() => setOpenTarget(null)}
             pending={statusMutation.isPending}
             onConfirm={() => openTarget && statusMutation.mutate({ id: openTarget.id, status: 'live' })}
+          />
+          <DeleteDropDialog
+            drop={deleteTarget}
+            pieces={deleteTarget ? (concepts || []).filter((c) => String(c.drop_id) === String(deleteTarget.id)) : []}
+            reservationsCount={deleteTarget ? (reservations || []).filter((r) => String(r.drop_id) === String(deleteTarget.id)).length : 0}
+            onClose={() => setDeleteTarget(null)}
+            pending={deleteMutation.isPending}
+            onConfirm={confirmDelete}
           />
         </>
       )}
