@@ -54,6 +54,7 @@ src/
 │   ├── hairGl.js              # Essayage couleur : shader WebGL Oklab (mode FAST)
 │   ├── hairUltra.js           # Essayage couleur : appel du mode AI ULTRA (backend)
 │   ├── textileApi.js          # Textile & drops : client des routes /textile (overview, vote, alerte, réservation, notify), constantes et helpers partagés
+│   ├── salonEventsApi.js      # Événements du salon : client des routes /salon-events (mine, rsvp, invite, guests, remind), constantes et helpers
 │   ├── app-params.js          # Paramètres app (appId, token, etc.)
 │   ├── pushNotifications.js   # Service Worker push notifications (web)
 │   ├── query-client.js        # React Query config
@@ -71,14 +72,14 @@ src/
 ├── pages/
 │   ├── Home.jsx               # Page d'accueil (hero centré, logo, "Premium Barber Shop", pastille Ouvert / Fermé en direct, bouton Réserver à anneau orbital, bloc « Comme la dernière fois », carrousel barbers avec parallaxe, bloc Carte Cadeau pulsant). Ordre des sections lu depuis salon_settings.homepage_order (pas d'éditeur UI, modifier en DB)
 │   ├── Booking.jsx            # Réservation en 4 étapes (étapes glissantes, récap animé, carte « Peu importe » = premier créneau dispo tous barbers, créneau qui se loge dans le résumé, écran de succès pluie de lames + boutons calendrier)
-│   ├── Services.jsx           # Liste des prestations
-│   ├── Shop.jsx               # Boutique produits
+│   ├── Services.jsx           # Prestations (refonte 12 sept. 2026) : recherche, formules, chips de catégories collantes avec suivi du défilement, cartes avec icône / durée / prix / description dépliable, badges Populaire et Nouveau, sélection multiple + barre de résumé → /booking?services= — composants dans components/services/
+│   ├── Shop.jsx               # Boutique produits : tap sur une carte → fiche produit complète (components/shop/ProductSheet.jsx : galerie image_url + images, description entière, stock, quantité, ajout au panier)
 │   ├── Orders.jsx             # Commandes client
 │   ├── Appointments.jsx       # Mes rendez-vous (client) : lien « Ajouter au calendrier » (Google / .ics) sur les RDV à venir
 │   ├── MyReviews.jsx          # Mes avis (client)
 │   ├── BarberProfile.jsx      # Profil public d'un barber (/barber/:id) : carte style FUT (BarberCard, holographique, stats qui montent, transition partagée depuis l'accueil) + vidéo de présentation ; swipe gauche/droite (ou flèches, boutons, points) pour passer aux autres barbers sans quitter la page
 │   ├── Feed.jsx               # Fil social "Ca dit quoi le Gang ?" (posts, réactions emoji, commentaires, menu Signaler / Bloquer, panneau admin des signalements) — aussi /admin/feed
-│   ├── Events.jsx             # Privatisation du salon : demande d'événement, acceptation/refus du devis
+│   ├── Events.jsx             # Privatisation du salon : demande d'événement, acceptation/refus du devis ; en tête, « Vos invitations » aux événements organisés par le salon (components/salon-events/ : cartes, fiche avec RSVP et places, confirmation animée, calendrier, SalonEventHomeCard pour l'accueil)
 │   ├── GiftCards.jsx          # Cartes cadeau : achat (code DHB + QR), affichage
 │   ├── Textile.jsx            # « DHB Textile » (/textile, lazy) : drop en vedette (compte à rebours, alerte), pièces (vote 🔥 + taille, réservation), Labo, mes réservations — composants dans components/textile/
 │   ├── TryOn.jsx              # « Nouvelle tête » (/try-on, lazy) : essayage couleur cheveux / barbe, FAST sur l'appareil + AI ULTRA serveur
@@ -97,7 +98,8 @@ src/
 │       ├── AdminStock.jsx     # Stock produits (ref, seuil critique, type boutique/salon)
 │       ├── AdminOrders.jsx    # Gestion des commandes
 │       ├── AdminReviews.jsx   # Gestion des avis
-│       ├── AdminEvents.jsx    # Événements / privatisations : devis, statut, notes admin
+│       ├── AdminEvents.jsx    # Privatisations (demandes des clients) : devis, statut, notes admin
+│       ├── AdminSalonEvents.jsx # Événements du salon (/admin/salon-events) : création (photos, date, lieu, prix, capacité, tenue, visibilité), publication, invitations ciblées ou à tous, liste des invités (RSVP, places, relances, export CSV) — composants dans components/salon-events-admin/
 │       ├── AdminGiftCards.jsx # Cartes cadeau : validation (scan QR ou code), solde restant
 │       ├── AdminTextile.jsx   # Textile & drops (/admin/textile) : drops, pièces (stock par taille, votes), réservations (payée / retirée), push aux abonnés — composants dans components/textile-admin/
 │       ├── AdminSettings.jsx  # Paramètres du salon
@@ -120,7 +122,7 @@ public/
 ```
 
 Routes client : `/`, `/services`, `/booking`, `/shop`, `/appointments`, `/orders`, `/reviews`, `/settings`, `/notifications`, `/profile`, `/barber/:id`, `/feed`, `/events`, `/gift-cards`, `/textile`, `/try-on`, `/snap`, `/login`.
-Routes admin : `/admin`, `/admin/agenda`, `/admin/smart-agenda`, `/admin/services`, `/admin/team`, `/admin/clients`, `/admin/products`, `/admin/stock`, `/admin/orders`, `/admin/reviews`, `/admin/stats`, `/admin/settings`, `/admin/my-settings`, `/admin/notifications`, `/admin/cleaning`, `/admin/my-cleaning`, `/admin/barber-accounts`, `/admin/leave`, `/admin/my-leave`, `/admin/feed`, `/admin/events`, `/admin/gift-cards`, `/admin/textile`.
+Routes admin : `/admin`, `/admin/agenda`, `/admin/smart-agenda`, `/admin/services`, `/admin/team`, `/admin/clients`, `/admin/products`, `/admin/stock`, `/admin/orders`, `/admin/reviews`, `/admin/stats`, `/admin/settings`, `/admin/my-settings`, `/admin/notifications`, `/admin/cleaning`, `/admin/my-cleaning`, `/admin/barber-accounts`, `/admin/leave`, `/admin/my-leave`, `/admin/feed`, `/admin/events`, `/admin/gift-cards`, `/admin/textile`, `/admin/salon-events`.
 
 ## Structure Backend
 
@@ -145,7 +147,8 @@ dhomebarber-api/
 │   ├── reviewReminder.js       # Toutes les 30 min : demande d'avis après prestation (review_reminder_sent)
 │   ├── birthdayReminder.js     # Tous les jours 8h : notif + email anniversaire (users.birth_date)
 │   ├── comebackReminder.js     # Tous les jours 10h Paris : relance « il est temps de revenir » (comeback_reminder_sent), --dry-run
-│   └── textileDrop.js          # Chaque minute : ouvre les drops à l'heure (teasing → live + push aux abonnés), clôt (ends_at), rappelle / expire les réservations
+│   ├── textileDrop.js          # Chaque minute : ouvre les drops à l'heure (teasing → live + push aux abonnés), clôt (ends_at), rappelle / expire les réservations
+│   └── salonEventReminder.js   # Toutes les 30 min : push « C'est demain » aux invités ayant accepté (fenêtre 23–25 h, reminder_sent_at)
 └── routes/
     ├── media.js       # GET /api/media/:id : sert une image stockée en base (cache 1 an, ETag / 304)
     ├── hairUltra.js   # POST /ai/hair-ultra : recoloration HD (lib/hairUltra.js, fal.ai, FAL_KEY)
@@ -157,7 +160,8 @@ dhomebarber-api/
     ├── barberAccounts.js  # Gestion comptes barbers
     ├── cleaning.js    # generate-schedule, notify-today, toggle, history
     ├── leave.js       # PATCH /leave/:id/status : admin approuve/refuse un congé + push au barber
-    └── textile.js     # Textile & drops : GET /textile/overview, vote, alerte, réservation (transaction + stock), cancel, notify (staff) — lib/textileNotify.js pour le push d'ouverture
+    ├── textile.js     # Textile & drops : GET /textile/overview, vote, alerte, réservation (transaction + stock), cancel, notify (staff) — lib/textileNotify.js pour le push d'ouverture
+    └── salonEvents.js # Événements du salon : GET /salon-events/mine, rsvp (transaction + capacité), invite (staff : push + email), guests, remind ; helpers de push exposés sur le routeur
 ```
 
 ## Entités (Tables PostgreSQL)
@@ -172,7 +176,9 @@ Mapping entité → table dans `routes/entities.js`.
 | Employee | employees | name, title, bio (contient l'URL vidéo après le marqueur `%%VIDEO%%`), email, phone, photo_url, color, working_hours (JSONB), permissions (JSONB), skills (JSONB), experience_level, sort_order, is_active |
 | SkillCategory | skill_categories | name, emoji, color, sort_order, is_active |
 | Appointment | appointments | client_name, client_email, client_phone, employee_id, employee_name, date, start_time, end_time, services (JSONB), status, payment_method, tip, tip_method, product_sold, product_price, grand_total, deposit_amount, reminder_sent, review_reminder_sent, comeback_reminder_sent, internal_notes, cancellation_reason |
-| Product | products | name, price, description, image_url, brand, category, stock, ref, critical_stock, stock_type (boutique/salon), is_active |
+| Product | products | name, price, description, image_url (couverture), images (JSONB, ≤ 8 URLs, galerie de la fiche produit), brand, category, stock, ref, critical_stock, stock_type (boutique/salon), is_active |
+| SalonEvent | salon_events | title, description, cover_image_url, images (JSONB), starts_at, ends_at (TIMESTAMPTZ), location, price (NULL / 0 = offert), capacity (NULL = illimité), status (draft / published / cancelled / done), visibility (invite / public), dress_code, notes (internes), reminder_sent_at, created_by |
+| SalonEventInvite | salon_event_invites | event_id, user_email, user_name, status (invited / accepted / declined), guests (places, 1..4), invited_at, responded_at, notified_at, UNIQUE(event_id, user_email) |
 | Order | orders | client_email, client_name, client_phone, items (JSONB), total_price, status, notes |
 | Review | reviews | client_name, client_email, rating, comment, employee_name, is_visible |
 | Post | posts | author_email, author_name, author_role, author_photo_url, content, image_url, likes_count |
@@ -264,7 +270,7 @@ Rapport complet : https://claude.ai/code/artifact/406820a6-13b7-43f2-bd32-65cd3e
 - **Battement de cœur WebSocket** (backend v80) : le routeur Heroku ferme toute connexion sans trafic au bout de 55 s. Le compteur `/ws/live` n'envoyant rien quand le nombre de connectés ne bouge pas, la socket était tuée (`H15 Idle connection`, visible dans les journaux depuis au moins le 3 sept.) et `useLiveCount` se reconnectait 3 s plus tard, en boucle — une poignée de main par client et par minute. Un `ws.ping()` toutes les 30 s la maintient ouverte ; le `pong` (renvoyé automatiquement par les navigateurs, aucun code client) sert à terminer les sockets réellement mortes. Minuteur annulé dans `gracefulShutdown`
 - **`POST /cleaning/notify-today`** utilise désormais `ac.parisToday()` : avec `toISOString()` il notifiait le ménage de la veille entre minuit et 2 h du matin à Paris
 - **Ramasse-miettes des médias** : `cleanup-media.js` supprime les images que plus aucune colonne ne cite (une image est référencée par une URL dans du texte, aucune clé étrangère ne peut le faire). **Simulation par défaut**, suppression avec `--apply`, délai de grâce de 7 jours (`--days=N`) pour ne pas emporter un fichier envoyé mais pas encore rattaché à une entité. `heroku run "node cleanup-media.js" --app dhomebarber-api`. La logique vit dans `jobs/mediaCleanup.js` et tourne **automatiquement le dimanche à 03h30 heure de Paris** (backend v81) ; le script en ligne de commande reste disponible pour un passage à la demande
-- **Tests dans le dépôt** : `cd dhomebarber-api && npm test` — 10 harnais (376 vérifications depuis le textile, 9 sept. 2026), sans dépendance ni accès à la base de production (le pool, `http2` et `fetch` sont remplacés avant le chargement du code testé)
+- **Tests dans le dépôt** : `cd dhomebarber-api && npm test` — 11 harnais (474 vérifications depuis les événements du salon, 12 sept. 2026), sans dépendance ni accès à la base de production (le pool, `http2` et `fetch` sont remplacés avant le chargement du code testé)
 
 ### Types de données
 - Les colonnes `decimal` de PostgreSQL sont converties en nombres dans `normalizeRow()`
@@ -415,6 +421,13 @@ Le salon présente des **concepts** de textile (t-shirt, hoodie, sweat, casquett
 - **Frontend client** (`src/pages/Textile.jsx`, `src/components/textile/`, `src/lib/textileApi.js`) : clé React Query `TEXTILE_QUERY_KEY = ['textile','overview']`, `useTextileActions` (vote / alerte optimistes avec rollback, réservation avec message serveur en toast et refetch sur 409). Le **compte à rebours suit l'horloge serveur** (`data.now` − `dataUpdatedAt`) ; à zéro, l'overview est rechargée toutes les 5 s jusqu'à la bascule du statut. Fiche de pièce en bottom sheet (carrousel drag, tailles avec restant, quantité, `pulse-cta` sur un wrapper autour du bouton motion), overlay de succès (« Précommande : paiement au salon avant le … »), « Mes réservations » (à payer / payée · fabrication / prête / retirée) avec annulation en deux taps, drops passés repliés. `TextileHomeCard` (carte de l'accueil, section `textile` de `homepage_order`, après `shop`) rend `null` sans drop annoncé / ouvert ni concept du Labo ; `Home.jsx` cache alors la section (visible en mode édition avec un texte explicatif). Accès : section d'accueil et menu Profil → « Textile & Drops » (pas d'onglet dans la barre du bas, déjà à cinq entrées)
 - **Frontend admin** (`src/pages/admin/AdminTextile.jsx`, `src/components/textile-admin/`, entrée « Textile & Drops » de la catégorie Commerce, permission `products`) : onglets Drops / Pièces / Réservations (`?tab=`), fusion overview + listes d'entités par id, boutons d'édition réservés à `role === 'admin'` (un barber est en lecture seule sur drops et pièces, il traite les réservations : Payée → Prête (push au client) → Retirée, Annuler, note interne). Pièces : images multi-upload (`UploadFile`, la première = couverture), couleurs `<input type="color">`, tailles + stock par taille (champ vide = non suivi), répartition des tailles votées. La duplication crée la copie **inactive**. Champs `datetime-local` convertis en ISO à l'envoi
 - **Tests backend** : `test/test-textile.js` (108 vérifications : accès, projection client, vote, alerte, réservation avec faux pool transactionnel, cancel, notify, push « prête », `runTextileTick`). `npm test` → 10 harnais
+
+### Lot du 12 sept. 2026 (backend v88) : fiche produit, prestations, événements du salon, compétences
+- **Fiche produit** : `products.images` (galerie, admin : upload séquentiel, la première photo devient `image_url`). Côté client, tap sur la carte → `components/shop/ProductSheet.jsx` (galerie, description complète `whitespace-pre-line`, « Plus que N » si stock ≤ 5, « Rupture » si 0, quantité plafonnée par le stock restant moins le panier, vol vers le panier avec badge ×N). Helpers dans `components/shop/productUtils.js` (`productImages`, `stockInfo`, libellés de catégories partagés avec Shop.jsx)
+- **Accueil** : « Comme la dernière fois » (`rebook`) et « Événement du salon » (`salon-event`) sont des sections de `homepage_order` comme les autres, donc déplaçables par l'admin. Leur composant rend `null` sans contenu : le wrapper `[&:has(>.auto-section:empty)]:hidden` masque alors la section. La fusion de l'ordre sauvegardé insère une section nouvelle **à sa place par défaut** (après son voisin précédent), plus en fin de page
+- **Prestations** (`Services.jsx`, `components/services/`) : chips de catégories collantes = liens d'ancrage avec suivi du défilement ; « Populaire » = 3 prestations les plus présentes dans les RDV `completed` (repli sur `sort_order` si moins de 5 RDV exploitables ou 403 : un client ne reçoit pas `services` dans les lignes projetées) ; « Nouveau » si `created_at` < 30 jours ; formules = nom contenant formule / pack / forfait ; `components/shared/ServiceCard.jsx` reste celui de Booking.jsx
+- **Événements du salon** (distincts des privatisations `events`) : cycle `draft → published → cancelled | done`, `visibility` `invite` (seuls les invités le voient) ou `public` (tous les clients, inscription libre). Le client passe uniquement par `GET /salon-events/mine` (`my_invite`, `accepted_count` = **places prises**, `spots_left`) et `POST /salon-events/:id/rsvp` (transaction `FOR UPDATE`, 409 « Complet » / « Plus que N place(s) », 403 sans invitation sur un `invite`, 404 sur un brouillon ; push aux admins). Staff : `POST /:id/invite` (`emails` de comptes existants uniquement, ou `all` = tous les clients ; crée les invitations manquantes, push + email `sendSalonEventInvitation`, `notified_at` ; 20/h/compte), `GET /:id/guests` (téléphone joint depuis `users`, `counts` invited / pending / accepted / declined / seats), `POST /:id/remind` (`audience` accepted / pending / all, 10/h ; `reminder_sent_at` posé seulement si les acceptés sont visés). Hooks d'`entities.js` : passage à `cancelled` → push « ❌ … est annulé » aux invités non refusés ; `starts_at` modifié sur un publié → push « nouvel horaire ». Job `salonEventReminder` : « ⏰ C'est demain » aux acceptés 23–25 h avant (un flag posé plus de 25 h avant est ignoré). Lecture des entités hors staff → 403 ; suppression de compte → invitations effacées. Admin : entrée « Événements du salon » (Divers, admin), publication ≠ invitation (rien ne part avant « Envoyer les invitations »), export CSV des invités. Tests : `test/test-salon-events.js` (98 vérifications) ; `npm test` → 11 harnais
+- **Compétences** : « Barbe et contours » scindée en **Maître barbe** (🧔) et **Contours** (📐, nouvelle catégorie, à noter sur chaque barber dans Équipe / Mes paramètres), « Taper » renommée **Fade** (👑). Abréviations de la carte FUT : BAR, CON, FAD (`ABBR_OVERRIDES` de `BarberCard.jsx`)
 
 ### Fenêtres : fermeture par la croix uniquement (règle, 9 sept. 2026)
 - Un tap à côté d'une fenêtre ne la ferme plus (demande du client : sur mobile, ça refermait les formulaires et perdait la saisie). `DialogContent` (`src/components/ui/dialog.jsx`) neutralise `onPointerDownOutside` / `onInteractOutside` pour toutes les modales shadcn ; Échap reste actif au clavier. Les modales maison (fond `fixed inset-0`) n'ont plus de `onClick` sur le fond : panier de la Boutique, cartes cadeau (client et admin), horaires de l'accueil, fiche de pièce Textile, composeur / menu / signalement / blocage du Feed

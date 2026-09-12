@@ -62,6 +62,7 @@ const BarberSettings = React.lazy(() => import('@/pages/admin/BarberSettings'));
 const AdminEvents = React.lazy(() => import('@/pages/admin/AdminEvents'));
 const AdminGiftCards = React.lazy(() => import('@/pages/admin/AdminGiftCards'));
 const AdminTextile = React.lazy(() => import('@/pages/admin/AdminTextile'));
+const AdminSalonEvents = React.lazy(() => import('@/pages/admin/AdminSalonEvents'));
 
 const LazyFallback = () => (
   <div className="fixed inset-0 flex items-center justify-center bg-background">
@@ -236,6 +237,7 @@ const AppRoutes = () => {
           <Route path="/admin/events" element={<Suspense fallback={<LazyFallback />}><AdminEvents /></Suspense>} />
           <Route path="/admin/gift-cards" element={<Suspense fallback={<LazyFallback />}><AdminGiftCards /></Suspense>} />
           <Route path="/admin/textile" element={<Suspense fallback={<LazyFallback />}><AdminTextile /></Suspense>} />
+          <Route path="/admin/salon-events" element={<Suspense fallback={<LazyFallback />}><AdminSalonEvents /></Suspense>} />
           <Route path="/admin/my-settings" element={<Suspense fallback={<LazyFallback />}><BarberSettings /></Suspense>} />
         </Route>
       </Route>

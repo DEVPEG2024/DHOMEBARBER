@@ -3,10 +3,11 @@ import { api } from '@/api/apiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { motion } from 'framer-motion';
-import { PartyPopper, Calendar, Clock, Users, MessageSquare, Send, CheckCircle, Sparkles, Ban, Euro, X as XIcon, ThumbsUp, ThumbsDown, MapPin } from 'lucide-react';
+import { PartyPopper, Calendar, Clock, Users, MessageSquare, Send, CheckCircle, Sparkles, Ban, Euro, ThumbsUp, ThumbsDown, MapPin } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
+import SalonEventsSection from '@/components/salon-events/SalonEventsSection';
 
 // Le salon reçoit exclusivement une clientèle masculine : pas d'EVJF dans les formules.
 const EVENT_TYPES = [
@@ -129,6 +130,9 @@ export default function Events() {
 
   return (
     <div className="max-w-lg mx-auto px-5 py-6">
+      {/* Événements organisés par le salon (invitations / ouverts à tous) : absent sans événement */}
+      <SalonEventsSection />
+
       {/* Header */}
       <div className="text-center mb-6">
         <div className="w-16 h-16 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center mx-auto mb-3">

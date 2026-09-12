@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { api } from '@/api/apiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Pencil, Trash2, Package, Upload, X, Percent } from 'lucide-react';
+import { Plus, Pencil, Trash2, Package, Upload, X, Percent, ArrowLeft, ArrowRight, Images } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -16,6 +16,22 @@ const categoryLabels = {
   hair_care: 'Cheveux', beard_care: 'Barbe', styling: 'Coiffant',
   accessories: 'Accessoires', skincare: 'Soin visage', other: 'Autre',
 };
+
+/** Galerie : la première photo est la couverture (`image_url`), la liste complète part dans `images`. */
+const MAX_IMAGES = 8;
+
+/** Couverture + galerie en une seule liste dédoublonnée (compat : anciens produits sans `images`). */
+function mergeImages(coverUrl, images) {
+  const seen = new Set();
+  const out = [];
+  [coverUrl, ...(Array.isArray(images) ? images : [])].forEach((url) => {
+    const u = typeof url === 'string' ? url.trim() : '';
+    if (!u || seen.has(u)) return;
+    seen.add(u);
+    out.push(u);
+  });
+  return out.slice(0, MAX_IMAGES);
+}
 
 export default function AdminProducts() {
   const [editProduct, setEditProduct] = useState(null);
@@ -32,17 +48,21 @@ export default function AdminProducts() {
 
   const saveMutation = useMutation({
     mutationFn: (data) => {
-      if (data.id) {
-        const { id, ...rest } = data;
+      // La première photo de la galerie devient la couverture ; la liste complète part dans `images`
+      const images = mergeImages(null, data.images);
+      const payload = { ...data, image_url: images[0] || '', images };
+      if (payload.id) {
+        const { id, ...rest } = payload;
         return api.entities.Product.update(id, rest);
       }
-      return api.entities.Product.create(data);
+      return api.entities.Product.create(payload);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['products'] });
       setShowDialog(false);
       toast.success('Produit sauvegardé');
     },
+    onError: (err) => toast.error(err?.message || 'Erreur lors de la sauvegarde'),
   });
 
   const deleteMutation = useMutation({
@@ -51,6 +71,7 @@ export default function AdminProducts() {
       queryClient.invalidateQueries({ queryKey: ['products'] });
       toast.success('Produit supprimé');
     },
+    onError: (err) => toast.error(err?.message || 'Erreur lors de la suppression'),
   });
 
   const applyPriceMutation = useMutation({
@@ -72,27 +93,54 @@ export default function AdminProducts() {
     onError: (err) => toast.error(err.message),
   });
 
-  const [uploading, setUploading] = useState(false);
+  const [upload, setUpload] = useState(null); // { done, total } pendant un envoi séquentiel
+  const uploading = !!upload;
 
   const openNew = () => {
-    setEditProduct({ name: '', description: '', price: 0, stock: 0, category: 'other', brand: '', image_url: '', is_active: true });
+    setEditProduct({ name: '', description: '', price: 0, stock: 0, category: 'other', brand: '', image_url: '', images: [], is_active: true });
+    setShowDialog(true);
+  };
+  const openEdit = (product) => {
+    setEditProduct({ ...product, images: mergeImages(product.image_url, product.images) });
     setShowDialog(true);
   };
 
-  const handleImageUpload = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploading(true);
-    try {
-      const { file_url } = await api.integrations.Core.UploadFile({ file });
-      setEditProduct(prev => ({ ...prev, image_url: file_url }));
-      toast.success('Photo ajoutée');
-    } catch {
-      toast.error("Erreur lors de l'upload");
-    } finally {
-      setUploading(false);
+  /** Multi-upload séquentiel via UploadFile (compression côté client incluse), max 8 photos. */
+  const handleImagesUpload = async (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (!files.length) return;
+    const room = MAX_IMAGES - (editProduct?.images?.length || 0);
+    if (room <= 0) { toast.error(`${MAX_IMAGES} photos maximum`); return; }
+    const batch = files.slice(0, room);
+    if (files.length > room) toast.warning(`Seules ${room} photo${room > 1 ? 's' : ''} ajoutée${room > 1 ? 's' : ''} : ${MAX_IMAGES} maximum`);
+    setUpload({ done: 0, total: batch.length });
+    for (const file of batch) {
+      try {
+        const { file_url } = await api.integrations.Core.UploadFile({ file });
+        if (!file_url) throw new Error("Le serveur n'a pas renvoyé d'URL pour la photo");
+        setEditProduct(prev => {
+          const images = Array.isArray(prev.images) ? prev.images : [];
+          if (images.length >= MAX_IMAGES || images.includes(file_url)) return prev;
+          return { ...prev, images: [...images, file_url] };
+        });
+      } catch (err) {
+        toast.error(err?.message || `Échec de l'envoi de ${file.name}`);
+      }
+      setUpload(p => (p ? { ...p, done: p.done + 1 } : p));
     }
+    setUpload(null);
   };
+  const moveImage = (index, delta) => {
+    setEditProduct(prev => {
+      const images = [...(prev.images || [])];
+      const target = index + delta;
+      if (target < 0 || target >= images.length) return prev;
+      [images[index], images[target]] = [images[target], images[index]];
+      return { ...prev, images };
+    });
+  };
+  const removeImage = (index) => setEditProduct(prev => ({ ...prev, images: (prev.images || []).filter((_, i) => i !== index) }));
 
   return (
     <div>
@@ -125,6 +173,11 @@ export default function AdminProducts() {
               <div className="flex items-center gap-2">
                 <h3 className="text-sm font-semibold truncate">{product.name}</h3>
                 {product.brand && <Badge variant="outline" className="text-[9px] border-border">{product.brand}</Badge>}
+                {Array.isArray(product.images) && product.images.length > 1 && (
+                  <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground shrink-0" title={`${product.images.length} photos`}>
+                    <Images className="w-3 h-3" /> {product.images.length}
+                  </span>
+                )}
               </div>
               <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
                 <span className="font-bold text-primary text-sm">{product.price}€</span>
@@ -133,7 +186,7 @@ export default function AdminProducts() {
               </div>
             </div>
             <div className="flex gap-1">
-              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setEditProduct({ ...product }); setShowDialog(true); }}>
+              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(product)}>
                 <Pencil className="w-3.5 h-3.5" />
               </Button>
               <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10"
@@ -152,39 +205,58 @@ export default function AdminProducts() {
       )}
 
       <Dialog open={showDialog} onOpenChange={setShowDialog}>
-        <DialogContent className="bg-card border-border max-w-md">
+        <DialogContent className="bg-card border-border max-w-md max-h-[92vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-display">{editProduct?.id ? 'Modifier' : 'Nouveau'} Produit</DialogTitle>
           </DialogHeader>
           {editProduct && (
             <div className="space-y-4">
-              {/* Photo */}
+              {/* Photos : galerie, la première = couverture */}
               <div>
-                <Label className="text-xs mb-2 block">Photo du produit</Label>
-                <div className="flex items-center gap-4">
-                  <div className="w-20 h-20 rounded-xl bg-white border border-border overflow-hidden flex items-center justify-center shrink-0">
-                    {editProduct.image_url ? (
-                      <img src={editProduct.image_url} alt="Produit" className="w-full h-full object-contain" />
-                    ) : (
-                      <Package className="w-8 h-8 text-muted-foreground/30" />
-                    )}
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <label className="cursor-pointer">
-                      <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} disabled={uploading} />
-                      <span className="flex items-center gap-1.5 text-xs text-primary border border-primary/30 bg-primary/5 hover:bg-primary/10 px-3 py-1.5 rounded-lg transition-all cursor-pointer">
-                        <Upload className="w-3 h-3" />
-                        {uploading ? 'Upload...' : 'Choisir une photo'}
-                      </span>
-                    </label>
-                    {editProduct.image_url && (
-                      <button onClick={() => setEditProduct({ ...editProduct, image_url: '' })}
-                        className="flex items-center gap-1 text-xs text-red-400 hover:text-red-300 transition-colors">
-                        <X className="w-3 h-3" /> Supprimer
-                      </button>
-                    )}
-                  </div>
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs">
+                    Photos <span className="text-muted-foreground">({editProduct.images?.length || 0}/{MAX_IMAGES}, la première sert de couverture)</span>
+                  </Label>
+                  <label className={`cursor-pointer ${uploading || (editProduct.images?.length || 0) >= MAX_IMAGES ? 'pointer-events-none opacity-50' : ''}`}>
+                    <input type="file" accept="image/*" multiple className="hidden" onChange={handleImagesUpload}
+                      disabled={uploading || (editProduct.images?.length || 0) >= MAX_IMAGES} />
+                    <span className="flex items-center gap-1.5 text-xs text-primary border border-primary/30 bg-primary/5 hover:bg-primary/10 px-3 py-1.5 rounded-lg transition-all">
+                      <Upload className="w-3 h-3" />
+                      {upload ? `Envoi ${Math.min(upload.done + 1, upload.total)}/${upload.total}…` : 'Ajouter'}
+                    </span>
+                  </label>
                 </div>
+                {(editProduct.images?.length || 0) === 0 ? (
+                  <div className="mt-2 rounded-xl border border-dashed border-border bg-secondary/40 p-5 text-center text-xs text-muted-foreground">
+                    <Package className="w-6 h-6 mx-auto mb-1 opacity-40" />
+                    Aucune photo pour l'instant.
+                  </div>
+                ) : (
+                  <div className="mt-2 grid grid-cols-4 gap-2">
+                    {editProduct.images.map((url, i) => (
+                      <div key={`${url}-${i}`} className="relative aspect-square rounded-lg overflow-hidden border border-border bg-white">
+                        <img src={url} alt={`Photo ${i + 1}`} className="w-full h-full object-contain" />
+                        {i === 0 && (
+                          <span className="absolute top-1 left-1 rounded bg-primary/90 px-1.5 py-0.5 text-[9px] font-bold text-primary-foreground">Couverture</span>
+                        )}
+                        <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-black/60 p-1">
+                          <button type="button" onClick={() => moveImage(i, -1)} disabled={i === 0} aria-label="Reculer"
+                            className="w-6 h-6 rounded flex items-center justify-center text-white hover:bg-white/20 disabled:opacity-30">
+                            <ArrowLeft className="w-3 h-3" />
+                          </button>
+                          <button type="button" onClick={() => removeImage(i)} aria-label="Retirer"
+                            className="w-6 h-6 rounded flex items-center justify-center text-red-300 hover:bg-red-500/30">
+                            <X className="w-3 h-3" />
+                          </button>
+                          <button type="button" onClick={() => moveImage(i, 1)} disabled={i === editProduct.images.length - 1} aria-label="Avancer"
+                            className="w-6 h-6 rounded flex items-center justify-center text-white hover:bg-white/20 disabled:opacity-30">
+                            <ArrowRight className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div>
@@ -195,7 +267,8 @@ export default function AdminProducts() {
               <div>
                 <Label className="text-xs">Description</Label>
                 <Textarea value={editProduct.description || ''} onChange={e => setEditProduct({ ...editProduct, description: e.target.value })}
-                  className="bg-secondary border-border mt-1" rows={2} />
+                  className="bg-secondary border-border mt-1" rows={6}
+                  placeholder="Description complète, affichée sur la fiche produit (sauts de ligne conservés)" />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -234,8 +307,12 @@ export default function AdminProducts() {
                 <Switch checked={editProduct.is_active} onCheckedChange={v => setEditProduct({ ...editProduct, is_active: v })} />
               </div>
               <Button className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
-                onClick={() => saveMutation.mutate(editProduct)}>
-                Sauvegarder
+                disabled={saveMutation.isPending || uploading}
+                onClick={() => {
+                  if (!editProduct.name?.trim()) { toast.error('Le nom du produit est obligatoire'); return; }
+                  saveMutation.mutate(editProduct);
+                }}>
+                {saveMutation.isPending ? 'Sauvegarde…' : uploading ? 'Envoi des photos…' : 'Sauvegarder'}
               </Button>
             </div>
           )}

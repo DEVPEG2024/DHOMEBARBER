@@ -4,20 +4,13 @@ import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { motion, AnimatePresence, useScroll, useTransform, useMotionValue, useReducedMotion, animate } from 'framer-motion';
 import { hapticFeedback } from '@/lib/capacitor';
-import { ShoppingBag, Plus, Minus, ShoppingCart, X, Trash2, Store, CheckCircle } from 'lucide-react';
+import { ShoppingBag, Plus, Minus, ShoppingCart, X, Trash2, Store, CheckCircle, Images } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
-
-const categoryLabels = {
-  hair_care: 'Cheveux',
-  beard_care: 'Barbe',
-  styling: 'Coiffant',
-  accessories: 'Accessoires',
-  skincare: 'Soin visage',
-  other: 'Autre',
-};
+import ProductSheet from '@/components/shop/ProductSheet';
+import { productCategoryLabel, productImages, stockInfo } from '@/components/shop/productUtils';
 
 /** Vol de la vignette produit vers le panier : taille du disque (px) et durée (s). */
 const FLY_SIZE = 56;
@@ -68,6 +61,8 @@ export default function Shop() {
   const [notes, setNotes] = useState('');
   const [ordering, setOrdering] = useState(false);
   const [orderSuccess, setOrderSuccess] = useState(false);
+  // Fiche produit ouverte (bottom sheet) : id du produit, résolu dans la liste à chaque rendu
+  const [openProductId, setOpenProductId] = useState(null);
   const { user } = useAuth();
   const reduceMotion = useReducedMotion();
 
@@ -110,22 +105,27 @@ export default function Shop() {
     });
   };
 
-  // Ajout depuis une vignette : même logique que updateCart, plus le clone qui s'envole.
-  // Départ : centre de l'image du produit, sinon centre du bouton cliqué.
-  const addToCart = (product, e) => {
-    updateCart(product.id, 1);
+  // Ajout depuis une vignette ou la fiche : même logique que updateCart, plus le clone qui s'envole
+  // (avec un badge « ×N » quand plusieurs unités partent d'un coup). `source` est l'élément d'où
+  // part le vol : centre de l'image du produit, sinon le bouton cliqué.
+  const addToCart = (product, source, quantity = 1) => {
+    updateCart(product.id, quantity);
     if (reduceMotion) return;
-    const source = imageRefs.current[product.id] || e.currentTarget;
     const r = source?.getBoundingClientRect?.();
     if (!r) return;
     flightIdRef.current += 1;
     setFlights(prev => [...prev, {
       id: flightIdRef.current,
       image: product.image_url || null,
+      qty: quantity,
       from: { x: r.left + r.width / 2 - FLY_SIZE / 2, y: r.top + r.height / 2 - FLY_SIZE / 2 },
       to: null,
     }]);
   };
+  const addFromCard = (product, e) => addToCart(product, imageRefs.current[product.id] || e.currentTarget, 1);
+
+  const openProduct = openProductId ? products.find(p => String(p.id) === String(openProductId)) : null;
+  const openSheet = (product) => { hapticFeedback(); setOpenProductId(product.id); };
 
   // Résout la destination des nouveaux vols une fois le bouton panier monté
   // (même commit que l'ajout). Bouton absent (tiroir ouvert…) : ajout sans animation.
@@ -230,65 +230,88 @@ export default function Shop() {
               activeCategory === cat ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground'
             }`}
           >
-            {categoryLabels[cat] || cat}
+            {productCategoryLabel(cat)}
           </button>
         ))}
       </div>
 
-      {/* Products Grid */}
+      {/* Products Grid : image et nom ouvrent la fiche, le « + » ajoute directement */}
       <div className="grid grid-cols-2 gap-4">
-        {filtered.map((product, i) => (
-          <GlassCard key={product.id}>
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.05 }}
-              className="bg-card border border-border rounded-xl overflow-hidden"
-            >
-              <div
-                ref={el => { imageRefs.current[product.id] = el; }}
-                className="aspect-square bg-white relative"
+        {filtered.map((product, i) => {
+          const stock = stockInfo(product);
+          const photoCount = productImages(product).length;
+          return (
+            <GlassCard key={product.id}>
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: i * 0.05 }}
+                className="bg-card border border-border rounded-xl overflow-hidden"
               >
-                {product.image_url ? (
-                  <img src={product.image_url} alt={product.name} className="w-full h-full object-contain" />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center">
-                    <ShoppingBag className="w-8 h-8 text-muted-foreground/30" />
+                <button
+                  type="button"
+                  onClick={() => openSheet(product)}
+                  aria-label={`Voir ${product.name}`}
+                  className="block w-full text-left"
+                >
+                  <div
+                    ref={el => { imageRefs.current[product.id] = el; }}
+                    className="aspect-square bg-white relative"
+                  >
+                    {product.image_url ? (
+                      <img src={product.image_url} alt={product.name} className={`w-full h-full object-contain ${stock.soldOut ? 'opacity-50' : ''}`} />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <ShoppingBag className="w-8 h-8 text-muted-foreground/30" />
+                      </div>
+                    )}
+                    {product.brand && (
+                      <Badge className="absolute top-2 left-2 bg-card/80 text-foreground text-[9px] border-none backdrop-blur-sm">
+                        {product.brand}
+                      </Badge>
+                    )}
+                    {photoCount > 1 && (
+                      <span className="absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-full bg-black/55 text-white text-[9px] font-semibold px-1.5 py-0.5 backdrop-blur-sm">
+                        <Images className="w-3 h-3" aria-hidden="true" />{photoCount}
+                      </span>
+                    )}
+                    {stock.soldOut && (
+                      <span className="absolute bottom-2 left-2 rounded-full bg-red-500/90 text-white text-[9px] font-bold uppercase tracking-wide px-2 py-0.5">
+                        Rupture
+                      </span>
+                    )}
                   </div>
-                )}
-                {product.brand && (
-                  <Badge className="absolute top-2 left-2 bg-card/80 text-foreground text-[9px] border-none backdrop-blur-sm">
-                    {product.brand}
-                  </Badge>
-                )}
-              </div>
-              <div className="p-3">
-                <h3 className="text-sm font-semibold line-clamp-1">{product.name}</h3>
-                {product.description && (
-                  <p className="text-[11px] text-muted-foreground line-clamp-2 mt-0.5">{product.description}</p>
-                )}
-                <div className="flex items-center justify-between mt-2">
-                  <span className="text-sm font-bold text-primary">{product.price}€</span>
-                  {cart[product.id] ? (
-                    <div className="flex items-center gap-2.5">
-                      <button onClick={() => updateCart(product.id, -1)} className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center active:scale-95">
-                        <Minus className="w-3.5 h-3.5" />
+                </button>
+                <div className="p-3">
+                  <button type="button" onClick={() => openSheet(product)} className="block w-full text-left">
+                    <h3 className="text-sm font-semibold line-clamp-1">{product.name}</h3>
+                    {product.description && (
+                      <p className="text-[11px] text-muted-foreground line-clamp-2 mt-0.5">{product.description}</p>
+                    )}
+                  </button>
+                  <div className="flex items-center justify-between mt-2">
+                    <span className="text-sm font-bold text-primary">{product.price}€</span>
+                    {cart[product.id] ? (
+                      <div className="flex items-center gap-2.5">
+                        <button onClick={() => updateCart(product.id, -1)} aria-label="Retirer une unité" className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center active:scale-95">
+                          <Minus className="w-3.5 h-3.5" />
+                        </button>
+                        <span className="text-sm font-bold w-4 text-center">{cart[product.id]}</span>
+                        <button onClick={e => addFromCard(product, e)} disabled={stock.soldOut} aria-label="Ajouter une unité" className="w-8 h-8 rounded-full bg-primary flex items-center justify-center active:scale-95 disabled:opacity-40">
+                          <Plus className="w-3.5 h-3.5 text-primary-foreground" />
+                        </button>
+                      </div>
+                    ) : (
+                      <button onClick={e => addFromCard(product, e)} disabled={stock.soldOut} aria-label="Ajouter au panier" className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center hover:bg-primary/20 transition-colors active:scale-95 disabled:opacity-40">
+                        <Plus className="w-4 h-4 text-primary" />
                       </button>
-                      <span className="text-sm font-bold w-4 text-center">{cart[product.id]}</span>
-                      <button onClick={e => addToCart(product, e)} className="w-8 h-8 rounded-full bg-primary flex items-center justify-center active:scale-95">
-                        <Plus className="w-3.5 h-3.5 text-primary-foreground" />
-                      </button>
-                    </div>
-                  ) : (
-                    <button onClick={e => addToCart(product, e)} className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center hover:bg-primary/20 transition-colors active:scale-95">
-                      <Plus className="w-4 h-4 text-primary" />
-                    </button>
-                  )}
+                    )}
+                  </div>
                 </div>
-              </div>
-            </motion.div>
-          </GlassCard>
-        ))}
+              </motion.div>
+            </GlassCard>
+          );
+        })}
       </div>
 
       {filtered.length === 0 && (
@@ -327,12 +350,13 @@ export default function Shop() {
       )}
 
       {/* Vignettes en vol vers le panier : trajectoire en arc (x et y sur des courbes
-          différentes), rétrécissement jusqu'à 0,3 et fondu final. Transform / opacity uniquement. */}
+          différentes), rétrécissement jusqu'à 0,3 et fondu final. Transform / opacity uniquement.
+          z-[70] : au-dessus de la fiche produit qui se referme pendant le vol. */}
       {flights.filter(f => f.to).map(f => (
         <motion.div
           key={f.id}
           aria-hidden="true"
-          className="fixed left-0 top-0 z-50 pointer-events-none rounded-full bg-white border border-border shadow-lg overflow-hidden flex items-center justify-center"
+          className="fixed left-0 top-0 z-[70] pointer-events-none rounded-full bg-white border border-border shadow-lg flex items-center justify-center"
           style={{ width: FLY_SIZE, height: FLY_SIZE }}
           initial={{ x: f.from.x, y: f.from.y, scale: 1, opacity: 1 }}
           animate={{
@@ -350,12 +374,31 @@ export default function Shop() {
           onAnimationComplete={() => handleFlightComplete(f.id)}
         >
           {f.image ? (
-            <img src={f.image} alt="" draggable={false} className="w-full h-full object-contain p-1.5" />
+            <img src={f.image} alt="" draggable={false} className="w-full h-full object-contain p-1.5 rounded-full" />
           ) : (
             <ShoppingBag className="w-5 h-5 text-primary" />
           )}
+          {f.qty > 1 && (
+            <span className="absolute -top-1 -right-1 min-w-[20px] h-5 px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center">
+              ×{f.qty}
+            </span>
+          )}
         </motion.div>
       ))}
+
+      {/* Fiche produit (croix ou Échap pour fermer, jamais le fond) */}
+      <AnimatePresence>
+        {openProduct && (
+          <ProductSheet
+            key={openProduct.id}
+            product={openProduct}
+            cartQty={cart[openProduct.id] || 0}
+            reduceMotion={reduceMotion}
+            onClose={() => setOpenProductId(null)}
+            onAdd={(product, quantity, source) => addToCart(product, source, quantity)}
+          />
+        )}
+      </AnimatePresence>
 
       {/* Cart Drawer */}
       <AnimatePresence>

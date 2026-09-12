@@ -14,6 +14,7 @@ import RebookCard from '@/components/home/RebookCard';
 import OpenStatusBadge from '@/components/home/OpenStatusBadge';
 import { snapFeatureEnabled } from '@/lib/snapLenses';
 import TextileHomeCard from '@/components/textile/TextileHomeCard';
+import SalonEventHomeCard from '@/components/salon-events/SalonEventHomeCard';
 import { TEXTILE_QUERY_KEY, fetchTextileOverview } from '@/lib/textileApi';
 
 const IS_MOBILE = typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
@@ -288,7 +289,10 @@ function BarberMarquee({ employees }) {
   );
 }
 
-const DEFAULT_SECTION_ORDER = ['quick-info', 'barbers', 'try-on', 'news', 'services', 'shop', 'textile', 'reviews', 'gift-card', 'cta'];
+// `rebook` (« Comme la dernière fois ») et `salon-event` sont des sections auto-masquées : leur
+// composant rend `null` sans contenu (pas de RDV passé, pas d'événement à venir) et le conteneur
+// `.auto-section` vide est caché par le wrapper (`[&:has(>.auto-section:empty)]:hidden`).
+const DEFAULT_SECTION_ORDER = ['quick-info', 'rebook', 'barbers', 'try-on', 'news', 'services', 'shop', 'textile', 'salon-event', 'reviews', 'gift-card', 'cta'];
 
 const SECTION_LABELS = {
   'quick-info': 'Infos rapides',
@@ -299,6 +303,8 @@ const SECTION_LABELS = {
   'textile': 'Textile & Drops',
   'reviews': 'Avis Clients',
   'gift-card': 'Carte Cadeau',
+  'rebook': 'Comme la dernière fois',
+  'salon-event': 'Événement du salon',
   'try-on': 'Filtres Snap',
   'cta': 'Réservation',
 };
@@ -377,10 +383,20 @@ export default function Home() {
   // Load saved section order from settings
   useEffect(() => {
     if (settings?.homepage_order && Array.isArray(settings.homepage_order) && settings.homepage_order.length > 0) {
-      // Merge: saved order first, then any new sections not in saved order
-      const saved = settings.homepage_order.filter(id => DEFAULT_SECTION_ORDER.includes(id));
-      const missing = DEFAULT_SECTION_ORDER.filter(id => !saved.includes(id));
-      setSectionOrder([...saved, ...missing]);
+      // Fusion : l'ordre sauvegardé fait foi ; une section inconnue de cet ordre (ajoutée depuis)
+      // est insérée juste après son voisin précédent de l'ordre par défaut, pas en fin de page
+      // (« Comme la dernière fois » doit rester en haut tant que l'admin ne l'a pas déplacée).
+      const merged = settings.homepage_order.filter(id => DEFAULT_SECTION_ORDER.includes(id));
+      DEFAULT_SECTION_ORDER.forEach((id, idx) => {
+        if (merged.includes(id)) return;
+        let insertAt = 0;
+        for (let i = idx - 1; i >= 0; i--) {
+          const pos = merged.indexOf(DEFAULT_SECTION_ORDER[i]);
+          if (pos >= 0) { insertAt = pos + 1; break; }
+        }
+        merged.splice(insertAt, 0, id);
+      });
+      setSectionOrder(merged);
     }
   }, [settings]);
 
@@ -588,6 +604,40 @@ export default function Home() {
                 </Link>
               ))}
             </div>
+          </div>
+        );
+
+      case 'rebook':
+        // « Comme la dernière fois » : déplaçable comme les autres sections (demande du 12 sept. 2026).
+        // RebookCard rend null sans RDV exploitable ; en mode édition, un repère pour la positionner.
+        if (!user?.email) return null;
+        if (editMode) {
+          return (
+            <div className="glass rounded-3xl p-5 text-center">
+              <p className="text-xs font-semibold text-foreground">Comme la dernière fois</p>
+              <p className="text-[11px] text-muted-foreground mt-1">Relance de la dernière visite du client (n'apparaît qu'aux clients ayant déjà un rendez-vous).</p>
+            </div>
+          );
+        }
+        return (
+          <div className="auto-section">
+            <RebookCard user={user} employees={employees} services={services} />
+          </div>
+        );
+
+      case 'salon-event':
+        // Prochain événement du salon auquel le client est invité (ou ouvert à tous) ; null sinon
+        if (editMode) {
+          return (
+            <div className="glass rounded-3xl p-5 text-center">
+              <p className="text-xs font-semibold text-foreground">Événement du salon</p>
+              <p className="text-[11px] text-muted-foreground mt-1">Prochain événement où le client est invité (caché s'il n'y en a pas).</p>
+            </div>
+          );
+        }
+        return (
+          <div className="auto-section">
+            <SalonEventHomeCard />
           </div>
         );
 
@@ -823,13 +873,6 @@ export default function Home() {
             )}
           </div>
         )}
-        {/* Relance en un tap de la dernière visite (client connecté). Bloc fixe,
-            hors de l'ordre des sections : ne rend rien sans RDV exploitable */}
-        {user?.email && (
-          <div className="mb-8 empty:hidden">
-            <RebookCard user={user} employees={employees} services={services} />
-          </div>
-        )}
         {editMode ? (
           /* Admin edit mode - drag to reorder */
           <Reorder.Group axis="y" values={sectionOrder} onReorder={setSectionOrder} className="space-y-4">
@@ -856,7 +899,7 @@ export default function Home() {
               const content = renderSection(id);
               if (!content) return null;
               return (
-                <motion.div key={id} variants={itemVariants}>
+                <motion.div key={id} variants={itemVariants} className="[&:has(>.auto-section:empty)]:hidden">
                   {content}
                 </motion.div>
               );

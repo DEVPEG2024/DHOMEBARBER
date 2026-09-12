@@ -40,10 +40,14 @@ const LEVEL_TO_RATING = [null, 68, 76, 84, 92, 99];
 const ABBR_OVERRIDES = {
   'ciseaux': 'CIS',
   'barbe et contours': 'BAR',
+  'maître barbe': 'BAR',
+  'maitre barbe': 'BAR',
+  'contours': 'CON',
   'cheveux afro': 'AFR',
   'design': 'DES',
   'coloration': 'COL',
   'taper': 'TAP',
+  'fade': 'FAD',
 };
 
 const GOLD = '#f6e7ad';

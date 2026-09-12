@@ -32,7 +32,9 @@ const allNavItems = [
   { path: '/admin/my-settings', icon: Settings, label: 'Paramètres', barberOnly: true, alwaysShow: true, category: 'Mon espace' },
   { path: '/admin/stats', icon: BarChart3, label: 'Statistiques', perm: 'stats', category: 'Analyse' },
   { path: '/admin/feed', icon: Newspaper, label: 'New\'sGang', alwaysShow: true, category: 'Divers' },
-  { path: '/admin/events', icon: PartyPopper, label: 'Événements', adminOnly: true, category: 'Divers' },
+  { path: '/admin/events', icon: PartyPopper, label: 'Privatisations', adminOnly: true, category: 'Divers' },
+  // Événements organisés par le salon (invitations ciblées, RSVP) : distincts des privatisations demandées par les clients
+  { path: '/admin/salon-events', icon: Sparkles, label: 'Événements du salon', adminOnly: true, category: 'Divers' },
   { path: '/admin/settings', icon: Settings, label: 'Paramètres', perm: 'settings', category: 'Divers' },
 ];
 
