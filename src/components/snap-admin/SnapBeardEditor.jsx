@@ -1,5 +1,5 @@
-import React from 'react';
-import { ArrowUp, ArrowDown, RotateCcw, Info } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { ArrowUp, ArrowDown, RotateCcw, Info, ChevronDown } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { beardStylesOf } from '@/lib/snapLenses';
@@ -9,6 +9,8 @@ import { beardStylesOf } from '@/lib/snapLenses';
  * quatre styles : on peut les renommer, changer leur emoji, les réordonner ou en masquer.
  */
 export default function SnapBeardEditor({ styles, onChange, hasBeardLens }) {
+  const [open, setOpen] = useState(hasBeardLens);
+  useEffect(() => { if (hasBeardLens) setOpen(true); }, [hasBeardLens]);
   const list = beardStylesOf({ beardStyles: styles });
   const patch = (i, p) => onChange(list.map((b, j) => (j === i ? { ...b, ...p } : b)));
   const move = (i, dir) => {
@@ -22,8 +24,12 @@ export default function SnapBeardEditor({ styles, onChange, hasBeardLens }) {
   return (
     <section className="bg-card border border-border rounded-xl p-5">
       <div className="flex items-start justify-between gap-3 mb-1">
-        <h3 className="text-sm font-semibold">Styles de barbe</h3>
-        {styles != null && (
+        <button type="button" onClick={() => setOpen((o) => !o)} className="flex items-center gap-1.5 text-sm font-semibold" aria-expanded={open}>
+          Styles de barbe
+          <span className="text-[11px] font-normal text-muted-foreground">({list.filter((b) => b.enabled !== false).length})</span>
+          <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform ${open ? 'rotate-180' : ''}`} />
+        </button>
+        {open && styles != null && (
           <button type="button" onClick={() => onChange(null)} className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground">
             <RotateCcw className="w-3 h-3" /> Réglages d'origine
           </button>
@@ -33,10 +39,13 @@ export default function SnapBeardEditor({ styles, onChange, hasBeardLens }) {
       {!hasBeardLens && (
         <p className="mb-3 flex items-start gap-2 rounded-lg bg-secondary/60 p-2.5 text-[11px] text-muted-foreground">
           <Info className="w-3.5 h-3.5 shrink-0 mt-px" />
-          Aucune lentille du groupe ne déclare la barbe (<code className="text-foreground">dhb = beard</code>) : ces styles seront
-          utilisés dès qu'une lentille la déclarera.
+          <span>
+            Aucune lentille du groupe ne déclare la barbe (<code className="text-foreground">dhb = beard</code>) : ces styles seront
+            utilisés dès qu'une lentille la déclarera.
+          </span>
         </p>
       )}
+      {open && (<>
       <div className="space-y-1.5">
         {list.map((b, i) => (
           <div key={b.id} className={`flex items-center gap-2 rounded-lg border border-border bg-secondary/40 px-2 py-1.5 ${b.enabled === false ? 'opacity-60' : ''}`}>
@@ -56,6 +65,7 @@ export default function SnapBeardEditor({ styles, onChange, hasBeardLens }) {
           </div>
         ))}
       </div>
+      </>)}
     </section>
   );
 }

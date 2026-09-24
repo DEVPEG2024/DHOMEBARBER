@@ -36,7 +36,8 @@ function fillDays(daily, days) {
 
 function DailyBars({ daily, days }) {
   const series = useMemo(() => fillDays(daily, days), [daily, days]);
-  const max = Math.max(1, ...series.map((s) => s.opens));
+  const peak = Math.max(0, ...series.map((s) => s.opens));
+  const max = Math.max(1, peak);
   const [hover, setHover] = useState(null);
   const shown = hover != null ? series[hover] : null;
   const total = series.reduce((sum, s) => sum + s.opens, 0);
@@ -75,7 +76,7 @@ function DailyBars({ daily, days }) {
       </div>
       <div className="flex justify-between text-[10px] text-muted-foreground mt-1 tabular-nums">
         <span>{series[0]?.label}</span>
-        <span>max {max}</span>
+        {peak > 0 && <span>max {peak} / jour</span>}
         <span>{series[series.length - 1]?.label}</span>
       </div>
     </div>
@@ -152,7 +153,7 @@ export default function SnapStats({ stats, days, onDaysChange, isLoading, error 
                   <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
                     <tile.icon className="w-3.5 h-3.5" /> {tile.label}
                   </p>
-                  <p className="font-display text-2xl font-bold mt-1 tabular-nums">{c.n}</p>
+                  <p className="text-2xl font-bold mt-1 tabular-nums">{c.n}</p>
                   <p className="text-[10px] text-muted-foreground tabular-nums">
                     {c.users} client{c.users > 1 ? 's' : ''}{share != null ? ` · ${share} % des visiteurs` : ''}
                   </p>

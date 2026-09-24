@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
-import { GripVertical, Plus, RotateCcw, Trash2, Info } from 'lucide-react';
+import { GripVertical, Plus, RotateCcw, Trash2, Info, ChevronDown } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { paletteOf } from '@/lib/snapLenses';
@@ -12,6 +12,10 @@ const MAX_COLORS = 32;
  * null tant que l'admin garde la palette d'origine ; la première modification la rend explicite.
  */
 export default function SnapPaletteEditor({ colors, onChange, hasColorLens }) {
+  // Repliée tant qu'aucune lentille ne s'en sert : 16 lignes à faire défiler pour rien sinon
+  const [open, setOpen] = useState(hasColorLens);
+  // les lentilles arrivent de chez Snap après le premier rendu
+  useEffect(() => { if (hasColorLens) setOpen(true); }, [hasColorLens]);
   const list = paletteOf({ colors });
   const update = (next) => onChange(next);
   const patch = (i, p) => update(list.map((c, j) => (j === i ? { ...c, ...p } : c)));
@@ -24,18 +28,22 @@ export default function SnapPaletteEditor({ colors, onChange, hasColorLens }) {
     update(next);
   };
 
+  const enabled = list.filter((c) => c.enabled !== false);
+
   const add = () => {
     if (list.length >= MAX_COLORS) return;
     update([...list, { id: `c-${Date.now().toString(36)}`, name: 'Nouvelle couleur', hex: '#888888', enabled: true }]);
   };
 
-  const enabled = list.filter((c) => c.enabled !== false);
-
   return (
     <section className="bg-card border border-border rounded-xl p-5">
       <div className="flex items-start justify-between gap-3 mb-1">
-        <h3 className="text-sm font-semibold">Palette de couleurs</h3>
-        {colors != null && (
+        <button type="button" onClick={() => setOpen((o) => !o)} className="flex items-center gap-1.5 text-sm font-semibold" aria-expanded={open}>
+          Palette de couleurs
+          <span className="text-[11px] font-normal text-muted-foreground">({enabled.length})</span>
+          <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform ${open ? 'rotate-180' : ''}`} />
+        </button>
+        {open && colors != null && (
           <button type="button" onClick={() => update(null)} className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground">
             <RotateCcw className="w-3 h-3" /> Palette d'origine
           </button>
@@ -48,11 +56,14 @@ export default function SnapPaletteEditor({ colors, onChange, hasColorLens }) {
       {!hasColorLens && (
         <p className="mb-3 flex items-start gap-2 rounded-lg bg-secondary/60 p-2.5 text-[11px] text-muted-foreground">
           <Info className="w-3.5 h-3.5 shrink-0 mt-px" />
-          Aucune lentille du groupe ne déclare la couleur (donnée fournisseur <code className="text-foreground">dhb = hair-color</code> dans Lens Studio) :
-          la palette sera utilisée dès qu'une lentille la déclarera.
+          <span>
+            Aucune lentille du groupe ne déclare la couleur (donnée fournisseur <code className="text-foreground">dhb = hair-color</code> dans Lens Studio) :
+            la palette sera utilisée dès qu'une lentille la déclarera.
+          </span>
         </p>
       )}
 
+      {open && (<>
       {/* ce que verront les clients */}
       <div className="flex flex-wrap gap-1.5 mb-4" aria-label="Aperçu de la palette">
         {enabled.map((c) => (
@@ -113,6 +124,7 @@ export default function SnapPaletteEditor({ colors, onChange, hasColorLens }) {
         className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-primary disabled:opacity-40">
         <Plus className="w-3.5 h-3.5" /> Ajouter une couleur
       </button>
+      </>)}
     </section>
   );
 }
