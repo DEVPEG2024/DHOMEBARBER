@@ -1,9 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion, useReducedMotion } from 'framer-motion';
-import { ChevronLeft, Loader2, Share2, RefreshCw, Sparkles, Palette, X } from 'lucide-react';
+import { ChevronLeft, Loader2, Share2, RefreshCw, Sparkles, Palette, X, Eye } from 'lucide-react';
 import { hapticFeedback, isNative } from '@/lib/capacitor';
-import { snapConfig, snapSupported } from '@/lib/snapLenses';
+import { useAuth } from '@/lib/AuthContext';
+import {
+  snapConfig, snapSupported, snapAdminPreviewConfig, getCameraKit, buildEntries, pickDefaultEntry, trackSnap,
+} from '@/lib/snapLenses';
 
 /**
  * « Filtres Snap » : la technologie des lentilles Snapchat dans l'app, via Camera Kit (SDK web
@@ -12,8 +15,10 @@ import { snapConfig, snapSupported } from '@/lib/snapLenses';
  * sur la caméra frontale. Rien à coder pour ajouter un filtre : publier une lentille suffit.
  *
  * Le SDK (~3 Mo + WASM) est chargé à la demande, uniquement sur cette page.
- * Prérequis : Safari 16+ / Chrome 95+, WebGL, caméra. Le jeton d'API et l'identifiant du groupe
- * viennent des paramètres publics du serveur (src/lib/snapLenses.js).
+ * Prérequis : Safari 16+ / Chrome 95+, WebGL, caméra. Le jeton d'API, les groupes et le catalogue
+ * (lentilles masquées, noms, ordre, palette, styles de barbe, filtre à l'ouverture) viennent des
+ * paramètres publics du serveur et se règlent dans Admin → Filtres Snap (src/lib/snapLenses.js).
+ * Filtres éteints, un admin ouvre quand même la page en aperçu, pour tester avant d'allumer.
  */
 
 /**
@@ -33,84 +38,12 @@ const tosAccepted = () => { try { return localStorage.getItem(TOS_KEY) === '1'; 
 
 const RENDER_WIDTH = 720;
 const RENDER_HEIGHT = 960;
-// Lentilles mises en avant et appliquées d'office si présentes
-const RELEVANT = /hair|cheveu|beard|barbe|colou?r|couleur|coupe|haircut/i;
-// Groupe de démonstration de Snap (23 exemples, surtout des tests pour développeurs) :
-// on n'y garde que ce qui a du sens pour un barbier. Un groupe du salon est affiché en entier.
-// `SNAP_LENS_GROUP_ID` accepte plusieurs groupes séparés par des virgules : le salon peut donc
-// afficher ses lentilles et celles de démonstration côte à côte. Chaque lentille porte son
-// `groupId`, donc le tri ci-dessous reste juste quel que soit le mélange.
-const SNAP_DEMO_GROUP = '39ed26d4-1931-4d21-98c2-eb2e29b76f6f';
-const DEMO_KEEP = /hair color|face expressions|distort/i;
-
-/**
- * Lentille « couleur de cheveux » du salon (créée dans Lens Studio) : une seule lentille qui lit la
- * couleur dans les paramètres de lancement Camera Kit (`launchParams.color`, hex). L'app la déploie
- * en une pastille par couleur.
- *
- * La reconnaissance passe **uniquement** par la donnée fournisseur `dhb` (Project Info → Vendor Data
- * dans Lens Studio) : `hair-color`, `beard`, ou `hair-color+beard` pour une lentille qui fait les deux.
- * C'est une déclaration du créateur de la lentille : « je lis ce paramètre ». Le nom ne suffit pas —
- * une lentille qui s'appelle « DHB Couleur » mais ignore `launchParams` afficherait 16 pastilles
- * strictement identiques, ce que le client ne peut pas comprendre (constaté le 4 sept. 2026).
- */
-const vendorKind = (lens) => String(lens?.vendorData?.dhb || '');
-const isColorLens = (lens) => /hair-color/.test(vendorKind(lens));
-export const SNAP_HAIR_COLORS = [
-  { id: 'platine', name: 'Blond platine', hex: '#EDE3C8' },
-  { id: 'dore', name: 'Blond doré', hex: '#D9B36A' },
-  { id: 'miel', name: 'Miel', hex: '#C68E3F' },
-  { id: 'chatain-clair', name: 'Châtain clair', hex: '#8B5A2B' },
-  { id: 'chatain', name: 'Châtain', hex: '#5B3A21' },
-  { id: 'brun', name: 'Brun', hex: '#3B2418' },
-  { id: 'noir', name: 'Noir', hex: '#141010' },
-  { id: 'cuivre', name: 'Roux cuivré', hex: '#B4471F' },
-  { id: 'auburn', name: 'Auburn', hex: '#7A2E1A' },
-  { id: 'argent', name: 'Gris argent', hex: '#B9BCC2' },
-  { id: 'blanc', name: 'Blanc polaire', hex: '#F1F1F1' },
-  { id: 'bleu', name: 'Bleu nuit', hex: '#1D3F8A' },
-  { id: 'violet', name: 'Violet', hex: '#6A2C9A' },
-  { id: 'rose', name: 'Rose', hex: '#E2559A' },
-  { id: 'cerise', name: 'Rouge cerise', hex: '#B4132E' },
-  { id: 'emeraude', name: 'Vert émeraude', hex: '#1F8A5B' },
-];
-/**
- * Lentille « barbe » du salon : une lentille, plusieurs styles choisis par le paramètre de
- * lancement `style`. Déclarée par la donnée fournisseur `dhb` contenant `beard`.
- */
-const isBeardLens = (lens) => /beard/.test(vendorKind(lens));
-export const SNAP_BEARD_STYLES = [
-  { id: 'full', name: 'Barbe fournie', emoji: '🧔' },
-  { id: 'light', name: 'Barbe de 3 jours', emoji: '🪒' },
-  { id: 'mustache', name: 'Moustache', emoji: '👨' },
-  { id: 'shaved', name: 'Rasé de près', emoji: '✨' },
-];
-
-const colorEntries = (lens) => SNAP_HAIR_COLORS.map((c) => ({ key: `${lens.id}:${c.id}`, lens, name: c.name, swatch: c.hex, launchParams: { color: c.hex, mode: 'full' } }));
-const beardEntries = (lens) => SNAP_BEARD_STYLES.map((b) => ({ key: `${lens.id}:${b.id}`, lens, name: b.name, emoji: b.emoji, launchParams: { style: b.id } }));
-
-/**
- * Déploie la liste du groupe : les lentilles paramétrables deviennent une entrée par réglage.
- * La lentille du salon porte les deux effets (couleur et barbe) : les styles de barbe passent
- * en tête, les teintes suivent. Chaque entrée relance la même lentille avec ses paramètres.
- */
-export function expandLenses(list) {
-  const out = [];
-  for (const lens of list) {
-    const color = isColorLens(lens);
-    const beard = isBeardLens(lens);
-    if (color || beard) {
-      if (beard) out.push(...beardEntries(lens));
-      if (color) out.push(...colorEntries(lens));
-      continue;
-    }
-    out.push({ key: lens.id, lens, name: lens.name, iconUrl: lens.iconUrl });
-  }
-  return out;
-}
 
 export default function SnapLenses() {
   const reduceMotion = useReducedMotion();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
+  const [preview, setPreview] = useState(false);
   const [status, setStatus] = useState('init'); // init | consent | unconfigured | unsupported | loading | ready | error
   const [accepted, setAccepted] = useState(tosAccepted);
   const [message, setMessage] = useState('');
@@ -134,21 +67,27 @@ export default function SnapLenses() {
     streamRef.current = null;
   }, []);
 
+  // Une ouverture par visite (les comptes staff sont ignorés côté serveur)
+  useEffect(() => { trackSnap('open'); }, []);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
       // Rien ne démarre — ni caméra, ni SDK — avant l'acceptation des conditions de Snap.
       if (!accepted) { setStatus('consent'); return; }
-      const config = await snapConfig();
+      let config = await snapConfig();
+      // Filtres éteints pour les clients : l'admin teste quand même, avec la configuration complète
+      if (!config && isAdmin) config = await snapAdminPreviewConfig().catch(() => null);
       if (cancelled) return;
       if (!config) { setStatus('unconfigured'); return; }
-      if (!snapSupported()) { setStatus('unsupported'); return; }
+      setPreview(!!config.preview);
+      if (!snapSupported()) { setStatus('unsupported'); trackSnap('error', { reason: 'unsupported' }); return; }
       setStatus('loading');
       setMessage('Chargement de Camera Kit…');
       try {
-        const { bootstrapCameraKit, createMediaStreamSource, Transform2D } = await import('@snap/camera-kit');
+        const { createMediaStreamSource, Transform2D } = await import('@snap/camera-kit');
         if (cancelled) return;
-        const cameraKit = await bootstrapCameraKit({ apiToken: config.apiToken });
+        const cameraKit = await getCameraKit(config.apiToken);
         if (cancelled) return;
         const session = await cameraKit.createSession({ liveRenderTarget: canvasRef.current });
         sessionRef.current = session;
@@ -173,18 +112,14 @@ export default function SnapLenses() {
         const groupIds = String(config.lensGroupId).split(',').map((g) => g.trim()).filter(Boolean);
         const { lenses: loaded } = await cameraKit.lensRepository.loadLensGroups(groupIds);
         if (cancelled) return;
-        // Les lentilles cheveux / barbe / couleur d'abord ; aucune lentille appliquée d'office
-        // (une lentille quelconque, comme les démos de Snap, peut recouvrir la caméra de sa propre interface)
-        const relevant = (lens) => isColorLens(lens) || isBeardLens(lens) || RELEVANT.test(lens?.name || '');
-        const visible = (loaded || []).filter((lens) => lens?.groupId !== SNAP_DEMO_GROUP || DEMO_KEEP.test(lens?.name || ''));
-        const sorted = [...visible].sort((a, b) => Number(relevant(b)) - Number(relevant(a)));
-        const entries = expandLenses(sorted);
+        // Lentilles visibles dans l'ordre réglé par l'admin, les paramétrables déployées
+        const entries = buildEntries(loaded || [], config.catalog);
         lensesRef.current = entries;
         setLenses(entries);
         setStatus('ready');
         setMessage('');
-        // à l'ouverture : une teinte, plus parlante qu'une barbe posée d'office
-        const first = entries.find((e) => e.swatch) || entries.find((e) => relevant(e.lens));
+        // à l'ouverture : le filtre choisi par l'admin, sinon une teinte (voir pickDefaultEntry)
+        const first = pickDefaultEntry(entries, config.catalog);
         if (first) {
           try {
             await session.applyLens(first.lens, first.launchParams ? { launchParams: first.launchParams } : undefined);
@@ -194,15 +129,17 @@ export default function SnapLenses() {
       } catch (err) {
         if (cancelled) return;
         const denied = err?.name === 'NotAllowedError';
+        trackSnap('error', { reason: denied ? 'camera_denied' : 'start_failed' });
         setStatus('error');
         setMessage(denied ? 'Accès à la caméra refusé.' : 'Impossible de démarrer les filtres Snap. Vérifiez votre connexion puis réessayez.');
       }
     })();
     return () => { cancelled = true; cleanup(); };
-  }, [cleanup, accepted]);
+  }, [cleanup, accepted, isAdmin]);
 
   const acceptTos = () => {
     hapticFeedback();
+    trackSnap('consent');
     try { localStorage.setItem(TOS_KEY, '1'); } catch { /* navigation privée : on redemandera */ }
     setAccepted(true);
   };
@@ -219,6 +156,7 @@ export default function SnapLenses() {
       } else {
         await session.applyLens(entry.lens, entry.launchParams ? { launchParams: entry.launchParams } : undefined);
         setActiveId(entry.key);
+        trackSnap('lens', { lens_key: entry.key, lens_name: entry.name });
       }
     } catch {
       setMessage('Impossible d\'appliquer ce filtre.');
@@ -233,6 +171,7 @@ export default function SnapLenses() {
     try {
       setCaptured(canvas.toDataURL('image/jpeg', 0.92));
       hapticFeedback();
+      trackSnap('capture');
     } catch {
       setMessage('Capture impossible sur cet appareil.');
     }
@@ -245,9 +184,11 @@ export default function SnapLenses() {
       const file = new File([blob], 'filtre-dhomebarber.jpg', { type: 'image/jpeg' });
       if (navigator.canShare?.({ files: [file] })) {
         await navigator.share({ files: [file], title: "Mon filtre · D'Home Barber" });
+        trackSnap('share');
         return;
       }
     } catch { return; }
+    trackSnap('share');
     if (!isNative) {
       const a = document.createElement('a');
       a.href = captured;
@@ -281,6 +222,15 @@ export default function SnapLenses() {
         </p>
         <h1 className="font-display text-2xl font-bold text-foreground">Filtres Snap</h1>
         <p className="text-xs text-muted-foreground mt-1 mb-4">Les vraies lentilles Snapchat du salon, coupes et couleurs, en direct sur vous.</p>
+        {preview && (
+          <div className="mb-4 flex items-start gap-2 rounded-xl border border-amber-400/30 bg-amber-400/10 p-3 text-[11px] text-amber-200">
+            <Eye className="w-4 h-4 shrink-0 mt-px" />
+            <span>
+              Aperçu administrateur : les filtres sont éteints pour les clients.{' '}
+              <Link to="/admin/snap" className="underline font-semibold">Les allumer dans l'admin</Link>
+            </span>
+          </div>
+        )}
 
         <div ref={containerRef} className="relative rounded-3xl overflow-hidden bg-black border border-white/10 shadow-2xl" style={{ aspectRatio: '3 / 4' }}>
           <canvas ref={canvasRef} className={`absolute inset-0 w-full h-full object-cover ${captured ? 'invisible' : ''}`} />
@@ -386,7 +336,7 @@ export default function SnapLenses() {
           </div>
         )}
 
-        <Link to="/booking" className="orbit-wrap rounded-2xl block mt-5 shadow-lg shadow-primary/25">
+        <Link to="/booking" onClick={() => trackSnap('book')} className="orbit-wrap rounded-2xl block mt-5 shadow-lg shadow-primary/25">
           <motion.span whileTap={reduceMotion ? undefined : { scale: 0.97 }}
             className="flex items-center justify-center gap-2 h-12 rounded-[14px] bg-primary text-primary-foreground font-semibold text-sm">
             Réserver ce look

@@ -2,7 +2,7 @@ import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { Outlet, Link, useLocation, Navigate } from 'react-router-dom';
 import {
   LayoutDashboard, Calendar, Users, Scissors, UserCircle,
-  BarChart3, Settings, Menu, X, ChevronLeft, ChevronDown, ShoppingBag, Star, Bell, Brain, Sun, Moon, ClipboardList, ShieldCheck, Sparkles, CalendarDays, Newspaper, Warehouse, PartyPopper, LogOut, Gift, GripVertical, Shirt
+  BarChart3, Settings, Menu, X, ChevronLeft, ChevronDown, ShoppingBag, Star, Bell, Brain, Sun, Moon, ClipboardList, ShieldCheck, Sparkles, CalendarDays, Newspaper, Warehouse, PartyPopper, LogOut, Gift, GripVertical, Shirt, Camera
 } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { useTheme } from '@/lib/ThemeContext';
@@ -35,6 +35,8 @@ const allNavItems = [
   { path: '/admin/events', icon: PartyPopper, label: 'Privatisations', adminOnly: true, category: 'Divers' },
   // Événements organisés par le salon (invitations ciblées, RSVP) : distincts des privatisations demandées par les clients
   { path: '/admin/salon-events', icon: Sparkles, label: 'Événements du salon', adminOnly: true, category: 'Divers' },
+  // Filtres Snap (Camera Kit) : interrupteur, lentilles, palette, jeton, statistiques
+  { path: '/admin/snap', icon: Camera, label: 'Filtres Snap', adminOnly: true, category: 'Divers' },
   { path: '/admin/settings', icon: Settings, label: 'Paramètres', perm: 'settings', category: 'Divers' },
 ];
 

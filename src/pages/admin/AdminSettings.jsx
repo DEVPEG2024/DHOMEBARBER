@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '@/api/apiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
-import { Save, Loader2, Plus, Trash2, Pencil, X, Check, GripVertical } from 'lucide-react';
+import { Save, Loader2, Plus, Trash2, Pencil, X, Check, GripVertical, Camera, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -244,26 +245,15 @@ export default function AdminSettings() {
           </div>
         </div>
 
-        {/* Fonctionnalités */}
-        <div className="bg-card border border-border rounded-xl p-5">
-          <h3 className="text-sm font-semibold mb-4">Fonctionnalités</h3>
-          <div className="space-y-4">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <Label className="text-xs">Filtres Snap</Label>
-                <p className="text-[11px] text-muted-foreground mt-1 max-w-md">
-                  Affiche « Nouvelle tête » sur l'accueil et donne accès aux lentilles Snapchat.
-                  Laissez éteint tant que vos lentilles ne produisent pas d'effet visible : la carte
-                  disparaît de l'accueil et la caméra n'est jamais demandée.
-                </p>
-              </div>
-              <Switch
-                checked={settings.snap_lenses_enabled === true}
-                onCheckedChange={v => setSettings({ ...settings, snap_lenses_enabled: v })}
-              />
-            </div>
+        {/* Fonctionnalités : les filtres Snap ont leur propre page */}
+        <Link to="/admin/snap" className="flex items-center gap-3 bg-card border border-border rounded-xl p-5 hover:border-primary/40 transition-colors">
+          <Camera className="w-5 h-5 text-yellow-300 shrink-0" />
+          <div className="flex-1 min-w-0">
+            <h3 className="text-sm font-semibold">Filtres Snap</h3>
+            <p className="text-[11px] text-muted-foreground mt-0.5">Interrupteur, lentilles, couleurs, jeton Camera Kit et statistiques.</p>
           </div>
-        </div>
+          <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
+        </Link>
 
         {/* Social */}
         <div className="bg-card border border-border rounded-xl p-5">
