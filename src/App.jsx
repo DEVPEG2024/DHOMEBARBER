@@ -38,6 +38,8 @@ const TryOn = React.lazy(() => import('@/pages/TryOn'));
 const SnapLenses = React.lazy(() => import('@/pages/SnapLenses'));
 // Textile & drops (lazy : page riche, hors du parcours de réservation)
 const Textile = React.lazy(() => import('@/pages/Textile'));
+// Bons plans du Gang (partenaires du salon, lazy)
+const Partners = React.lazy(() => import('@/pages/Partners'));
 
 // Admin pages (lazy-loaded - only for admin/barber users)
 const AdminDashboard = React.lazy(() => import('@/pages/admin/Dashboard'));
@@ -64,6 +66,7 @@ const AdminGiftCards = React.lazy(() => import('@/pages/admin/AdminGiftCards'));
 const AdminTextile = React.lazy(() => import('@/pages/admin/AdminTextile'));
 const AdminSalonEvents = React.lazy(() => import('@/pages/admin/AdminSalonEvents'));
 const AdminSnap = React.lazy(() => import('@/pages/admin/AdminSnap'));
+const AdminPartners = React.lazy(() => import('@/pages/admin/AdminPartners'));
 
 const LazyFallback = () => (
   <div className="fixed inset-0 flex items-center justify-center bg-background">
@@ -210,6 +213,7 @@ const AppRoutes = () => {
           <Route path="/try-on" element={<Suspense fallback={<LazyFallback />}><TryOn /></Suspense>} />
           <Route path="/snap" element={<Suspense fallback={<LazyFallback />}><SnapLenses /></Suspense>} />
           <Route path="/textile" element={<Suspense fallback={<LazyFallback />}><Textile /></Suspense>} />
+          <Route path="/partners" element={<Suspense fallback={<LazyFallback />}><Partners /></Suspense>} />
         </Route>
       </Route>
 
@@ -240,6 +244,7 @@ const AppRoutes = () => {
           <Route path="/admin/textile" element={<Suspense fallback={<LazyFallback />}><AdminTextile /></Suspense>} />
           <Route path="/admin/salon-events" element={<Suspense fallback={<LazyFallback />}><AdminSalonEvents /></Suspense>} />
           <Route path="/admin/snap" element={<Suspense fallback={<LazyFallback />}><AdminSnap /></Suspense>} />
+          <Route path="/admin/partners" element={<Suspense fallback={<LazyFallback />}><AdminPartners /></Suspense>} />
           <Route path="/admin/my-settings" element={<Suspense fallback={<LazyFallback />}><BarberSettings /></Suspense>} />
         </Route>
       </Route>
