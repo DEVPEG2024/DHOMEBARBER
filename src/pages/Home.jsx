@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { Link } from 'react-router-dom';
 import { api } from '@/api/apiClient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { MapPin, Clock, Phone, Star, ArrowRight, Scissors, ShoppingBag, Newspaper, Sparkles, Gift, GripVertical, Pencil, Check, X, Volume2, VolumeX, Shirt } from 'lucide-react';
+import { MapPin, Clock, Phone, Star, ArrowRight, Scissors, ShoppingBag, Newspaper, Sparkles, Gift, GripVertical, Pencil, Check, X, Volume2, VolumeX, Shirt, Handshake } from 'lucide-react';
 import { motion, useMotionValue, useSpring, useTransform, Reorder } from 'framer-motion';
 import SectionHeader from '@/components/shared/SectionHeader';
 import StarRating from '@/components/shared/StarRating';
@@ -16,6 +16,8 @@ import { snapFeatureEnabled } from '@/lib/snapLenses';
 import TextileHomeCard from '@/components/textile/TextileHomeCard';
 import SalonEventHomeCard from '@/components/salon-events/SalonEventHomeCard';
 import { TEXTILE_QUERY_KEY, fetchTextileOverview } from '@/lib/textileApi';
+import PartnersHomeCard from '@/components/partners/PartnersHomeCard';
+import { PARTNERS_QUERY_KEY, fetchPartners, visiblePartners } from '@/lib/partnersApi';
 
 const IS_MOBILE = typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
@@ -292,7 +294,7 @@ function BarberMarquee({ employees }) {
 // `rebook` (« Comme la dernière fois ») et `salon-event` sont des sections auto-masquées : leur
 // composant rend `null` sans contenu (pas de RDV passé, pas d'événement à venir) et le conteneur
 // `.auto-section` vide est caché par le wrapper (`[&:has(>.auto-section:empty)]:hidden`).
-const DEFAULT_SECTION_ORDER = ['quick-info', 'rebook', 'barbers', 'try-on', 'news', 'services', 'shop', 'textile', 'salon-event', 'reviews', 'gift-card', 'cta'];
+const DEFAULT_SECTION_ORDER = ['quick-info', 'rebook', 'barbers', 'try-on', 'news', 'services', 'shop', 'textile', 'salon-event', 'partners', 'reviews', 'gift-card', 'cta'];
 
 const SECTION_LABELS = {
   'quick-info': 'Infos rapides',
@@ -305,6 +307,7 @@ const SECTION_LABELS = {
   'gift-card': 'Carte Cadeau',
   'rebook': 'Comme la dernière fois',
   'salon-event': 'Événement du salon',
+  'partners': 'Bons plans du Gang',
   'try-on': 'Filtres Snap',
   'cta': 'Réservation',
 };
@@ -376,6 +379,14 @@ export default function Home() {
     const concepts = textile?.concepts || [];
     return drops.some(d => d.status === 'teasing' || d.status === 'live') || concepts.some(c => !c.drop_id && c.is_active !== false);
   }, [textile]);
+
+  // Bons plans du Gang : section cachée tant qu'aucun partenaire n'est visible (même requête que /partners)
+  const { data: partnersData } = useQuery({
+    queryKey: PARTNERS_QUERY_KEY,
+    queryFn: fetchPartners,
+    staleTime: 5 * 60 * 1000,
+  });
+  const partnersVisible = useMemo(() => visiblePartners(partnersData).length > 0, [partnersData]);
 
   const latestPost = posts[0] || null;
   const settings = settingsData[0] || null;
@@ -653,6 +664,22 @@ export default function Home() {
               <div className="glass rounded-3xl p-5 text-center">
                 <Shirt className="w-6 h-6 text-muted-foreground/40 mx-auto mb-2" />
                 <p className="text-xs text-muted-foreground">Aucun drop annoncé ni pièce du Labo pour l'instant : la section reste cachée aux clients.</p>
+              </div>
+            )}
+          </div>
+        );
+
+      case 'partners':
+        if (!partnersVisible && !editMode) return null;
+        return (
+          <div>
+            <SectionHeader title="Les bons plans du Gang" subtitle="Partenaires" linkTo="/partners" />
+            {partnersVisible ? (
+              <PartnersHomeCard />
+            ) : (
+              <div className="glass rounded-3xl p-5 text-center">
+                <Handshake className="w-6 h-6 text-muted-foreground/40 mx-auto mb-2" />
+                <p className="text-xs text-muted-foreground">Aucun partenaire visible pour l'instant : la section reste cachée aux clients.</p>
               </div>
             )}
           </div>

@@ -4,7 +4,7 @@ import { api } from '@/api/apiClient';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { motion } from 'framer-motion';
-import { Calendar, Star, ShoppingBag, Settings, LogOut, ChevronRight, Shield, Bell, Camera, Shirt } from 'lucide-react';
+import { Calendar, Star, ShoppingBag, Settings, LogOut, ChevronRight, Shield, Bell, Camera, Shirt, Handshake } from 'lucide-react';
 import { toast } from 'sonner';
 import ImageCropDialog from '@/components/shared/ImageCropDialog';
 
@@ -13,6 +13,7 @@ const menuItems = [
   { icon: Bell, label: 'Notifications', path: '/notifications', desc: 'Messages & alertes' },
   { icon: ShoppingBag, label: 'Mes Commandes', path: '/orders', desc: 'Suivi de vos achats' },
   { icon: Shirt, label: 'Textile & Drops', path: '/textile', desc: 'Concepts, votes & réservations' },
+  { icon: Handshake, label: 'Bons plans du Gang', path: '/partners', desc: 'Remises chez nos partenaires' },
   { icon: Star, label: 'Mes Avis', path: '/reviews', desc: 'Vos évaluations' },
   { icon: Settings, label: 'Paramètres', path: '/settings', desc: 'Compte & préférences' },
 ];
