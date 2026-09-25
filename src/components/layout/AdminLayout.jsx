@@ -77,8 +77,18 @@ function applyOrder(defaultList, savedIds) {
   savedIds.forEach(id => {
     if (map[id]) { ordered.push(map[id]); delete map[id]; }
   });
-  // Append any new entries not in saved order
-  Object.values(map).forEach(entry => ordered.push(entry));
+  // Entrées absentes de l'ordre sauvegardé (ajoutées depuis) : insérées juste après leur voisin
+  // précédent de l'ordre par défaut, donc dans leur rubrique, et non en bas du menu
+  defaultList.forEach((entry, idx) => {
+    if (!map[entry.id]) return;
+    let insertAt = 0;
+    for (let i = idx - 1; i >= 0; i--) {
+      const pos = ordered.findIndex(e => e.id === defaultList[i].id);
+      if (pos >= 0) { insertAt = pos + 1; break; }
+    }
+    ordered.splice(insertAt, 0, entry);
+    delete map[entry.id];
+  });
   return ordered;
 }
 
