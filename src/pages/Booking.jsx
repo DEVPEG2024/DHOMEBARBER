@@ -7,7 +7,7 @@ import { motion, AnimatePresence, animate, useReducedMotion } from 'framer-motio
 import { ChevronLeft, ChevronRight, Check, Calendar, CalendarPlus, Clock, User, Users, Scissors, Sparkles } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
-import { format, addDays, isSameDay, startOfDay } from 'date-fns';
+import { format, addDays, addMonths, isBefore, isSameDay, startOfDay } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import ServicePicker from '@/components/services/ServicePicker';
 import EmployeeCard from '@/components/shared/EmployeeCard';
@@ -446,6 +446,110 @@ export function SuccessOverlay({ barberName, detail, calendarEvent = null, durat
   );
 }
 
+/** Horizon de réservation proposé au client, en mois à partir d'aujourd'hui. */
+const BOOKING_MONTHS_AHEAD = 3;
+/** Marge gauche de la bande de dates (`px-4`), retirée lors des défilements programmés. */
+const STRIP_PADDING = 16;
+
+/**
+ * Bande de dates de l'étape 3 (≈ 90 jours) avec des raccourcis par mois : le mois visible est
+ * suivi au défilement, un tap sur un mois amène son premier jour en tête de bande.
+ */
+function DateStrip({ dates, selectedDate, onSelect }) {
+  const reduceMotion = useReducedMotion();
+  const stripRef = useRef(null);
+  const dayRefs = useRef([]);
+  const frame = useRef(0);
+
+  // Index du premier jour de chaque mois de la plage
+  const months = useMemo(() => dates.reduce((acc, date, i) => {
+    const key = format(date, 'yyyy-MM');
+    if (!acc.length || acc[acc.length - 1].key !== key) {
+      const label = format(date, 'LLLL', { locale: fr });
+      acc.push({ key, index: i, label: label.charAt(0).toUpperCase() + label.slice(1) });
+    }
+    return acc;
+  }, []), [dates]);
+
+  const [visibleMonth, setVisibleMonth] = useState(() => format(selectedDate || dates[0], 'yyyy-MM'));
+
+  const scrollToIndex = (index, smooth) => {
+    const strip = stripRef.current;
+    const day = dayRefs.current[index];
+    if (!strip || !day) return;
+    strip.scrollTo({ left: Math.max(0, day.offsetLeft - STRIP_PADDING), behavior: smooth && !reduceMotion ? 'smooth' : 'auto' });
+  };
+
+  // Retour sur l'étape avec une date déjà choisie : la ramener à l'écran
+  useEffect(() => {
+    if (!selectedDate) return;
+    const index = dates.findIndex(d => isSameDay(d, selectedDate));
+    if (index > 0) scrollToIndex(Math.max(0, index - 1), false);
+  }, []);
+
+  useEffect(() => () => cancelAnimationFrame(frame.current), []);
+
+  const onScroll = () => {
+    cancelAnimationFrame(frame.current);
+    frame.current = requestAnimationFrame(() => {
+      const strip = stripRef.current;
+      if (!strip) return;
+      const edge = strip.scrollLeft + STRIP_PADDING;
+      const first = dayRefs.current.findIndex(el => el && el.offsetLeft + el.offsetWidth / 2 > edge);
+      if (first >= 0) setVisibleMonth(format(dates[first], 'yyyy-MM'));
+    });
+  };
+
+  return (
+    <>
+      <div className="flex gap-2 mb-3 overflow-x-auto -mx-4 px-4 scrollbar-hide">
+        {months.map(m => {
+          const active = m.key === visibleMonth;
+          return (
+            <button
+              key={m.key}
+              type="button"
+              onClick={() => { setVisibleMonth(m.key); scrollToIndex(m.index, true); hapticFeedback(); }}
+              className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors duration-300 ${
+                active
+                  ? 'bg-primary/15 text-primary border border-primary/40'
+                  : 'bg-white/5 border border-white/10 text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {m.label}
+            </button>
+          );
+        })}
+      </div>
+      <div ref={stripRef} onScroll={onScroll} className="relative flex gap-2 overflow-x-auto pb-2 -mx-4 px-4 scrollbar-hide">
+        {dates.map((date, i) => {
+          const active = selectedDate && isSameDay(date, selectedDate);
+          return (
+            <motion.button
+              key={date.toISOString()}
+              ref={el => { dayRefs.current[i] = el; }}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: Math.min(i, 10) * 0.03, duration: 0.3, ease: 'easeOut' }}
+              whileTap={{ scale: 0.94 }}
+              onClick={() => onSelect(date)}
+              className={`flex-shrink-0 w-16 py-3 rounded-2xl text-center transition-colors duration-300 ${
+                active
+                  ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/25'
+                  : 'backdrop-blur-xl bg-white/5 border border-white/10 text-foreground hover:bg-white/10'
+              }`}
+            >
+              <p className="text-[11px] uppercase opacity-70">{format(date, 'EEE', { locale: fr })}</p>
+              <p className="text-lg font-bold leading-tight">{format(date, 'd')}</p>
+              <p className="text-[11px] opacity-60">{format(date, 'MMM', { locale: fr })}</p>
+            </motion.button>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
 export default function Booking() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -532,10 +636,10 @@ export default function Booking() {
   const totalPrice = selectedServices.reduce((sum, s) => sum + (s.price || 0), 0);
 
   const dates = useMemo(() => {
+    const today = startOfDay(new Date());
+    const end = addMonths(today, BOOKING_MONTHS_AHEAD);
     const d = [];
-    for (let i = 0; i < 14; i++) {
-      d.push(addDays(startOfDay(new Date()), i));
-    }
+    for (let day = today; isBefore(day, end); day = addDays(day, 1)) d.push(day);
     return d;
   }, []);
 
@@ -813,30 +917,11 @@ export default function Booking() {
                 <p className="text-sm font-medium mb-3 flex items-center gap-2 text-foreground/80">
                   <Calendar className="w-4 h-4 text-primary" /> Choisir une date
                 </p>
-                <div className="flex gap-2 overflow-x-auto pb-2 -mx-4 px-4 scrollbar-hide">
-                  {dates.map((date, i) => {
-                    const active = selectedDate && isSameDay(date, selectedDate);
-                    return (
-                      <motion.button
-                        key={date.toISOString()}
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: i * 0.03, duration: 0.3, ease: 'easeOut' }}
-                        whileTap={{ scale: 0.94 }}
-                        onClick={() => { setSelectedDate(date); setSelectedTime(null); if (anyBarber) setSelectedEmployee(null); hapticFeedback(); }}
-                        className={`flex-shrink-0 w-16 py-3 rounded-2xl text-center transition-colors duration-300 ${
-                          active
-                            ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/25'
-                            : 'backdrop-blur-xl bg-white/5 border border-white/10 text-foreground hover:bg-white/10'
-                        }`}
-                      >
-                        <p className="text-[11px] uppercase opacity-70">{format(date, 'EEE', { locale: fr })}</p>
-                        <p className="text-lg font-bold leading-tight">{format(date, 'd')}</p>
-                        <p className="text-[11px] opacity-60">{format(date, 'MMM', { locale: fr })}</p>
-                      </motion.button>
-                    );
-                  })}
-                </div>
+                <DateStrip
+                  dates={dates}
+                  selectedDate={selectedDate}
+                  onSelect={(date) => { setSelectedDate(date); setSelectedTime(null); if (anyBarber) setSelectedEmployee(null); hapticFeedback(); }}
+                />
               </div>
 
               {selectedDate && (
