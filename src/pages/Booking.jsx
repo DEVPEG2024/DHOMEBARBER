@@ -676,8 +676,22 @@ export default function Booking() {
       .map(([time, employee]) => ({ time, employee }));
   }, [anyBarber, selectedEmployee, selectedDate, appointments, timeOffs, totalDuration, employees]);
 
+  // Ajout d'une prestation : la page descend jusqu'au récapitulatif et au bouton « Suivant »
+  // (avec une longue carte, ils restaient hors de l'écran, sous la liste).
+  const reduceMotion = useReducedMotion();
+  const scrollToBottomRef = useRef(false);
+  useEffect(() => {
+    if (!scrollToBottomRef.current) return undefined;
+    scrollToBottomRef.current = false;
+    const raf = requestAnimationFrame(() => {
+      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: reduceMotion ? 'auto' : 'smooth' });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [selectedServices]);
+
   const toggleService = (service) => {
     hapticFeedback();
+    if (!selectedServices.some(s => s.id === service.id)) scrollToBottomRef.current = true;
     setSelectedServices(prev =>
       prev.find(s => s.id === service.id)
         ? prev.filter(s => s.id !== service.id)
@@ -688,6 +702,7 @@ export default function Booking() {
   // Suggestion du sélecteur (ex. passer à une formule) : retire et ajoute en un seul rendu
   const swapServices = (remove, add) => {
     const removeIds = new Set(remove.map(s => String(s.id)));
+    if (add.length > 0) scrollToBottomRef.current = true;
     setSelectedServices(prev => {
       const kept = prev.filter(s => !removeIds.has(String(s.id)));
       const known = new Set(kept.map(s => String(s.id)));
