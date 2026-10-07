@@ -36,15 +36,10 @@ export default function MyReviews() {
 
   const createReview = useMutation({
     mutationFn: (data) => api.entities.Review.create(data),
-    onSuccess: (created) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['myReviews'] });
       queryClient.invalidateQueries({ queryKey: ['reviews'] });
-      // Sans visite retrouvée sous cet email, le serveur garde l'avis masqué jusqu'à validation
-      if (created?.is_visible === false) {
-        toast.success('Merci ! Votre avis sera publié dès que le salon l\'aura validé.');
-      } else {
-        toast.success('Merci pour votre avis !');
-      }
+      toast.success('Merci pour votre avis !');
       setShowForm(false);
       setRating(0);
       setComment('');
@@ -152,16 +147,9 @@ export default function MyReviews() {
                       <Star key={s} className={`w-3.5 h-3.5 ${s <= review.rating ? 'text-primary fill-primary' : 'text-muted-foreground/20'}`} />
                     ))}
                   </div>
-                  <div className="flex items-center gap-2">
-                    {review.is_visible === false && (
-                      <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                        En attente de validation
-                      </span>
-                    )}
-                    <span className="text-[10px] text-muted-foreground">
-                      {review.created_date && new Date(review.created_date).toLocaleDateString('fr-FR')}
-                    </span>
-                  </div>
+                  <span className="text-[10px] text-muted-foreground">
+                    {review.created_date && new Date(review.created_date).toLocaleDateString('fr-FR')}
+                  </span>
                 </div>
                 {review.comment && (
                   <p className="text-xs text-muted-foreground leading-relaxed">{review.comment}</p>
