@@ -35,6 +35,8 @@ export default function AdminReviews() {
     },
   });
 
+  const pendingCount = reviews.filter(r => !r.is_visible).length;
+
   const avgRating = reviews.length > 0
     ? (reviews.reduce((sum, r) => sum + (r.rating || 0), 0) / reviews.length).toFixed(1)
     : '0';
@@ -46,6 +48,7 @@ export default function AdminReviews() {
         <h1 className="font-display text-2xl font-bold">Avis Clients</h1>
         <p className="text-xs text-muted-foreground mt-1">
           {reviews.length} avis · Note moyenne: {avgRating}/5
+          {pendingCount > 0 && <span className="text-amber-400"> · {pendingCount} non publié{pendingCount > 1 ? 's' : ''}</span>}
         </p>
       </div>
 
@@ -118,7 +121,7 @@ export default function AdminReviews() {
         <>
           <div className="space-y-3">
             {reviews.map(review => (
-              <div key={review.id} className={`bg-card border border-border rounded-xl p-4 ${!review.is_visible ? 'opacity-50' : ''}`}>
+              <div key={review.id} className={`bg-card border rounded-xl p-4 ${review.is_visible ? 'border-border' : 'border-amber-500/30'}`}>
                 <div className="flex items-start justify-between mb-2">
                   <div>
                     <p className="text-sm font-semibold">{review.client_name || 'Anonyme'}</p>
@@ -141,6 +144,16 @@ export default function AdminReviews() {
                 </div>
                 {review.comment && (
                   <p className="text-xs text-muted-foreground leading-relaxed mt-2">{review.comment}</p>
+                )}
+                {!review.is_visible && (
+                  // Avis d'un client sans visite retrouvée (ou masqué à la main) : invisible des clients
+                  <div className="flex items-center justify-between gap-3 mt-3 pt-3 border-t border-border">
+                    <p className="text-[10px] text-amber-400">Non publié : les clients ne le voient pas</p>
+                    <Button size="sm" className="h-7 text-xs" disabled={toggleVisibility.isPending}
+                      onClick={() => toggleVisibility.mutate(review)}>
+                      Publier
+                    </Button>
+                  </div>
                 )}
               </div>
             ))}
