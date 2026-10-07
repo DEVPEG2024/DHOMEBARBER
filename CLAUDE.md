@@ -73,7 +73,7 @@ src/
 │   └── ui/                    # Composants shadcn/ui (dialog, button, etc.)
 ├── pages/
 │   ├── Home.jsx               # Page d'accueil (hero centré, logo, "Premium Barber Shop", pastille Ouvert / Fermé en direct, bouton Réserver à anneau orbital, bloc « Comme la dernière fois », carrousel barbers avec parallaxe, bloc Carte Cadeau pulsant). Ordre des sections lu depuis salon_settings.homepage_order (pas d'éditeur UI, modifier en DB)
-│   ├── Booking.jsx            # Réservation en 4 étapes (étapes glissantes, récap animé, carte « Peu importe » = premier créneau dispo tous barbers, créneau qui se loge dans le résumé, écran de succès pluie de lames + boutons calendrier)
+│   ├── Booking.jsx            # Réservation en 4 étapes (dates sur 3 mois `BOOKING_MONTHS_AHEAD` avec raccourcis par mois, étapes glissantes, récap animé, carte « Peu importe » = premier créneau dispo tous barbers, créneau qui se loge dans le résumé, écran de succès pluie de lames + boutons calendrier)
 │   ├── Services.jsx           # Prestations (refonte 12 sept. 2026) : recherche, formules, chips de catégories collantes avec suivi du défilement, cartes avec icône / durée / prix / description dépliable, badges Populaire et Nouveau, sélection multiple + barre de résumé → /booking?services= — composants dans components/services/
 │   ├── Shop.jsx               # Boutique produits : tap sur une carte → fiche produit complète (components/shop/ProductSheet.jsx : galerie image_url + images, description entière, stock, quantité, ajout au panier)
 │   ├── Orders.jsx             # Commandes client
