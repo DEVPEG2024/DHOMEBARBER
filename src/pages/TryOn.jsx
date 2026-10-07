@@ -677,7 +677,8 @@ export default function TryOn() {
           </Link>
         )}
 
-        <Link to={bookingHref} className="orbit-wrap rounded-2xl block mt-4 shadow-lg shadow-primary/25">
+        {/* `!block w-full` : `.orbit-wrap` (index.css, hors couche Tailwind) impose inline-block */}
+        <Link to={bookingHref} className="orbit-wrap rounded-2xl !block w-full mt-4 shadow-lg shadow-primary/25">
           <motion.span whileTap={reduceMotion ? undefined : { scale: 0.97 }}
             className="flex items-center justify-center gap-2 h-12 rounded-[14px] bg-primary text-primary-foreground font-semibold text-sm">
             <Palette className="w-4 h-4" /> Réserver une coloration

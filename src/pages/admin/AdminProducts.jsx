@@ -144,12 +144,13 @@ export default function AdminProducts() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6 gap-3">
-        <div className="shrink-0">
+      {/* flex-wrap : sur téléphone les boutons passent sous le titre au lieu de déborder de l'écran */}
+      <div className="flex flex-wrap items-center justify-between mb-6 gap-3">
+        <div className="min-w-0">
           <p className="text-[11px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Boutique</p>
           <h1 className="font-display text-2xl font-bold">Produits</h1>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={() => setShowPriceDialog(true)} className="rounded-lg">
             <Percent className="w-4 h-4 mr-1.5" /> Modifier les prix
           </Button>

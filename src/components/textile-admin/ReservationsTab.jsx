@@ -23,6 +23,11 @@ const STATUS_ICONS = {
   reserved: Clock, paid: CheckCircle2, ready: Package, picked_up: PackageCheck, cancelled: Ban, expired: Clock,
 };
 
+// Libellés des filtres, au pluriel (« À payer » est invariable : ajouter un « s » donnait « À payers »)
+const FILTER_LABELS = {
+  reserved: 'À payer', paid: 'Payées', ready: 'Prêtes', picked_up: 'Retirées', cancelled: 'Annulées', expired: 'Expirées',
+};
+
 function NotesEditor({ reservation, onSave, saving }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(reservation.notes || '');
@@ -104,7 +109,7 @@ export default function ReservationsTab({ reservations, isLoading }) {
 
   const filters = [
     { key: 'all', label: `Toutes (${counts.all})` },
-    ...RESERVATION_STATUSES.map((s) => ({ key: s.value, label: `${s.label}s (${counts[s.value] || 0})` })),
+    ...RESERVATION_STATUSES.map((s) => ({ key: s.value, label: `${FILTER_LABELS[s.value] || s.label} (${counts[s.value] || 0})` })),
   ];
 
   const setStatus = (r, status, successMessage) => updateMutation.mutate({ id: r.id, data: { status }, successMessage });

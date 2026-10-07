@@ -1,6 +1,7 @@
 import React, { createContext, useState, useContext, useEffect, useCallback } from 'react';
 import { api } from '@/api/apiClient';
 import { queryClientInstance } from '@/lib/query-client';
+import { syncPushSubscription } from '@/lib/pushNotifications';
 
 const AuthContext = createContext();
 
@@ -8,6 +9,9 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
+  // Vrai juste après une inscription : l'écran « Bienvenue ! » de Login (installer l'app,
+  // activer les notifications) s'affiche avant la redirection (GuestOnly, App.jsx).
+  const [welcomePending, setWelcomePending] = useState(false);
 
   // Check token on mount
   useEffect(() => {
@@ -26,6 +30,8 @@ export const AuthProvider = ({ children }) => {
       const currentUser = await api.auth.me();
       setUser(currentUser);
       setIsAuthenticated(true);
+      // Rattache l'appareil au compte (jeton push obtenu hors session, autorisation déjà donnée)
+      syncPushSubscription();
     } catch (err) {
       // Ne jamais effacer le jeton sur une panne réseau : ouvrir l'app dans le métro ou
       // en avion déconnectait définitivement, il fallait retaper son mot de passe.
@@ -50,6 +56,7 @@ export const AuthProvider = ({ children }) => {
     queryClientInstance.clear();
     setUser(null);
     setIsAuthenticated(false);
+    setWelcomePending(false);
   }, []);
 
   // Le jeton vit 24 h et la session n'était vérifiée qu'au démarrage : passé ce délai, toutes
@@ -61,7 +68,8 @@ export const AuthProvider = ({ children }) => {
       if (!localStorage.getItem('base44_access_token') && !localStorage.getItem('token')) return;
       clearSession();
       if (window.location.pathname !== '/login') {
-        window.location.assign(`/login?redirect=${encodeURIComponent(window.location.pathname)}&expired=1`);
+        const back = window.location.pathname + window.location.search;
+        window.location.assign(`/login?redirect=${encodeURIComponent(back)}&expired=1`);
       }
     };
     window.addEventListener('dhb:unauthorized', onUnauthorized);
@@ -77,6 +85,7 @@ export const AuthProvider = ({ children }) => {
     const fullUser = await api.auth.me();
     setUser(fullUser);
     setIsAuthenticated(true);
+    syncPushSubscription();
     return fullUser;
   }, []);
 
@@ -89,8 +98,13 @@ export const AuthProvider = ({ children }) => {
     queryClientInstance.clear();
     setUser(newUser);
     setIsAuthenticated(true);
+    setWelcomePending(true);
+    syncPushSubscription();
     return newUser;
   }, []);
+
+  // « Commencer » / « Passer cette étape » de l'écran de bienvenue : GuestOnly redirige
+  const dismissWelcome = useCallback(() => setWelcomePending(false), []);
 
   const refreshUser = useCallback(async () => {
     try {
@@ -113,8 +127,10 @@ export const AuthProvider = ({ children }) => {
       user,
       isAuthenticated,
       isLoadingAuth,
+      welcomePending,
       login,
       register,
+      dismissWelcome,
       logout,
       refreshUser,
     }}>

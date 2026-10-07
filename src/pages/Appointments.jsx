@@ -1,11 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '@/api/apiClient';
 import { useAuth } from '@/lib/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
-import { Calendar, CalendarPlus, Clock, User, X, Scissors, Plus } from 'lucide-react';
-import { format, isPast, parseISO } from 'date-fns';
+import { Calendar, CalendarPlus, Clock, User, X, Scissors, Plus, Phone } from 'lucide-react';
+import { format, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { toast } from 'sonner';
 import {
@@ -13,13 +13,27 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { hapticFeedback } from '@/lib/capacitor';
-import { buildAppointmentEvent, openCalendar, toLocalDate } from '@/lib/calendarLinks';
+import { appointmentEvent, openCalendar, parisInstant } from '@/lib/calendarLinks';
 
 /** Cibles « Ajouter au calendrier ». */
 const CALENDAR_TARGETS = [
   { kind: 'google', label: 'Google Agenda' },
   { kind: 'ics', label: 'Apple / Outlook' },
 ];
+
+/** Statuts qui rangent un rendez-vous dans l'historique, quelle que soit sa date. */
+const CLOSED_STATUSES = ['cancelled', 'completed', 'no_show'];
+
+/**
+ * Début / fin d'un rendez-vous en instant réel (heure de Paris, quel que soit le fuseau de
+ * l'appareil). Un rendez-vous reste « à venir » tant que son heure de fin n'est pas passée :
+ * comparer la seule date à minuit rangeait dans l'historique un rendez-vous pris pour le jour même.
+ */
+const startsAt = (apt) => parisInstant(apt.date, apt.start_time || '00:00');
+const endsAt = (apt) => parisInstant(apt.date, apt.end_time || apt.start_time || '23:59');
+
+/** « 06 66 08 36 05 » → « tel:0666083605 ». */
+const telHref = (phone) => `tel:${String(phone || '').replace(/[^\d+]/g, '')}`;
 
 const statusConfig = {
   pending:   { label: 'En attente', bg: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' },
@@ -45,6 +59,23 @@ export default function Appointments() {
     refetchInterval: 30000, // Auto-refresh toutes les 30s
   });
 
+  // Délai d'annulation du salon (même requête et même cache que l'accueil). Dans ce délai le
+  // serveur refuse l'annulation : on affiche le téléphone du salon au lieu du bouton.
+  const { data: settingsData = [] } = useQuery({
+    queryKey: ['salonSettings'],
+    staleTime: 5 * 60 * 1000,
+    queryFn: () => api.entities.SalonSettings.list(),
+  });
+  const settings = settingsData[0] || null;
+  const cancelHours = parseInt(settings?.cancellation_hours, 10) || 0;
+
+  // Horloge à la minute : un rendez-vous passe dans l'historique dès que son heure de fin est passée
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 60 * 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   const cancelMutation = useMutation({
     mutationFn: (id) => api.entities.Appointment.update(id, { status: 'cancelled' }),
     onSuccess: () => {
@@ -62,21 +93,22 @@ export default function Appointments() {
   /** Ouvre Google Agenda ou télécharge le .ics d'un rendez-vous (UID stable : réimporter met à jour au lieu de dupliquer). */
   const addToCalendar = (kind, apt) => {
     hapticFeedback();
-    openCalendar(kind, buildAppointmentEvent({
-      barberName: apt.employee_name,
-      services: apt.services,
-      date: apt.date,
-      startTime: apt.start_time,
-      endTime: apt.end_time,
-      totalDuration: apt.total_duration,
-      totalPrice: apt.total_price,
-      uid: `appointment-${apt.id}@dhomebarber.fr`,
-    }));
+    openCalendar(kind, appointmentEvent(apt));
     setCalendarOpenId(null);
   };
 
-  const upcoming = appointments.filter(a => !isPast(parseISO(a.date)) && a.status !== 'cancelled' && a.status !== 'completed');
-  const past = appointments.filter(a => isPast(parseISO(a.date)) || a.status === 'cancelled' || a.status === 'completed');
+  // À venir : le plus proche d'abord ; historique : le plus récent d'abord
+  const { upcoming, past } = useMemo(() => {
+    const up = [];
+    const done = [];
+    for (const apt of appointments) {
+      const isUpcoming = !!apt.date && !CLOSED_STATUSES.includes(apt.status) && endsAt(apt) > now;
+      (isUpcoming ? up : done).push(apt);
+    }
+    up.sort((a, b) => startsAt(a) - startsAt(b));
+    done.sort((a, b) => startsAt(b) - startsAt(a));
+    return { upcoming: up, past: done };
+  }, [appointments, now]);
   const list = tab === 'upcoming' ? upcoming : past;
 
   return (
@@ -163,10 +195,14 @@ export default function Appointments() {
             <AnimatePresence>
               {list.map((apt, i) => {
                 const status = statusConfig[apt.status] || statusConfig.pending;
-                const canCancel = apt.status === 'confirmed' && !isPast(parseISO(apt.date));
+                // Annulation : RDV confirmé pas encore commencé, hors du délai d'annulation du salon
+                // (le serveur applique la même règle). Dans le délai : téléphone du salon à la place.
+                const startMs = startsAt(apt);
+                const notStarted = apt.status === 'confirmed' && startMs > now;
+                const tooLateToCancel = notStarted && cancelHours > 0 && startMs - now < cancelHours * 3600 * 1000;
+                const canCancel = notStarted && !tooLateToCancel;
                 // À venir (fin du RDV pas encore passée) et ni annulé ni terminé : proposer l'ajout au calendrier
-                const endsInFuture = toLocalDate(apt.date, apt.end_time || apt.start_time || '23:59') > new Date();
-                const canAddToCalendar = endsInFuture && !['cancelled', 'completed', 'no_show'].includes(apt.status);
+                const canAddToCalendar = !CLOSED_STATUSES.includes(apt.status) && endsAt(apt) > now;
                 const calendarOpen = calendarOpenId === apt.id;
                 return (
                   <motion.div
@@ -229,7 +265,7 @@ export default function Appointments() {
                       )}
 
                       {/* Actions : ajout au calendrier (RDV à venir) et annulation */}
-                      {(canAddToCalendar || canCancel) && (
+                      {(canAddToCalendar || canCancel || tooLateToCancel) && (
                         <div className="mt-3 pt-3 border-t border-white/6">
                           <div className="flex items-center justify-between gap-3">
                             {canAddToCalendar ? (
@@ -255,6 +291,18 @@ export default function Appointments() {
                               </button>
                             )}
                           </div>
+                          {tooLateToCancel && (
+                            <p className="mt-2.5 text-[11px] leading-relaxed text-muted-foreground">
+                              Annulation en ligne possible jusqu'à {cancelHours} h avant le rendez-vous.
+                              {' '}Un empêchement ?{' '}
+                              {settings?.phone ? (
+                                <a href={telHref(settings.phone)} className="inline-flex items-center gap-1 font-semibold text-primary whitespace-nowrap">
+                                  <Phone className="w-3 h-3" />
+                                  Appelez le salon
+                                </a>
+                              ) : 'Appelez le salon.'}
+                            </p>
+                          )}
                           <AnimatePresence initial={false}>
                             {calendarOpen && canAddToCalendar && (
                               <motion.div

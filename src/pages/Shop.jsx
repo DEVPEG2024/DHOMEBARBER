@@ -1,6 +1,6 @@
 import React, { useState, useRef, useLayoutEffect } from 'react';
 import { api } from '@/api/apiClient';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { motion, AnimatePresence, useScroll, useTransform, useMotionValue, useReducedMotion, animate } from 'framer-motion';
 import { hapticFeedback } from '@/lib/capacitor';
@@ -15,6 +15,20 @@ import { productCategoryLabel, productImages, stockInfo } from '@/components/sho
 /** Vol de la vignette produit vers le panier : taille du disque (px) et durée (s). */
 const FLY_SIZE = 56;
 const FLY_DURATION = 0.7;
+
+/**
+ * Quantité maximale d'un produit dans le panier : son stock s'il est suivi (`stockInfo`),
+ * sans limite sinon (`stock` absent = non suivi). Le serveur refuse aussi une commande au-delà.
+ */
+const cartLimit = (product) => {
+  const stock = stockInfo(product);
+  return stock.tracked ? Math.max(0, stock.stock) : Infinity;
+};
+
+/** Message affiché quand on essaie d'ajouter au-delà du stock. */
+const stockLimitMessage = (limit) => (limit <= 0
+  ? 'Ce produit est en rupture de stock'
+  : `Plus que ${limit} en stock : tout est déjà dans votre panier`);
 
 function GlassCard({ children }) {
   const ref = useRef(null);
@@ -64,6 +78,7 @@ export default function Shop() {
   // Fiche produit ouverte (bottom sheet) : id du produit, résolu dans la liste à chaque rendu
   const [openProductId, setOpenProductId] = useState(null);
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const reduceMotion = useReducedMotion();
 
   // Vol de la vignette vers le panier : un clone par ajout (ids indépendants),
@@ -93,9 +108,12 @@ export default function Shop() {
 
   const categories = [...new Set(products.map(p => p.category).filter(Boolean))];
 
-  const updateCart = (productId, delta) => {
+  // `limit` : plafond du stock (cartLimit). Un ajout ne dépasse jamais le plafond, mais ne retire
+  // rien non plus si le stock a baissé entre-temps : c'est au client de réduire (message dans le panier).
+  const updateCart = (productId, delta, limit = Infinity) => {
     setCart(prev => {
-      const newQty = (prev[productId] || 0) + delta;
+      const current = prev[productId] || 0;
+      const newQty = delta > 0 ? Math.min(current + delta, Math.max(limit, current)) : current + delta;
       if (newQty <= 0) {
         const next = { ...prev };
         delete next[productId];
@@ -108,8 +126,16 @@ export default function Shop() {
   // Ajout depuis une vignette ou la fiche : même logique que updateCart, plus le clone qui s'envole
   // (avec un badge « ×N » quand plusieurs unités partent d'un coup). `source` est l'élément d'où
   // part le vol : centre de l'image du produit, sinon le bouton cliqué.
+  // Plafonné au stock restant (stock suivi moins le panier) : au-delà, rien n'est ajouté et un
+  // message l'explique, au lieu d'une commande que le serveur refuserait.
   const addToCart = (product, source, quantity = 1) => {
-    updateCart(product.id, quantity);
+    const limit = cartLimit(product);
+    const qty = Math.min(quantity, limit - (cart[product.id] || 0));
+    if (qty <= 0) {
+      toast.error(stockLimitMessage(limit));
+      return;
+    }
+    updateCart(product.id, qty, limit);
     if (reduceMotion) return;
     const r = source?.getBoundingClientRect?.();
     if (!r) return;
@@ -117,7 +143,7 @@ export default function Shop() {
     setFlights(prev => [...prev, {
       id: flightIdRef.current,
       image: product.image_url || null,
-      qty: quantity,
+      qty,
       from: { x: r.left + r.width / 2 - FLY_SIZE / 2, y: r.top + r.height / 2 - FLY_SIZE / 2 },
       to: null,
     }]);
@@ -163,10 +189,19 @@ export default function Shop() {
     return sum + (product?.price || 0) * qty;
   }, 0);
   const cartCount = cartItems.reduce((sum, [, qty]) => sum + qty, 0);
+  // Un article dépasse le stock (stock rechargé à la baisse depuis l'ajout) : commande bloquée
+  const cartOverStock = cartItems.some(([id, qty]) => {
+    const product = products.find(p => String(p.id) === String(id));
+    return product && qty > cartLimit(product);
+  });
 
   const handleOrder = async () => {
     if (cartItems.length === 0) {
       toast.error('Votre panier est vide');
+      return;
+    }
+    if (cartOverStock) {
+      toast.error('Ajustez les quantités : certains produits n\'ont plus assez de stock');
       return;
     }
     setOrdering(true);
@@ -195,8 +230,14 @@ export default function Shop() {
       setCart({});
       setNotes('');
       setOrderSuccess(true);
-    } catch {
-      toast.error('Erreur lors de la commande');
+      // Le stock a bougé côté serveur : la grille doit le refléter
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+    } catch (err) {
+      // Message du serveur (ex. 409 « plus que N en stock ») plutôt qu'une erreur générique
+      const message = err?.data?.error || err?.message;
+      toast.error(message && !/^HTTP \d+$/.test(message) ? message : 'Erreur lors de la commande');
+      // Stock insuffisant ou produit modifié : on recharge le catalogue, le panier signale l'écart
+      if (err?.status === 409 || err?.status === 400) queryClient.invalidateQueries({ queryKey: ['products'] });
     } finally {
       setOrdering(false);
     }
@@ -240,6 +281,10 @@ export default function Shop() {
         {filtered.map((product, i) => {
           const stock = stockInfo(product);
           const photoCount = productImages(product).length;
+          const inCart = cart[product.id] || 0;
+          // Tout le stock suivi est déjà au panier : le « + » reste touchable mais n'ajoute rien
+          // et explique pourquoi (un bouton simplement grisé ne dirait rien)
+          const atLimit = inCart > 0 && inCart >= cartLimit(product);
           return (
             <GlassCard key={product.id}>
               <motion.div
@@ -297,7 +342,7 @@ export default function Shop() {
                           <Minus className="w-3.5 h-3.5" />
                         </button>
                         <span className="text-sm font-bold w-4 text-center">{cart[product.id]}</span>
-                        <button onClick={e => addFromCard(product, e)} disabled={stock.soldOut} aria-label="Ajouter une unité" className="w-8 h-8 rounded-full bg-primary flex items-center justify-center active:scale-95 disabled:opacity-40">
+                        <button onClick={e => addFromCard(product, e)} aria-disabled={atLimit} aria-label={atLimit ? 'Stock maximum atteint' : 'Ajouter une unité'} className={`w-8 h-8 rounded-full bg-primary flex items-center justify-center active:scale-95 ${atLimit ? 'opacity-40' : ''}`}>
                           <Plus className="w-3.5 h-3.5 text-primary-foreground" />
                         </button>
                       </div>
@@ -307,6 +352,9 @@ export default function Shop() {
                       </button>
                     )}
                   </div>
+                  {atLimit && (
+                    <p className="text-[10px] text-amber-400 mt-1.5 leading-tight">Tout le stock est dans votre panier</p>
+                  )}
                 </div>
               </motion.div>
             </GlassCard>
@@ -460,8 +508,11 @@ export default function Shop() {
                     {cartItems.map(([id, qty]) => {
                       const product = products.find(p => String(p.id) === String(id));
                       if (!product) return null;
+                      const limit = cartLimit(product);
+                      const atLimit = qty >= limit;
+                      const over = qty > limit;
                       return (
-                        <div key={id} className="bg-card rounded-lg p-3 border border-border">
+                        <div key={id} className={`bg-card rounded-lg p-3 border ${over ? 'border-red-500/40' : 'border-border'}`}>
                           <div className="flex items-center justify-between mb-2">
                             <p className="text-sm font-semibold truncate flex-1">{product.name}</p>
                             <p className="text-sm font-bold text-primary ml-2">
@@ -471,15 +522,27 @@ export default function Shop() {
                           <div className="flex items-center justify-between">
                             <p className="text-xs text-muted-foreground">{product.price.toFixed(2)}€ / unité</p>
                             <div className="flex items-center gap-3">
-                              <button onClick={() => updateCart(id, -1)} className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center active:scale-95">
+                              <button onClick={() => updateCart(id, -1)} aria-label={qty === 1 ? 'Retirer du panier' : 'Retirer une unité'} className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center active:scale-95">
                                 {qty === 1 ? <Trash2 className="w-3.5 h-3.5 text-red-400" /> : <Minus className="w-3.5 h-3.5" />}
                               </button>
                               <span className="text-sm font-bold w-5 text-center">{qty}</span>
-                              <button onClick={() => updateCart(id, 1)} className="w-9 h-9 rounded-full bg-primary flex items-center justify-center active:scale-95">
+                              <button
+                                onClick={() => (atLimit ? toast.error(stockLimitMessage(limit)) : updateCart(id, 1, limit))}
+                                aria-disabled={atLimit}
+                                aria-label={atLimit ? 'Stock maximum atteint' : 'Ajouter une unité'}
+                                className={`w-9 h-9 rounded-full bg-primary flex items-center justify-center active:scale-95 ${atLimit ? 'opacity-40' : ''}`}
+                              >
                                 <Plus className="w-3.5 h-3.5 text-primary-foreground" />
                               </button>
                             </div>
                           </div>
+                          {over ? (
+                            <p className="text-[11px] text-red-400 mt-2">
+                              {limit <= 0 ? 'Rupture de stock : retirez ce produit' : `Plus que ${limit} en stock : réduisez la quantité`}
+                            </p>
+                          ) : atLimit && (
+                            <p className="text-[11px] text-amber-400 mt-2">Stock maximum atteint ({limit})</p>
+                          )}
                         </div>
                       );
                     })}
@@ -515,10 +578,15 @@ export default function Shop() {
                         <Store className="w-3.5 h-3.5" />
                         Retrait au salon — paiement sur place
                       </div>
+                      {cartOverStock && (
+                        <p className="text-[11px] text-red-400">
+                          Certains produits n'ont plus assez de stock : ajustez les quantités pour commander.
+                        </p>
+                      )}
                       <Button
                         className="w-full h-12 rounded-xl text-sm font-semibold gap-2"
                         onClick={handleOrder}
-                        disabled={ordering}
+                        disabled={ordering || cartOverStock}
                       >
                         <ShoppingCart className="w-4 h-4" />
                         {ordering ? 'Validation...' : `Commander — ${cartTotal.toFixed(2)}€`}

@@ -2,11 +2,12 @@ import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { Outlet, Link, useLocation, Navigate } from 'react-router-dom';
 import {
   LayoutDashboard, Calendar, Users, Scissors, UserCircle,
-  BarChart3, Settings, Menu, X, ChevronLeft, ChevronDown, ShoppingBag, Star, Bell, Brain, Sun, Moon, ClipboardList, ShieldCheck, Sparkles, CalendarDays, Newspaper, Warehouse, PartyPopper, LogOut, Gift, GripVertical, Shirt, Camera, Handshake
+  BarChart3, Settings, Menu, X, ChevronLeft, ChevronDown, ShoppingBag, Star, Bell, Brain, Sun, Moon, ClipboardList, ShieldCheck, Sparkles, CalendarDays, Newspaper, Warehouse, PartyPopper, LogOut, Gift, GripVertical, Shirt, Camera, Handshake, Volume2, VolumeX
 } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { useTheme } from '@/lib/ThemeContext';
 import { useAuth } from '@/lib/AuthContext';
+import { useMusic } from '@/lib/MusicContext';
 
 // All nav items with their default category
 const allNavItems = [
@@ -106,6 +107,9 @@ export default function AdminLayout() {
   const location = useLocation();
   const { theme, toggleTheme } = useTheme();
   const { user, logout } = useAuth();
+  // Musique d'ambiance : le bouton flottant global est masqué dans l'admin (il recouvrait le contenu),
+  // la musique démarrant seule au premier tap, on garde de quoi la couper dans l'en-tête et le menu
+  const { playing: musicPlaying, toggle: toggleMusic } = useMusic();
 
   // Filter items by role/permissions
   const filteredItems = useMemo(() => {
@@ -157,20 +161,8 @@ export default function AdminLayout() {
     });
   }, []);
 
-  // Barber route protection
   const isBarber = user?.role === 'barber';
   const allItems = useMemo(() => flatList.filter(e => e.type === 'item'), [flatList]);
-  if (isBarber) {
-    const currentPath = location.pathname;
-    const isAllowed = allItems.some(item => {
-      if (item.exact) return currentPath === item.path;
-      return currentPath.startsWith(item.path);
-    });
-    if (!isAllowed) {
-      const target = allItems[0]?.path || '/admin/my-cleaning';
-      return <Navigate to={target} replace />;
-    }
-  }
 
   const isActive = (item) => {
     if (item.exact) return location.pathname === item.path;
@@ -220,6 +212,20 @@ export default function AdminLayout() {
     });
     return map;
   }, [flatList]);
+
+  // Barber route protection — après tous les hooks : un retour anticipé avant les useMemo
+  // ci-dessus changeait leur nombre d'un rendu à l'autre (erreur React « more hooks ») après la redirection
+  if (isBarber) {
+    const currentPath = location.pathname;
+    const isAllowed = allItems.some(item => {
+      if (item.exact) return currentPath === item.path;
+      return currentPath.startsWith(item.path);
+    });
+    if (!isAllowed) {
+      const target = allItems[0]?.path || '/admin/my-cleaning';
+      return <Navigate to={target} replace />;
+    }
+  }
 
   return (
     <div className="min-h-screen bg-background flex">
@@ -328,6 +334,14 @@ export default function AdminLayout() {
             {theme === 'dark' ? <Sun className="w-4 h-4 text-yellow-400" /> : <Moon className="w-4 h-4" />}
             {theme === 'dark' ? 'Mode clair' : 'Mode sombre'}
           </button>
+          <button
+            onClick={toggleMusic}
+            aria-pressed={musicPlaying}
+            className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm text-muted-foreground hover:bg-secondary hover:text-foreground transition-all"
+          >
+            {musicPlaying ? <Volume2 className="w-4 h-4 text-primary" /> : <VolumeX className="w-4 h-4" />}
+            {musicPlaying ? 'Couper la musique' : 'Activer la musique'}
+          </button>
           {!isBarber && (
             <Link to="/" className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm text-muted-foreground hover:bg-secondary hover:text-foreground transition-all">
               <ChevronLeft className="w-4 h-4" />
@@ -358,6 +372,11 @@ export default function AdminLayout() {
               <ChevronLeft className="w-4 h-4" />
             </Link>
           )}
+          <button className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-secondary transition-colors"
+            onClick={toggleMusic}
+            aria-label={musicPlaying ? 'Couper la musique' : 'Activer la musique'}>
+            {musicPlaying ? <Volume2 className="w-4 h-4 text-primary" /> : <VolumeX className="w-4 h-4 text-muted-foreground" />}
+          </button>
           <button className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-secondary transition-colors"
             onClick={toggleTheme}>
             {theme === 'dark' ? <Sun className="w-4 h-4 text-yellow-400" /> : <Moon className="w-4 h-4" />}

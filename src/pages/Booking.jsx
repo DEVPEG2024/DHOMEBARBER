@@ -13,7 +13,7 @@ import ServicePicker from '@/components/services/ServicePicker';
 import EmployeeCard from '@/components/shared/EmployeeCard';
 import { hapticFeedback } from '@/lib/capacitor';
 import { BARBER_PHOTO_ASPECT } from '@/lib/barberPhoto';
-import { buildAppointmentEvent, openCalendar } from '@/lib/calendarLinks';
+import { appointmentEvent, openCalendar, parisInstant } from '@/lib/calendarLinks';
 
 const STEPS = ['services', 'barber', 'datetime', 'confirm'];
 const STEP_LABELS = ['Prestations', 'Barber', 'Date & Heure', 'Confirmation'];
@@ -50,35 +50,27 @@ function generateTimeSlots(start, end, interval = 30) {
   return slots;
 }
 
-/**
- * Décalage de Paris (en minutes) à un instant donné.
- * Le salon est à Paris, l'appareil du client peut être n'importe où : sans ça, un client en
- * voyage voit des créneaux que le serveur refuse.
- */
-function parisOffsetMinutes(instant) {
-  const tz = new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Paris', timeZoneName: 'shortOffset' })
-    .formatToParts(instant).find(p => p.type === 'timeZoneName')?.value || 'GMT';
-  const m = /GMT([+-])(\d{1,2})(?::(\d{2}))?/.exec(tz);
-  if (!m) return 0;
-  return (m[1] === '-' ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3] || 0));
+/** Congé approuvé du barber ce jour-là (`dateStr` = `yyyy-MM-dd`). */
+function isOnLeave(employee, dateStr, timeOffs) {
+  return (timeOffs || []).some(t =>
+    String(t.employee_id) === String(employee.id)
+    && dateStr >= String(t.start_date).slice(0, 10)
+    && dateStr <= String(t.end_date).slice(0, 10)
+    && (t.status === 'approved' || !t.status)
+  );
+}
+
+/** Horaires du barber pour ce jour de la semaine (`working_hours[jour]`), `null` s'il ne travaille pas. */
+function workingHoursOf(employee, date) {
+  const hours = employee.working_hours?.[format(date, 'EEEE').toLowerCase()];
+  return !hours || hours.closed ? null : hours;
 }
 
 /**
- * Instant réel d'un couple date + heure exprimé en heure de Paris.
- * Deux passes : l'offset lu à l'instant « naïf » est faux dans l'heure qui borde une bascule
- * d'heure d'été. Même calcul que `parisToUtc` côté serveur, pour que les deux soient d'accord.
- */
-function parisInstant(dateStr, time) {
-  const [y, mo, d] = dateStr.split('-').map(Number);
-  const [h, mi] = time.split(':').map(Number);
-  const naive = Date.UTC(y, mo - 1, d, h, mi);
-  const first = naive - parisOffsetMinutes(new Date(naive)) * 60000;
-  return naive - parisOffsetMinutes(new Date(first)) * 60000;
-}
-
-/**
- * Créneaux disponibles d'un barber pour une date (fonction pure, réutilisée pour un barber précis
- * comme pour l'union « peu importe »).
+ * Créneaux disponibles d'un barber pour une date, et la raison quand il n'y en a aucun
+ * (fonction pure, réutilisée pour un barber précis comme pour l'union « peu importe »).
+ * Anciennement `computeSlots` : `assertSlotAvailable` (routes/entities.js du backend) en est le
+ * portage côté serveur, les deux règles doivent rester identiques.
  * Règles : congé approuvé → aucun créneau ; horaires du jour `working_hours[jour]` (`start` / `end` /
  * `closed`) ; un créneau est libre si [créneau, créneau + durée totale[ ne chevauche aucun RDV ni
  * pause du barber ce jour-là (les RDV annulés sont ignorés).
@@ -87,21 +79,18 @@ function parisInstant(dateStr, time) {
  * @param {Array} appointmentsOfEmployee  RDV et pauses de ce barber ce jour-là (`start_time`, `end_time`, `status`)
  * @param {Array} timeOffs  congés (tous barbers, filtrés ici sur `employee_id`)
  * @param {number} totalDuration  durée totale des prestations en minutes
- * @returns {string[]} heures `HH:mm` triées
+ * @param {number} [shortestDuration]  durée de la plus courte prestation choisie (diagnostic « durée »)
+ * @returns {{ slots: string[], reason: null | 'leave' | 'off' | 'over' | 'duration' | 'full' }}
+ *   heures `HH:mm` triées ; sans créneau : `leave` congé, `off` ne travaille pas ce jour de la
+ *   semaine, `over` plus aucune heure à venir (aujourd'hui), `duration` un créneau plus court
+ *   existerait (c'est la durée des prestations qui bloque), `full` journée complète
  */
-function computeSlots(employee, date, appointmentsOfEmployee, timeOffs, totalDuration) {
-  if (!employee || !date) return [];
+function analyzeDay(employee, date, appointmentsOfEmployee, timeOffs, totalDuration, shortestDuration = 30) {
+  if (!employee || !date) return { slots: [], reason: null };
   const dateStr = format(date, 'yyyy-MM-dd');
-  const onLeave = (timeOffs || []).some(t =>
-    String(t.employee_id) === String(employee.id)
-    && dateStr >= String(t.start_date).slice(0, 10)
-    && dateStr <= String(t.end_date).slice(0, 10)
-    && (t.status === 'approved' || !t.status)
-  );
-  if (onLeave) return [];
-  const dayName = format(date, 'EEEE').toLowerCase();
-  const hours = employee.working_hours?.[dayName];
-  if (!hours || hours.closed) return [];
+  if (isOnLeave(employee, dateStr, timeOffs)) return { slots: [], reason: 'leave' };
+  const hours = workingHoursOf(employee, date);
+  if (!hours) return { slots: [], reason: 'off' };
   const busy = (appointmentsOfEmployee || [])
     .filter(apt => apt.status !== 'cancelled' && apt.start_time && apt.end_time)
     .map(apt => {
@@ -113,19 +102,85 @@ function computeSlots(employee, date, appointmentsOfEmployee, timeOffs, totalDur
   // passé »), les afficher mènerait droit à une erreur. La comparaison se fait sur l'instant
   // réel, donc elle reste juste quel que soit le fuseau de l'appareil.
   const nowMs = Date.now();
+  const upcoming = generateTimeSlots(hours.start || '09:00', hours.end || '19:00', 30)
+    .filter(slot => parisInstant(dateStr, slot) >= nowMs);
+  if (upcoming.length === 0) return { slots: [], reason: 'over' };
   // La prestation doit tenir avant la fermeture : un créneau qui déborde faisait finir le
   // barber après son horaire. Le serveur applique la même règle et refuse le cas échéant.
   const [ch, cm] = (hours.end || '19:00').split(':').map(Number);
   const closeMinutes = ch * 60 + cm;
-  return generateTimeSlots(hours.start || '09:00', hours.end || '19:00', 30).filter(slot => {
+  const freeFor = (duration) => upcoming.filter(slot => {
     const [sh, sm] = slot.split(':').map(Number);
     const slotStart = sh * 60 + sm;
-    const slotEnd = slotStart + totalDuration;
+    const slotEnd = slotStart + duration;
     if (slotEnd > closeMinutes) return false;
-    if (parisInstant(dateStr, slot) < nowMs) return false;
     return !busy.some(([aptStart, aptEnd]) => slotStart < aptEnd && slotEnd > aptStart);
   });
+  const slots = freeFor(totalDuration);
+  if (slots.length > 0) return { slots, reason: null };
+  // Aucun créneau : la durée n'est en cause que si un créneau plus court (une demi-heure, ou la
+  // plus courte des prestations choisies) tiendrait encore ce jour-là.
+  const probe = Math.min(30, shortestDuration || 30);
+  return { slots: [], reason: totalDuration > probe && freeFor(probe).length > 0 ? 'duration' : 'full' };
 }
+
+/**
+ * « Peu importe » : raison commune quand aucun barber n'a de créneau.
+ * Tous en repos → salon fermé ; repos et congés → personne ne travaille ; un barber qui aurait un
+ * créneau plus court → durée ; sinon journée terminée (aujourd'hui) ou complète.
+ */
+function mergeDayReasons(reasons) {
+  if (reasons.length === 0) return 'full';
+  if (reasons.every(r => r === 'off')) return 'closed';
+  if (reasons.every(r => r === 'off' || r === 'leave')) return 'nobody';
+  if (reasons.includes('duration')) return 'duration';
+  if (reasons.every(r => r === 'off' || r === 'leave' || r === 'over')) return 'over';
+  return 'full';
+}
+
+/** « 35 min », « 1 h », « 1 h30 ». */
+function formatMinutes(total) {
+  if (total < 60) return `${total} min`;
+  return `${Math.floor(total / 60)} h${total % 60 ? String(total % 60).padStart(2, '0') : ''}`;
+}
+
+/**
+ * Message d'une date sans créneau, selon la raison (`analyzeDay` / `mergeDayReasons`).
+ * Le conseil sur la durée n'apparaît que lorsque c'est vraiment elle qui bloque.
+ */
+function emptyDayMessage(reason, { barberName, date, totalDuration, serviceCount, canChangeBarber }) {
+  const weekday = format(date, 'EEEE', { locale: fr });
+  const otherDate = canChangeBarber ? 'Choisissez une autre date, ou un autre barber.' : 'Choisissez une autre date.';
+  switch (reason) {
+    case 'leave':
+      return { title: `${barberName} est en congé ce jour-là`, hint: otherDate };
+    case 'off':
+      return { title: `${barberName} ne travaille pas le ${weekday}`, hint: otherDate };
+    case 'closed':
+      return { title: `Le salon est fermé le ${weekday}`, hint: 'Choisissez une autre date.' };
+    case 'nobody':
+      return { title: 'Aucun barber ne travaille ce jour-là', hint: 'Choisissez une autre date.' };
+    case 'over':
+      return { title: 'Plus aucun créneau aujourd\'hui', hint: 'La journée est terminée : choisissez une autre date.' };
+    case 'duration':
+      return {
+        title: 'Pas de créneau assez long ce jour-là',
+        hint: `Vos prestations durent ${formatMinutes(totalDuration)} : essayez une autre date${serviceCount > 1 ? ', ou retirez une prestation' : ''}.`,
+      };
+    default:
+      return {
+        title: barberName ? `${barberName} est complet ce jour-là` : 'Tous les barbers sont complets ce jour-là',
+        hint: barberName ? otherDate : 'Choisissez une autre date.',
+      };
+  }
+}
+
+/** Repères discrets du bandeau de dates : jours où l'on sait d'avance qu'il n'y a aucun créneau. */
+const DAY_MARKS = {
+  off: { label: 'repos', title: 'ne travaille pas' },
+  leave: { label: 'congé', title: 'en congé' },
+  closed: { label: 'fermé', title: 'salon fermé' },
+};
 
 /** Nombre qui glisse de l'ancienne valeur à la nouvelle (écrit dans le DOM, sans re-render). */
 function AnimatedNumber({ value, suffix = '', className }) {
@@ -454,8 +509,10 @@ const STRIP_PADDING = 16;
 /**
  * Bande de dates de l'étape 3 (≈ 90 jours) avec des raccourcis par mois : le mois visible est
  * suivi au défilement, un tap sur un mois amène son premier jour en tête de bande.
+ * `marks` (Map `yyyy-MM-dd` → clé de `DAY_MARKS`) atténue les jours sans créneau connu d'avance
+ * (repos, congé, salon fermé) ; ils restent cliquables, la page explique alors pourquoi.
  */
-function DateStrip({ dates, selectedDate, onSelect }) {
+function DateStrip({ dates, selectedDate, onSelect, marks }) {
   const reduceMotion = useReducedMotion();
   const stripRef = useRef(null);
   const dayRefs = useRef([]);
@@ -524,15 +581,17 @@ function DateStrip({ dates, selectedDate, onSelect }) {
       <div ref={stripRef} onScroll={onScroll} className="relative flex gap-2 overflow-x-auto pb-2 -mx-4 px-4 scrollbar-hide">
         {dates.map((date, i) => {
           const active = selectedDate && isSameDay(date, selectedDate);
+          const mark = DAY_MARKS[marks?.get(format(date, 'yyyy-MM-dd'))] || null;
           return (
             <motion.button
               key={date.toISOString()}
               ref={el => { dayRefs.current[i] = el; }}
               initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
+              animate={{ opacity: mark && !active ? 0.45 : 1, y: 0 }}
               transition={{ delay: Math.min(i, 10) * 0.03, duration: 0.3, ease: 'easeOut' }}
               whileTap={{ scale: 0.94 }}
               onClick={() => onSelect(date)}
+              aria-label={`${format(date, 'EEEE d MMMM', { locale: fr })}${mark ? ` · ${mark.title}` : ''}`}
               className={`flex-shrink-0 w-16 py-3 rounded-2xl text-center transition-colors duration-300 ${
                 active
                   ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/25'
@@ -541,7 +600,8 @@ function DateStrip({ dates, selectedDate, onSelect }) {
             >
               <p className="text-[11px] uppercase opacity-70">{format(date, 'EEE', { locale: fr })}</p>
               <p className="text-lg font-bold leading-tight">{format(date, 'd')}</p>
-              <p className="text-[11px] opacity-60">{format(date, 'MMM', { locale: fr })}</p>
+              {/* Jour sans créneau connu d'avance : « repos » / « congé » / « fermé » à la place du mois */}
+              <p className={`text-[11px] ${mark ? 'opacity-80 italic' : 'opacity-60'}`}>{mark ? mark.label : format(date, 'MMM', { locale: fr })}</p>
             </motion.button>
           );
         })}
@@ -558,6 +618,8 @@ export default function Booking() {
   // Sens de la dernière navigation entre étapes (1 = suivant, -1 = retour)
   const [direction, setDirection] = useState(1);
   const [success, setSuccess] = useState(false);
+  // Rendez-vous renvoyé par le serveur à la création (id → UID stable du .ics)
+  const [createdAppointment, setCreatedAppointment] = useState(null);
   const [selectedServices, setSelectedServices] = useState([]);
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [selectedDate, setSelectedDate] = useState(null);
@@ -576,11 +638,23 @@ export default function Booking() {
     queryFn: () => api.entities.Service.filter({ is_active: true }, 'sort_order', 100),
   });
 
-  const { data: employees = [] } = useQuery({
+  const { data: employees = [], isPending: employeesPending } = useQuery({
     queryKey: ['employees'],
     staleTime: 5 * 60 * 1000, // catalogue : change rarement
     queryFn: () => api.entities.Employee.filter({ is_active: true }, 'sort_order', 50),
   });
+
+  // Barber passé dans l'URL (« Comme la dernière fois », relance « il est temps de revenir ») :
+  // on ne saute l'étape 2 que s'il figure parmi les barbers actifs. Introuvable (parti du salon,
+  // désactivé, lien abîmé) → l'étape de choix du barber revient, prestations présélectionnées.
+  const preSelectedBarber = useMemo(
+    () => (preSelectedBarberId ? employees.find(e => String(e.id) === String(preSelectedBarberId)) || null : null),
+    [employees, preSelectedBarberId],
+  );
+  const skipBarberStep = !!preSelectedBarber;
+  // Pendant le chargement des barbers, l'indicateur d'étapes part du principe que le lien est bon
+  const barberParamPending = !!preSelectedBarberId && employeesPending;
+  const missingBarber = !!preSelectedBarberId && !employeesPending && !preSelectedBarber;
 
   const { data: timeOffs = [] } = useQuery({
     queryKey: ['timeOffs'],
@@ -622,18 +696,15 @@ export default function Booking() {
     }
   }, [services]);
 
-  // Pre-select barber from URL param and skip barber step
+  // Barber de l'URL trouvé parmi les actifs : présélectionné, l'étape 2 est sautée
   React.useEffect(() => {
-    if (preSelectedBarberId && employees.length > 0 && !selectedEmployee) {
-      const barber = employees.find(e => e.id === preSelectedBarberId);
-      if (barber) {
-        setSelectedEmployee(barber);
-      }
-    }
-  }, [employees, preSelectedBarberId]);
+    if (preSelectedBarber && !selectedEmployee) setSelectedEmployee(preSelectedBarber);
+  }, [preSelectedBarber]);
 
   const totalDuration = selectedServices.reduce((sum, s) => sum + (s.duration || 0), 0);
   const totalPrice = selectedServices.reduce((sum, s) => sum + (s.price || 0), 0);
+  // Plus courte prestation choisie : sert à dire si c'est la durée qui empêche tout créneau
+  const shortestDuration = selectedServices.reduce((min, s) => Math.min(min, s.duration || 30), 30);
 
   const dates = useMemo(() => {
     const today = startOfDay(new Date());
@@ -644,18 +715,19 @@ export default function Booking() {
   }, []);
 
   /**
-   * Créneaux affichés à l'étape 3 : `{ time, employee }` triés par heure.
-   * - Barber précis : ses créneaux (`computeSlots`).
+   * Créneaux affichés à l'étape 3 : `options` = `{ time, employee }` triés par heure, et `reason`
+   * quand il n'y en a aucun (voir `analyzeDay`), pour expliquer pourquoi.
+   * - Barber précis : ses créneaux (`analyzeDay`).
    * - « Peu importe » : union des créneaux de tous les barbers actifs ; RDV du jour regroupés par
    *   `employee_id` (comparés en string) ; pour une même heure on garde le premier barber dans
-   *   l'ordre `sort_order`.
+   *   l'ordre `sort_order`. Sans créneau, raisons des barbers fusionnées (`mergeDayReasons`).
    */
-  const slotOptions = useMemo(() => {
-    if (!selectedDate) return [];
+  const { options: slotOptions, reason: emptyReason } = useMemo(() => {
+    if (!selectedDate) return { options: [], reason: null };
     if (!anyBarber) {
-      if (!selectedEmployee) return [];
-      return computeSlots(selectedEmployee, selectedDate, appointments, timeOffs, totalDuration)
-        .map(time => ({ time, employee: selectedEmployee }));
+      if (!selectedEmployee) return { options: [], reason: null };
+      const { slots, reason } = analyzeDay(selectedEmployee, selectedDate, appointments, timeOffs, totalDuration, shortestDuration);
+      return { options: slots.map(time => ({ time, employee: selectedEmployee })), reason };
     }
     const byEmployee = new Map();
     for (const apt of appointments) {
@@ -664,17 +736,44 @@ export default function Booking() {
       byEmployee.get(key).push(apt);
     }
     const firstAvailable = new Map();
+    const reasons = [];
     const ordered = [...employees].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
     for (const emp of ordered) {
-      const slots = computeSlots(emp, selectedDate, byEmployee.get(String(emp.id)) || [], timeOffs, totalDuration);
+      const { slots, reason } = analyzeDay(emp, selectedDate, byEmployee.get(String(emp.id)) || [], timeOffs, totalDuration, shortestDuration);
+      if (reason) reasons.push(reason);
       for (const time of slots) {
         if (!firstAvailable.has(time)) firstAvailable.set(time, emp);
       }
     }
-    return [...firstAvailable.entries()]
+    const options = [...firstAvailable.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([time, employee]) => ({ time, employee }));
-  }, [anyBarber, selectedEmployee, selectedDate, appointments, timeOffs, totalDuration, employees]);
+    return { options, reason: options.length > 0 ? null : mergeDayReasons(reasons) };
+  }, [anyBarber, selectedEmployee, selectedDate, appointments, timeOffs, totalDuration, shortestDuration, employees]);
+
+  /**
+   * Repères du bandeau de dates (`yyyy-MM-dd` → `off` / `leave` / `closed`) : seulement ce qui est
+   * sûr sans charger les rendez-vous (horaires de la semaine, congés approuvés). Un jour complet
+   * n'est pas marqué : il faudrait les rendez-vous de chaque jour pour le savoir.
+   */
+  const dayMarks = useMemo(() => {
+    const marks = new Map();
+    if (!anyBarber && !selectedEmployee) return marks;
+    if (anyBarber && employees.length === 0) return marks;
+    for (const date of dates) {
+      const dateStr = format(date, 'yyyy-MM-dd');
+      const statusOf = (emp) => (isOnLeave(emp, dateStr, timeOffs) ? 'leave' : workingHoursOf(emp, date) ? null : 'off');
+      if (!anyBarber) {
+        const status = statusOf(selectedEmployee);
+        if (status) marks.set(dateStr, status);
+        continue;
+      }
+      // « Peu importe » : marqué seulement si aucun barber ne travaille ce jour-là
+      const statuses = employees.map(statusOf);
+      if (statuses.every(Boolean)) marks.set(dateStr, statuses.every(s => s === 'off') ? 'closed' : 'leave');
+    }
+    return marks;
+  }, [anyBarber, selectedEmployee, employees, timeOffs, dates]);
 
   // Ajout d'une prestation : la page descend jusqu'au récapitulatif et au bouton « Suivant »
   // (avec une longue carte, ils restaient hors de l'écran, sous la liste).
@@ -688,6 +787,14 @@ export default function Booking() {
     });
     return () => cancelAnimationFrame(raf);
   }, [selectedServices]);
+
+  // Barber du lien introuvable : à l'arrivée sur l'étape 2 (depuis « Suivant », en bas de page),
+  // remonter pour que le message qui l'explique et toute la liste des barbers soient à l'écran
+  useEffect(() => {
+    if (step !== 1 || !missingBarber) return undefined;
+    const raf = requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: reduceMotion ? 'auto' : 'smooth' }));
+    return () => cancelAnimationFrame(raf);
+  }, [step]);
 
   const toggleService = (service) => {
     hapticFeedback();
@@ -768,8 +875,11 @@ export default function Booking() {
         notes,
       });
     },
-    onSuccess: () => {
+    onSuccess: (created) => {
       queryClient.invalidateQueries({ queryKey: ['appointments-confirmed'] });
+      // Le rendez-vous créé (id, heure de fin et prix recalculés par le serveur) alimente
+      // l'« Ajouter au calendrier » de l'écran de succès
+      setCreatedAppointment(created && typeof created === 'object' ? created : null);
       toast.success('Rendez-vous confirmé !');
       // Explosion de lames, puis la liste des rendez-vous
       setSuccess(true);
@@ -794,7 +904,8 @@ export default function Booking() {
   });
 
   const canNext = () => {
-    if (step === 0) return selectedServices.length > 0;
+    // Lien avec un barber : attendre de savoir s'il est encore là pour décider de l'étape suivante
+    if (step === 0) return selectedServices.length > 0 && !barberParamPending;
     if (step === 1) return !!selectedEmployee || anyBarber;
     if (step === 2) return !!selectedDate && !!selectedTime;
     return true;
@@ -802,18 +913,37 @@ export default function Booking() {
 
   const hasRecap = selectedServices.length > 0 || !!selectedEmployee || anyBarber || !!selectedTime;
 
-  /** Événement proposé sur l'écran de succès (« Ajouter au calendrier »). */
+  // Date sans créneau : pourquoi (repos, congé, journée terminée ou complète), et le conseil sur la
+  // durée des prestations seulement quand un créneau plus court tiendrait ce jour-là.
+  const emptyMessage = selectedDate && slotOptions.length === 0 && (anyBarber || selectedEmployee)
+    ? emptyDayMessage(emptyReason, {
+      barberName: anyBarber ? null : selectedEmployee.name,
+      date: selectedDate,
+      totalDuration,
+      serviceCount: selectedServices.length,
+      canChangeBarber: !skipBarberStep,
+    })
+    : null;
+
+  /**
+   * Événement proposé sur l'écran de succès (« Ajouter au calendrier ») : le rendez-vous créé, avec
+   * le même UID que dans Mes rendez-vous (`appointment-<id>@dhomebarber.fr`). L'ajouter ici puis
+   * depuis la liste met à jour l'événement au lieu de le dupliquer dans l'agenda du client.
+   */
   const calendarEvent = useMemo(() => {
     if (!success || !selectedEmployee || !selectedDate || !selectedTime) return null;
-    return buildAppointmentEvent({
-      barberName: selectedEmployee.name,
-      services: selectedServices,
-      date: selectedDate,
-      startTime: selectedTime,
-      totalDuration,
-      totalPrice,
+    const created = createdAppointment || {};
+    return appointmentEvent({
+      id: created.id,
+      employee_name: created.employee_name || selectedEmployee.name,
+      services: created.services || selectedServices,
+      date: created.date || format(selectedDate, 'yyyy-MM-dd'),
+      start_time: created.start_time || selectedTime,
+      end_time: created.end_time,
+      total_duration: created.total_duration ?? totalDuration,
+      total_price: created.total_price ?? totalPrice,
     });
-  }, [success, selectedEmployee, selectedDate, selectedTime, selectedServices, totalDuration, totalPrice]);
+  }, [success, createdAppointment, selectedEmployee, selectedDate, selectedTime, selectedServices, totalDuration, totalPrice]);
 
   return (
     <div className="min-h-screen relative overflow-hidden">
@@ -835,7 +965,7 @@ export default function Booking() {
           {/* Step indicators : halo qui glisse d'une étape à l'autre, coches à ressort, lignes qui se remplissent */}
           <div className="flex items-center gap-2 mb-6">
             {STEPS.map((_, i) => {
-              if (i === 1 && preSelectedBarberId) return null;
+              if (i === 1 && (skipBarberStep || barberParamPending)) return null;
               const Icon = STEP_ICONS[i];
               const done = i < step;
               const active = i === step;
@@ -865,7 +995,7 @@ export default function Booking() {
                       )}
                     </AnimatePresence>
                   </motion.div>
-                  {i < STEPS.length - 1 && !(i === 0 && preSelectedBarberId) && (
+                  {i < STEPS.length - 1 && !(i === 0 && (skipBarberStep || barberParamPending)) && (
                     <div className="flex-1 h-px bg-white/10 relative overflow-hidden">
                       <motion.div
                         initial={false}
@@ -885,7 +1015,7 @@ export default function Booking() {
               <h1 className="font-display text-2xl font-bold text-foreground">{STEP_LABELS[step]}</h1>
               <p className="text-xs text-muted-foreground mt-1">
                 Étape {step + 1} sur {STEPS.length}
-                {preSelectedBarberId && selectedEmployee ? ` · avec ${selectedEmployee.name}` : anyBarber && step === 2 ? ' · premier créneau disponible' : ''}
+                {skipBarberStep && selectedEmployee ? ` · avec ${selectedEmployee.name}` : anyBarber && step === 2 ? ' · premier créneau disponible' : ''}
               </p>
             </motion.div>
           </AnimatePresence>
@@ -912,6 +1042,12 @@ export default function Booking() {
           {step === 1 && (
             <motion.div key="barber" custom={direction} variants={stepVariants} initial="enter" animate="center" exit="exit" transition={stepTransition}>
               <p className="text-xs text-muted-foreground mb-4">Choisissez votre barber, ou prenez le premier créneau disponible.</p>
+              {/* Lien (relance, « Comme la dernière fois ») vers un barber qui n'est plus réservable */}
+              {missingBarber && (
+                <p role="status" className="mb-4 px-4 py-3 rounded-2xl bg-amber-500/10 border border-amber-500/25 text-xs leading-relaxed text-amber-200/90">
+                  Le barber de votre lien n'est plus disponible à la réservation : choisissez-en un autre, ou prenez le premier créneau disponible.
+                </p>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 <motion.div key="any-barber" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: 'easeOut' }}>
                   <AnyBarberCard selected={anyBarber} onClick={chooseAnyBarber} />
@@ -936,6 +1072,7 @@ export default function Booking() {
                   dates={dates}
                   selectedDate={selectedDate}
                   onSelect={(date) => { setSelectedDate(date); setSelectedTime(null); if (anyBarber) setSelectedEmployee(null); hapticFeedback(); }}
+                  marks={dayMarks}
                 />
               </div>
 
@@ -975,18 +1112,10 @@ export default function Booking() {
                         );
                       })}
                     </div>
-                  ) : (
+                  ) : emptyMessage && (
                     <div className="backdrop-blur-xl bg-white/5 border border-white/10 rounded-2xl p-8 text-center">
-                      <p className="text-sm text-muted-foreground">Aucun créneau disponible ce jour{anyBarber ? ', quel que soit le barber' : ''}</p>
-                      {/* Une sélection longue peut ne plus tenir avant la fermeture : le dire,
-                          plutôt que de laisser croire que la journée est complète. */}
-                      {totalDuration > 30 && (
-                        <p className="mt-2 text-xs text-muted-foreground/80">
-                          Vos prestations durent {totalDuration >= 60
-                            ? `${Math.floor(totalDuration / 60)} h${totalDuration % 60 ? String(totalDuration % 60).padStart(2, '0') : ''}`
-                            : `${totalDuration} min`} : essayez une autre date, ou retirez une prestation.
-                        </p>
-                      )}
+                      <p className="text-sm text-muted-foreground">{emptyMessage.title}</p>
+                      <p className="mt-2 text-xs text-muted-foreground/80">{emptyMessage.hint}</p>
                     </div>
                   )}
                 </motion.div>
@@ -1101,13 +1230,13 @@ export default function Booking() {
         {/* Navigation */}
         <div className="flex gap-3 mt-6 pb-6">
           {step > 0 && (
-            <motion.button whileTap={{ scale: 0.96 }} onClick={() => goToStep((step === 2 && preSelectedBarberId) ? 0 : step - 1)}
+            <motion.button whileTap={{ scale: 0.96 }} onClick={() => goToStep((step === 2 && skipBarberStep) ? 0 : step - 1)}
               className="flex items-center gap-2 px-5 h-12 rounded-2xl backdrop-blur-xl bg-white/5 border border-white/10 text-sm font-medium text-foreground hover:bg-white/10 transition-all">
               <ChevronLeft className="w-4 h-4" /> Retour
             </motion.button>
           )}
           {step < 3 ? (
-            <motion.button whileTap={canNext() ? { scale: 0.97 } : undefined} onClick={() => goToStep((step === 0 && preSelectedBarberId) ? 2 : step + 1)} disabled={!canNext()}
+            <motion.button whileTap={canNext() ? { scale: 0.97 } : undefined} onClick={() => goToStep((step === 0 && skipBarberStep) ? 2 : step + 1)} disabled={!canNext()}
               className={`flex-1 flex items-center justify-center gap-2 h-12 rounded-2xl text-sm font-semibold transition-all duration-300 ${
                 canNext()
                   ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/25 hover:bg-primary/90'

@@ -52,6 +52,37 @@ export function toLocalDate(dateStr, timeStr = '00:00') {
   return new Date(y || 1970, (m || 1) - 1, d || 1, h || 0, min || 0, 0, 0);
 }
 
+/**
+ * Décalage de Paris (en minutes) à un instant donné.
+ * Le salon est à Paris, l'appareil du client peut être n'importe où : les comparaisons à
+ * « maintenant » (créneau passé, rendez-vous terminé) se font donc sur l'instant réel.
+ */
+export function parisOffsetMinutes(instant) {
+  const tz = new Intl.DateTimeFormat('en-US', { timeZone: TIMEZONE, timeZoneName: 'shortOffset' })
+    .formatToParts(instant).find(p => p.type === 'timeZoneName')?.value || 'GMT';
+  const m = /GMT([+-])(\d{1,2})(?::(\d{2}))?/.exec(tz);
+  if (!m) return 0;
+  return (m[1] === '-' ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3] || 0));
+}
+
+/**
+ * Instant réel (ms) d'un couple `'YYYY-MM-DD'` + `'HH:mm'` exprimé en heure de Paris.
+ * Deux passes : l'offset lu à l'instant « naïf » est faux dans l'heure qui borde une bascule
+ * d'heure d'été. Même calcul que `parisToUtc` côté serveur, pour que les deux soient d'accord.
+ */
+export function parisInstant(dateStr, time = '00:00') {
+  const [y, mo, d] = String(dateStr ?? '').slice(0, 10).split('-').map(Number);
+  const [h = 0, mi = 0] = String(time ?? '00:00').split(':').map(Number);
+  const naive = Date.UTC(y || 1970, (mo || 1) - 1, d || 1, h || 0, mi || 0);
+  const first = naive - parisOffsetMinutes(new Date(naive)) * 60000;
+  return naive - parisOffsetMinutes(new Date(first)) * 60000;
+}
+
+/** UID iCalendar stable d'un rendez-vous : réimporter le .ics met à jour l'événement au lieu de le dupliquer. */
+export function appointmentUid(id) {
+  return `appointment-${id}@dhomebarber.fr`;
+}
+
 /** Date (ou valeur parsable) → Date valide, sinon `null`. */
 function asDate(value) {
   if (value == null) return null;
@@ -128,6 +159,24 @@ export function buildAppointmentEvent({ barberName, services = [], date, startTi
     end,
     uid,
   };
+}
+
+/**
+ * Événement d'un rendez-vous tel que renvoyé par l'API (`date`, `start_time`, `end_time`,
+ * `employee_name`, `services`…), avec son UID stable. Même événement depuis l'écran de succès de
+ * la réservation et depuis Mes rendez-vous : l'ajouter deux fois ne crée pas de doublon.
+ */
+export function appointmentEvent(apt) {
+  return buildAppointmentEvent({
+    barberName: apt.employee_name,
+    services: apt.services,
+    date: apt.date,
+    startTime: apt.start_time,
+    endTime: apt.end_time,
+    totalDuration: apt.total_duration,
+    totalPrice: apt.total_price,
+    uid: apt.id != null ? appointmentUid(apt.id) : undefined,
+  });
 }
 
 /**

@@ -121,8 +121,9 @@ export default function AdminSalonEvents() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-5 gap-3">
-        <div className="shrink-0">
+      {/* flex-wrap : sur téléphone le bouton passe sous le titre au lieu de déborder de l'écran */}
+      <div className="flex flex-wrap items-center justify-between mb-5 gap-3">
+        <div className="min-w-0">
           <p className="text-[11px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Salon</p>
           <h1 className="font-display text-2xl font-bold">Événements du salon</h1>
         </div>
@@ -131,7 +132,7 @@ export default function AdminSalonEvents() {
             <Plus className="w-4 h-4 mr-1.5" /> Nouvel événement
           </Button>
         ) : (
-          <p className="text-[11px] text-muted-foreground text-right max-w-[220px]">
+          <p className="text-[11px] text-muted-foreground sm:text-right max-w-[220px]">
             Lecture seule ; vous pouvez consulter les invités, inviter et relancer.
           </p>
         )}

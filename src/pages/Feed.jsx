@@ -1,6 +1,7 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { api } from '@/api/apiClient';
 import { useQuery, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { motion, AnimatePresence, useScroll, useTransform } from 'framer-motion';
 import { Send, Heart, Trash2, Loader2, Camera, MessageCircle, Plus, X, MoreHorizontal, Flag, Ban, ShieldAlert, Check } from 'lucide-react';
@@ -196,6 +197,9 @@ function PostCard({ post, currentUser, onLike, onDelete, likes, comments, onComm
   // Animations de réaction : explosion d'emojis, gros cœur au double tap sur la photo
   const [burst, setBurst] = useState(null);
   const [heartPop, setHeartPop] = useState(null);
+  // Suppression en deux taps : la corbeille demande confirmation, rien ne part au premier tap
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const postLikes = likes.filter(l => l.post_id === post.id);
   const userLike = currentUser ? postLikes.find(l => isMine(l, currentUser, 'user_key', 'user_email')) : undefined;
@@ -224,6 +228,14 @@ function PostCard({ post, currentUser, onLike, onDelete, likes, comments, onComm
     setHeartPop(Date.now());
     hapticFeedback();
     if (!userLike) onLike(post.id, false, '❤️');
+  };
+
+  const confirmAndDelete = async () => {
+    setDeleting(true);
+    hapticFeedback();
+    const ok = await onDelete(post.id);
+    // Supprimée : la carte disparaît avec le rechargement du fil. Échec : on revient à la corbeille.
+    if (!ok) { setDeleting(false); setConfirmDelete(false); }
   };
 
   const handleSubmitComment = async () => {
@@ -263,9 +275,34 @@ function PostCard({ post, currentUser, onLike, onDelete, likes, comments, onComm
           <p className="text-[11px] text-muted-foreground">{timeAgo(post.created_at)}</p>
         </div>
         {isOwner ? (
-          <button onClick={() => onDelete(post.id)} className="text-muted-foreground/40 hover:text-red-400 transition-colors">
-            <Trash2 className="w-4 h-4" />
-          </button>
+          confirmDelete ? (
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              <button
+                onClick={() => setConfirmDelete(false)}
+                disabled={deleting}
+                aria-label="Garder la publication"
+                className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={confirmAndDelete}
+                disabled={deleting}
+                className="flex items-center gap-1.5 h-8 px-3 rounded-full bg-red-500 text-white text-xs font-semibold disabled:opacity-60"
+              >
+                {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                Supprimer
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => { hapticFeedback(); setConfirmDelete(true); }}
+              aria-label="Supprimer la publication"
+              className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground/40 hover:text-red-400 transition-colors"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          )
         ) : currentUser ? (
           <button
             onClick={() => onOpenMenu({ type: 'post', id: post.id, authorKey: post.author_key, authorEmail: post.author_email, authorName: post.author_name, content: post.content })}
@@ -449,6 +486,7 @@ function PostCard({ post, currentUser, onLike, onDelete, likes, comments, onComm
 export default function Feed() {
   const { user, refreshUser } = useAuth();
   const queryClient = useQueryClient();
+  const inAdmin = useLocation().pathname.startsWith('/admin');
   const [content, setContent] = useState('');
   const [imageUrl, setImageUrl] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -641,13 +679,16 @@ export default function Feed() {
     }
   };
 
+  // Appelée après la confirmation de la carte ; renvoie `true` si la publication est supprimée
   const handleDelete = async (postId) => {
     try {
       await api.entities.Post.delete(postId);
       queryClient.invalidateQueries({ queryKey: ['posts'] });
       toast.success('Publication supprimée');
+      return true;
     } catch {
       toast.error('Erreur lors de la suppression');
+      return false;
     }
   };
 
@@ -738,7 +779,9 @@ export default function Feed() {
   };
 
   return (
-    <div className="max-w-lg mx-auto">
+    // Côté client, mêmes marges que les autres pages (16 px) ; dans l'admin (/admin/feed),
+    // le <main> d'AdminLayout fournit déjà les siennes
+    <div className={`max-w-lg mx-auto ${inAdmin ? '' : 'px-4 py-6'}`}>
       <div className="mb-6">
         <p className="text-[10px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Communauté</p>
         <h1 className="font-sans text-2xl font-bold">Ca dit quoi le Gang ?</h1>

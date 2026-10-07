@@ -1,6 +1,8 @@
 // D'Home Barber - Service Worker for Push Notifications + Offline Mode
 
-const CACHE_NAME = 'dhome-v1';
+// v2 : le cache v1 contenait des réponses authentifiées (dont /me) ; changer le nom le
+// fait supprimer à l'activation (voir « activate »).
+const CACHE_NAME = 'dhome-v2';
 const STORAGE_KEY = 'dhome_notifications';
 
 // App shell files to cache for offline support
@@ -8,9 +10,19 @@ const APP_SHELL = [
   '/',
   '/index.html',
   '/logo.png',
-  '/icon.png',
+  '/icons/icon-192.png',
   '/manifest.json',
 ];
+
+// Seules les réponses publiques de l'API sont gardées pour le hors-ligne. Une requête qui
+// porte un jeton dépend du compte, or le cache n'a que l'URL pour clé : sur un appareil
+// partagé, hors ligne, on revoyait les données du compte précédent (/me compris).
+function isPublicApiRequest(request, url) {
+  if (request.method !== 'GET') return false;
+  if (request.headers.has('Authorization')) return false;
+  if (url.pathname.includes('/auth/') || /\/entities\/User\/me\/?$/.test(url.pathname)) return false;
+  return true;
+}
 
 // ─── Install: cache app shell ────────────────────────────────────────
 self.addEventListener('install', (event) => {
@@ -38,13 +50,15 @@ self.addEventListener('fetch', (event) => {
   // Only handle same-origin requests
   if (url.origin !== self.location.origin && !url.hostname.includes('herokuapp.com')) return;
 
-  // API requests: network-first with cache fallback (for offline agenda)
+  // API requests: network-first with cache fallback, public responses only
   if (url.pathname.includes('/api/')) {
+    // Requête authentifiée ou d'authentification : le navigateur s'en charge, rien n'est gardé
+    if (!isPublicApiRequest(request, url)) return;
     event.respondWith(
       fetch(request)
         .then((response) => {
           // Only cache GET requests that succeed
-          if (request.method === 'GET' && response.ok) {
+          if (response.ok) {
             const clone = response.clone();
             caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
           }
@@ -83,8 +97,8 @@ self.addEventListener('push', (event) => {
     Promise.all([
       self.registration.showNotification(data.title, {
         body: data.body,
-        icon: data.icon || '/icon.png',
-        badge: data.badge || '/icon.png',
+        icon: data.icon || '/icons/icon-192.png',
+        badge: data.badge || '/icons/icon-96.png',
         data: { url: data.data?.url || '/notifications', title: data.title, body: data.body },
         vibrate: [200, 100, 200],
       }),

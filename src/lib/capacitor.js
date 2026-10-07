@@ -54,11 +54,14 @@ export async function initCapacitor() {
     });
   }
 
-  // Handle deep links
+  // Liens profonds : l'app utilise des URL classiques (BrowserRouter), changer le hash ne naviguait
+  // pas. pushState + popstate fait suivre react-router sans recharger le bundle.
   App.addListener('appUrlOpen', (event) => {
     const url = new URL(event.url);
-    if (url.pathname) {
-      window.location.hash = url.pathname;
+    const target = `${url.pathname}${url.search}`;
+    if (url.pathname && target !== `${window.location.pathname}${window.location.search}`) {
+      window.history.pushState({}, '', target);
+      window.dispatchEvent(new PopStateEvent('popstate'));
     }
   });
 }

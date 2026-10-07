@@ -94,16 +94,28 @@ export default function Events() {
       setShowForm(false);
       setForm({ event_type: '', date: '', time_slot: 'full_day', guest_count: '', message: '' });
     },
-    onError: () => toast.error('Erreur lors de l\'envoi'),
+    onError: (err) => {
+      // Message du serveur (créneau invalide, date déjà prise…) plutôt qu'une erreur générique
+      const message = err?.data?.error || err?.message;
+      toast.error(message && !/^HTTP \d+$/.test(message) ? message : 'Erreur lors de l\'envoi');
+      // Un créneau a pu être confirmé entre-temps : on recharge les créneaux pris
+      if (err?.status === 409 || err?.status === 400) queryClient.invalidateQueries({ queryKey: ['confirmedEvents'] });
+    },
   });
 
-  // Reset time_slot if it becomes blocked when date changes
+  // Créneau pris au changement de date : on bascule sur le premier créneau libre. Date complète :
+  // aucun créneau, l'envoi reste désactivé ; revenu sur une date libre, on reprend la journée
+  // complète (choix par défaut) si elle est libre.
   React.useEffect(() => {
-    if (blockedSlots.has(form.time_slot)) {
-      const firstAvailable = TIME_SLOTS.find(s => !blockedSlots.has(s.id));
-      setForm(f => ({ ...f, time_slot: firstAvailable?.id || '' }));
-    }
-  }, [form.date, blockedSlots]);
+    if (form.time_slot && !blockedSlots.has(form.time_slot)) return;
+    const next = !form.time_slot && !blockedSlots.has('full_day')
+      ? 'full_day'
+      : TIME_SLOTS.find(s => !blockedSlots.has(s.id))?.id || '';
+    if (next !== form.time_slot) setForm(f => ({ ...f, time_slot: next }));
+  }, [form.date, form.time_slot, blockedSlots]);
+
+  // Envoi possible seulement sur un créneau existant et libre (le serveur refuse `time_slot: ''`)
+  const slotValid = TIME_SLOTS.some(s => s.id === form.time_slot) && !blockedSlots.has(form.time_slot);
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -111,8 +123,10 @@ export default function Events() {
       toast.error('Type d\'événement et date requis');
       return;
     }
-    if (blockedSlots.has(form.time_slot)) {
-      toast.error('Ce créneau est déjà réservé pour cette date');
+    if (!slotValid) {
+      toast.error(blockedSlots.size >= TIME_SLOTS.length
+        ? 'Tous les créneaux sont pris pour cette date, choisissez-en une autre'
+        : 'Choisissez un créneau libre');
       return;
     }
     createEvent.mutate({
@@ -301,8 +315,8 @@ export default function Events() {
               className="flex-1 py-3 rounded-xl border border-border text-sm text-muted-foreground hover:bg-secondary transition-all">
               Annuler
             </button>
-            <button type="submit" disabled={createEvent.isPending}
-              className="flex-1 py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 disabled:opacity-50 transition-all flex items-center justify-center gap-2">
+            <button type="submit" disabled={createEvent.isPending || !slotValid}
+              className="flex-1 py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2">
               {createEvent.isPending ? (
                 <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
               ) : (

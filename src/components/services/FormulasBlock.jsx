@@ -7,7 +7,8 @@ import { EASE, formatDuration, formatPrice } from './serviceUtils';
 const springy = { type: 'spring', stiffness: 520, damping: 26 };
 
 /**
- * Vitrine des formules (prestations dont le nom contient « formule » / « pack ») en tête de page :
+ * Vitrine des formules (nom contenant « formule » / « pack », ou réunissant une coupe et une barbe :
+ * `isFormula`) en tête de page :
  * cartes sombres à défilement horizontal, sélectionnables comme les autres. Rien si aucune formule.
  */
 export default function FormulasBlock({ formulas, selectedIds, popularIds, newIds, onToggle, reduceMotion = false }) {
@@ -88,7 +89,7 @@ export default function FormulasBlock({ formulas, selectedIds, popularIds, newId
                     </span>
                     <ServiceBadges popular={popularIds.has(id)} isNew={newIds.has(id)} light />
                   </div>
-                  <span className="font-fut text-3xl font-bold leading-none text-primary tabular-nums">{formatPrice(service.price)}</span>
+                  <span className="shrink-0 whitespace-nowrap font-fut text-3xl font-bold leading-none text-primary tabular-nums">{formatPrice(service.price)}</span>
                 </div>
               </div>
             </motion.div>

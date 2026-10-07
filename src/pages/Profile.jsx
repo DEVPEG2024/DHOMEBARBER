@@ -6,7 +6,7 @@ import { useAuth } from '@/lib/AuthContext';
 import { motion } from 'framer-motion';
 import { Calendar, Star, ShoppingBag, Settings, LogOut, ChevronRight, Shield, Bell, Camera, Shirt, Handshake } from 'lucide-react';
 import { toast } from 'sonner';
-import ImageCropDialog from '@/components/shared/ImageCropDialog';
+import ImageCropDialog, { unreadableImageMessage } from '@/components/shared/ImageCropDialog';
 
 const menuItems = [
   { icon: Calendar, label: 'Mes Rendez-vous', path: '/appointments', desc: 'Historique & prochains RDV' },
@@ -26,11 +26,19 @@ export default function Profile() {
 
   const handlePhotoSelect = (e) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => setCropImage(reader.result);
+    // On vérifie que le navigateur sait décoder la photo avant d'ouvrir le recadrage
+    // (HEIC hors Safari, fichier abîmé) : sinon la fenêtre s'ouvrirait vide.
+    reader.onload = () => {
+      const probe = new Image();
+      probe.onload = () => setCropImage(reader.result);
+      probe.onerror = () => toast.error(unreadableImageMessage(file));
+      probe.src = reader.result;
+    };
+    reader.onerror = () => toast.error(unreadableImageMessage(file));
     reader.readAsDataURL(file);
-    e.target.value = '';
   };
 
   const handleCropComplete = async (croppedFile) => {
@@ -41,8 +49,8 @@ export default function Profile() {
       await api.entities.User.update(user.id, { photo_url: file_url });
       if (refreshUser) await refreshUser();
       toast.success('Photo de profil mise à jour');
-    } catch {
-      toast.error('Erreur lors de la mise à jour de la photo');
+    } catch (err) {
+      toast.error(err?.message || 'Erreur lors de la mise à jour de la photo');
     } finally {
       setUploading(false);
     }
@@ -103,7 +111,7 @@ export default function Profile() {
           <ImageCropDialog
             open={!!cropImage}
             imageSrc={cropImage}
-            onClose={() => setCropImage(null)}
+            onOpenChange={(open) => { if (!open) setCropImage(null); }}
             onCropComplete={handleCropComplete}
           />
 

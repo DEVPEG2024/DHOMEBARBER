@@ -3,11 +3,104 @@ import { useAuth } from '@/lib/AuthContext';
 import { api, apiRequest, apiUrl } from '@/api/apiClient';
 import { isPushSupported, isSubscribed, subscribeToPush, unsubscribeFromPush } from '@/lib/pushNotifications';
 import { motion } from 'framer-motion';
-import { User, Mail, Phone, Bell, Shield, ChevronRight, Cake, Trash2, Ban } from 'lucide-react';
+import { User, Mail, Phone, Bell, Shield, ChevronRight, Cake, Trash2, Ban, Pencil } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
 import { isNative, openExternalUrl } from '@/lib/capacitor';
+
+// Mêmes limites que l'inscription (routes/auth.js côté serveur)
+const NAME_MAX = 120;
+const PHONE_MAX = 30;
+
+const squash = (s) => String(s || '').trim().replace(/\s+/g, ' ');
+
+const validateName = (v) => {
+  if (!v) return 'Le nom est obligatoire.';
+  if (v.length > NAME_MAX) return `Le nom ne peut pas dépasser ${NAME_MAX} caractères.`;
+  return null;
+};
+
+const validatePhone = (v) => {
+  if (v.length > PHONE_MAX) return `Le téléphone ne peut pas dépasser ${PHONE_MAX} caractères.`;
+  if (v && !/^[0-9+().\s-]+$/.test(v)) return 'Numéro invalide : utilisez seulement des chiffres, des espaces et le signe +.';
+  return null;
+};
+
+/**
+ * Champ du bloc « Informations » modifiable sur place, comme la date de naissance :
+ * le bouton « OK » n'apparaît que si la valeur a changé. Entrée enregistre, Échap annule.
+ * `validate(valeur)` renvoie un message d'erreur ou rien, `onSave(valeur)` enregistre.
+ */
+function InlineField({ id, icon: Icon, label, value, placeholder, validate, onSave, inputProps = {} }) {
+  const saved = squash(value);
+  const [draft, setDraft] = useState(saved);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setDraft(saved);
+  }, [saved]);
+
+  const cleaned = squash(draft);
+  const dirty = cleaned !== saved;
+
+  const save = async () => {
+    if (!dirty || saving) return;
+    const error = validate?.(cleaned);
+    if (error) {
+      toast.error(error);
+      return;
+    }
+    setSaving(true);
+    try {
+      await onSave(cleaned);
+    } catch (err) {
+      console.error(`${label} save error:`, err);
+      toast.error(err?.message || 'Erreur lors de la sauvegarde');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-3">
+      <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+        <Icon className="w-4 h-4 text-primary" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <label htmlFor={id} className="block text-[11px] text-muted-foreground">{label}</label>
+        <div className="flex items-center gap-2 mt-0.5">
+          <input
+            id={id}
+            value={draft}
+            onChange={e => setDraft(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter') { e.preventDefault(); save(); }
+              if (e.key === 'Escape') setDraft(saved);
+            }}
+            placeholder={placeholder}
+            enterKeyHint="done"
+            className="flex-1 min-w-0 bg-transparent text-sm font-semibold text-foreground placeholder:text-muted-foreground/60 placeholder:font-normal border-b border-transparent focus:border-primary/40 focus:outline-none transition-colors"
+            {...inputProps}
+          />
+          {dirty ? (
+            <button
+              onClick={save}
+              disabled={saving}
+              className="text-xs font-semibold text-primary px-2 py-1 rounded-lg bg-primary/10 hover:bg-primary/20 transition-colors disabled:opacity-50"
+            >
+              {saving ? '...' : 'OK'}
+            </button>
+          ) : (
+            <label htmlFor={id} aria-hidden="true" className="p-1 text-muted-foreground/50 cursor-pointer">
+              <Pencil className="w-3.5 h-3.5" />
+            </label>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function Settings() {
   const { user, refreshUser, logout } = useAuth();
@@ -110,35 +203,46 @@ export default function Settings() {
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}
           className="rounded-2xl border border-white/8 bg-white/4 backdrop-blur-xl p-4 mb-4 space-y-3">
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Informations</p>
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
-              <User className="w-4 h-4 text-primary" />
-            </div>
-            <div>
-              <p className="text-[11px] text-muted-foreground">Nom</p>
-              <p className="text-sm font-semibold text-foreground">{user?.full_name || 'Non renseigné'}</p>
-            </div>
-          </div>
+          <InlineField
+            id="settings-full-name"
+            icon={User}
+            label="Nom"
+            value={user?.full_name}
+            placeholder="Votre nom"
+            validate={validateName}
+            onSave={async (value) => {
+              if (!user?.id) return;
+              await api.entities.User.update(user.id, { full_name: value });
+              if (refreshUser) await refreshUser();
+              toast.success('Nom mis à jour');
+            }}
+            inputProps={{ autoComplete: 'name', maxLength: NAME_MAX }}
+          />
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
               <Mail className="w-4 h-4 text-primary" />
             </div>
-            <div>
+            <div className="min-w-0">
               <p className="text-[11px] text-muted-foreground">Email</p>
-              <p className="text-sm font-semibold text-foreground">{user?.email || '-'}</p>
+              <p className="text-sm font-semibold text-foreground break-all">{user?.email || '-'}</p>
             </div>
           </div>
-          {user?.phone && (
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
-                <Phone className="w-4 h-4 text-primary" />
-              </div>
-              <div>
-                <p className="text-[11px] text-muted-foreground">Téléphone</p>
-                <p className="text-sm font-semibold text-foreground">{user.phone}</p>
-              </div>
-            </div>
-          )}
+          {/* Toujours affiché : un client inscrit sans numéro peut l'ajouter (facultatif) */}
+          <InlineField
+            id="settings-phone"
+            icon={Phone}
+            label="Téléphone"
+            value={user?.phone}
+            placeholder="Ajouter un numéro"
+            validate={validatePhone}
+            onSave={async (value) => {
+              if (!user?.id) return;
+              await api.entities.User.update(user.id, { phone: value });
+              if (refreshUser) await refreshUser();
+              toast.success(value ? 'Téléphone mis à jour' : 'Téléphone supprimé');
+            }}
+            inputProps={{ type: 'tel', inputMode: 'tel', autoComplete: 'tel', maxLength: PHONE_MAX }}
+          />
           {/* Birthday */}
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
@@ -297,6 +401,9 @@ export default function Settings() {
                     try {
                       await apiRequest('DELETE', apiUrl('/auth/delete-account'));
                       toast.success('Compte supprimé avec succès');
+                      // logout() recharge la page : le toast serait perdu. La page de connexion
+                      // affiche ce message au chargement.
+                      try { sessionStorage.setItem('dhb-flash', 'Votre compte a bien été supprimé.'); } catch { /* stockage indisponible */ }
                       logout();
                     } catch (err) {
                       toast.error(err?.message || 'Erreur lors de la suppression');

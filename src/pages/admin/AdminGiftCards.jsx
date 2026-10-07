@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Gift, CheckCircle2, XCircle, Clock, Search, X, Ban, CreditCard, Banknote, Minus, ScanLine, Camera, Trash2, AlertTriangle } from 'lucide-react';
-import { useToast } from '@/components/ui/use-toast';
+import { toast } from 'sonner';
 import jsQR from 'jsqr';
 
 const STATUS_CONFIG = {
@@ -17,7 +17,6 @@ const STATUS_CONFIG = {
 
 function ValidateModal({ card, onClose, onValidated }) {
   const { user } = useAuth();
-  const { toast } = useToast();
   const queryClient = useQueryClient();
   const [paymentMethod, setPaymentMethod] = useState('');
   const [loading, setLoading] = useState(false);
@@ -29,7 +28,7 @@ function ValidateModal({ card, onClose, onValidated }) {
 
   const handleValidate = async () => {
     if (!paymentMethod) {
-      toast({ title: 'Sélectionnez un mode de paiement', variant: 'destructive' });
+      toast.error('Sélectionnez un mode de paiement');
       return;
     }
     setLoading(true);
@@ -40,12 +39,12 @@ function ValidateModal({ card, onClose, onValidated }) {
         validated_by: user?.full_name || user?.email || 'admin',
         remaining_balance: card.amount,
       });
-      toast({ title: 'Carte validée !', description: `${card.amount}€ - ${card.recipient_name}` });
+      toast.success('Carte validée !', { description: `${card.amount}€ - ${card.recipient_name}` });
       queryClient.invalidateQueries({ queryKey: ['adminGiftCards'] });
       onValidated?.();
       onClose();
     } catch (err) {
-      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+      toast.error('Erreur', { description: err.message });
     } finally {
       setLoading(false);
     }
@@ -55,11 +54,11 @@ function ValidateModal({ card, onClose, onValidated }) {
     setLoading(true);
     try {
       await api.entities.GiftCard.update(card.id, { status: 'expired' });
-      toast({ title: 'Carte rejetée' });
+      toast.success('Carte rejetée');
       queryClient.invalidateQueries({ queryKey: ['adminGiftCards'] });
       onClose();
     } catch (err) {
-      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+      toast.error('Erreur', { description: err.message });
     } finally {
       setLoading(false);
     }
@@ -69,11 +68,11 @@ function ValidateModal({ card, onClose, onValidated }) {
     setLoading(true);
     try {
       await api.entities.GiftCard.update(card.id, { status: 'expired', remaining_balance: 0 });
-      toast({ title: 'Carte annulée', description: `${card.code} - ${card.recipient_name}` });
+      toast.success('Carte annulée', { description: `${card.code} - ${card.recipient_name}` });
       queryClient.invalidateQueries({ queryKey: ['adminGiftCards'] });
       onClose();
     } catch (err) {
-      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+      toast.error('Erreur', { description: err.message });
     } finally {
       setLoading(false);
     }
@@ -82,11 +81,11 @@ function ValidateModal({ card, onClose, onValidated }) {
   const handleDeduct = async () => {
     const val = Number(deductAmount);
     if (!val || val <= 0) {
-      toast({ title: 'Montant invalide', variant: 'destructive' });
+      toast.error('Montant invalide');
       return;
     }
     if (val > currentBalance) {
-      toast({ title: `Solde insuffisant (${currentBalance}€)`, variant: 'destructive' });
+      toast.error(`Solde insuffisant (${currentBalance}€)`);
       return;
     }
     setLoading(true);
@@ -98,14 +97,13 @@ function ValidateModal({ card, onClose, onValidated }) {
         updates.used_at = new Date().toISOString();
       }
       await api.entities.GiftCard.update(card.id, updates);
-      toast({
-        title: newBalance <= 0 ? 'Carte épuisée' : `${val}€ débité`,
+      toast.success(newBalance <= 0 ? 'Carte épuisée' : `${val}€ débité`, {
         description: newBalance > 0 ? `Nouveau solde: ${newBalance}€` : 'La carte est maintenant utilisée',
       });
       queryClient.invalidateQueries({ queryKey: ['adminGiftCards'] });
       onClose();
     } catch (err) {
-      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+      toast.error('Erreur', { description: err.message });
     } finally {
       setLoading(false);
     }
@@ -115,11 +113,11 @@ function ValidateModal({ card, onClose, onValidated }) {
     setLoading(true);
     try {
       await api.entities.GiftCard.delete(card.id);
-      toast({ title: 'Carte supprimée' });
+      toast.success('Carte supprimée');
       queryClient.invalidateQueries({ queryKey: ['adminGiftCards'] });
       onClose();
     } catch (err) {
-      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+      toast.error('Erreur', { description: err.message });
     } finally {
       setLoading(false);
     }
@@ -129,14 +127,15 @@ function ValidateModal({ card, onClose, onValidated }) {
   const StatusIcon = statusConf.icon;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+    // z-[60] comme les autres fiches, entre l'encoche et la barre d'accueil iOS : la fenêtre défile jusqu'à « Supprimer »
+    <div className="fixed inset-0 z-[60] flex items-center justify-center px-4 pt-[calc(env(safe-area-inset-top)+1rem)] pb-[calc(env(safe-area-inset-bottom)+1rem)]">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
       <motion.div
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.9 }}
         onClick={e => e.stopPropagation()}
-        className="relative w-full max-w-md max-h-[90vh] overflow-y-auto rounded-3xl bg-card border border-border p-6 shadow-2xl"
+        className="relative w-full max-w-md max-h-full overflow-y-auto overscroll-contain rounded-3xl bg-card border border-border p-6 shadow-2xl"
       >
         <button onClick={onClose} className="absolute top-4 right-4 w-8 h-8 rounded-full flex items-center justify-center hover:bg-secondary z-10">
           <X className="w-4 h-4" />
@@ -372,7 +371,6 @@ function QRScannerModal({ onClose, onScanned }) {
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraError, setCameraError] = useState(false);
   const [manualCode, setManualCode] = useState('');
-  const { toast } = useToast();
 
   const stopCamera = useCallback(() => {
     if (streamRef.current) {
@@ -454,21 +452,21 @@ function QRScannerModal({ onClose, onScanned }) {
       stopCamera();
       onScanned(code);
     } else {
-      toast({ title: 'Code invalide', description: 'Le code doit commencer par DHB-', variant: 'destructive' });
+      toast.error('Code invalide', { description: 'Le code doit commencer par DHB-' });
     }
   };
 
   const handleClose = () => { stopCamera(); onClose(); };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center px-4 pb-4">
+    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center px-4 pt-[calc(env(safe-area-inset-top)+1rem)] pb-[calc(env(safe-area-inset-bottom)+1rem)]">
       <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
       <motion.div
         initial={{ opacity: 0, y: 40 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: 40 }}
         onClick={e => e.stopPropagation()}
-        className="relative w-full max-w-sm rounded-3xl bg-card border border-border p-5 shadow-2xl"
+        className="relative w-full max-w-sm max-h-full overflow-y-auto overscroll-contain rounded-3xl bg-card border border-border p-5 shadow-2xl"
       >
         <button onClick={handleClose} className="absolute top-3 right-3 w-8 h-8 rounded-full flex items-center justify-center hover:bg-secondary z-10">
           <X className="w-4 h-4" />
@@ -545,7 +543,6 @@ export default function AdminGiftCards() {
   const [selectedCard, setSelectedCard] = useState(null);
   const [showScanner, setShowScanner] = useState(false);
   const [pendingScanCode, setPendingScanCode] = useState(null);
-  const { toast } = useToast();
   const queryClient = useQueryClient();
 
   const { data: giftCards = [], isLoading } = useQuery({
@@ -575,10 +572,10 @@ export default function AdminGiftCards() {
       setSelectedCard(card);
       setPendingScanCode(null);
     } else if (giftCards.length > 0) {
-      toast({ title: 'Carte introuvable', description: `Aucune carte avec le code ${pendingScanCode}`, variant: 'destructive' });
+      toast.error('Carte introuvable', { description: `Aucune carte avec le code ${pendingScanCode}` });
       setPendingScanCode(null);
     }
-  }, [giftCards, isLoading, pendingScanCode, toast]);
+  }, [giftCards, isLoading, pendingScanCode]);
 
   // Handle QR scan from URL: ?scan=DHB-XXXX-XXXX
   useEffect(() => {
@@ -744,7 +741,7 @@ export default function AdminGiftCards() {
 
       {/* Scan loading overlay */}
       {pendingScanCode && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm">
           <div className="bg-card rounded-3xl border border-border p-8 text-center shadow-2xl">
             <div className="w-8 h-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin mx-auto mb-3" />
             <p className="text-sm font-semibold text-foreground">Recherche de la carte...</p>

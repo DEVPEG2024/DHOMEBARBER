@@ -2,7 +2,10 @@
 import { useState, useEffect } from "react";
 
 const TOAST_LIMIT = 20;
-const TOAST_REMOVE_DELAY = 1000000;
+// Un toast fermé n'est plus rendu (toast.jsx) ; il est retiré de la mémoire peu après
+const TOAST_REMOVE_DELAY = 1000;
+// Fermeture automatique, comme les toasts sonner du reste de l'app (`duration: Infinity` pour la désactiver)
+const TOAST_DURATION = 4000;
 
 const actionTypes = {
   ADD_TOAST: "ADD_TOAST",
@@ -119,8 +122,14 @@ function toast({ ...props }) {
       toast: { ...props, id },
     });
 
-  const dismiss = () =>
+  const dismiss = () => {
+    // Déjà fermé (croix puis minuterie) : rien à faire
+    if (!memoryState.toasts.some((t) => t.id === id && t.open)) return;
     dispatch({ type: actionTypes.DISMISS_TOAST, toastId: id });
+  };
+
+  const duration = props.duration ?? TOAST_DURATION;
+  if (Number.isFinite(duration) && duration > 0) setTimeout(dismiss, duration);
 
   dispatch({
     type: actionTypes.ADD_TOAST,

@@ -312,6 +312,9 @@ const SECTION_LABELS = {
   'cta': 'Réservation',
 };
 
+/** Avis chargés pour la note du hero (limite par défaut du serveur) ; au-delà, « N+ ». */
+const REVIEWS_STATS_LIMIT = 500;
+
 export default function Home() {
   const [showHours, setShowHours] = useState(false);
   const [editMode, setEditMode] = useState(false);
@@ -345,9 +348,11 @@ export default function Home() {
     queryFn: () => api.entities.Employee.filter({ is_active: true }, 'sort_order', 50),
   });
 
+  // Tous les avis visibles, pas seulement les 5 affichés dans la section : la note du hero est la
+  // vraie moyenne sur le vrai nombre d'avis (lignes légères : nom, note, commentaire)
   const { data: reviews = [] } = useQuery({
     queryKey: ['reviews'],
-    queryFn: () => api.entities.Review.filter({ is_visible: true }, '-created_date', 5),
+    queryFn: () => api.entities.Review.filter({ is_visible: true }, '-created_date', REVIEWS_STATS_LIMIT),
   });
 
   const { data: products = [] } = useQuery({
@@ -411,9 +416,17 @@ export default function Home() {
     }
   }, [settings]);
 
-  const avgRating = reviews.length > 0
-    ? (reviews.reduce((sum, r) => sum + (r.rating || 0), 0) / reviews.length).toFixed(1)
-    : '5.0';
+  // Note du hero : moyenne réelle des avis notés, ou rien du tout sans avis. Jamais de note par
+  // défaut : un « 5.0 » sans avis est une déclaration trompeuse (motif du refus Google Play).
+  const ratingStats = useMemo(() => {
+    const rated = reviews.filter(r => Number(r.rating) > 0);
+    if (rated.length === 0) return null;
+    const avg = rated.reduce((sum, r) => sum + Number(r.rating), 0) / rated.length;
+    return {
+      avg: avg.toFixed(1).replace('.', ','),
+      count: reviews.length >= REVIEWS_STATS_LIMIT ? `${rated.length}+` : String(rated.length),
+    };
+  }, [reviews]);
 
   // Build opening hours data from salon settings
   const openingHours = useMemo(() => {
@@ -804,11 +817,14 @@ export default function Home() {
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}
             className="flex flex-col items-center gap-2 mb-5">
             <div className="flex items-center gap-3">
-              <Link to="/reviews" className="flex items-center gap-1.5 backdrop-blur-xl bg-white/10 border border-white/15 rounded-full px-3 py-1.5 active:scale-95 transition-transform">
-                <Star className="w-3.5 h-3.5 text-primary fill-primary" />
-                <span className="text-white font-bold text-sm">{avgRating}</span>
-                <span className="text-white/50 text-xs">({reviews.length})</span>
-              </Link>
+              {ratingStats && (
+                <Link to="/reviews" aria-label={`Note moyenne ${ratingStats.avg} sur 5, ${ratingStats.count} avis`}
+                  className="flex items-center gap-1.5 backdrop-blur-xl bg-white/10 border border-white/15 rounded-full px-3 py-1.5 active:scale-95 transition-transform">
+                  <Star className="w-3.5 h-3.5 text-primary fill-primary" />
+                  <span className="text-white font-bold text-sm">{ratingStats.avg}</span>
+                  <span className="text-white/50 text-xs">({ratingStats.count})</span>
+                </Link>
+              )}
               <div className="flex items-center gap-1.5 text-white/60 text-xs">
                 <MapPin className="w-3.5 h-3.5" /> Douvaine
               </div>

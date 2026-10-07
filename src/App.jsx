@@ -1,9 +1,8 @@
 import React, { Suspense, useLayoutEffect } from 'react';
-import { Toaster } from "@/components/ui/toaster"
 import { Toaster as SonnerToaster } from "@/components/ui/sonner"
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClientInstance } from '@/lib/query-client'
-import { BrowserRouter as Router, Route, Routes, Navigate, Outlet, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Route, Routes, Navigate, Outlet, useLocation, useSearchParams } from 'react-router-dom';
 import PageNotFound from './lib/PageNotFound';
 import { AuthProvider, useAuth } from '@/lib/AuthContext';
 import { ThemeProvider } from '@/lib/ThemeContext';
@@ -74,6 +73,25 @@ const LazyFallback = () => (
   </div>
 );
 
+// Page d'arrivée d'un barber : la première section à laquelle il a droit
+function barberHomePath(user) {
+  const perms = user?.permissions || [];
+  const permToPath = { agenda: '/admin/agenda', dashboard: '/admin', services: '/admin/services', clients: '/admin/clients' };
+  return permToPath[perms[0]] || '/admin/my-cleaning';
+}
+
+// Paramètre `redirect` de /login : chemin interne uniquement (jamais « //autre-site »
+// ni une URL absolue), et pas /login lui-même. null = page d'accueil du rôle.
+function safeRedirect(value) {
+  if (typeof value !== 'string' || !value.startsWith('/')) return null;
+  if (value.startsWith('//') || value.startsWith('/\\')) return null;
+  if (value === '/' || value === '/login' || value.startsWith('/login?')) return null;
+  return value;
+}
+
+// Adresse de /login qui ramène ici une fois connecté (requête comprise : /booking?services=…)
+const loginPathFor = (location) => `/login?redirect=${encodeURIComponent(location.pathname + location.search)}`;
+
 // Route guard: requires authentication (client routes only)
 function RequireAuth() {
   const { user, isAuthenticated, isLoadingAuth } = useAuth();
@@ -88,15 +106,12 @@ function RequireAuth() {
   }
 
   if (!isAuthenticated) {
-    return <Navigate to={`/login?redirect=${encodeURIComponent(location.pathname)}`} replace />;
+    return <Navigate to={loginPathFor(location)} replace />;
   }
 
   // Redirect barbers to admin interface
   if (user?.role === 'barber') {
-    const perms = user.permissions || [];
-    const permToPath = { agenda: '/admin/agenda', dashboard: '/admin', services: '/admin/services', clients: '/admin/clients' };
-    const firstPerm = perms[0];
-    return <Navigate to={permToPath[firstPerm] || '/admin/my-cleaning'} replace />;
+    return <Navigate to={barberHomePath(user)} replace />;
   }
 
   // Admin can browse client pages freely (e.g. "Retour au salon")
@@ -117,7 +132,7 @@ function RequireAdmin() {
   }
 
   if (!isAuthenticated) {
-    return <Navigate to={`/login?redirect=${encodeURIComponent(location.pathname)}`} replace />;
+    return <Navigate to={loginPathFor(location)} replace />;
   }
 
   if (user?.role !== 'admin' && user?.role !== 'barber') {
@@ -128,8 +143,12 @@ function RequireAdmin() {
 }
 
 // Redirect to home if already authenticated
+// Seul endroit qui décide où aller après une connexion ou une inscription : Login se
+// contente d'ouvrir la session, cette garde redirige aussitôt (avant, les deux se
+// faisaient la course et le paramètre `redirect` était perdu).
 function GuestOnly() {
-  const { user, isAuthenticated, isLoadingAuth } = useAuth();
+  const { user, isAuthenticated, isLoadingAuth, welcomePending } = useAuth();
+  const [searchParams] = useSearchParams();
 
   if (isLoadingAuth) {
     return (
@@ -140,14 +159,14 @@ function GuestOnly() {
   }
 
   if (isAuthenticated) {
+    // Juste après une inscription : Login affiche l'écran « Bienvenue ! » (installer l'app,
+    // activer les notifications) ; « Commencer » lève ce drapeau et on repasse ici.
+    if (welcomePending) return <Outlet />;
+    // Page demandée avant la connexion (ex. /booking), sinon l'accueil du rôle
+    const redirect = safeRedirect(searchParams.get('redirect'));
+    if (redirect) return <Navigate to={redirect} replace />;
     if (user?.role === 'admin') return <Navigate to="/admin" replace />;
-    if (user?.role === 'barber') {
-      // Redirect to first permitted page
-      const perms = user.permissions || [];
-      const permToPath = { agenda: '/admin/agenda', dashboard: '/admin', services: '/admin/services', clients: '/admin/clients' };
-      const firstPerm = perms[0];
-      return <Navigate to={permToPath[firstPerm] || '/admin/my-cleaning'} replace />;
-    }
+    if (user?.role === 'barber') return <Navigate to={barberHomePath(user)} replace />;
     return <Navigate to="/" replace />;
   }
 
@@ -267,7 +286,6 @@ function App() {
                 {/* Dans le Router : le bouton lit la route (masqué sur l'accueil, intégré au hero) */}
                 <MusicToggle />
               </Router>
-              <Toaster />
               <SonnerToaster />
             </QueryClientProvider>
           </AuthProvider>

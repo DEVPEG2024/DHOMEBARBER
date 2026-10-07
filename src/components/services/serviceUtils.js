@@ -45,7 +45,9 @@ export const KINDS = {
 
 const KIND_PATTERNS = [
   ['formula', /\b(formule|pack|forfait|combo|duo|trio)\b/],
-  ['kids', /\b(enfant|enfants|kid|kids|junior|ado|ados|petit|petits|gamin)\b/],
+  // « moins de 6 ans », « - 18 ans », « à partir de 7 ans » (mais pas « Coupe Homme + 18 ans ») :
+  // sans eux, « Ajoute la coupe » proposait la coupe des moins de 6 ans, la moins chère
+  ['kids', /\b(enfant|enfants|kid|kids|junior|ado|ados|petit|petits|gamin)\b|moins de \d+ ans|(^|\s)-\s?\d+ ans|a partir de \d+ ans/],
   ['color', /(colo|coloration|meche|meches|decolo|blond|teint|balayage|patine|gris)/],
   ['care', /(soin|masque|gommage|hydrat|visage|spa|detente|massage|vapeur|serviette chaude)/],
   ['clipper', /(tondeuse|fade|degrade|taper|skin|contour)/],
@@ -53,9 +55,30 @@ const KIND_PATTERNS = [
   ['cut', /(coupe|ciseau|ciseaux|cheveux|coiff|shampo|brushing)/],
 ];
 
+/** Mots d'une coupe et d'une barbe (texte déjà normalisé), pour reconnaître les formules « coupe + barbe ». */
+const CUT_WORD = /\bcoupes?\b/;
+const BEARD_WORD = /\b(barbe|moustache|bouc)\b/;
+/** Carte de plusieurs coupes (« 4 coupes + barbe premium ») : un abonnement, pas une visite. */
+const MULTI_CUT_PACK = /^\d+\s*coupes\b/;
+
+/**
+ * Formule « coupe + barbe » : le nom enchaîne plusieurs prestations par « + », dont une coupe et
+ * une barbe (« Coupe + Barbe premium », « Coupe Homme + taille de barbe à la tondeuse »).
+ * Pas de faux positif sur « Coupe Homme + 18 ans » (pas de barbe), « Rasage de tête + barbe »
+ * (pas de coupe), « Rituel barbe (taille + rasage…) » ni sur les cartes de plusieurs coupes.
+ */
+export function isCutBeardCombo(name) {
+  const t = normalizeText(name);
+  if (!t.includes('+') || MULTI_CUT_PACK.test(t)) return false;
+  const parts = t.split('+');
+  return parts.some(p => CUT_WORD.test(p)) && parts.some(p => BEARD_WORD.test(p));
+}
+
 function detectKind(text) {
   const t = normalizeText(text);
   if (!t) return null;
+  // « Coupe + barbe » : une formule (icône cadeau), même sans le mot « formule »
+  if (isCutBeardCombo(t)) return 'formula';
   let found = null;
   for (const [kind, re] of KIND_PATTERNS) {
     if (re.test(t)) { found = kind; break; }
@@ -75,9 +98,71 @@ export function categoryKind(categoryName) {
   return detectKind(categoryName) || 'cut';
 }
 
-/** Une prestation dont le nom contient « formule » ou « pack » (ou équivalent) est une formule. */
+/**
+ * Formule : nom qui contient « formule », « pack » (ou équivalent), ou qui réunit une coupe et une
+ * barbe (`isCutBeardCombo`). Le catalogue du salon n'emploie aucun de ces mots : sans la seconde
+ * règle, aucune formule n'était reconnue et « Passe à la formule » ne se déclenchait jamais.
+ */
 export function isFormula(service) {
-  return KIND_PATTERNS[0][1].test(normalizeText(service?.name));
+  return KIND_PATTERNS[0][1].test(normalizeText(service?.name)) || isCutBeardCombo(service?.name);
+}
+
+/** Coupe seule : une coupe sans barbe dans le nom, ni formule, ni carte de plusieurs coupes. */
+export function isPlainCut(service) {
+  const t = normalizeText(service?.name);
+  return CUT_WORD.test(t) && !BEARD_WORD.test(t) && !MULTI_CUT_PACK.test(t) && !isFormula(service);
+}
+
+/** Barbe seule : barbe, moustache ou rasage, sans coupe ni tête rasée, et pas une teinture. */
+export function isPlainBeard(service) {
+  const t = normalizeText(service?.name);
+  return (BEARD_WORD.test(t) || /\brasage\b/.test(t))
+    && !CUT_WORD.test(t) && !/\b(tete|crane)\b/.test(t) && !/(teint|colo)/.test(t) && !isFormula(service);
+}
+
+/** Mots trop courants pour distinguer deux prestations (« Coupe Homme » / « Coupe premium »). */
+const GENERIC_WORDS = new Set(['coupe', 'coupes', 'barbe', 'avec', 'sans', 'pour', 'les', 'des', 'aux', 'ans', 'moins', 'partir', 'plus', 'inclus']);
+
+function distinctiveWords(name) {
+  return new Set(
+    normalizeText(name).split(/[^a-z0-9]+/).filter(w => w.length >= 3 && !/^\d+$/.test(w) && !GENERIC_WORDS.has(w)),
+  );
+}
+
+/**
+ * « Passe à la formule » : une coupe et une barbe choisies séparément qu'une formule « coupe +
+ * barbe » réunit pour moins cher. La formule doit **nommer** la coupe et la barbe choisies (au moins
+ * un mot distinctif commun avec chacune : « premium », « homme », « tondeuse »…) : sinon on
+ * proposerait de troquer une « Barbe premium » contre une taille à la tondeuse, moins chère mais
+ * différente. À égalité, la formule la plus proche en contenu, puis la plus complète (la plus chère).
+ * @param {Array} selected    prestations choisies
+ * @param {Array} candidates  prestations non choisies
+ * @returns {{ formula: object, remove: object[], saving: number } | null}
+ */
+export function findFormulaSwap(selected, candidates) {
+  const price = (s) => Number(s?.price) || 0;
+  const formulas = (candidates || []).filter(f => isCutBeardCombo(f?.name));
+  if (formulas.length === 0) return null;
+  let best = null;
+  for (const cut of (selected || []).filter(isPlainCut)) {
+    const cutWords = distinctiveWords(cut.name);
+    for (const beard of (selected || []).filter(isPlainBeard)) {
+      const beardWords = distinctiveWords(beard.name);
+      for (const formula of formulas) {
+        const saving = price(cut) + price(beard) - price(formula);
+        if (saving <= 0) continue;
+        const words = distinctiveWords(formula.name);
+        const cutShared = [...cutWords].filter(w => words.has(w)).length;
+        const beardShared = [...beardWords].filter(w => words.has(w)).length;
+        if ((cutWords.size > 0 && cutShared === 0) || (beardWords.size > 0 && beardShared === 0)) continue;
+        const score = cutShared + beardShared;
+        if (!best || score > best.score || (score === best.score && price(formula) > price(best.formula))) {
+          best = { formula, remove: [cut, beard], saving, score };
+        }
+      }
+    }
+  }
+  return best && { formula: best.formula, remove: best.remove, saving: best.saving };
 }
 
 /** « Nouveau » si `created_at` date de moins de `NEW_DAYS` jours. */

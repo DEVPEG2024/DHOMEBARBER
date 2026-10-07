@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { motion } from 'framer-motion';
 import { Mail, Lock, User, Phone, Eye, EyeOff, Download, Bell, CheckCircle, ArrowRight, Share, Plus, KeyRound } from 'lucide-react';
 import { toast } from 'sonner';
 import LegalLink from '@/components/shared/LegalLink';
 import { isPushSupported, subscribeToPush } from '@/lib/pushNotifications';
+import { isNative } from '@/lib/capacitor';
 import { API_SERVER_URL, resolvedAppId } from '@/api/apiClient';
 
 const LOGO_URL = '/logo.png';
@@ -19,7 +20,6 @@ export default function Login() {
   const [phone, setPhone] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [showWelcome, setShowWelcome] = useState(false);
   const [pushDone, setPushDone] = useState(false);
 
   // Forgot password state
@@ -28,10 +28,10 @@ export default function Login() {
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
 
-  const { login, register } = useAuth();
-  const navigate = useNavigate();
+  // Après une connexion ou une inscription, la redirection (paramètre `redirect` compris)
+  // est faite par la garde GuestOnly d'App.jsx, dès que la session est ouverte.
+  const { login, register, welcomePending, dismissWelcome } = useAuth();
   const [searchParams] = useSearchParams();
-  const redirect = searchParams.get('redirect') || '/';
 
   // Session expirée en cours d'utilisation (voir AuthContext) : dire pourquoi on est ici,
   // plutôt que de renvoyer l'utilisateur sur un écran de connexion sans explication.
@@ -40,6 +40,21 @@ export default function Login() {
       toast.info('Votre session a expiré, reconnectez-vous.');
     }
   }, [searchParams]);
+
+  // Message laissé avant un rechargement complet (ex. Paramètres pose « Votre compte a bien
+  // été supprimé. » juste avant la déconnexion, qui recharge l'app) : affiché une fois, puis effacé.
+  useEffect(() => {
+    let flash = null;
+    try {
+      flash = sessionStorage.getItem('dhb-flash');
+      sessionStorage.removeItem('dhb-flash');
+    } catch { /* stockage indisponible */ }
+    if (flash) toast.success(flash, { duration: 6000 });
+  }, []);
+
+  // Quitter l'écran de bienvenue par un autre chemin que ses boutons ne doit pas le
+  // laisser armé pour le prochain passage sur /login
+  useEffect(() => dismissWelcome, [dismissWelcome]);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -51,17 +66,6 @@ export default function Login() {
     try {
       const user = await login(email, password);
       toast.success(`Bienvenue ${user.full_name || ''} !`);
-      if (redirect !== '/') {
-        navigate(redirect);
-      } else if (user.role === 'admin') {
-        navigate('/admin');
-      } else if (user.role === 'barber') {
-        const perms = user.permissions || [];
-        const permToPath = { agenda: '/admin/agenda', dashboard: '/admin', services: '/admin/services', clients: '/admin/clients' };
-        navigate(permToPath[perms[0]] || '/admin/my-cleaning');
-      } else {
-        navigate('/');
-      }
     } catch (err) {
       const msg = err?.response?.data?.error || err?.data?.error || 'Email ou mot de passe incorrect';
       toast.error(msg);
@@ -86,9 +90,9 @@ export default function Login() {
     }
     setLoading(true);
     try {
+      // Ouvre la session et arme l'écran de bienvenue ci-dessous (welcomePending)
       await register({ email, password, full_name: fullName, phone });
       toast.success('Compte créé avec succès !');
-      setShowWelcome(true);
     } catch (err) {
       const msg = err?.response?.data?.error || err?.data?.error || "Erreur lors de l'inscription";
       toast.error(msg);
@@ -175,7 +179,7 @@ export default function Login() {
   const inputClass = 'w-full bg-white/5 border border-white/10 rounded-2xl pl-11 pr-4 py-3.5 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-primary/50 transition-colors';
   const iconClass = 'absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground/70';
 
-  if (showWelcome) {
+  if (welcomePending) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center px-5 py-6 bg-background">
         <motion.div
@@ -191,7 +195,8 @@ export default function Login() {
             Votre compte a été créé avec succès. Pour une meilleure expérience :
           </p>
 
-          {/* Step 1: Install app */}
+          {/* Step 1: Install app (pas dans l'app des stores : elle est déjà installée) */}
+          {!isNative && (
           <motion.div
             initial={{ opacity: 0, y: 15 }}
             animate={{ opacity: 1, y: 0 }}
@@ -206,11 +211,12 @@ export default function Login() {
                 <p className="text-sm font-semibold text-foreground">Installer l'application</p>
                 {isIOS ? (
                   <div className="text-xs text-muted-foreground mt-1 space-y-1.5">
-                    <p className="flex items-center gap-1.5">
-                      1. Appuyez sur <Share className="w-3.5 h-3.5 inline text-blue-400" /> en bas du navigateur
+                    {/* Icônes en ligne dans le texte (pas de flex : à 320 px chaque morceau devenait une colonne) */}
+                    <p>
+                      1. Appuyez sur <Share className="w-3.5 h-3.5 inline-block align-[-2px] mx-0.5 text-blue-400" /> en bas du navigateur
                     </p>
-                    <p className="flex items-center gap-1.5">
-                      2. Sélectionnez <span className="font-semibold text-foreground">"Sur l'écran d'accueil"</span> <Plus className="w-3 h-3 inline text-blue-400" />
+                    <p>
+                      2. Sélectionnez <span className="font-semibold text-foreground">"Sur l'écran d'accueil"</span> <Plus className="w-3 h-3 inline-block align-[-1px] text-blue-400" />
                     </p>
                     <p>3. Appuyez sur <span className="font-semibold text-foreground">"Ajouter"</span></p>
                   </div>
@@ -233,6 +239,7 @@ export default function Login() {
               </div>
             </div>
           </motion.div>
+          )}
 
           {/* Step 2: Notifications */}
           <motion.div
@@ -279,14 +286,14 @@ export default function Login() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.5 }}
-            onClick={() => navigate(redirect)}
+            onClick={dismissWelcome}
             className="w-full flex items-center justify-center gap-2 h-13 py-3.5 rounded-2xl bg-primary text-primary-foreground font-semibold text-sm shadow-lg shadow-primary/25 hover:bg-primary/90 transition-all"
           >
             Commencer
             <ArrowRight className="w-4 h-4" />
           </motion.button>
 
-          <button onClick={() => navigate(redirect)} className="mt-3 text-xs text-muted-foreground hover:text-foreground transition-colors">
+          <button onClick={dismissWelcome} className="mt-3 text-xs text-muted-foreground hover:text-foreground transition-colors">
             Passer cette étape
           </button>
         </motion.div>

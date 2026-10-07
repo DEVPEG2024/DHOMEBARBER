@@ -13,13 +13,15 @@ import {
   categoryKind,
   serviceKind,
   isFormula,
+  isPlainCut,
+  isPlainBeard,
+  findFormulaSwap,
   isNewService,
   matchesSearch,
   computePopularIds,
   fallbackPopularIds,
   formatDuration,
   formatPrice,
-  normalizeText,
 } from './serviceUtils';
 
 /** Marge sous la barre de chips collante pour qu'un en-tête de catégorie ciblé reste visible. */
@@ -153,29 +155,27 @@ export default function ServicePicker({ services = [], selectedIds, onToggle, on
       return out;
     }
 
-    // Formule qui réunit une coupe et une barbe choisies séparément, moins cher
-    const cut = selectedServices.find(s => kindOf(s) === 'cut');
-    const beard = selectedServices.find(s => kindOf(s) === 'beard');
-    if (cut && beard) {
-      const both = notSelected.filter(f => isFormula(f) && /coupe|cheveux/.test(normalizeText(f.name)) && /barbe/.test(normalizeText(f.name)));
-      const formula = cheapest(both);
-      if (formula) {
-        const separate = (Number(cut.price) || 0) + (Number(beard.price) || 0);
-        const saving = separate - (Number(formula.price) || 0);
-        if (saving > 0) {
-          out.push({ key: `formula-${formula.id}`, label: `Passe à « ${formula.name} »`, sub: `${formatPrice(formula.price)} · tu économises ${formatPrice(saving)}`, icon: 'gift', add: [formula], remove: [cut, beard], accent: true });
-        }
-      }
+    // Formule « coupe + barbe » qui réunit une coupe et une barbe choisies séparément, moins cher
+    const swap = findFormulaSwap(selectedServices, notSelected);
+    if (swap) {
+      const { formula, remove, saving } = swap;
+      out.push({ key: `formula-${formula.id}`, label: `Passe à « ${formula.name} »`, sub: `${formatPrice(formula.price)} · tu économises ${formatPrice(saving)}`, icon: 'gift', add: [formula], remove, accent: true });
     }
-    if (kinds.has('cut') && !kinds.has('beard') && !kinds.has('formula')) {
-      const s = cheapest(notSelected.filter(x => kindOf(x) === 'beard'));
+    // Coupe / barbe d'après le nom, pas d'après l'icône : « Barbe à la tondeuse » a l'icône tondeuse
+    // mais reste une barbe, et une prestation sans mot-clé (« Epilation nez ») retombe sur l'icône
+    // coupe sans en être une. La coupe proposée est une coupe adulte (pas « moins de 6 ans »).
+    const isAdultCut = (s) => isPlainCut(s) && kindOf(s) !== 'kids';
+    const hasCut = selectedServices.some(isAdultCut);
+    const hasBeard = selectedServices.some(isPlainBeard);
+    if (hasCut && !hasBeard && !kinds.has('formula')) {
+      const s = cheapest(notSelected.filter(isPlainBeard));
       if (s) out.push({ key: `beard-${s.id}`, label: 'Ajoute la barbe', sub: `${s.name} · +${formatPrice(s.price)} · +${formatDuration(s.duration)}`, icon: 'plus', add: [s], remove: [] });
     }
-    if (kinds.has('beard') && !kinds.has('cut') && !kinds.has('formula')) {
-      const s = cheapest(notSelected.filter(x => kindOf(x) === 'cut'));
+    if (hasBeard && !hasCut && !kinds.has('formula')) {
+      const s = cheapest(notSelected.filter(isAdultCut));
       if (s) out.push({ key: `cut-${s.id}`, label: 'Ajoute la coupe', sub: `${s.name} · +${formatPrice(s.price)} · +${formatDuration(s.duration)}`, icon: 'plus', add: [s], remove: [] });
     }
-    if ((kinds.has('cut') || kinds.has('beard') || kinds.has('formula')) && !kinds.has('care')) {
+    if ((hasCut || hasBeard || kinds.has('formula')) && !kinds.has('care')) {
       const s = cheapest(notSelected.filter(x => kindOf(x) === 'care'));
       if (s) out.push({ key: `care-${s.id}`, label: 'Un soin en plus ?', sub: `${s.name} · +${formatPrice(s.price)} · +${formatDuration(s.duration)}`, icon: 'sparkles', add: [s], remove: [] });
     }

@@ -1,10 +1,10 @@
 import React, { useState, useRef } from 'react';
 import { api } from '@/api/apiClient';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Gift, Plus, Download, Share2, Clock, CheckCircle2, XCircle, ChevronLeft, X, Sparkles } from 'lucide-react';
-import { useToast } from '@/components/ui/use-toast';
+import { Gift, Plus, Download, Share2, Clock, CheckCircle2, XCircle, X, Sparkles } from 'lucide-react';
+import { toast } from 'sonner';
 import { QRCodeSVG } from 'qrcode.react';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
@@ -129,7 +129,6 @@ function GiftCardBack({ card, backRef }) {
 // Create gift card form
 function CreateGiftCardModal({ onClose, onCreated }) {
   const { user } = useAuth();
-  const { toast } = useToast();
   const [amount, setAmount] = useState('');
   const [recipientName, setRecipientName] = useState('');
   const [message, setMessage] = useState('');
@@ -140,11 +139,11 @@ function CreateGiftCardModal({ onClose, onCreated }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!amount || Number(amount) <= 0) {
-      toast({ title: 'Montant invalide', variant: 'destructive' });
+      toast.error('Montant invalide');
       return;
     }
     if (!recipientName.trim()) {
-      toast({ title: 'Nom du bénéficiaire requis', variant: 'destructive' });
+      toast.error('Nom du bénéficiaire requis');
       return;
     }
 
@@ -159,25 +158,27 @@ function CreateGiftCardModal({ onClose, onCreated }) {
         recipient_message: message.trim(),
       });
 
-      toast({ title: 'Carte cadeau créée !', description: 'Rendez-vous au salon pour régler et activer votre carte.' });
+      toast.success('Carte cadeau créée !', { description: 'Rendez-vous au salon pour régler et activer votre carte.' });
       onCreated();
       onClose();
     } catch (err) {
-      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+      toast.error('Erreur', { description: err.message });
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
+    // z-[60] comme les autres fiches : au-dessus de la barre du bas (z-50). La fenêtre ne dépasse pas la zone
+    // visible (sous l'encoche) et défile jusqu'au dernier bouton, au-dessus de la barre d'accueil iOS.
+    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center pt-[calc(env(safe-area-inset-top)+0.75rem)]">
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
       <motion.div
         initial={{ opacity: 0, y: 100 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: 100 }}
         onClick={e => e.stopPropagation()}
-        className="relative w-full max-w-md rounded-t-3xl sm:rounded-3xl bg-card border border-border p-6 max-h-[90vh] overflow-y-auto"
+        className="relative w-full max-w-md rounded-t-3xl sm:rounded-3xl bg-card border border-border p-6 pb-[calc(env(safe-area-inset-bottom)+1.5rem)] max-h-full overflow-y-auto overscroll-contain"
       >
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
@@ -310,6 +311,7 @@ function GiftCardDetailModal({ card, onClose }) {
       pdf.save(`carte-cadeau-dhomebarber-${card.code}.pdf`);
     } catch (err) {
       console.error('PDF error:', err);
+      toast.error('Impossible de générer le PDF', { description: 'Réessayez dans un instant.' });
     } finally {
       setDownloading(false);
     }
@@ -328,20 +330,25 @@ function GiftCardDetailModal({ card, onClose }) {
         if (err.name !== 'AbortError') console.error(err);
       }
     } else {
-      await navigator.clipboard.writeText(shareData.text);
-      alert('Texte copié dans le presse-papier !');
+      try {
+        await navigator.clipboard.writeText(shareData.text);
+        toast.success('Texte copié dans le presse-papier !');
+      } catch {
+        toast.error('Impossible de copier le texte');
+      }
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
+    // Même cadre que « Offrir » : au-dessus de la barre du bas, Télécharger / Partager atteignables
+    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center pt-[calc(env(safe-area-inset-top)+0.75rem)]">
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
       <motion.div
         initial={{ opacity: 0, y: 100 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: 100 }}
         onClick={e => e.stopPropagation()}
-        className="relative w-full max-w-md rounded-t-3xl sm:rounded-3xl bg-card border border-border p-6 max-h-[90vh] overflow-y-auto"
+        className="relative w-full max-w-md rounded-t-3xl sm:rounded-3xl bg-card border border-border p-6 pb-[calc(env(safe-area-inset-bottom)+1.5rem)] max-h-full overflow-y-auto overscroll-contain"
       >
         <button onClick={onClose} className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full hover:bg-secondary z-10">
           <X className="w-4 h-4" />
@@ -438,7 +445,7 @@ export default function GiftCards() {
   const otherCards = myCards.filter(c => c.status !== 'validated' && c.status !== 'pending');
 
   return (
-    <div className="max-w-lg mx-auto px-1 py-4">
+    <div className="max-w-lg mx-auto px-4 py-4">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>

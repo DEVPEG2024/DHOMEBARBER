@@ -89,8 +89,9 @@ export default function BarberLeave() {
 
   return (
     <div>
-      <div className="flex items-start justify-between mb-6 gap-3">
-        <div className="shrink-0">
+      {/* flex-wrap : sur téléphone le bouton passe sous le titre au lieu de déborder de l'écran */}
+      <div className="flex flex-wrap items-start justify-between mb-6 gap-3">
+        <div className="min-w-0">
           <p className="text-[11px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Mes congés</p>
           <h1 className="font-display text-2xl font-bold">Demandes de congés</h1>
           <p className="text-xs text-muted-foreground mt-1">

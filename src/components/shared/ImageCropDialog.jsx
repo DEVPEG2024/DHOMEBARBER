@@ -1,17 +1,35 @@
 import React, { useState, useCallback } from 'react';
 import Cropper from 'react-easy-crop';
+import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Check, RotateCw, ZoomIn, ZoomOut } from 'lucide-react';
 
 const MAX_OUTPUT_SIDE = 2480;
 
-async function getCroppedImg(imageSrc, pixelCrop) {
+// Même consigne que l'envoi (api/apiClient.js, UploadFile) : le HEIC des iPhone ne se décode
+// que dans Safari, ailleurs la photo est illisible.
+const HEIC_MESSAGE = "Cette photo est au format HEIC, que l'app ne sait pas lire. Sur iPhone : Réglages → "
+  + 'Appareil photo → Formats → « Le plus compatible », puis reprenez la photo.';
+
+/**
+ * Message à afficher quand le navigateur ne sait pas décoder une photo choisie.
+ * `source` : le fichier (nom + type) ou l'URL `data:` lue depuis ce fichier.
+ */
+export function unreadableImageMessage(source) {
+  const hint = typeof source === 'string'
+    ? source.slice(0, 40)
+    : `${source?.name || ''} ${source?.type || ''}`;
+  if (/hei[cf]/i.test(hint)) return HEIC_MESSAGE;
+  return 'Impossible de lire cette photo (fichier abîmé ou format non pris en charge). Choisissez une image JPEG ou PNG.';
+}
+
+async function getCroppedImg(imageSrc, pixelCrop, rotation = 0) {
   const image = new Image();
   image.crossOrigin = 'anonymous';
   await new Promise((resolve, reject) => {
     image.onload = resolve;
-    image.onerror = reject;
+    image.onerror = () => reject(new Error(unreadableImageMessage(imageSrc)));
     image.src = imageSrc;
   });
 
@@ -23,20 +41,25 @@ async function getCroppedImg(imageSrc, pixelCrop) {
   canvas.height = Math.max(1, Math.round(pixelCrop.height * scale));
   const ctx = canvas.getContext('2d');
 
-  ctx.drawImage(
-    image,
-    pixelCrop.x,
-    pixelCrop.y,
-    pixelCrop.width,
-    pixelCrop.height,
-    0,
-    0,
-    canvas.width,
-    canvas.height
-  );
+  // Avec une rotation, react-easy-crop donne la zone dans le repère de la boîte englobante de
+  // l'image tournée : on dessine l'image tournée autour du centre de cette boîte, décalée de la
+  // zone. Un seul canvas, à la taille de la sortie (pas de canvas intermédiaire géant sur iOS).
+  const rad = (rotation * Math.PI) / 180;
+  const w = image.naturalWidth;
+  const h = image.naturalHeight;
+  const boxW = Math.abs(Math.cos(rad)) * w + Math.abs(Math.sin(rad)) * h;
+  const boxH = Math.abs(Math.sin(rad)) * w + Math.abs(Math.cos(rad)) * h;
+  ctx.scale(canvas.width / pixelCrop.width, canvas.height / pixelCrop.height);
+  ctx.translate(-pixelCrop.x + boxW / 2, -pixelCrop.y + boxH / 2);
+  ctx.rotate(rad);
+  ctx.drawImage(image, -w / 2, -h / 2);
 
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => {
+      if (!blob) {
+        reject(new Error('Impossible de préparer la photo. Réessayez avec une image plus petite.'));
+        return;
+      }
       resolve(new File([blob], 'cropped.jpg', { type: 'image/jpeg' }));
     }, 'image/jpeg', 0.92);
   });
@@ -47,6 +70,7 @@ export default function ImageCropDialog({ open, onOpenChange, imageSrc, onCropCo
   const [zoom, setZoom] = useState(1);
   const [rotation, setRotation] = useState(0);
   const [croppedAreaPixels, setCroppedAreaPixels] = useState(null);
+  const [processing, setProcessing] = useState(false);
 
   const onCropChange = useCallback((location) => setCrop(location), []);
   const onZoomChange = useCallback((z) => setZoom(z), []);
@@ -55,22 +79,43 @@ export default function ImageCropDialog({ open, onOpenChange, imageSrc, onCropCo
     setCroppedAreaPixels(croppedPixels);
   }, []);
 
-  const handleConfirm = async () => {
-    if (!croppedAreaPixels) return;
-    const croppedFile = await getCroppedImg(imageSrc, croppedAreaPixels);
-    onCropComplete(croppedFile);
-    onOpenChange(false);
-  };
-
-  const handleCancel = () => {
+  // Fermeture (Annuler, croix, Échap, après validation) : réglages remis à zéro pour la photo suivante
+  const close = () => {
     setCrop({ x: 0, y: 0 });
     setZoom(1);
     setRotation(0);
-    onOpenChange(false);
+    setCroppedAreaPixels(null);
+    onOpenChange?.(false);
+  };
+
+  // Photo illisible par le navigateur (HEIC hors Safari, fichier abîmé) : le recadrage resterait
+  // vide et « Valider » ne ferait rien. On le dit et on referme.
+  const handleMediaError = () => {
+    toast.error(unreadableImageMessage(imageSrc));
+    close();
+  };
+
+  const handleConfirm = async () => {
+    if (processing) return;
+    if (!croppedAreaPixels) {
+      toast.error('La photo est encore en cours de chargement, patientez un instant.');
+      return;
+    }
+    setProcessing(true);
+    try {
+      const croppedFile = await getCroppedImg(imageSrc, croppedAreaPixels, rotation);
+      onCropComplete(croppedFile);
+      close();
+    } catch (err) {
+      toast.error(err?.message || 'Impossible de recadrer cette photo.');
+      close();
+    } finally {
+      setProcessing(false);
+    }
   };
 
   return (
-    <Dialog open={open} onOpenChange={handleCancel}>
+    <Dialog open={open} onOpenChange={(next) => { if (!next) close(); }}>
       <DialogContent className="bg-card border-border max-w-sm p-0 overflow-hidden">
         <DialogHeader className="px-4 pt-4 pb-2">
           <DialogTitle className="font-display text-base">Recadrer la photo</DialogTitle>
@@ -89,6 +134,7 @@ export default function ImageCropDialog({ open, onOpenChange, imageSrc, onCropCo
               onCropChange={onCropChange}
               onZoomChange={onZoomChange}
               onCropComplete={handleCropComplete}
+              mediaProps={{ onError: handleMediaError }}
             />
           )}
         </div>
@@ -128,12 +174,12 @@ export default function ImageCropDialog({ open, onOpenChange, imageSrc, onCropCo
 
         {/* Actions */}
         <div className="flex gap-2 px-4 pb-4">
-          <Button variant="outline" className="flex-1 text-xs" onClick={handleCancel}>
+          <Button variant="outline" className="flex-1 text-xs" onClick={close}>
             Annuler
           </Button>
-          <Button className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90 text-xs" onClick={handleConfirm}>
+          <Button className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90 text-xs" onClick={handleConfirm} disabled={processing}>
             <Check className="w-3.5 h-3.5 mr-1.5" />
-            Valider
+            {processing ? 'Préparation…' : 'Valider'}
           </Button>
         </div>
       </DialogContent>

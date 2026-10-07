@@ -239,9 +239,9 @@ export default function AdminStock() {
         </div>
       </div>
 
-      {/* Search + Filter */}
-      <div className="flex gap-2 mb-4">
-        <div className="relative flex-1">
+      {/* Search + Filter — sur téléphone la recherche prend toute la ligne, les filtres passent dessous */}
+      <div className="flex flex-wrap gap-2 mb-4">
+        <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input placeholder="Rechercher par nom, réf, marque..." value={search}
             onChange={e => setSearch(e.target.value)} className="bg-card border-border pl-9" />
@@ -274,33 +274,37 @@ export default function AdminStock() {
               transition={{ delay: i * 0.02 }}
               className={`bg-card border rounded-xl p-4 ${critical ? 'border-red-500/30 bg-red-500/5' : 'border-border'}`}
             >
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-lg bg-white flex items-center justify-center overflow-hidden flex-shrink-0">
-                  {product.image_url ? (
-                    <img src={product.image_url} alt={product.name} className="w-full h-full object-contain" />
-                  ) : (
-                    <Package className="w-5 h-5 text-muted-foreground/40" />
-                  )}
-                </div>
-
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-sm font-semibold truncate">{product.name}</h3>
-                    {product.brand && <Badge variant="outline" className="text-[9px] border-border">{product.brand}</Badge>}
-                    {critical && (
-                      <Badge className="text-[9px] bg-red-500/10 text-red-400 border-red-500/20 gap-0.5">
-                        <AlertTriangle className="w-2.5 h-2.5" /> Critique
-                      </Badge>
+              {/* Mobile : deux lignes (photo + nom + badges, puis réf / stock / seuil / corbeille) ;
+                  à partir de sm, une seule ligne comme avant */}
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                <div className="flex items-center gap-3 flex-1 min-w-0">
+                  <div className="w-12 h-12 rounded-lg bg-white flex items-center justify-center overflow-hidden flex-shrink-0">
+                    {product.image_url ? (
+                      <img src={product.image_url} alt={product.name} className="w-full h-full object-contain" />
+                    ) : (
+                      <Package className="w-5 h-5 text-muted-foreground/40" />
                     )}
                   </div>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <p className="text-xs text-muted-foreground">{product.price}€</p>
-                    {getVal(product, 'ref') && <p className="text-[10px] text-muted-foreground/60">Réf: {getVal(product, 'ref')}</p>}
+
+                  <div className="flex-1 min-w-0">
+                    <div className="flex flex-wrap sm:flex-nowrap items-center gap-x-2 gap-y-1">
+                      <h3 className="text-sm font-semibold truncate min-w-0 max-w-full">{product.name}</h3>
+                      {product.brand && <Badge variant="outline" className="text-[9px] border-border shrink-0">{product.brand}</Badge>}
+                      {critical && (
+                        <Badge className="text-[9px] bg-red-500/10 text-red-400 border-red-500/20 gap-0.5 shrink-0">
+                          <AlertTriangle className="w-2.5 h-2.5" /> Critique
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 mt-0.5 min-w-0">
+                      <p className="text-xs text-muted-foreground shrink-0">{product.price}€</p>
+                      {getVal(product, 'ref') && <p className="text-[10px] text-muted-foreground/60 truncate">Réf: {getVal(product, 'ref')}</p>}
+                    </div>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <div className="w-24">
+                <div className="flex items-end sm:items-center gap-2">
+                  <div className="flex-1 min-w-0 sm:flex-none sm:w-24">
                     <Label className="text-[9px] text-muted-foreground uppercase">Réf.</Label>
                     <Input
                       value={getVal(product, 'ref') || ''}
@@ -309,7 +313,7 @@ export default function AdminStock() {
                       className="bg-secondary border-border h-8 text-xs mt-0.5"
                     />
                   </div>
-                  <div className="w-16">
+                  <div className="w-16 shrink-0">
                     <Label className="text-[9px] text-muted-foreground uppercase">Stock</Label>
                     <Input
                       type="number"
@@ -318,7 +322,7 @@ export default function AdminStock() {
                       className={`border-border h-8 text-xs mt-0.5 font-bold text-center ${critical ? 'bg-red-500/10 text-red-400' : 'bg-secondary'}`}
                     />
                   </div>
-                  <div className="w-16">
+                  <div className="w-16 shrink-0">
                     <Label className="text-[9px] text-muted-foreground uppercase">Seuil</Label>
                     <Input
                       type="number"

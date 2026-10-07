@@ -466,9 +466,10 @@ export default function Clients() {
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold truncate">{client.name || client.email}</p>
-                <p className="text-[10px] text-muted-foreground">{client.email}</p>
+                {/* truncate : un email long passait sous « visites » sur téléphone */}
+                <p className="text-[10px] text-muted-foreground truncate" title={client.email}>{client.email}</p>
               </div>
-              <div className="flex items-center gap-3 text-xs">
+              <div className="flex items-center gap-3 text-xs shrink-0">
                 <div className="text-center">
                   <p className="font-bold">{client.visits}</p>
                   <p className="text-[9px] text-muted-foreground">visites</p>

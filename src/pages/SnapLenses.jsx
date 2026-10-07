@@ -67,20 +67,25 @@ export default function SnapLenses() {
     streamRef.current = null;
   }, []);
 
-  // Une ouverture par visite (les comptes staff sont ignorés côté serveur)
-  useEffect(() => { trackSnap('open'); }, []);
+  // Mesure d'usage seulement filtres allumés (hors aperçu admin) : une visite ou un « Réserver ce
+  // look » sur la page « bientôt disponibles » fausserait les statistiques de l'admin. Vrai dès que
+  // l'ouverture est comptée, une fois par visite (les comptes staff sont aussi ignorés côté serveur).
+  const tracking = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      // Rien ne démarre — ni caméra, ni SDK — avant l'acceptation des conditions de Snap.
-      if (!accepted) { setStatus('consent'); return; }
+      // La configuration d'abord : filtres éteints, le client lit tout de suite « bientôt
+      // disponibles », sans écran de conditions ni mesure d'usage.
       let config = await snapConfig();
       // Filtres éteints pour les clients : l'admin teste quand même, avec la configuration complète
       if (!config && isAdmin) config = await snapAdminPreviewConfig().catch(() => null);
       if (cancelled) return;
       if (!config) { setStatus('unconfigured'); return; }
       setPreview(!!config.preview);
+      if (!config.preview && !tracking.current) { tracking.current = true; trackSnap('open'); }
+      // Rien ne démarre — ni caméra, ni SDK — avant l'acceptation des conditions de Snap.
+      if (!accepted) { setStatus('consent'); return; }
       if (!snapSupported()) { setStatus('unsupported'); trackSnap('error', { reason: 'unsupported' }); return; }
       setStatus('loading');
       setMessage('Chargement de Camera Kit…');
@@ -336,7 +341,8 @@ export default function SnapLenses() {
           </div>
         )}
 
-        <Link to="/booking" onClick={() => trackSnap('book')} className="orbit-wrap rounded-2xl block mt-5 shadow-lg shadow-primary/25">
+        {/* `!block w-full` : `.orbit-wrap` (index.css, hors couche Tailwind) impose inline-block */}
+        <Link to="/booking" onClick={() => { if (tracking.current) trackSnap('book'); }} className="orbit-wrap rounded-2xl !block w-full mt-5 shadow-lg shadow-primary/25">
           <motion.span whileTap={reduceMotion ? undefined : { scale: 0.97 }}
             className="flex items-center justify-center gap-2 h-12 rounded-[14px] bg-primary text-primary-foreground font-semibold text-sm">
             Réserver ce look
