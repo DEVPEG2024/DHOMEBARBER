@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
+import AiWriterPanel from '@/components/notifications/AiWriterPanel';
 
 // La liste des destinataires n'est chargée que lorsqu'on en a besoin (choix d'un client ou
 // envoi), et par lots : le serveur renvoie chaque photo de profil dans la liste des comptes.
@@ -286,6 +287,13 @@ export default function Notifications() {
                   )}
                 </div>
               )}
+
+              <AiWriterPanel
+                subject={subject}
+                message={message}
+                audience={target}
+                onApply={(next) => { setSubject(next.subject); setMessage(next.message); }}
+              />
 
               <div>
                 <Label className="text-xs">Titre / Objet</Label>

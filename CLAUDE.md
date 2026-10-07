@@ -23,7 +23,7 @@
 - Init DB : `heroku run node init-db.js --app dhomebarber-api`
 - PostgreSQL addon : `postgresql-deep-70510` (plan essential-0)
 - La session Heroku CLI expire régulièrement : relancer `heroku login` si les commandes renvoient `Invalid credentials`
-- Variables d'environnement attendues : `NODE_ENV=production` (**obligatoire** : sans elle les origines `localhost` restent autorisées par CORS, et le serveur accepte un `JWT_SECRET` de repli), `DATABASE_URL`, `JWT_SECRET` (le serveur **refuse de démarrer** en production sans), `API_PUBLIC_URL` (base des URL d'images renvoyées par l'upload), `FRONTEND_URL`, `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_EMAIL`, `SMTP_HOST` (défaut smtp.hostinger.com), `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` ; optionnelles : `FAL_KEY` (active le mode AI ULTRA de l'essayage couleur, release v69), `HAIR_ULTRA_EDIT_MODEL`, `SNAP_CAMERA_KIT_API_TOKEN` + `SNAP_LENS_GROUP_ID` (activent les filtres Snap), `APNS_KEY_P8` + `APNS_KEY_ID` + `APNS_TEAM_ID` + `APNS_BUNDLE_ID` (push natif iOS) et `FCM_SERVICE_ACCOUNT` (push natif Android)
+- Variables d'environnement attendues : `NODE_ENV=production` (**obligatoire** : sans elle les origines `localhost` restent autorisées par CORS, et le serveur accepte un `JWT_SECRET` de repli), `DATABASE_URL`, `JWT_SECRET` (le serveur **refuse de démarrer** en production sans), `API_PUBLIC_URL` (base des URL d'images renvoyées par l'upload), `FRONTEND_URL`, `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_EMAIL`, `SMTP_HOST` (défaut smtp.hostinger.com), `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` ; optionnelles : `FAL_KEY` (active le mode AI ULTRA de l'essayage couleur, release v69), `HAIR_ULTRA_EDIT_MODEL`, `ANTHROPIC_API_KEY` (active l'assistant IA de rédaction des notifications, release v94 ; **pas encore posée au 7 oct. 2026**) + `AI_WRITER_MODEL` (défaut `claude-opus-5`), `SNAP_CAMERA_KIT_API_TOKEN` + `SNAP_LENS_GROUP_ID` (activent les filtres Snap), `APNS_KEY_P8` + `APNS_KEY_ID` + `APNS_TEAM_ID` + `APNS_BUNDLE_ID` (push natif iOS) et `FCM_SERVICE_ACCOUNT` (push natif Android)
 
 ### Apps natives (Capacitor)
 - Scripts : `npm run cap:sync` (build + sync), `npm run cap:ios`, `npm run cap:android` (build + sync + ouverture Xcode / Android Studio)
@@ -54,6 +54,7 @@ src/
 │   ├── hairColor.js           # Essayage couleur : MediaPipe (cheveux + visage), palette Oklab, masques barbe / racines, repli canvas 2D
 │   ├── hairGl.js              # Essayage couleur : shader WebGL Oklab (mode FAST)
 │   ├── hairUltra.js           # Essayage couleur : appel du mode AI ULTRA (backend)
+│   ├── aiWriter.js            # Assistant IA des notifications : features.aiWriter, POST /ai/notification-draft, retouches proposées
 │   ├── textileApi.js          # Textile & drops : client des routes /textile (overview, vote, alerte, réservation, notify), constantes et helpers partagés
 │   ├── partnersApi.js         # Bons plans du Gang : clé React Query, catégories, helpers (meilleure remise, expiration, liens sûrs)
 │   ├── salonEventsApi.js      # Événements du salon : client des routes /salon-events (mine, rsvp, invite, guests, remind), constantes et helpers
@@ -114,7 +115,7 @@ src/
 │       ├── BarberAccounts.jsx # Comptes barbers
 │       ├── BarberCleaning.jsx # Nettoyage (vue barber)
 │       ├── Cleaning.jsx       # Gestion nettoyage (admin)
-│       ├── Notifications.jsx  # Notifications admin
+│       ├── Notifications.jsx  # Notifications admin (push + email) avec l'Assistant IA de rédaction (components/notifications/AiWriterPanel.jsx)
 │       ├── Team.jsx           # Gestion équipe
 │       └── Stats.jsx          # Statistiques
 └── utils/
@@ -147,6 +148,7 @@ dhomebarber-api/
 │   ├── emailHelper.js # Nodemailer SMTP : bienvenue, confirmation/rappel/annulation RDV, commande, événements, avis, anniversaire, relance
 │   ├── pushHelper.js  # sendPushToRole, sendPushToEmail, sendPushToEmployee, sendToSubscriptions (Web Push, lots de 50)
 │   ├── hairUltra.js   # AI ULTRA : SAM 3 + FLUX Kontext (fal.ai) + fusion gardée par le masque (sharp)
+│   ├── aiWriter.js    # Assistant de rédaction des notifications : Claude via @anthropic-ai/sdk, sortie JSON structurée
 │   └── snapConfig.js  # Filtres Snap : ligne snap_config (cache 30 s), jeton / groupes effectifs (admin > Heroku), bloc public, validation des modifications
 ├── jobs/
 │   ├── appointmentReminder.js  # Toutes les 30 min : rappel RDV (push + email)
@@ -158,6 +160,7 @@ dhomebarber-api/
 └── routes/
     ├── media.js       # GET /api/media/:id : sert une image stockée en base (cache 1 an, ETag / 304)
     ├── hairUltra.js   # POST /ai/hair-ultra : recoloration HD (lib/hairUltra.js, fal.ai, FAL_KEY)
+    ├── aiWriter.js    # POST /ai/notification-draft : rédaction / retouche d'une notification (lib/aiWriter.js, ANTHROPIC_API_KEY)
     ├── entities.js    # CRUD générique : politique d'accès par rôle (CREATE_RULES / UPDATE_RULES), emails sur création RDV / commande / événement
     ├── auth.js        # register, login, /me, forgot-password, reset-password, delete-account, logout
     ├── public.js      # Public settings endpoint
@@ -251,6 +254,7 @@ Mapping entité → table dans `routes/entities.js`.
 - `POST /auth/forgot-password` → envoie un code à 6 chiffres par email ; `POST /auth/reset-password` le vérifie
 - `DELETE /auth/delete-account` → transaction : supprime l'utilisateur, ses abonnements push, ses avis, ses posts / commentaires / réactions et blocages ; anonymise ses RDV, commandes, événements, cartes cadeau envoyées et signalements ("Compte supprimé") (exigence App Store / Play Store)
 - `POST /last-minute` (**staff uniquement**, quota 6/heure par compte) → push « Créneau Last Minute » à tous les clients (rôle `user`). Était ouvert à tout compte connecté jusqu'au 5 sept. 2026 : n'importe quel client pouvait notifier tout le salon avec un texte libre. Les champs repris dans le texte sont bornés et nettoyés
+- `POST /ai/notification-draft` (**admin**, comme `/push/send` ; 40/heure par compte) → assistant IA de la page Notifications (release v94, 7 oct. 2026). `mode: 'write'` + `brief` (≤ 600) → trois propositions `{ subject, message }` ; `mode: 'rewrite'` + `style` (`improve` / `shorter` / `warmer` / `fun` / `pro` / `fix`) + titre et message en cours → une proposition, appliquée directement dans le composeur avec « Revenir au texte précédent ». `address` `tu` / `vous` (choix mémorisé dans le navigateur), `audience` `all` / `one` (aucun nom de client n'est transmis). Le prompt (`lib/aiWriter.js`) connaît les deux canaux — push sur écran verrouillé (titre ≤ 45, texte ≤ 220 caractères), email où l'app ajoute « Bonjour <prénom>, » et la signature, donc ni salutation ni signature dans le texte —, reçoit les coordonnées, horaires et prestations actives du salon (prix réels) et la date du jour à Paris, et a l'interdiction d'inventer prix, remise ou date. Modèle `claude-opus-5`, effort `low`, sortie JSON structurée (`output_config.format`), `fallbacks: 'default'` (beta `server-side-fallback-2026-07-01` : un refus de classifieur est rejoué sur un autre modèle côté serveur). Coût ≈ 1 à 3 centimes par appel, consommation journalisée (`[AiWriter] … jetons`). **Sans `ANTHROPIC_API_KEY`** : 503 `not_configured`, `features.aiWriter` faux, le panneau affiche « en cours d'activation ». Clé refusée par Anthropic → 503 aussi. Tests : `test/test-ai-writer.js` (19 vérifications, faux `fetch` sous le vrai SDK). **Jamais testé contre l'API réelle tant que la clé n'est pas posée** : faire un essai dans l'admin juste après l'avoir posée
 - `GET /api/media/:id` (public) → sert une image stockée en base : `Cache-Control` d'un an, `ETag`, `If-None-Match` → 304, type MIME filtré par liste blanche. Exempté du quota global (ouvrir le fil = une centaine de requêtes depuis la même IP)
 - `POST /push/subscribe-native` → enregistre un token FCM/APNs (iOS/Android)
 - `PATCH /leave/:id/status` → admin approuve/refuse un congé, push au barber
@@ -281,7 +285,7 @@ Rapport complet : https://claude.ai/code/artifact/406820a6-13b7-43f2-bd32-65cd3e
 - **Battement de cœur WebSocket** (backend v80) : le routeur Heroku ferme toute connexion sans trafic au bout de 55 s. Le compteur `/ws/live` n'envoyant rien quand le nombre de connectés ne bouge pas, la socket était tuée (`H15 Idle connection`, visible dans les journaux depuis au moins le 3 sept.) et `useLiveCount` se reconnectait 3 s plus tard, en boucle — une poignée de main par client et par minute. Un `ws.ping()` toutes les 30 s la maintient ouverte ; le `pong` (renvoyé automatiquement par les navigateurs, aucun code client) sert à terminer les sockets réellement mortes. Minuteur annulé dans `gracefulShutdown`
 - **`POST /cleaning/notify-today`** utilise désormais `ac.parisToday()` : avec `toISOString()` il notifiait le ménage de la veille entre minuit et 2 h du matin à Paris
 - **Ramasse-miettes des médias** : `cleanup-media.js` supprime les images que plus aucune colonne ne cite (une image est référencée par une URL dans du texte, aucune clé étrangère ne peut le faire). **Simulation par défaut**, suppression avec `--apply`, délai de grâce de 7 jours (`--days=N`) pour ne pas emporter un fichier envoyé mais pas encore rattaché à une entité. `heroku run "node cleanup-media.js" --app dhomebarber-api`. La logique vit dans `jobs/mediaCleanup.js` et tourne **automatiquement le dimanche à 03h30 heure de Paris** (backend v81) ; le script en ligne de commande reste disponible pour un passage à la demande
-- **Tests dans le dépôt** : `cd dhomebarber-api && npm test` — 12 harnais (dont `test-snap.js`, 35 vérifications, depuis le pilotage des filtres Snap le 25 sept. 2026), sans dépendance ni accès à la base de production (le pool, `http2` et `fetch` sont remplacés avant le chargement du code testé)
+- **Tests dans le dépôt** : `cd dhomebarber-api && npm test` — 14 harnais (dont `test-ai-writer.js` depuis le 7 oct. 2026, `test-snap.js`, 35 vérifications, depuis le pilotage des filtres Snap le 25 sept. 2026), sans dépendance ni accès à la base de production (le pool, `http2` et `fetch` sont remplacés avant le chargement du code testé)
 
 ### Types de données
 - Les colonnes `decimal` de PostgreSQL sont converties en nombres dans `normalizeRow()`
