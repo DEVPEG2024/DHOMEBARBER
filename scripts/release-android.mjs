@@ -175,7 +175,14 @@ async function upload(version) {
   // changesNotSentForReview : dès que l'app a des modifications en attente d'examen (ou refusées),
   // l'API refuse un commit « simple ». La release de test interne est quand même publiée aux
   // testeurs ; seul l'envoi pour examen reste à faire dans la console (constaté le 10 sept. 2026).
-  await play(token, 'POST', `/edits/${edit.id}:commit?changesNotSentForReview=true`);
+  // À l'inverse, sans modification en attente l'API refuse ce paramètre (« Changes are sent for
+  // review automatically », constaté le 7 oct. 2026) : on retente alors sans lui.
+  try {
+    await play(token, 'POST', `/edits/${edit.id}:commit?changesNotSentForReview=true`);
+  } catch (err) {
+    if (!/changesNotSentForReview must not be set/.test(err.message)) throw err;
+    await play(token, 'POST', `/edits/${edit.id}:commit`);
+  }
   info('édition validée — la version est en ligne sur la piste');
   return true;
 }
