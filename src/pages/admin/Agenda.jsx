@@ -250,9 +250,30 @@ export default function Agenda() {
     setSelected(null);
   };
 
+  // ─── Pause ou créneau sans client : enregistré tout de suite, « Annuler » dans la notification ───
+  const quickSave = (apt, fields, message) => {
+    const before = Object.fromEntries(Object.keys(fields).map((k) => [k, apt[k] ?? null]));
+    saveMove(queryClient, apt, fields, false)
+      .then(() => toast.success(message, {
+        action: {
+          label: 'Annuler',
+          onClick: () => saveMove(queryClient, { ...apt, ...fields }, before, false)
+            .catch((e) => toast.error(e?.message || 'Retour impossible')),
+        },
+      }))
+      .catch((e) => toast.error(e?.message || 'Modification impossible'));
+  };
+
+  // Même heure de départ qu'un autre créneau du même barber : refusé par la base, on prévient avant
+  const clashFor = (apt, date, startTime, duration, employeeId) => slotIssues({
+    selfId: apt.id, date, startTime, duration,
+    employee: employees.find((e) => String(e.id) === String(employeeId)),
+    employeeId, dayApts: inRange, timeOffs: [],
+  }).clash;
+
   // ─── Carte glissée dans la grille ───
-  // Pause ou créneau last minute sans client : déplacé tout de suite, avec « Annuler » dans la notification.
-  // Rendez-vous d'un client : confirmation (avant / après, alertes, « Prévenir le client »).
+  // Pause ou créneau last minute sans client : déplacé tout de suite. Rendez-vous d'un client :
+  // confirmation (avant / après, alertes, « Prévenir le client »).
   const handleMoveRequest = (apt, target) => {
     const freeSlot = isBreak(apt) || (isLastMinuteSlot(apt) && !apt.client_email);
     if (!freeSlot) {
@@ -260,29 +281,29 @@ export default function Agenda() {
       return;
     }
     const fields = buildMoveFields(apt, target, employees);
-    const employee = employees.find((e) => String(e.id) === String(target.employee_id));
-    const { clash } = slotIssues({
-      selfId: apt.id, date: fields.date, startTime: fields.start_time, duration: aptDuration(apt),
-      employee, employeeId: target.employee_id, dayApts: inRange, timeOffs: [],
-    });
+    const clash = clashFor(apt, fields.date, fields.start_time, aptDuration(apt), target.employee_id);
     if (clash) {
       toast.error(clash);
       return;
     }
-    const before = {
-      date: apt.date, start_time: apt.start_time, end_time: apt.end_time,
-      employee_id: apt.employee_id, employee_name: apt.employee_name,
-    };
-    const what = isBreak(apt) ? 'Pause déplacée' : 'Créneau déplacé';
-    saveMove(queryClient, apt, fields, false)
-      .then(() => toast.success(`${what} à ${fields.start_time}`, {
-        action: {
-          label: 'Annuler',
-          onClick: () => saveMove(queryClient, { ...apt, ...fields }, before, false)
-            .catch((e) => toast.error(e?.message || 'Retour impossible')),
-        },
-      }))
-      .catch((e) => toast.error(e?.message || 'Déplacement impossible'));
+    quickSave(apt, fields, `${isBreak(apt) ? 'Pause déplacée' : 'Créneau déplacé'} à ${fields.start_time}`);
+  };
+
+  // ─── Pause étirée par ses poignées, ou horaires saisis dans sa fenêtre ───
+  const handleResizeRequest = (apt, { start_time, end_time }) => {
+    const duration = timeToMinutes(end_time) - timeToMinutes(start_time);
+    if (duration < 5) {
+      toast.error('La fin doit être après le début');
+      return;
+    }
+    if (start_time !== String(apt.start_time).slice(0, 5)) {
+      const clash = clashFor(apt, String(apt.date).slice(0, 10), start_time, duration, apt.employee_id);
+      if (clash) {
+        toast.error(clash);
+        return;
+      }
+    }
+    quickSave(apt, { start_time, end_time, total_duration: duration }, `Pause : ${start_time} – ${end_time}`);
   };
 
   // ─── Last Minute ───
@@ -474,6 +495,7 @@ export default function Agenda() {
             onCreateBreak={handleCreateBreak}
             onFocusBarber={setEmployeeFilter}
             onMoveRequest={handleMoveRequest}
+            onResizeRequest={handleResizeRequest}
           />
         )}
         {view === 'week' && (
@@ -488,6 +510,7 @@ export default function Agenda() {
             onCreateBreak={handleCreateBreak}
             onDayClick={openDay}
             onMoveRequest={handleMoveRequest}
+            onResizeRequest={handleResizeRequest}
           />
         )}
         {view === 'month' && (
@@ -520,11 +543,13 @@ export default function Agenda() {
 
       {/* Pause : récurrence / suppression */}
       <BreakModal
+        key={selectedBreak?.id || 'none'}
         breakItem={selectedBreak}
         employees={employees}
         onClose={() => setSelectedBreak(null)}
         onDelete={(id) => deleteBreak.mutate(id)}
         onApplyRecurrence={handleApplyRecurrence}
+        onSaveTimes={(item, times) => { handleResizeRequest(item, times); setSelectedBreak(null); }}
       />
 
       {/* Choix du barber pour une pause tracée en vue « Tous » */}

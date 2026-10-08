@@ -28,7 +28,7 @@ function DragPreview({ startMin, endMin }) {
   );
 }
 
-export default function DayView({ date, appointments, employees, employeeFilter, timeOffs = [], onSelect, onBreakClick, onCreateBreak, onFocusBarber, onMoveRequest }) {
+export default function DayView({ date, appointments, employees, employeeFilter, timeOffs = [], onSelect, onBreakClick, onCreateBreak, onFocusBarber, onMoveRequest, onResizeRequest }) {
   const scrollRef = useRef();
   const isToday = date === toDateStr(new Date());
 
@@ -44,7 +44,9 @@ export default function DayView({ date, appointments, employees, employeeFilter,
   const cardDrag = useCardDrag({
     hourHeight: HOUR_HEIGHT,
     scrollRef,
-    onDrop: ({ apt, column, startMin }) => onMoveRequest?.(apt, { date, employee_id: column, start_time: minutesToTime(startMin) }),
+    onDrop: ({ apt, column, startMin, duration, mode }) => (mode === 'move'
+      ? onMoveRequest?.(apt, { date, employee_id: column, start_time: minutesToTime(startMin) })
+      : onResizeRequest?.(apt, { start_time: minutesToTime(startMin), end_time: minutesToTime(startMin + duration) })),
   });
   const moving = cardDrag.drag;
   const dragProps = (apt) => (onMoveRequest ? cardDrag.bind(apt) : undefined);
@@ -103,6 +105,7 @@ export default function DayView({ date, appointments, employees, employeeFilter,
 
         {apts.filter(isBreak).map((apt) => (
           <BreakCard key={apt.id} apt={apt} onSelect={selectBreak} dragProps={dragProps(apt)} ghosted={moving?.apt.id === apt.id}
+            resizeProps={onResizeRequest ? cardDrag.bindResize(apt) : null}
             style={{ ...verticalPlacement(apt.start_time, apt.end_time, HOUR_HEIGHT, 20), left: 2, right: 2 }} />
         ))}
 

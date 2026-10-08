@@ -95,7 +95,22 @@ export function AppointmentCard({ apt, style, color, showBarber = false, dense =
   );
 }
 
-export function BreakCard({ apt, style, onSelect, dragProps, ghosted = false }) {
+/** Poignée d'étirement (haut ou bas d'une carte) : `touch-action: none`, le doigt l'étire sans faire défiler. */
+function ResizeHandle({ edge, handlers }) {
+  return (
+    <div
+      {...handlers}
+      aria-label={edge === 'start' ? 'Changer le début' : 'Changer la fin'}
+      className={`absolute inset-x-0 ${edge === 'start' ? 'top-0' : 'bottom-0'} h-3 z-[2] flex justify-center ${edge === 'start' ? 'items-start pt-0.5' : 'items-end pb-0.5'} cursor-ns-resize group/handle`}
+      style={{ touchAction: 'none' }}
+    >
+      <span className="w-7 h-1 rounded-full bg-slate-300/45 group-hover/handle:bg-slate-200 transition-colors" />
+    </div>
+  );
+}
+
+export function BreakCard({ apt, style, onSelect, dragProps, resizeProps, ghosted = false }) {
+  const height = style.height || 0;
   return (
     <div
       data-block
@@ -112,10 +127,13 @@ export function BreakCard({ apt, style, onSelect, dragProps, ghosted = false }) 
         ...NO_CALLOUT,
       }}
     >
-      <div className="px-1.5 py-0.5 flex items-center gap-1 min-w-0">
+      <div className={`px-1.5 ${resizeProps && height >= 36 ? 'pt-2' : 'py-0.5'} flex items-center gap-1 min-w-0`}>
         <Coffee className="w-3 h-3 text-slate-400 shrink-0" />
         <p className="text-[10px] font-bold text-slate-400 truncate">{apt.start_time} – {apt.end_time}</p>
       </div>
+      {/* Étirer la pause : haut = début, bas = fin (une pause très courte garde seulement le bas) */}
+      {resizeProps && height >= 36 && <ResizeHandle edge="start" handlers={resizeProps.start} />}
+      {resizeProps && <ResizeHandle edge="end" handlers={resizeProps.end} />}
     </div>
   );
 }

@@ -28,7 +28,7 @@ function DragPreview({ startMin, endMin }) {
   );
 }
 
-export default function WeekView({ currentDate, appointments, employees, employeeFilter, timeOffs = [], onSelect, onBreakClick, onCreateBreak, onDayClick, onMoveRequest }) {
+export default function WeekView({ currentDate, appointments, employees, employeeFilter, timeOffs = [], onSelect, onBreakClick, onCreateBreak, onDayClick, onMoveRequest, onResizeRequest }) {
   const scrollRef = useRef();
   const weekStart = startOfWeek(currentDate, { weekStartsOn: 1 });
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
@@ -46,7 +46,9 @@ export default function WeekView({ currentDate, appointments, employees, employe
   const cardDrag = useCardDrag({
     hourHeight: HOUR_HEIGHT,
     scrollRef,
-    onDrop: ({ apt, column, startMin }) => onMoveRequest?.(apt, { date: column, employee_id: apt.employee_id, start_time: minutesToTime(startMin) }),
+    onDrop: ({ apt, column, startMin, duration, mode }) => (mode === 'move'
+      ? onMoveRequest?.(apt, { date: column, employee_id: apt.employee_id, start_time: minutesToTime(startMin) })
+      : onResizeRequest?.(apt, { start_time: minutesToTime(startMin), end_time: minutesToTime(startMin + duration) })),
   });
   const moving = cardDrag.drag;
   const dragProps = (apt) => (onMoveRequest ? cardDrag.bind(apt) : undefined);
@@ -153,6 +155,7 @@ export default function WeekView({ currentDate, appointments, employees, employe
 
                 {dayApts.filter(isBreak).map((apt) => (
                   <BreakCard key={apt.id} apt={apt} onSelect={selectBreak} dragProps={dragProps(apt)} ghosted={moving?.apt.id === apt.id}
+                    resizeProps={onResizeRequest ? cardDrag.bindResize(apt) : null}
                     style={{ ...verticalPlacement(apt.start_time, apt.end_time, HOUR_HEIGHT, 18), left: 1, right: 1 }} />
                 ))}
 
