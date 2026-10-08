@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { api } from '@/api/apiClient';
 import { getServiceColor } from '@/utils/serviceColors';
 import {
-  timeToMinutes, addMinutesToTime, parseDateParam, workingWindow, isOnLeave, minutesToTime,
+  timeToMinutes, addMinutesToTime, parseDateParam, slotIssues, isUpcomingSlot,
 } from './agendaUtils';
 
 const inputCls = 'w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-primary/50';
@@ -20,13 +20,6 @@ const normalizeService = (s) => ({
 
 const sameServices = (a, b) =>
   a.length === b.length && a.every((s, i) => String(s.service_id) === String(b[i].service_id) && s.name === b[i].name);
-
-function isUpcoming(dateStr, time) {
-  const d = parseDateParam(dateStr);
-  if (!d || !/^\d{2}:\d{2}$/.test(time || '')) return false;
-  const m = timeToMinutes(time);
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), Math.floor(m / 60), m % 60) > new Date();
-}
 
 /**
  * Modification d'un rendez-vous à tout moment (staff) : jour, heure, barber, prestations, durée,
@@ -83,43 +76,17 @@ export default function AppointmentEditForm({ appointment, employees, onCancel, 
   };
 
   // ─── Contrôles (avertissements, sauf le même horaire de départ) ───
-  const { clash, warnings } = useMemo(() => {
-    const out = [];
-    if (!validDate || !validTime || !employeeId) return { clash: null, warnings: out };
-    const s = timeToMinutes(startTime);
-    const e = s + duration;
-    const others = dayApts.filter((a) => a.id !== appointment.id && a.status !== 'cancelled' && a.status !== 'no_show');
-    const sameStart = others.find((a) => String(a.start_time).slice(0, 5) === startTime);
-    for (const a of others) {
-      if (a === sameStart) continue;
-      const as = timeToMinutes(a.start_time);
-      const ae = timeToMinutes(a.end_time || a.start_time);
-      if (as < e && ae > s) {
-        out.push(a.status === 'break'
-          ? `Chevauche une pause (${a.start_time} – ${a.end_time})`
-          : `Chevauche ${a.client_name || 'un rendez-vous'} (${a.start_time} – ${a.end_time})`);
-      }
-    }
-    const approved = timeOffs.filter((t) => t.status === 'approved' || !t.status);
-    if (isOnLeave(approved, employeeId, date)) out.push(`${employee?.name || 'Ce barber'} est en congé ce jour-là`);
-    const win = workingWindow(employee, date);
-    if (win === null) out.push(`${employee?.name || 'Ce barber'} ne travaille pas ce jour-là`);
-    else if (win && (s < win.start || e > win.end)) {
-      out.push(`En dehors des horaires de ${employee?.name || 'ce barber'} (${minutesToTime(win.start)} – ${minutesToTime(win.end)})`);
-    }
-    return {
-      clash: sameStart
-        ? `${sameStart.status === 'break' ? 'Une pause' : (sameStart.client_name || 'Un rendez-vous')} commence déjà à ${startTime} pour ${employee?.name || 'ce barber'}`
-        : null,
-      warnings: out,
-    };
-  }, [validDate, validTime, employeeId, startTime, duration, dayApts, appointment.id, timeOffs, employee, date]);
+  const { clash, warnings } = useMemo(() => (
+    validDate && validTime && employeeId
+      ? slotIssues({ selfId: appointment.id, date, startTime, duration, employee, employeeId, dayApts, timeOffs })
+      : { clash: null, warnings: [] }
+  ), [validDate, validTime, employeeId, startTime, duration, dayApts, appointment.id, timeOffs, employee, date]);
 
   const moved = date !== String(appointment.date || '').slice(0, 10)
     || startTime !== String(appointment.start_time || '').slice(0, 5)
     || employeeId !== String(appointment.employee_id || '');
   const canNotify = moved && !!appointment.client_email
-    && ['confirmed', 'pending'].includes(appointment.status) && isUpcoming(date, startTime);
+    && ['confirmed', 'pending'].includes(appointment.status) && isUpcomingSlot(date, startTime);
 
   const handleSave = async () => {
     if (!validDate) return toast.error('Date invalide');

@@ -2,8 +2,9 @@ import React, { useRef, useEffect } from 'react';
 import { format, startOfWeek, addDays, isSameDay } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { Coffee } from 'lucide-react';
-import { AppointmentCard, BreakCard, LastMinuteCard, NowLine, OffHoursShade } from './AppointmentCard';
+import { AppointmentCard, BreakCard, LastMinuteCard, NowLine, OffHoursShade, DragGhost } from './AppointmentCard';
 import useBreakDrag from './useBreakDrag';
+import useCardDrag from './useCardDrag';
 import {
   START_HOUR, TOTAL_HOURS, minutesToTime, layoutOverlaps, verticalPlacement,
   workingWindow, isOnLeave, isBreak, isLastMinuteSlot, toDateStr,
@@ -27,7 +28,7 @@ function DragPreview({ startMin, endMin }) {
   );
 }
 
-export default function WeekView({ currentDate, appointments, employees, employeeFilter, timeOffs = [], onSelect, onBreakClick, onCreateBreak, onDayClick }) {
+export default function WeekView({ currentDate, appointments, employees, employeeFilter, timeOffs = [], onSelect, onBreakClick, onCreateBreak, onDayClick, onMoveRequest }) {
   const scrollRef = useRef();
   const weekStart = startOfWeek(currentDate, { weekStartsOn: 1 });
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
@@ -40,6 +41,17 @@ export default function WeekView({ currentDate, appointments, employees, employe
     const target = thisWeek ? Math.max(now.getHours() - 1, START_HOUR) : 8;
     scrollRef.current.scrollTop = (target - START_HOUR) * HOUR_HEIGHT;
   }, []);
+
+  // Glisser une carte : plus haut / plus bas = autre heure, autre colonne = autre jour (même barber)
+  const cardDrag = useCardDrag({
+    hourHeight: HOUR_HEIGHT,
+    scrollRef,
+    onDrop: ({ apt, column, startMin }) => onMoveRequest?.(apt, { date: column, employee_id: apt.employee_id, start_time: minutesToTime(startMin) }),
+  });
+  const moving = cardDrag.drag;
+  const dragProps = (apt) => (onMoveRequest ? cardDrag.bind(apt) : undefined);
+  const selectCard = cardDrag.guard(onSelect);
+  const selectBreak = cardDrag.guard(onBreakClick);
 
   const drag = useBreakDrag({
     hourHeight: HOUR_HEIGHT,
@@ -111,6 +123,7 @@ export default function WeekView({ currentDate, appointments, employees, employe
             return (
               <div
                 key={dateStr}
+                data-drop-column={dateStr}
                 className={`flex-1 basis-0 min-w-0 relative border-l border-foreground/15 select-none cursor-crosshair ${isToday ? 'bg-primary/[0.03]' : ''}`}
                 onMouseDown={(e) => drag.start(e, dateStr, e.currentTarget)}
                 onTouchStart={(e) => drag.start(e, dateStr, e.currentTarget)}
@@ -139,12 +152,12 @@ export default function WeekView({ currentDate, appointments, employees, employe
                 )}
 
                 {dayApts.filter(isBreak).map((apt) => (
-                  <BreakCard key={apt.id} apt={apt} onSelect={onBreakClick}
+                  <BreakCard key={apt.id} apt={apt} onSelect={selectBreak} dragProps={dragProps(apt)} ghosted={moving?.apt.id === apt.id}
                     style={{ ...verticalPlacement(apt.start_time, apt.end_time, HOUR_HEIGHT, 18), left: 1, right: 1 }} />
                 ))}
 
                 {dayApts.filter(isLastMinuteSlot).map((apt) => (
-                  <LastMinuteCard key={apt.id} apt={apt} onSelect={onSelect}
+                  <LastMinuteCard key={apt.id} apt={apt} onSelect={selectCard} dragProps={dragProps(apt)} ghosted={moving?.apt.id === apt.id}
                     style={{ ...verticalPlacement(apt.start_time, apt.end_time, HOUR_HEIGHT, 20), left: 1, right: 1 }} />
                 ))}
 
@@ -158,7 +171,9 @@ export default function WeekView({ currentDate, appointments, employees, employe
                       color={colorOf(apt.employee_id)}
                       showBarber={!single}
                       dense
-                      onSelect={onSelect}
+                      onSelect={selectCard}
+                      dragProps={dragProps(apt)}
+                      ghosted={moving?.apt.id === apt.id}
                       style={{
                         ...verticalPlacement(apt.start_time, apt.end_time, HOUR_HEIGHT, MIN_CARD),
                         left: `calc(${col * width}% + 1px)`,
@@ -170,6 +185,9 @@ export default function WeekView({ currentDate, appointments, employees, employe
 
                 {isToday && <NowLine hourHeight={HOUR_HEIGHT} />}
                 {preview && <DragPreview {...preview} />}
+                {moving && moving.column === dateStr && (
+                  <DragGhost apt={moving.apt} startMin={moving.startMin} duration={moving.duration} hourHeight={HOUR_HEIGHT} label={moving.apt.employee_name} />
+                )}
               </div>
             );
           })}

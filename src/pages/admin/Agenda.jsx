@@ -14,10 +14,12 @@ import WeekView from '@/components/agenda/WeekView';
 import MonthView from '@/components/agenda/MonthView';
 import BreakModal from '@/components/agenda/BreakModal';
 import AppointmentDetailModal from '@/components/agenda/AppointmentDetailModal';
+import MoveDialog, { buildMoveFields, saveMove } from '@/components/agenda/MoveDialog';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   BARBER_COLORS, timeToMinutes, toDateStr, parseDateParam, visibleRange, datesBetween,
   fetchAppointmentsForDates, agendaQueryKey, invalidateAppointmentQueries,
+  isBreak, isLastMinuteSlot, slotIssues, aptDuration,
 } from '@/components/agenda/agendaUtils';
 
 const VIEWS = ['day', 'week', 'month'];
@@ -74,6 +76,7 @@ export default function Agenda() {
 
   const [showCancelled, setShowCancelled] = useState(false);
   const [selected, setSelected] = useState(null);
+  const [pendingMove, setPendingMove] = useState(null); // carte client posée ailleurs : { apt, date, start_time, employee_id }
   const [selectedBreak, setSelectedBreak] = useState(null);
   const [pendingBreak, setPendingBreak] = useState(null); // { start_time, end_time, date } en attente du choix du barber
   const [lastMinuteDialog, setLastMinuteDialog] = useState(false);
@@ -247,6 +250,41 @@ export default function Agenda() {
     setSelected(null);
   };
 
+  // ─── Carte glissée dans la grille ───
+  // Pause ou créneau last minute sans client : déplacé tout de suite, avec « Annuler » dans la notification.
+  // Rendez-vous d'un client : confirmation (avant / après, alertes, « Prévenir le client »).
+  const handleMoveRequest = (apt, target) => {
+    const freeSlot = isBreak(apt) || (isLastMinuteSlot(apt) && !apt.client_email);
+    if (!freeSlot) {
+      setPendingMove({ apt, ...target });
+      return;
+    }
+    const fields = buildMoveFields(apt, target, employees);
+    const employee = employees.find((e) => String(e.id) === String(target.employee_id));
+    const { clash } = slotIssues({
+      selfId: apt.id, date: fields.date, startTime: fields.start_time, duration: aptDuration(apt),
+      employee, employeeId: target.employee_id, dayApts: inRange, timeOffs: [],
+    });
+    if (clash) {
+      toast.error(clash);
+      return;
+    }
+    const before = {
+      date: apt.date, start_time: apt.start_time, end_time: apt.end_time,
+      employee_id: apt.employee_id, employee_name: apt.employee_name,
+    };
+    const what = isBreak(apt) ? 'Pause déplacée' : 'Créneau déplacé';
+    saveMove(queryClient, apt, fields, false)
+      .then(() => toast.success(`${what} à ${fields.start_time}`, {
+        action: {
+          label: 'Annuler',
+          onClick: () => saveMove(queryClient, { ...apt, ...fields }, before, false)
+            .catch((e) => toast.error(e?.message || 'Retour impossible')),
+        },
+      }))
+      .catch((e) => toast.error(e?.message || 'Déplacement impossible'));
+  };
+
   // ─── Last Minute ───
   const handleSendLastMinute = async () => {
     const { date, start_time, end_time, employee_id } = lastMinuteForm;
@@ -329,6 +367,8 @@ export default function Agenda() {
   const swipe = useRef(null);
   const onTouchStart = (e) => {
     if (e.touches.length !== 1) { swipe.current = null; return; }
+    // Sur une carte, le doigt la déplace (appui long) ou l'ouvre : jamais de changement de période
+    if (e.target.closest?.('[data-block]')) { swipe.current = null; return; }
     // Grille qui défile déjà horizontalement (journée à cinq barbers sur téléphone) : pas de changement de jour
     const scroller = e.target.closest?.('[data-scroll-container]');
     if (scroller && scroller.scrollWidth > scroller.clientWidth + 2) { swipe.current = null; return; }
@@ -337,7 +377,7 @@ export default function Agenda() {
   const onTouchEnd = (e) => {
     const s = swipe.current;
     swipe.current = null;
-    if (!s || selected || selectedBreak || pendingBreak) return;
+    if (!s || selected || selectedBreak || pendingBreak || pendingMove) return;
     const t = e.changedTouches[0];
     const dx = t.clientX - s.x;
     const dy = t.clientY - s.y;
@@ -433,6 +473,7 @@ export default function Agenda() {
             onBreakClick={setSelectedBreak}
             onCreateBreak={handleCreateBreak}
             onFocusBarber={setEmployeeFilter}
+            onMoveRequest={handleMoveRequest}
           />
         )}
         {view === 'week' && (
@@ -446,6 +487,7 @@ export default function Agenda() {
             onBreakClick={setSelectedBreak}
             onCreateBreak={handleCreateBreak}
             onDayClick={openDay}
+            onMoveRequest={handleMoveRequest}
           />
         )}
         {view === 'month' && (
@@ -465,6 +507,15 @@ export default function Agenda() {
         onClose={() => setSelected(null)}
         onChanged={handleChanged}
         onDeleted={handleDeleted}
+      />
+
+      <MoveDialog
+        key={pendingMove ? `${pendingMove.apt.id}-${pendingMove.date}-${pendingMove.start_time}-${pendingMove.employee_id}` : 'none'}
+        move={pendingMove}
+        employees={employees}
+        appointments={inRange}
+        timeOffs={approvedTimeOffs}
+        onClose={() => setPendingMove(null)}
       />
 
       {/* Pause : récurrence / suppression */}

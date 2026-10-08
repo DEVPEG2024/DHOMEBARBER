@@ -1,7 +1,8 @@
 import React, { useRef, useEffect } from 'react';
 import { Coffee } from 'lucide-react';
-import { AppointmentCard, BreakCard, LastMinuteCard, NowLine, OffHoursShade } from './AppointmentCard';
+import { AppointmentCard, BreakCard, LastMinuteCard, NowLine, OffHoursShade, DragGhost } from './AppointmentCard';
 import useBreakDrag from './useBreakDrag';
+import useCardDrag from './useCardDrag';
 import {
   START_HOUR, TOTAL_HOURS, minutesToTime, layoutOverlaps, verticalPlacement,
   workingWindow, isOnLeave, isBreak, isLastMinuteSlot, toDateStr,
@@ -27,7 +28,7 @@ function DragPreview({ startMin, endMin }) {
   );
 }
 
-export default function DayView({ date, appointments, employees, employeeFilter, timeOffs = [], onSelect, onBreakClick, onCreateBreak, onFocusBarber }) {
+export default function DayView({ date, appointments, employees, employeeFilter, timeOffs = [], onSelect, onBreakClick, onCreateBreak, onFocusBarber, onMoveRequest }) {
   const scrollRef = useRef();
   const isToday = date === toDateStr(new Date());
 
@@ -38,6 +39,17 @@ export default function DayView({ date, appointments, employees, employeeFilter,
     const target = isToday ? Math.max(now.getHours() - 1, START_HOUR) : 8;
     scrollRef.current.scrollTop = (target - START_HOUR) * HOUR_HEIGHT;
   }, []);
+
+  // Glisser une carte : plus haut / plus bas = autre heure, autre colonne = autre barber
+  const cardDrag = useCardDrag({
+    hourHeight: HOUR_HEIGHT,
+    scrollRef,
+    onDrop: ({ apt, column, startMin }) => onMoveRequest?.(apt, { date, employee_id: column, start_time: minutesToTime(startMin) }),
+  });
+  const moving = cardDrag.drag;
+  const dragProps = (apt) => (onMoveRequest ? cardDrag.bind(apt) : undefined);
+  const selectCard = cardDrag.guard(onSelect);
+  const selectBreak = cardDrag.guard(onBreakClick);
 
   const drag = useBreakDrag({
     hourHeight: HOUR_HEIGHT,
@@ -67,6 +79,7 @@ export default function DayView({ date, appointments, employees, employeeFilter,
     return (
       <div
         key={key}
+        data-drop-column={emp.id !== 'other' ? key : undefined}
         className="flex-1 basis-0 min-w-0 relative border-l border-foreground/15 select-none cursor-crosshair"
         onMouseDown={(e) => emp.id !== 'other' && drag.start(e, key, e.currentTarget)}
         onTouchStart={(e) => emp.id !== 'other' && drag.start(e, key, e.currentTarget)}
@@ -89,12 +102,12 @@ export default function DayView({ date, appointments, employees, employeeFilter,
         )}
 
         {apts.filter(isBreak).map((apt) => (
-          <BreakCard key={apt.id} apt={apt} onSelect={onBreakClick}
+          <BreakCard key={apt.id} apt={apt} onSelect={selectBreak} dragProps={dragProps(apt)} ghosted={moving?.apt.id === apt.id}
             style={{ ...verticalPlacement(apt.start_time, apt.end_time, HOUR_HEIGHT, 20), left: 2, right: 2 }} />
         ))}
 
         {apts.filter(isLastMinuteSlot).map((apt) => (
-          <LastMinuteCard key={apt.id} apt={apt} onSelect={onSelect}
+          <LastMinuteCard key={apt.id} apt={apt} onSelect={selectCard} dragProps={dragProps(apt)} ghosted={moving?.apt.id === apt.id}
             style={{ ...verticalPlacement(apt.start_time, apt.end_time, HOUR_HEIGHT, 24), left: 2, right: 2 }} />
         ))}
 
@@ -107,7 +120,9 @@ export default function DayView({ date, appointments, employees, employeeFilter,
               apt={apt}
               color={color}
               dense={multi}
-              onSelect={onSelect}
+              onSelect={selectCard}
+              dragProps={dragProps(apt)}
+              ghosted={moving?.apt.id === apt.id}
               style={{
                 ...verticalPlacement(apt.start_time, apt.end_time, HOUR_HEIGHT, MIN_CARD),
                 left: `calc(${col * width}% + 2px)`,
@@ -119,6 +134,9 @@ export default function DayView({ date, appointments, employees, employeeFilter,
 
         {isToday && <NowLine hourHeight={HOUR_HEIGHT} />}
         {preview && <DragPreview {...preview} />}
+        {moving && moving.column === key && (
+          <DragGhost apt={moving.apt} startMin={moving.startMin} duration={moving.duration} hourHeight={HOUR_HEIGHT} label={emp.name} />
+        )}
       </div>
     );
   };

@@ -1,4 +1,5 @@
 import { format, addDays, startOfWeek, endOfWeek, startOfMonth, endOfMonth, parseISO, isValid } from 'date-fns';
+import { fr } from 'date-fns/locale';
 import { api } from '@/api/apiClient';
 
 // Grille commune aux vues Jour et Semaine
@@ -157,6 +158,69 @@ export const STATUS_META = {
   last_minute: { label: 'Last Minute', chip: 'bg-orange-500/20 text-orange-300 border-orange-400/50' },
   break: { label: 'Pause', chip: 'bg-slate-500/20 text-slate-300 border-slate-400/50' },
 };
+
+/** Durée affichée d'un créneau en minutes (fin − début, sinon durée enregistrée, au moins 5 min). */
+export function aptDuration(apt) {
+  const span = timeToMinutes(apt.end_time) - timeToMinutes(apt.start_time);
+  return Math.max(span > 0 ? span : (Number(apt.total_duration) || 30), 5);
+}
+
+/** Ce qui se déplace à la main dans la grille : tout sauf un rendez-vous annulé ou absent. */
+export const canDragAppointment = (apt) => !isCancelledLike(apt);
+
+/** « jeu. 8 oct. » */
+export function shortDayLabel(dateStr) {
+  const d = parseDateParam(String(dateStr || '').slice(0, 10));
+  return d ? format(d, 'EEE d MMM', { locale: fr }) : String(dateStr || '');
+}
+
+/** Rendez-vous à venir (heure de l'appareil) : seul cas où l'on propose de prévenir le client. */
+export function isUpcomingSlot(dateStr, time) {
+  const d = parseDateParam(String(dateStr || '').slice(0, 10));
+  if (!d || !/^\d{2}:\d{2}$/.test(String(time || '').slice(0, 5))) return false;
+  const m = timeToMinutes(time);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), Math.floor(m / 60), m % 60) > new Date();
+}
+
+/**
+ * Contrôle d'un nouvel horaire pour un rendez-vous (fiche « Modifier » et glisser-déposer).
+ * `clash` (bloquant) : un autre créneau non annulé du même barber commence à la même heure, ce que
+ * refuse l'index idx_appointments_unique_slot. `warnings` (non bloquants) : chevauchement, congé,
+ * jour non travaillé, horaires du barber — le salon peut vouloir caser un client quand même.
+ */
+export function slotIssues({ selfId, date, startTime, duration, employee, employeeId, dayApts = [], timeOffs = [] }) {
+  const warnings = [];
+  const who = employee?.name || 'ce barber';
+  const s = timeToMinutes(startTime);
+  const e = s + duration;
+  const others = dayApts.filter((a) =>
+    a.id !== selfId
+    && String(a.date).slice(0, 10) === date
+    && String(a.employee_id) === String(employeeId)
+    && !isCancelledLike(a));
+  const sameStart = others.find((a) => String(a.start_time).slice(0, 5) === startTime);
+  for (const a of others) {
+    if (a === sameStart) continue;
+    const as = timeToMinutes(a.start_time);
+    const ae = timeToMinutes(a.end_time || a.start_time);
+    if (as < e && ae > s) {
+      warnings.push(isBreak(a)
+        ? `Chevauche une pause (${a.start_time} – ${a.end_time})`
+        : `Chevauche ${a.client_name || 'un rendez-vous'} (${a.start_time} – ${a.end_time})`);
+    }
+  }
+  const approved = timeOffs.filter((t) => t.status === 'approved' || !t.status);
+  if (isOnLeave(approved, employeeId, date)) warnings.push(`${employee?.name || 'Ce barber'} est en congé ce jour-là`);
+  const win = workingWindow(employee, date);
+  if (win === null) warnings.push(`${employee?.name || 'Ce barber'} ne travaille pas ce jour-là`);
+  else if (win && (s < win.start || e > win.end)) {
+    warnings.push(`En dehors des horaires de ${who} (${minutesToTime(win.start)} – ${minutesToTime(win.end)})`);
+  }
+  const clash = sameStart
+    ? `${isBreak(sameStart) ? 'Une pause' : (sameStart.client_name || 'Un rendez-vous')} commence déjà à ${startTime} pour ${who}`
+    : null;
+  return { clash, warnings };
+}
 
 /** Position verticale d'un créneau dans la grille. */
 export function verticalPlacement(startTime, endTime, hourHeight, minHeight) {

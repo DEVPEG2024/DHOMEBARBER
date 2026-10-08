@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Coffee, Zap, Check, X, UserX, Euro } from 'lucide-react';
-import { needsClosing, isCancelledLike, START_HOUR, END_HOUR, STATUS_META } from './agendaUtils';
+import { needsClosing, isCancelledLike, START_HOUR, END_HOUR, STATUS_META, minutesToTime } from './agendaUtils';
 
 const activate = (fn) => ({
   role: 'button',
@@ -10,6 +10,9 @@ const activate = (fn) => ({
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fn(); }
   },
 });
+
+// Appui long au doigt = déplacer la carte : pas de bulle « Copier / Rechercher » d'iOS
+const NO_CALLOUT = { WebkitTouchCallout: 'none', WebkitUserSelect: 'none', userSelect: 'none' };
 
 function describe(apt) {
   const services = apt.services?.map((s) => s.name).filter(Boolean).join(' + ');
@@ -26,7 +29,7 @@ function describe(apt) {
  * Carte d'un rendez-vous dans les grilles Jour / Semaine. La hauteur suit la durée ; le contenu
  * se déploie avec la place disponible (heure + client, puis prestations, puis barber).
  */
-export function AppointmentCard({ apt, style, color, showBarber = false, dense = false, onSelect }) {
+export function AppointmentCard({ apt, style, color, showBarber = false, dense = false, onSelect, dragProps, ghosted = false }) {
   const height = style.height || 0;
   const cancelled = isCancelledLike(apt);
   const toClose = needsClosing(apt);
@@ -39,16 +42,18 @@ export function AppointmentCard({ apt, style, color, showBarber = false, dense =
     <div
       data-block
       {...activate(() => onSelect(apt))}
+      {...dragProps}
       title={describe(apt)}
-      className={`absolute rounded-md overflow-hidden cursor-pointer transition-[filter,box-shadow] hover:brightness-110 hover:shadow-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-primary ${toClose ? 'ring-1 ring-amber-400/80' : ''}`}
+      className={`absolute rounded-md overflow-hidden ${dragProps?.onMouseDown ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} transition-[filter,box-shadow,opacity] hover:brightness-110 hover:shadow-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-primary ${toClose ? 'ring-1 ring-amber-400/80' : ''}`}
       style={{
         ...style,
+        ...NO_CALLOUT,
         borderLeft: `3px solid ${accent}`,
         // Teinte posée sur le fond de la carte : opaque, une pause recouverte ne transparaît pas
         background: cancelled
           ? `repeating-linear-gradient(135deg, ${accent}1a, ${accent}1a 4px, transparent 4px, transparent 8px), hsl(var(--card))`
           : `linear-gradient(${color}38, ${color}38), hsl(var(--card))`,
-        opacity: cancelled ? 0.55 : 1,
+        opacity: ghosted ? 0.3 : cancelled ? 0.55 : 1,
         zIndex: toClose ? 12 : 10,
       }}
     >
@@ -90,11 +95,12 @@ export function AppointmentCard({ apt, style, color, showBarber = false, dense =
   );
 }
 
-export function BreakCard({ apt, style, onSelect }) {
+export function BreakCard({ apt, style, onSelect, dragProps, ghosted = false }) {
   return (
     <div
       data-block
       {...activate(() => onSelect(apt))}
+      {...dragProps}
       title={`Pause ${apt.start_time} – ${apt.end_time}${apt.employee_name ? ` · ${apt.employee_name}` : ''}`}
       className="absolute rounded-md overflow-hidden cursor-pointer hover:ring-2 hover:ring-slate-400/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
       style={{
@@ -102,6 +108,8 @@ export function BreakCard({ apt, style, onSelect }) {
         background: 'repeating-linear-gradient(135deg, rgba(148,163,184,0.16), rgba(148,163,184,0.16) 4px, rgba(148,163,184,0.07) 4px, rgba(148,163,184,0.07) 8px)',
         borderLeft: '3px solid #94a3b8',
         zIndex: 6,
+        opacity: ghosted ? 0.3 : 1,
+        ...NO_CALLOUT,
       }}
     >
       <div className="px-1.5 py-0.5 flex items-center gap-1 min-w-0">
@@ -112,11 +120,12 @@ export function BreakCard({ apt, style, onSelect }) {
   );
 }
 
-export function LastMinuteCard({ apt, style, onSelect }) {
+export function LastMinuteCard({ apt, style, onSelect, dragProps, ghosted = false }) {
   return (
     <div
       data-block
       {...activate(() => onSelect(apt))}
+      {...dragProps}
       title={`Last Minute ${apt.start_time} – ${apt.end_time || apt.start_time}`}
       className="absolute rounded-md overflow-hidden cursor-pointer hover:ring-2 hover:ring-orange-400/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
       style={{
@@ -124,6 +133,8 @@ export function LastMinuteCard({ apt, style, onSelect }) {
         background: 'repeating-linear-gradient(135deg, rgba(249,115,22,0.2), rgba(249,115,22,0.2) 4px, rgba(249,115,22,0.1) 4px, rgba(249,115,22,0.1) 8px)',
         borderLeft: '3px solid #f97316',
         zIndex: 11,
+        opacity: ghosted ? 0.3 : 1,
+        ...NO_CALLOUT,
       }}
     >
       <div className="px-1.5 py-0.5 flex items-center gap-1 min-w-0">
@@ -175,5 +186,25 @@ export function OffHoursShade({ window: win, hourHeight }) {
         <div className="absolute inset-x-0 pointer-events-none" style={{ ...shade, top: toY(win.end), height: total - toY(win.end) }} />
       )}
     </>
+  );
+}
+
+/** Aperçu de la carte en cours de déplacement, à sa place d'arrivée (n'intercepte pas le pointeur). */
+export function DragGhost({ apt, startMin, duration, hourHeight, label }) {
+  const top = ((startMin - START_HOUR * 60) / 60) * hourHeight;
+  const height = Math.max((duration / 60) * hourHeight, 20);
+  return (
+    <div
+      className="absolute left-0.5 right-0.5 rounded-md border-2 border-dashed border-primary shadow-xl shadow-primary/20 pointer-events-none overflow-hidden"
+      style={{ top, height, zIndex: 40, background: 'linear-gradient(hsl(var(--primary) / 0.25), hsl(var(--primary) / 0.25)), hsl(var(--card))' }}
+    >
+      <div className="px-1.5 py-0.5 min-w-0">
+        <p className="text-[10px] font-bold text-primary tabular-nums truncate">
+          {minutesToTime(startMin)} – {minutesToTime(startMin + duration)}
+        </p>
+        {height >= 34 && <p className="text-[10px] font-semibold text-foreground truncate">{apt.client_name || 'Pause'}</p>}
+        {label && height >= 48 && <p className="text-[9px] text-muted-foreground truncate">{label}</p>}
+      </div>
+    </div>
   );
 }
