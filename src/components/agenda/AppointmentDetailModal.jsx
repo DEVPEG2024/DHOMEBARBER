@@ -1,19 +1,12 @@
 import React, { useReducer } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Clock, User, Phone, Mail, Scissors, CreditCard, FileText, Calendar, Banknote, CheckCircle, Heart, ShoppingBag, ChevronDown, Check, BadgeCheck, X, AlertTriangle, Trash2, UserX, Gift } from 'lucide-react';
+import { Clock, User, Phone, Mail, Scissors, CreditCard, FileText, Calendar, Banknote, CheckCircle, Heart, ShoppingBag, ChevronDown, Check, BadgeCheck, X, AlertTriangle, Trash2, UserX, Gift, Pencil, RotateCcw, Undo2 } from 'lucide-react';
 import { getServiceColor } from '@/utils/serviceColors';
 import { api } from '@/api/apiClient';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
-
-const statusLabel = {
-  pending: { label: 'En attente', color: 'bg-yellow-500/20 text-yellow-300 border-yellow-400/50' },
-  confirmed: { label: 'Confirmé', color: 'bg-green-500/20 text-green-300 border-green-400/50' },
-  completed: { label: 'Terminé', color: 'bg-primary/20 text-primary border-primary/50' },
-  cancelled: { label: 'Annulé', color: 'bg-red-500/10 text-red-400 border-red-400/30' },
-  no_show: { label: 'No-show', color: 'bg-red-500/15 text-red-400 border-red-500/50' },
-  last_minute: { label: 'Last Minute', color: 'bg-orange-500/20 text-orange-300 border-orange-400/50' },
-};
+import AppointmentEditForm from './AppointmentEditForm';
+import { STATUS_META } from './agendaUtils';
 
 const initialState = (apt) => ({
   saving: false,
@@ -53,18 +46,22 @@ async function fetchUsersForSearch() {
   return all;
 }
 
-function ModalInner({ appointment, onUpdate, onDelete }) {
+function ModalInner({ appointment, onUpdate, onDelete, onEdit }) {
   const [state, dispatch] = useReducer(reducer, appointment, initialState);
+  // Prestation déjà validée : l'encaissement reste corrigeable (moyen de paiement, pourboire, produit)
+  const [correcting, setCorrecting] = React.useState(false);
   const [clientSearch, setClientSearch] = React.useState('');
   const [assignedClient, setAssignedClient] = React.useState(null);
   const isLastMinute = appointment.status === 'last_minute';
   const isCompleted = appointment.status === 'completed';
+  const locked = isCompleted && !correcting; // récapitulatif en lecture seule
+  const isClosedOut = appointment.status === 'cancelled' || appointment.status === 'no_show';
 
   // Le catalogue produits ne sert qu'à la validation : inutile sur une prestation déjà terminée
   const { data: products = [] } = useQuery({
     queryKey: ['products'],
     queryFn: () => api.entities.Product.filter({ is_active: true }, 'name', 100),
-    enabled: !isCompleted,
+    enabled: !locked,
   });
 
   const { data: allServices = [] } = useQuery({
@@ -89,13 +86,13 @@ function ModalInner({ appointment, onUpdate, onDelete }) {
     ? allUsers.filter(u => u.full_name?.toLowerCase().includes(clientSearch.toLowerCase()) || u.email?.toLowerCase().includes(clientSearch.toLowerCase()))
     : [];
 
-  const status = statusLabel[appointment.status] || statusLabel.confirmed;
-  const tipValue = isCompleted ? (appointment.tip || 0) : (parseFloat(state.tip) || 0);
-  const prodValue = isCompleted ? (appointment.product_price || 0) : (parseFloat(state.productPrice) || 0);
+  const status = STATUS_META[appointment.status] || STATUS_META.confirmed;
+  const tipValue = locked ? (appointment.tip || 0) : (parseFloat(state.tip) || 0);
+  const prodValue = locked ? (appointment.product_price || 0) : (parseFloat(state.productPrice) || 0);
   const manualServiceTotal = selectedServices.reduce((sum, s) => sum + (s.price || 0), 0);
   const serviceTotal = appointment.total_price || manualServiceTotal || 0;
-  const grandTotal = isCompleted ? (appointment.grand_total || serviceTotal + tipValue + prodValue) : (serviceTotal + tipValue + prodValue);
-  const canValidate = !isCompleted && state.paymentMethod && (tipValue === 0 || state.tipMethod);
+  const grandTotal = locked ? (appointment.grand_total || serviceTotal + tipValue + prodValue) : (serviceTotal + tipValue + prodValue);
+  const canValidate = !locked && state.paymentMethod && (tipValue === 0 || state.tipMethod);
 
   const handleValidate = async () => {
     dispatch({ type: 'SAVING', value: true });
@@ -126,7 +123,7 @@ function ModalInner({ appointment, onUpdate, onDelete }) {
         }
       }
       await api.entities.Appointment.update(appointment.id, updateData);
-      toast.success('Prestation validée !');
+      toast.success(correcting ? 'Encaissement corrigé' : 'Prestation validée !');
       onUpdate?.();
     } catch (e) {
       toast.error('Erreur lors de la validation');
@@ -139,12 +136,61 @@ function ModalInner({ appointment, onUpdate, onDelete }) {
     <div className="space-y-4">
       {/* Status + date */}
       <div className="flex items-center justify-between">
-        <span className={`text-xs px-2.5 py-1 rounded-full border font-medium ${status.color}`}>
+        <span className={`text-xs px-2.5 py-1 rounded-full border font-medium ${status.chip}`}>
           {status.label}
         </span>
         <span className="text-xs text-muted-foreground">
           {appointment.date} · {appointment.start_time} – {appointment.end_time}
         </span>
+      </div>
+
+      {/* Modifier à tout moment : horaire, barber, prestations, client ; corriger un encaissement ; rétablir */}
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={onEdit}
+          className="flex-1 min-w-[140px] flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold bg-primary/15 border border-primary/30 text-primary hover:bg-primary/25 transition-all"
+        >
+          <Pencil className="w-3.5 h-3.5" />
+          Modifier / déplacer
+        </button>
+        {isCompleted && !correcting && (
+          <button
+            type="button"
+            onClick={() => setCorrecting(true)}
+            className="flex-1 min-w-[140px] flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-medium bg-white/5 border border-white/10 hover:bg-white/10 transition-all"
+          >
+            <Undo2 className="w-3.5 h-3.5" />
+            Corriger l'encaissement
+          </button>
+        )}
+        {isClosedOut && (
+          <button
+            type="button"
+            disabled={state.saving}
+            onClick={async () => {
+              dispatch({ type: 'SAVING', value: true });
+              try {
+                // Un créneau last minute que personne n'a pris redevient un créneau last minute
+                const wasLastMinute = !appointment.client_email && appointment.client_name === 'Last Minute';
+                await api.entities.Appointment.update(appointment.id, {
+                  status: wasLastMinute ? 'last_minute' : 'confirmed',
+                  cancellation_reason: null,
+                });
+                toast.success('Rendez-vous rétabli');
+                onUpdate?.();
+              } catch (e) {
+                toast.error(e?.message || 'Erreur');
+              } finally {
+                dispatch({ type: 'SAVING', value: false });
+              }
+            }}
+            className="flex-1 min-w-[140px] flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-medium bg-green-500/10 border border-green-500/25 text-green-400 hover:bg-green-500/20 transition-all disabled:opacity-60"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            Rétablir le rendez-vous
+          </button>
+        )}
       </div>
 
       {/* Client info */}
@@ -344,7 +390,7 @@ function ModalInner({ appointment, onUpdate, onDelete }) {
         </div>
       )}
 
-      {isCompleted ? (
+      {locked ? (
         <>
           {/* Completed banner */}
           <div className="flex items-center gap-2 bg-green-500/10 border border-green-500/20 rounded-xl px-4 py-3">
@@ -528,12 +574,22 @@ function ModalInner({ appointment, onUpdate, onDelete }) {
               className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-green-500 text-white font-semibold text-sm shadow-lg shadow-green-500/25 hover:bg-green-600 transition-all disabled:opacity-60"
             >
               <Check className="w-4 h-4" />
-              {state.saving ? 'Validation...' : 'Valider la prestation'}
+              {state.saving ? 'Enregistrement...' : correcting ? 'Enregistrer la correction' : 'Valider la prestation'}
+            </button>
+          )}
+
+          {correcting && (
+            <button
+              type="button"
+              onClick={() => setCorrecting(false)}
+              className="w-full py-2.5 rounded-xl text-xs font-medium bg-white/5 border border-white/10 hover:bg-white/10 transition-all"
+            >
+              Annuler la correction
             </button>
           )}
 
           {/* Cancel / No-show buttons */}
-          {appointment.status !== 'cancelled' && appointment.status !== 'no_show' && (
+          {!correcting && appointment.status !== 'cancelled' && appointment.status !== 'no_show' && (
             <div className="flex gap-2">
               <button
                 onClick={async () => {
@@ -617,19 +673,42 @@ function ModalInner({ appointment, onUpdate, onDelete }) {
   );
 }
 
-export default function AppointmentDetailModal({ appointment, onClose, onUpdate, onDelete }) {
+/**
+ * Fiche d'un rendez-vous de l'agenda. `onChanged(rdv?)` après toute modification (avec le rendez-vous
+ * à jour quand il a été modifié / déplacé), `onDeleted()` après suppression.
+ */
+export default function AppointmentDetailModal({ appointment, employees = [], onClose, onChanged, onDeleted }) {
+  const [editing, setEditing] = React.useState(false);
+  React.useEffect(() => { setEditing(false); }, [appointment?.id]);
+
   return (
-    <Dialog open={!!appointment} onOpenChange={onClose}>
-      <DialogContent className="bg-card border-border max-w-md max-h-[90vh] overflow-y-auto">
+    <Dialog open={!!appointment} onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="bg-card border-border max-w-md max-h-[90dvh] overflow-y-auto">
         {appointment && (
           <>
             <DialogHeader>
               <DialogTitle className="font-display flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-primary" />
-                Détails du rendez-vous
+                {editing ? <Pencil className="w-4 h-4 text-primary" /> : <Calendar className="w-4 h-4 text-primary" />}
+                {editing ? 'Modifier le rendez-vous' : 'Détails du rendez-vous'}
               </DialogTitle>
             </DialogHeader>
-            <ModalInner key={appointment.id} appointment={appointment} onUpdate={onUpdate} onDelete={onDelete} />
+            {editing ? (
+              <AppointmentEditForm
+                key={`edit-${appointment.id}`}
+                appointment={appointment}
+                employees={employees}
+                onCancel={() => setEditing(false)}
+                onSaved={(updated) => onChanged?.(updated)}
+              />
+            ) : (
+              <ModalInner
+                key={appointment.id}
+                appointment={appointment}
+                onEdit={() => setEditing(true)}
+                onUpdate={() => onChanged?.()}
+                onDelete={() => onDeleted?.()}
+              />
+            )}
           </>
         )}
       </DialogContent>

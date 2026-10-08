@@ -1,415 +1,180 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { Coffee, Zap } from 'lucide-react';
-import { getServiceColor } from '@/utils/serviceColors';
-import { useQueryClient } from '@tanstack/react-query';
-import AppointmentDetailModal from './AppointmentDetailModal';
-import { hapticFeedback } from '@/lib/capacitor';
+import React, { useRef, useEffect } from 'react';
+import { Coffee } from 'lucide-react';
+import { AppointmentCard, BreakCard, LastMinuteCard, NowLine, OffHoursShade } from './AppointmentCard';
+import useBreakDrag from './useBreakDrag';
+import {
+  START_HOUR, TOTAL_HOURS, minutesToTime, layoutOverlaps, verticalPlacement,
+  workingWindow, isOnLeave, isBreak, isLastMinuteSlot, toDateStr,
+} from './agendaUtils';
 
-const HOUR_HEIGHT = 64;
-const START_HOUR = 7;
-const END_HOUR = 21;
-const TOTAL_HOURS = END_HOUR - START_HOUR;
-const SNAP_GRID = 5; // snap every 5 minutes for better precision
-const DRAG_THRESHOLD = 4; // pixels before starting drag
-
-const statusStyle = {
-  pending: { border: '#facc15', bg: 'rgba(234,179,8,0.18)' },
-  confirmed: { border: '#4ade80', bg: 'rgba(74,222,128,0.18)' },
-  completed: { border: '#3fcf8e', bg: 'rgba(63,207,142,0.20)' },
-  cancelled: { border: '#f87171', bg: 'rgba(248,113,113,0.15)', opacity: 0.6 },
-  no_show: { border: '#ef4444', bg: 'rgba(239,68,68,0.15)' },
-  break: { border: '#94a3b8', bg: 'rgba(148,163,184,0.25)' },
-  last_minute: { border: '#f97316', bg: 'rgba(249,115,22,0.25)' },
-};
-
-function timeToMinutes(t) {
-  if (!t) return 0;
-  const [h, m] = t.split(':').map(Number);
-  return h * 60 + m;
-}
-
-function minutesToTime(mins) {
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-}
-
-function snapToGrid(minutes) {
-  return Math.round(minutes / SNAP_GRID) * SNAP_GRID;
-}
-
-function yToMinutes(clientY, colElement) {
-  // colElement is inside the scroll container, so its getBoundingClientRect
-  // already reflects scroll position. We need the position relative to the
-  // top of the grid (the full scrollable area), not the viewport.
-  const scrollContainer = colElement.closest('[data-scroll-container]');
-  const scrollRect = scrollContainer.getBoundingClientRect();
-  const scrollTop = scrollContainer.scrollTop;
-  // clientY relative to the visible top of the scroll container + scrollTop
-  // gives us the position in the full grid
-  const relY = clientY - scrollRect.top + scrollTop;
-  return snapToGrid(START_HOUR * 60 + (relY / HOUR_HEIGHT) * 60);
-}
-
-function clampMinutes(m) {
-  return Math.max(START_HOUR * 60, Math.min(END_HOUR * 60, m));
-}
-
-function BreakBlock({ apt, onClick }) {
-  const startMin = timeToMinutes(apt.start_time) - START_HOUR * 60;
-  const endMin = timeToMinutes(apt.end_time) - START_HOUR * 60;
-  const top = (startMin / 60) * HOUR_HEIGHT;
-  const height = Math.max(((endMin - startMin) / 60) * HOUR_HEIGHT, 28);
-
-  return (
-    <div
-      onClick={e => { e.stopPropagation(); onClick(apt); }}
-      className="absolute left-1 right-1 rounded-lg px-2 py-1 overflow-hidden cursor-pointer group transition-all hover:z-20 hover:shadow-lg hover:ring-2 hover:ring-slate-400/40"
-      style={{
-        top, height,
-        background: 'repeating-linear-gradient(135deg, rgba(148,163,184,0.15), rgba(148,163,184,0.15) 4px, rgba(148,163,184,0.08) 4px, rgba(148,163,184,0.08) 8px)',
-        borderLeft: '4px solid #94a3b8',
-        zIndex: 8,
-      }}
-    >
-      <div className="flex items-center gap-1">
-        <Coffee className="w-3 h-3 text-slate-400" />
-        <p className="text-[10px] font-bold text-slate-400">{apt.start_time} - {apt.end_time}</p>
-      </div>
-      {height > 32 && <p className="text-[10px] text-slate-400 font-medium">Pause</p>}
-    </div>
-  );
-}
-
-function LastMinuteBlock({ apt, onClick }) {
-  const startMin = timeToMinutes(apt.start_time) - START_HOUR * 60;
-  const endMin = timeToMinutes(apt.end_time || apt.start_time) - START_HOUR * 60;
-  const top = (startMin / 60) * HOUR_HEIGHT;
-  const height = Math.max(((endMin - startMin) / 60) * HOUR_HEIGHT, 36);
-
-  return (
-    <div
-      onClick={e => { e.stopPropagation(); onClick(apt); }}
-      className="absolute left-1 right-1 rounded-lg px-2.5 py-1 overflow-hidden cursor-pointer group transition-all hover:z-20 hover:shadow-lg hover:ring-2 hover:ring-orange-400/40"
-      style={{
-        top, height,
-        background: 'repeating-linear-gradient(135deg, rgba(249,115,22,0.18), rgba(249,115,22,0.18) 4px, rgba(249,115,22,0.10) 4px, rgba(249,115,22,0.10) 8px)',
-        borderLeft: '4px solid #f97316',
-        zIndex: 10,
-      }}
-    >
-      <div className="flex items-center gap-1">
-        <Zap className="w-3 h-3 text-orange-400" />
-        <p className="text-[10px] font-bold text-orange-400">{apt.start_time} - {apt.end_time || apt.start_time}</p>
-      </div>
-      {height > 32 && <p className="text-[10px] text-orange-400 font-semibold">Last Minute</p>}
-    </div>
-  );
-}
-
-function AppointmentBlock({ apt, onStatusChange, employeeColor, onClick }) {
-  const startMin = timeToMinutes(apt.start_time) - START_HOUR * 60;
-  const endMin = timeToMinutes(apt.end_time) - START_HOUR * 60;
-  const top = (startMin / 60) * HOUR_HEIGHT;
-  const height = Math.max(((endMin - startMin) / 60) * HOUR_HEIGHT, 36);
-  const style = statusStyle[apt.status] || statusStyle.confirmed;
-
-  const accentColor = apt.services?.[0]?.service_id
-    ? getServiceColor(apt.services[0].service_id)
-    : (employeeColor || '#3fcf8e');
-
-  // À clôturer = confirmé non payé OU completed sans méthode de paiement
-  const needsClose = (apt.status === 'confirmed' && !apt.payment_method) || (apt.status === 'completed' && !apt.payment_method);
-
-  return (
-    <div
-      onClick={e => { e.stopPropagation(); onClick(apt); }}
-      className={`absolute left-1 right-1 rounded-lg overflow-hidden cursor-pointer group transition-all hover:z-20 hover:shadow-lg hover:brightness-110 flex items-center gap-2 px-2.5 ${needsClose ? 'ring-2 ring-yellow-400/60 animate-pulse' : ''}`}
-      style={{
-        top, height: Math.min(height, 36),
-        background: style.bg,
-        borderLeft: `4px solid ${accentColor}`,
-        opacity: style.opacity || 1,
-        zIndex: needsClose ? 15 : 10,
-      }}
-    >
-      <span className="text-[10px] font-bold shrink-0" style={{ color: accentColor }}>{apt.start_time}</span>
-      <span className="text-xs font-semibold text-foreground truncate">{apt.client_name}</span>
-    </div>
-  );
-}
+const HOUR_HEIGHT = 80;
+const LABEL_WIDTH = 48; // colonne des heures (w-12)
+const MIN_COLUMN = 76; // px par barber avant défilement horizontal
+const MIN_CARD = 20; // px = 15 min : deux prestations courtes qui se suivent restent l'une sous l'autre
+const MIN_CARD_MINUTES = Math.ceil((MIN_CARD / HOUR_HEIGHT) * 60);
 
 function DragPreview({ startMin, endMin }) {
   const top = ((startMin - START_HOUR * 60) / 60) * HOUR_HEIGHT;
   const height = Math.max(((endMin - startMin) / 60) * HOUR_HEIGHT, 16);
-
   return (
-    <div
-      className="absolute left-1 right-1 rounded-lg border-2 border-dashed border-slate-400 pointer-events-none"
-      style={{ top, height, background: 'rgba(148,163,184,0.15)', zIndex: 30 }}
-    >
+    <div className="absolute left-1 right-1 rounded-md border-2 border-dashed border-slate-400 pointer-events-none"
+      style={{ top, height, background: 'rgba(148,163,184,0.15)', zIndex: 30 }}>
       <div className="flex items-center gap-1 px-2 py-1">
         <Coffee className="w-3 h-3 text-slate-400" />
-        <p className="text-[10px] font-bold text-slate-400">
-          {minutesToTime(startMin)} - {minutesToTime(endMin)}
-        </p>
+        <p className="text-[10px] font-bold text-slate-400">{minutesToTime(startMin)} – {minutesToTime(endMin)}</p>
       </div>
     </div>
   );
 }
 
-export default function DayView({ appointments, employees, employeeFilter, onStatusChange, date, onCreateBreak, onDeleteBreak, onBreakClick, timeOffs = [] }) {
+export default function DayView({ date, appointments, employees, employeeFilter, timeOffs = [], onSelect, onBreakClick, onCreateBreak, onFocusBarber }) {
   const scrollRef = useRef();
-  const queryClient = useQueryClient();
-  const [selected, setSelected] = useState(null);
-  const [dragging, setDragging] = useState(null);
-  const dragStartPos = useRef(null);
-  const hasDragged = useRef(false);
-  const longPressTimer = useRef(null);
-  const longPressActive = useRef(false);
+  const isToday = date === toDateStr(new Date());
 
+  // À l'ouverture : on arrive sur l'heure actuelle (aujourd'hui) ou sur 8 h
   useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = (8 - START_HOUR) * HOUR_HEIGHT;
+    if (!scrollRef.current) return;
+    const now = new Date();
+    const target = isToday ? Math.max(now.getHours() - 1, START_HOUR) : 8;
+    scrollRef.current.scrollTop = (target - START_HOUR) * HOUR_HEIGHT;
   }, []);
 
-  useEffect(() => {
-    return () => { clearTimeout(longPressTimer.current); };
-  }, []);
-
-  const filtered = employeeFilter === 'all'
-    ? appointments
-    : appointments.filter(a => a.employee_id === employeeFilter);
+  const drag = useBreakDrag({
+    hourHeight: HOUR_HEIGHT,
+    onCreate: ({ start_time, end_time, column }) => onCreateBreak({ start_time, end_time, employee_id: column, date }),
+  });
 
   const cols = employeeFilter === 'all'
-    ? employees.filter(e => appointments.some(a => a.employee_id === e.id) || e.is_active)
-    : employees.filter(e => e.id === employeeFilter);
+    ? employees
+    : employees.filter((e) => String(e.id) === String(employeeFilter));
 
-  const showCols = cols.length > 1;
+  // Rendez-vous d'un barber qui n'est plus actif : colonne « Autres » pour ne rien perdre
+  const known = new Set(cols.map((e) => String(e.id)));
+  const orphans = employeeFilter === 'all' ? appointments.filter((a) => !known.has(String(a.employee_id))) : [];
+  const columns = [
+    ...cols.map((emp) => ({ key: String(emp.id), emp, apts: appointments.filter((a) => String(a.employee_id) === String(emp.id)) })),
+    ...(orphans.length ? [{ key: 'other', emp: { id: 'other', name: 'Autres', color: '#94a3b8' }, apts: orphans }] : []),
+  ];
+  const multi = columns.length > 1;
 
-  const handlePointerStart = useCallback((e, colEmpId, colElement) => {
-    const isTouch = e.type === 'touchstart';
-    if (!isTouch && e.button !== 0) return;
-    if ((e.target || e.srcElement).closest('[data-block]')) return;
-
-    const clientY = isTouch ? e.touches[0].clientY : e.clientY;
-    const clientX = isTouch ? e.touches[0].clientX : e.clientX;
-    const minutes = clampMinutes(yToMinutes(clientY, colElement));
-
-    dragStartPos.current = { x: clientX, y: clientY };
-    hasDragged.current = false;
-    longPressActive.current = false;
-
-    const getPos = (ev) => {
-      if (ev.touches) return { x: ev.touches[0].clientX, y: ev.touches[0].clientY };
-      return { x: ev.clientX, y: ev.clientY };
-    };
-
-    const handleMove = (ev) => {
-      const pos = getPos(ev);
-      const dx = pos.x - dragStartPos.current.x;
-      const dy = pos.y - dragStartPos.current.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-
-      // On touch, cancel long-press if finger moves before activation
-      if (isTouch && !longPressActive.current) {
-        if (dist > DRAG_THRESHOLD) {
-          // User is scrolling — cancel everything
-          clearTimeout(longPressTimer.current);
-          longPressTimer.current = null;
-          cleanup();
-        }
-        return;
-      }
-
-      if (!hasDragged.current && dist < DRAG_THRESHOLD) return;
-      hasDragged.current = true;
-      if (isTouch) ev.preventDefault();
-
-      const m = clampMinutes(yToMinutes(pos.y, colElement));
-      setDragging({ startMin: minutes, currentMin: m, colEmpId });
-    };
-
-    const handleEnd = () => {
-      clearTimeout(longPressTimer.current);
-      longPressTimer.current = null;
-      cleanup();
-
-      const didDrag = hasDragged.current;
-      dragStartPos.current = null;
-      hasDragged.current = false;
-      longPressActive.current = false;
-
-      setDragging(prev => {
-        if (prev && didDrag) {
-          const s = Math.min(prev.startMin, prev.currentMin);
-          const end = Math.max(prev.startMin, prev.currentMin);
-          if (end - s >= 10 && onCreateBreak) {
-            setTimeout(() => onCreateBreak({
-              start_time: minutesToTime(s),
-              end_time: minutesToTime(end),
-              employee_id: prev.colEmpId,
-            }), 0);
-          }
-        }
-        return null;
-      });
-    };
-
-    const cleanup = () => {
-      window.removeEventListener('mousemove', handleMove);
-      window.removeEventListener('mouseup', handleEnd);
-      window.removeEventListener('touchmove', handleMove);
-      window.removeEventListener('touchend', handleEnd);
-    };
-
-    window.addEventListener('mousemove', handleMove);
-    window.addEventListener('mouseup', handleEnd);
-    window.addEventListener('touchmove', handleMove, { passive: false });
-    window.addEventListener('touchend', handleEnd);
-
-    // On touch: require 1-second long-press before activating drag mode
-    if (isTouch) {
-      longPressTimer.current = setTimeout(() => {
-        longPressActive.current = true;
-        // Vibrate to signal activation
-        hapticFeedback();
-        // Show initial drag preview at touch position
-        setDragging({ startMin: minutes, currentMin: minutes, colEmpId });
-      }, 1000);
-    } else {
-      // Mouse: activate immediately (desktop)
-      longPressActive.current = true;
-    }
-  }, [onCreateBreak]);
-
-  const renderDragPreview = (colEmpId) => {
-    if (!dragging || dragging.colEmpId !== colEmpId) return null;
-    const s = Math.min(dragging.startMin, dragging.currentMin);
-    const e = Math.max(dragging.startMin, dragging.currentMin);
-    if (e - s < 5) return null;
-    return <DragPreview startMin={s} endMin={e} />;
-  };
-
-  const isOnLeave = (empId) => {
-    const result = timeOffs.some(t => {
-      const d = String(date);
-      const s = String(t.start_date).slice(0, 10);
-      const e = String(t.end_date).slice(0, 10);
-      const match = String(t.employee_id) === String(empId) && d >= s && d <= e;
-      return match;
-    });
-    return result;
-  };
-
-  const renderColumn = (empId, empColor, columnApts) => {
-    const onLeave = isOnLeave(empId);
+  const renderColumn = ({ key, emp, apts }) => {
+    const onLeave = emp.id !== 'other' && isOnLeave(timeOffs, emp.id, date);
+    const bookings = apts.filter((a) => !isBreak(a) && !isLastMinuteSlot(a));
+    const meta = layoutOverlaps(bookings, MIN_CARD_MINUTES);
+    const preview = drag.previewFor(key);
+    const color = emp.color || '#3fcf8e';
 
     return (
-      <>
+      <div
+        key={key}
+        className="flex-1 basis-0 min-w-0 relative border-l border-foreground/15 select-none cursor-crosshair"
+        onMouseDown={(e) => emp.id !== 'other' && drag.start(e, key, e.currentTarget)}
+        onTouchStart={(e) => emp.id !== 'other' && drag.start(e, key, e.currentTarget)}
+      >
         {Array.from({ length: TOTAL_HOURS }).map((_, i) => (
           <div key={i} className="absolute w-full border-t border-foreground/20" style={{ top: i * HOUR_HEIGHT, height: HOUR_HEIGHT }}>
-            {/* Half-hour line */}
-            <div className="absolute w-full border-t border-foreground/10" style={{ top: HOUR_HEIGHT / 2 }} />
+            <div className="absolute w-full border-t border-foreground/[0.08]" style={{ top: HOUR_HEIGHT / 2 }} />
           </div>
         ))}
 
+        {!onLeave && emp.id !== 'other' && <OffHoursShade window={workingWindow(emp, date)} hourHeight={HOUR_HEIGHT} />}
+
         {onLeave && (
-          <div className="absolute inset-0 z-20 pointer-events-none flex flex-col items-center justify-center"
-            style={{ background: 'repeating-linear-gradient(135deg, rgba(239,68,68,0.18), rgba(239,68,68,0.18) 8px, rgba(239,68,68,0.08) 8px, rgba(239,68,68,0.08) 16px)' }}>
-            <div className="bg-red-500/25 border-2 border-red-500/50 rounded-xl px-5 py-3 text-center shadow-lg">
-              <p className="text-red-500 font-bold text-base">CONGÉ</p>
-              <p className="text-red-400 text-xs font-medium">Journée bloquée</p>
+          <div className="absolute inset-0 z-[5] pointer-events-none flex justify-center"
+            style={{ background: 'repeating-linear-gradient(135deg, rgba(239,68,68,0.16), rgba(239,68,68,0.16) 8px, rgba(239,68,68,0.06) 8px, rgba(239,68,68,0.06) 16px)' }}>
+            <div className="mt-20 h-fit bg-red-500/20 border border-red-500/40 rounded-lg px-3 py-1.5 text-center">
+              <p className="text-red-500 font-bold text-xs">CONGÉ</p>
             </div>
           </div>
         )}
 
-        {columnApts.map(apt =>
-          apt.status === 'break' ? (
-            <div key={apt.id} data-block>
-              <BreakBlock apt={apt} onClick={onBreakClick} />
-            </div>
-          ) : apt.status === 'last_minute' ? (
-            <div key={apt.id} data-block>
-              <LastMinuteBlock apt={apt} onClick={setSelected} />
-            </div>
-          ) : (
-            <div key={apt.id} data-block>
-              <AppointmentBlock apt={apt} onStatusChange={onStatusChange} employeeColor={empColor} onClick={setSelected} />
-            </div>
-          )
-        )}
+        {apts.filter(isBreak).map((apt) => (
+          <BreakCard key={apt.id} apt={apt} onSelect={onBreakClick}
+            style={{ ...verticalPlacement(apt.start_time, apt.end_time, HOUR_HEIGHT, 20), left: 2, right: 2 }} />
+        ))}
 
-        {renderDragPreview(empId)}
-      </>
+        {apts.filter(isLastMinuteSlot).map((apt) => (
+          <LastMinuteCard key={apt.id} apt={apt} onSelect={onSelect}
+            style={{ ...verticalPlacement(apt.start_time, apt.end_time, HOUR_HEIGHT, 24), left: 2, right: 2 }} />
+        ))}
+
+        {bookings.map((apt) => {
+          const { col, cols: n } = meta[apt.id] || { col: 0, cols: 1 };
+          const width = 100 / n;
+          return (
+            <AppointmentCard
+              key={apt.id}
+              apt={apt}
+              color={color}
+              dense={multi}
+              onSelect={onSelect}
+              style={{
+                ...verticalPlacement(apt.start_time, apt.end_time, HOUR_HEIGHT, MIN_CARD),
+                left: `calc(${col * width}% + 2px)`,
+                width: `calc(${width}% - 4px)`,
+              }}
+            />
+          );
+        })}
+
+        {isToday && <NowLine hourHeight={HOUR_HEIGHT} />}
+        {preview && <DragPreview {...preview} />}
+      </div>
     );
   };
 
+  // Même largeur minimale pour l'en-tête et la grille : sur téléphone, cinq barbers défilent
+  // horizontalement ensemble, et l'heure reste collée à gauche
+  const rowStyle = { minWidth: LABEL_WIDTH + columns.length * MIN_COLUMN };
+
   return (
-    <>
-      <div className="bg-card border border-border rounded-xl overflow-hidden flex flex-col" style={{ height: 'calc(100vh - 200px)' }}>
-        {showCols && (
-          <div className="flex border-b border-border">
-            <div className="w-14 shrink-0" />
-            {cols.map(emp => (
-              <div key={emp.id} className="flex-1 text-center py-2 border-l border-foreground/15">
-                <div className="w-2 h-2 rounded-full mx-auto mb-1" style={{ background: emp.color || '#3fcf8e' }} />
-                <p className="text-xs font-semibold">{emp.name}</p>
-                {isOnLeave(emp.id) && (
-                  <span className="text-[9px] bg-red-500/15 text-red-500 border border-red-500/20 rounded px-1.5 py-0.5 font-semibold inline-block mt-0.5">CONGÉ</span>
-                )}
-              </div>
-            ))}
+    <div className="bg-card border border-border rounded-xl overflow-hidden flex flex-col h-[calc(100dvh-220px)] min-h-[420px]">
+      <div ref={scrollRef} data-scroll-container className="overflow-auto flex-1 overscroll-contain">
+        {multi && (
+          <div className="flex border-b border-border sticky top-0 z-30 bg-card" style={rowStyle}>
+            <div className="w-12 shrink-0 sticky left-0 bg-card z-10" />
+            {columns.map(({ key, emp, apts }) => {
+              const count = apts.filter((a) => !isBreak(a) && !isLastMinuteSlot(a) && a.status !== 'cancelled').length;
+              const clickable = emp.id !== 'other' && !!onFocusBarber;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  disabled={!clickable}
+                  onClick={() => clickable && onFocusBarber(emp.id)}
+                  title={clickable ? `Afficher seulement ${emp.name}` : undefined}
+                  className="flex-1 basis-0 min-w-0 text-center py-2 border-l border-foreground/15 hover:bg-foreground/5 transition-colors disabled:hover:bg-transparent"
+                >
+                  <span className="flex items-center justify-center gap-1.5 min-w-0 px-1">
+                    <span className="w-2 h-2 rounded-full shrink-0" style={{ background: emp.color || '#3fcf8e' }} />
+                    <span className="text-xs font-semibold truncate">{emp.name}</span>
+                  </span>
+                  <span className="text-[10px] text-muted-foreground">
+                    {emp.id !== 'other' && isOnLeave(timeOffs, emp.id, date)
+                      ? <span className="text-red-500 font-semibold">Congé</span>
+                      : emp.id !== 'other' && workingWindow(emp, date) === null && count === 0 ? 'Repos' : `${count} rdv`}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         )}
 
-        <div ref={scrollRef} data-scroll-container className="overflow-y-auto flex-1">
-          <div className="flex" style={{ minHeight: TOTAL_HOURS * HOUR_HEIGHT }}>
-            <div className="w-14 shrink-0 relative">
-              {Array.from({ length: TOTAL_HOURS }).map((_, i) => (
-                <div key={i} className="absolute w-full" style={{ top: i * HOUR_HEIGHT }}>
-                  <span className="text-[10px] text-muted-foreground absolute -top-2 right-2">
-                    {String(START_HOUR + i).padStart(2, '0')}:00
-                  </span>
-                </div>
-              ))}
-            </div>
-
-            {showCols ? cols.map(emp => (
-              <div
-                key={emp.id}
-                className="flex-1 relative border-l border-foreground/15 select-none cursor-crosshair"
-                onMouseDown={e => handlePointerStart(e, emp.id, e.currentTarget)}
-                onTouchStart={e => handlePointerStart(e, emp.id, e.currentTarget)}
-              >
-                {renderColumn(emp.id, emp.color, appointments.filter(a => a.employee_id === emp.id))}
+        <div className="flex" style={{ ...rowStyle, minHeight: TOTAL_HOURS * HOUR_HEIGHT }}>
+          <div className="w-12 shrink-0 relative sticky left-0 z-20 bg-card">
+            {Array.from({ length: TOTAL_HOURS }).map((_, i) => (
+              <div key={i} className="absolute w-full" style={{ top: i * HOUR_HEIGHT }}>
+                <span className="text-[10px] text-muted-foreground absolute top-0.5 right-1.5 font-mono select-none">
+                  {String(START_HOUR + i).padStart(2, '0')}:00
+                </span>
               </div>
-            )) : (
-              <div
-                className="flex-1 relative border-l border-foreground/15 select-none cursor-crosshair"
-                onMouseDown={e => handlePointerStart(e, employeeFilter, e.currentTarget)}
-                onTouchStart={e => handlePointerStart(e, employeeFilter, e.currentTarget)}
-              >
-                {renderColumn(employeeFilter, cols[0]?.color, filtered)}
-              </div>
-            )}
+            ))}
           </div>
+          {columns.length > 0 ? columns.map(renderColumn) : (
+            <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">Aucun barber actif</div>
+          )}
         </div>
       </div>
-
-      <AppointmentDetailModal appointment={selected} onClose={() => setSelected(null)}
-        onUpdate={() => {
-          queryClient.invalidateQueries({ queryKey: ['appointments'] });
-          queryClient.invalidateQueries({ queryKey: ['agendaAppointments'] });
-          queryClient.invalidateQueries({ queryKey: ['adminAppointments'] });
-          setSelected(null);
-        }}
-        onDelete={() => {
-          queryClient.invalidateQueries({ queryKey: ['appointments'] });
-          queryClient.invalidateQueries({ queryKey: ['agendaAppointments'] });
-          queryClient.invalidateQueries({ queryKey: ['adminAppointments'] });
-          setSelected(null);
-        }}
-      />
-    </>
+    </div>
   );
 }

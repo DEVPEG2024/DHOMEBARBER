@@ -1,471 +1,180 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect } from 'react';
 import { format, startOfWeek, addDays, isSameDay } from 'date-fns';
 import { fr } from 'date-fns/locale';
-import { Coffee, Zap } from 'lucide-react';
-import { useQueryClient } from '@tanstack/react-query';
-import AppointmentDetailModal from './AppointmentDetailModal';
-import { hapticFeedback } from '@/lib/capacitor';
+import { Coffee } from 'lucide-react';
+import { AppointmentCard, BreakCard, LastMinuteCard, NowLine, OffHoursShade } from './AppointmentCard';
+import useBreakDrag from './useBreakDrag';
+import {
+  START_HOUR, TOTAL_HOURS, minutesToTime, layoutOverlaps, verticalPlacement,
+  workingWindow, isOnLeave, isBreak, isLastMinuteSlot, toDateStr,
+} from './agendaUtils';
 
 const HOUR_HEIGHT = 72;
-const START_HOUR = 7;
-const END_HOUR = 22;
-const TOTAL_HOURS = END_HOUR - START_HOUR;
-const SNAP_GRID = 5;
-const DRAG_THRESHOLD = 4;
-
-function timeToMinutes(t) {
-  if (!t) return 0;
-  const [h, m] = t.split(':').map(Number);
-  return h * 60 + m;
-}
-
-function minutesToTime(mins) {
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-}
-
-function snapToGrid(minutes) {
-  return Math.round(minutes / SNAP_GRID) * SNAP_GRID;
-}
-
-function yToMinutes(clientY, colElement) {
-  const scrollContainer = colElement.closest('[data-scroll-container]');
-  const scrollRect = scrollContainer.getBoundingClientRect();
-  const scrollTop = scrollContainer.scrollTop;
-  const relY = clientY - scrollRect.top + scrollTop;
-  return snapToGrid(START_HOUR * 60 + (relY / HOUR_HEIGHT) * 60);
-}
-
-function clampMinutes(m) {
-  return Math.max(START_HOUR * 60, Math.min(END_HOUR * 60, m));
-}
-
-function computeColumns(apts) {
-  const sorted = [...apts].sort((a, b) => timeToMinutes(a.start_time) - timeToMinutes(b.start_time));
-  const columns = [];
-  const aptMeta = {};
-
-  for (const apt of sorted) {
-    const start = timeToMinutes(apt.start_time);
-    let placed = false;
-    for (let col = 0; col < columns.length; col++) {
-      const lastEnd = timeToMinutes(columns[col][columns[col].length - 1].end_time);
-      if (start >= lastEnd) {
-        columns[col].push(apt);
-        aptMeta[apt.id] = { col, totalCols: 1 };
-        placed = true;
-        break;
-      }
-    }
-    if (!placed) {
-      columns.push([apt]);
-      aptMeta[apt.id] = { col: columns.length - 1, totalCols: 1 };
-    }
-  }
-
-  for (const apt of sorted) {
-    const start = timeToMinutes(apt.start_time);
-    const end = timeToMinutes(apt.end_time);
-    let maxCol = aptMeta[apt.id].col;
-    for (const other of sorted) {
-      if (other.id === apt.id) continue;
-      const oStart = timeToMinutes(other.start_time);
-      const oEnd = timeToMinutes(other.end_time);
-      if (oStart < end && oEnd > start) {
-        maxCol = Math.max(maxCol, aptMeta[other.id].col);
-      }
-    }
-    aptMeta[apt.id].totalCols = maxCol + 1;
-  }
-
-  return aptMeta;
-}
-
-function BreakBlock({ apt, onClick }) {
-  const startMin = timeToMinutes(apt.start_time) - START_HOUR * 60;
-  const endMin = timeToMinutes(apt.end_time) - START_HOUR * 60;
-  const top = (startMin / 60) * HOUR_HEIGHT;
-  const height = Math.max(((endMin - startMin) / 60) * HOUR_HEIGHT, 28);
-
-  return (
-    <div
-      onClick={e => { e.stopPropagation(); onClick(apt); }}
-      className="absolute rounded-lg overflow-hidden cursor-pointer group transition-all hover:z-30 hover:shadow-xl hover:ring-2 hover:ring-slate-400/40"
-      style={{
-        top, height,
-        background: 'repeating-linear-gradient(135deg, rgba(148,163,184,0.15), rgba(148,163,184,0.15) 4px, rgba(148,163,184,0.08) 4px, rgba(148,163,184,0.08) 8px)',
-        borderLeft: '3px solid #94a3b8',
-        zIndex: 8,
-      }}
-    >
-      <div className="px-2 py-1 flex items-center gap-1">
-        <Coffee className="w-3 h-3 text-slate-400 shrink-0" />
-        <p className="text-[10px] font-bold text-slate-400 truncate">{apt.start_time} - {apt.end_time}</p>
-      </div>
-      {height > 36 && <p className="text-[9px] text-slate-400 px-2">Pause</p>}
-    </div>
-  );
-}
-
-function LastMinuteBlock({ apt, onClick }) {
-  const startMin = timeToMinutes(apt.start_time) - START_HOUR * 60;
-  const endMin = timeToMinutes(apt.end_time || apt.start_time) - START_HOUR * 60;
-  const top = (startMin / 60) * HOUR_HEIGHT;
-  const height = Math.max(((endMin - startMin) / 60) * HOUR_HEIGHT, 28);
-
-  return (
-    <div
-      onClick={e => { e.stopPropagation(); onClick(apt); }}
-      className="absolute rounded-lg overflow-hidden cursor-pointer group transition-all hover:z-30 hover:shadow-xl hover:ring-2 hover:ring-orange-400/40"
-      style={{
-        top, height,
-        background: 'repeating-linear-gradient(135deg, rgba(249,115,22,0.18), rgba(249,115,22,0.18) 4px, rgba(249,115,22,0.10) 4px, rgba(249,115,22,0.10) 8px)',
-        borderLeft: '3px solid #f97316',
-        zIndex: 10,
-      }}
-    >
-      <div className="px-2 py-1 flex items-center gap-1">
-        <Zap className="w-3 h-3 text-orange-400 shrink-0" />
-        <p className="text-[10px] font-bold text-orange-400 truncate">{apt.start_time} - {apt.end_time || apt.start_time}</p>
-      </div>
-      {height > 36 && <p className="text-[9px] text-orange-400 font-semibold px-2">Last Minute</p>}
-    </div>
-  );
-}
-
-function AppointmentBlock({ apt, empColor, onStatusChange, onClick }) {
-  const startMin = timeToMinutes(apt.start_time) - START_HOUR * 60;
-  const endMin = timeToMinutes(apt.end_time) - START_HOUR * 60;
-  const top = (startMin / 60) * HOUR_HEIGHT;
-  const height = Math.max(((endMin - startMin) / 60) * HOUR_HEIGHT, 32);
-
-  const isLight = apt.status === 'cancelled' || apt.status === 'no_show';
-  const borderColor = apt.status === 'cancelled' ? '#f87171' : apt.status === 'pending' ? '#facc15' : empColor;
-  const needsClose = (apt.status === 'confirmed' && !apt.payment_method) || (apt.status === 'completed' && !apt.payment_method);
-
-  return (
-    <div
-      onClick={e => { e.stopPropagation(); onClick(apt); }}
-      className={`absolute rounded-lg overflow-hidden cursor-pointer group transition-all hover:z-30 hover:shadow-xl flex items-center gap-1.5 px-2 ${needsClose ? 'ring-2 ring-yellow-400/60 animate-pulse' : ''}`}
-      style={{
-        top, height: Math.min(height, 32),
-        borderLeft: `3px solid ${borderColor}`,
-        background: `${empColor}15`,
-        opacity: isLight ? 0.5 : 1,
-        zIndex: needsClose ? 15 : 10,
-        backdropFilter: 'blur(4px)',
-      }}
-    >
-      <span className="text-[9px] font-bold shrink-0" style={{ color: borderColor }}>{apt.start_time}</span>
-      <span className="text-[10px] font-semibold text-foreground truncate">{apt.client_name}</span>
-    </div>
-  );
-}
+const MIN_CARD = 18; // px = 15 min (voir DayView)
+const MIN_CARD_MINUTES = Math.ceil((MIN_CARD / HOUR_HEIGHT) * 60);
 
 function DragPreview({ startMin, endMin }) {
   const top = ((startMin - START_HOUR * 60) / 60) * HOUR_HEIGHT;
   const height = Math.max(((endMin - startMin) / 60) * HOUR_HEIGHT, 16);
-
   return (
-    <div
-      className="absolute left-1 right-1 rounded-lg border-2 border-dashed border-slate-400 pointer-events-none"
-      style={{ top, height, background: 'rgba(148,163,184,0.15)', zIndex: 30 }}
-    >
-      <div className="flex items-center gap-1 px-2 py-1">
-        <Coffee className="w-3 h-3 text-slate-400" />
-        <p className="text-[10px] font-bold text-slate-400">
-          {minutesToTime(startMin)} - {minutesToTime(endMin)}
-        </p>
+    <div className="absolute left-0.5 right-0.5 rounded-md border-2 border-dashed border-slate-400 pointer-events-none"
+      style={{ top, height, background: 'rgba(148,163,184,0.15)', zIndex: 30 }}>
+      <div className="flex items-center gap-1 px-1 py-0.5">
+        <Coffee className="w-3 h-3 text-slate-400 shrink-0" />
+        <p className="text-[9px] font-bold text-slate-400 truncate">{minutesToTime(startMin)} – {minutesToTime(endMin)}</p>
       </div>
     </div>
   );
 }
 
-export default function WeekView({ currentDate, appointments, employees, onStatusChange, onCreateBreak, onDeleteBreak, onBreakClick, employeeFilter, timeOffs = [] }) {
+export default function WeekView({ currentDate, appointments, employees, employeeFilter, timeOffs = [], onSelect, onBreakClick, onCreateBreak, onDayClick }) {
   const scrollRef = useRef();
-  const queryClient = useQueryClient();
-  const [selected, setSelected] = useState(null);
-  const [dragging, setDragging] = useState(null);
-  const dragStartPos = useRef(null);
-  const hasDragged = useRef(false);
-  const longPressTimer = useRef(null);
-  const longPressActive = useRef(false);
-
   const weekStart = startOfWeek(currentDate, { weekStartsOn: 1 });
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+  const single = employeeFilter !== 'all' ? employees.find((e) => String(e.id) === String(employeeFilter)) : null;
 
   useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = (8 - START_HOUR) * HOUR_HEIGHT;
+    if (!scrollRef.current) return;
+    const now = new Date();
+    const thisWeek = days.some((d) => isSameDay(d, now));
+    const target = thisWeek ? Math.max(now.getHours() - 1, START_HOUR) : 8;
+    scrollRef.current.scrollTop = (target - START_HOUR) * HOUR_HEIGHT;
   }, []);
 
-  useEffect(() => {
-    return () => { clearTimeout(longPressTimer.current); };
-  }, []);
+  const drag = useBreakDrag({
+    hourHeight: HOUR_HEIGHT,
+    onCreate: ({ start_time, end_time, column }) => onCreateBreak({
+      start_time, end_time, date: column, employee_id: single ? single.id : null,
+    }),
+  });
 
-  const getEmpColor = (empId) => employees.find(e => e.id === empId)?.color || '#3fcf8e';
-
-  const handlePointerStart = useCallback((e, dateStr, colElement) => {
-    const isTouch = e.type === 'touchstart';
-    if (!isTouch && e.button !== 0) return;
-    if ((e.target || e.srcElement).closest('[data-block]')) return;
-
-    const clientY = isTouch ? e.touches[0].clientY : e.clientY;
-    const clientX = isTouch ? e.touches[0].clientX : e.clientX;
-    const minutes = clampMinutes(yToMinutes(clientY, colElement));
-
-    dragStartPos.current = { x: clientX, y: clientY };
-    hasDragged.current = false;
-    longPressActive.current = false;
-
-    const getPos = (ev) => {
-      if (ev.touches) return { x: ev.touches[0].clientX, y: ev.touches[0].clientY };
-      return { x: ev.clientX, y: ev.clientY };
-    };
-
-    const handleMove = (ev) => {
-      const pos = getPos(ev);
-      const dx = pos.x - dragStartPos.current.x;
-      const dy = pos.y - dragStartPos.current.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-
-      // On touch, cancel long-press if finger moves before activation
-      if (isTouch && !longPressActive.current) {
-        if (dist > DRAG_THRESHOLD) {
-          clearTimeout(longPressTimer.current);
-          longPressTimer.current = null;
-          cleanup();
-        }
-        return;
-      }
-
-      if (!hasDragged.current && dist < DRAG_THRESHOLD) return;
-      hasDragged.current = true;
-      if (isTouch) ev.preventDefault();
-
-      const m = clampMinutes(yToMinutes(pos.y, colElement));
-      setDragging({ startMin: minutes, currentMin: m, dateStr });
-    };
-
-    const handleEnd = () => {
-      clearTimeout(longPressTimer.current);
-      longPressTimer.current = null;
-      cleanup();
-
-      const didDrag = hasDragged.current;
-      dragStartPos.current = null;
-      hasDragged.current = false;
-      longPressActive.current = false;
-
-      setDragging(prev => {
-        if (prev && didDrag) {
-          const s = Math.min(prev.startMin, prev.currentMin);
-          const end = Math.max(prev.startMin, prev.currentMin);
-          if (end - s >= 10 && onCreateBreak) {
-            setTimeout(() => onCreateBreak({
-              start_time: minutesToTime(s),
-              end_time: minutesToTime(end),
-              date: prev.dateStr,
-              employee_id: employeeFilter !== 'all' ? employeeFilter : null,
-            }), 0);
-          }
-        }
-        return null;
-      });
-    };
-
-    const cleanup = () => {
-      window.removeEventListener('mousemove', handleMove);
-      window.removeEventListener('mouseup', handleEnd);
-      window.removeEventListener('touchmove', handleMove);
-      window.removeEventListener('touchend', handleEnd);
-    };
-
-    window.addEventListener('mousemove', handleMove);
-    window.addEventListener('mouseup', handleEnd);
-    window.addEventListener('touchmove', handleMove, { passive: false });
-    window.addEventListener('touchend', handleEnd);
-
-    // On touch: require 1-second long-press before activating drag mode
-    if (isTouch) {
-      longPressTimer.current = setTimeout(() => {
-        longPressActive.current = true;
-        hapticFeedback();
-        setDragging({ startMin: minutes, currentMin: minutes, dateStr });
-      }, 1000);
-    } else {
-      longPressActive.current = true;
-    }
-  }, [onCreateBreak, employeeFilter]);
+  const colorOf = (empId) => employees.find((e) => String(e.id) === String(empId))?.color || '#94a3b8';
 
   return (
-    <>
-      <div className="bg-card border border-border rounded-xl overflow-hidden flex flex-col"
-        style={{ height: 'calc(100vh - 200px)' }}>
-        {/* Day headers */}
-        <div className="flex border-b border-border shrink-0">
-          <div className="w-14 shrink-0 border-r border-foreground/15" />
-          {days.map(day => {
+    <div className="bg-card border border-border rounded-xl overflow-hidden flex flex-col h-[calc(100dvh-220px)] min-h-[420px]">
+      {/* En-têtes des jours : un tap ouvre la journée */}
+      <div className="flex border-b border-border shrink-0 overflow-hidden [scrollbar-gutter:stable]">
+        <div className="w-10 sm:w-12 shrink-0" />
+        {days.map((day) => {
+          const dateStr = toDateStr(day);
+          const isToday = isSameDay(day, new Date());
+          const count = appointments.filter((a) => a.date === dateStr && !isBreak(a) && !isLastMinuteSlot(a) && a.status !== 'cancelled').length;
+          const onLeave = single && isOnLeave(timeOffs, single.id, dateStr);
+          return (
+            <button
+              key={dateStr}
+              type="button"
+              onClick={() => onDayClick(day)}
+              title={`Ouvrir le ${format(day, 'EEEE d MMMM', { locale: fr })}`}
+              className={`flex-1 basis-0 min-w-0 text-center py-2 border-l border-foreground/15 transition-colors hover:bg-foreground/5 ${onLeave ? 'bg-red-500/10' : isToday ? 'bg-primary/5' : ''}`}
+            >
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
+                {format(day, 'EEE', { locale: fr }).replace('.', '')}
+              </p>
+              <p className={`text-base sm:text-xl font-bold leading-tight ${onLeave ? 'text-red-500' : isToday ? 'text-primary' : 'text-foreground'}`}>
+                {format(day, 'd')}
+              </p>
+              {onLeave ? (
+                <span className="text-[9px] px-1.5 rounded-full font-bold bg-red-500/20 text-red-500">Congé</span>
+              ) : (
+                <span className={`text-[9px] px-1.5 rounded-full font-semibold ${count ? (isToday ? 'bg-primary/25 text-primary' : 'bg-secondary text-muted-foreground') : 'text-transparent'}`}>
+                  {count || 0}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      <div ref={scrollRef} data-scroll-container className="overflow-y-auto overflow-x-hidden flex-1 overscroll-contain [scrollbar-gutter:stable]">
+        <div className="flex" style={{ minHeight: TOTAL_HOURS * HOUR_HEIGHT }}>
+          <div className="w-10 sm:w-12 shrink-0 relative">
+            {Array.from({ length: TOTAL_HOURS }).map((_, i) => (
+              <div key={i} className="absolute w-full" style={{ top: i * HOUR_HEIGHT }}>
+                <span className="text-[10px] text-muted-foreground/70 absolute top-0.5 right-1 font-mono select-none">
+                  {String(START_HOUR + i).padStart(2, '0')}h
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {days.map((day) => {
+            const dateStr = toDateStr(day);
             const isToday = isSameDay(day, new Date());
-            const dayStr = format(day, 'yyyy-MM-dd');
-            const count = appointments.filter(a => a.date === dayStr && a.status !== 'break').length;
-            const dayLeaveEmps = employeeFilter !== 'all'
-              ? timeOffs.some(t => String(t.employee_id) === String(employeeFilter) && dayStr >= String(t.start_date).slice(0,10) && dayStr <= String(t.end_date).slice(0,10))
-              : false;
+            const dayApts = appointments.filter((a) => a.date === dateStr);
+            const bookings = dayApts.filter((a) => !isBreak(a) && !isLastMinuteSlot(a));
+            const meta = layoutOverlaps(bookings, MIN_CARD_MINUTES);
+            const onLeaveEmps = employees.filter((emp) => isOnLeave(timeOffs, emp.id, dateStr));
+            const singleOnLeave = single && onLeaveEmps.some((e) => String(e.id) === String(single.id));
+            const preview = drag.previewFor(dateStr);
+
             return (
-              <div key={day.toISOString()} className={`flex-1 text-center py-3 border-l border-foreground/15 ${dayLeaveEmps ? 'bg-red-500/10' : isToday ? 'bg-primary/5' : ''}`}>
-                <p className="text-[10px] text-muted-foreground uppercase tracking-widest font-medium">
-                  {format(day, 'EEE', { locale: fr })}
-                </p>
-                <p className={`text-xl font-bold leading-snug ${dayLeaveEmps ? 'text-red-500' : isToday ? 'text-primary' : 'text-foreground'}`}>
-                  {format(day, 'd')}
-                </p>
-                {dayLeaveEmps ? (
-                  <span className="text-[9px] px-2 py-0.5 rounded-full font-bold inline-block mt-0.5 bg-red-500/20 text-red-500 border border-red-500/30">
-                    CONGÉ
-                  </span>
-                ) : count > 0 ? (
-                  <span className={`text-[9px] px-2 py-0.5 rounded-full font-semibold inline-block mt-0.5 ${isToday ? 'bg-primary/25 text-primary' : 'bg-secondary text-muted-foreground'}`}>
-                    {count}
-                  </span>
-                ) : <div className="h-4 mt-0.5" />}
+              <div
+                key={dateStr}
+                className={`flex-1 basis-0 min-w-0 relative border-l border-foreground/15 select-none cursor-crosshair ${isToday ? 'bg-primary/[0.03]' : ''}`}
+                onMouseDown={(e) => drag.start(e, dateStr, e.currentTarget)}
+                onTouchStart={(e) => drag.start(e, dateStr, e.currentTarget)}
+              >
+                {Array.from({ length: TOTAL_HOURS }).map((_, i) => (
+                  <div key={i} className="absolute w-full border-t border-foreground/20" style={{ top: i * HOUR_HEIGHT, height: HOUR_HEIGHT }}>
+                    <div className="absolute w-full border-t border-foreground/[0.08]" style={{ top: HOUR_HEIGHT / 2 }} />
+                  </div>
+                ))}
+
+                {single && !singleOnLeave && <OffHoursShade window={workingWindow(single, dateStr)} hourHeight={HOUR_HEIGHT} />}
+
+                {singleOnLeave && (
+                  <div className="absolute inset-0 z-[5] pointer-events-none"
+                    style={{ background: 'repeating-linear-gradient(135deg, rgba(239,68,68,0.16), rgba(239,68,68,0.16) 8px, rgba(239,68,68,0.06) 8px, rgba(239,68,68,0.06) 16px)' }} />
+                )}
+
+                {!single && onLeaveEmps.length > 0 && (
+                  <div className="absolute top-0.5 left-0.5 right-0.5 z-[26] pointer-events-none flex flex-col gap-0.5">
+                    {onLeaveEmps.map((emp) => (
+                      <span key={emp.id} className="text-[8px] sm:text-[9px] bg-red-500/20 text-red-500 border border-red-500/30 rounded px-1 font-semibold truncate">
+                        {emp.name} congé
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {dayApts.filter(isBreak).map((apt) => (
+                  <BreakCard key={apt.id} apt={apt} onSelect={onBreakClick}
+                    style={{ ...verticalPlacement(apt.start_time, apt.end_time, HOUR_HEIGHT, 18), left: 1, right: 1 }} />
+                ))}
+
+                {dayApts.filter(isLastMinuteSlot).map((apt) => (
+                  <LastMinuteCard key={apt.id} apt={apt} onSelect={onSelect}
+                    style={{ ...verticalPlacement(apt.start_time, apt.end_time, HOUR_HEIGHT, 20), left: 1, right: 1 }} />
+                ))}
+
+                {bookings.map((apt) => {
+                  const { col, cols } = meta[apt.id] || { col: 0, cols: 1 };
+                  const width = 100 / cols;
+                  return (
+                    <AppointmentCard
+                      key={apt.id}
+                      apt={apt}
+                      color={colorOf(apt.employee_id)}
+                      showBarber={!single}
+                      dense
+                      onSelect={onSelect}
+                      style={{
+                        ...verticalPlacement(apt.start_time, apt.end_time, HOUR_HEIGHT, MIN_CARD),
+                        left: `calc(${col * width}% + 1px)`,
+                        width: `calc(${width}% - 2px)`,
+                      }}
+                    />
+                  );
+                })}
+
+                {isToday && <NowLine hourHeight={HOUR_HEIGHT} />}
+                {preview && <DragPreview {...preview} />}
               </div>
             );
           })}
         </div>
-
-        {/* Scrollable grid */}
-        <div ref={scrollRef} data-scroll-container className="overflow-y-auto flex-1 overflow-x-hidden">
-          <div className="flex" style={{ minHeight: TOTAL_HOURS * HOUR_HEIGHT }}>
-            {/* Hour labels */}
-            <div className="w-14 shrink-0 relative border-r border-foreground/15">
-              {Array.from({ length: TOTAL_HOURS }).map((_, i) => (
-                <div key={i} className="absolute w-full" style={{ top: i * HOUR_HEIGHT }}>
-                  <span className="text-[10px] text-muted-foreground/60 absolute -top-2.5 right-2 font-mono select-none">
-                    {String(START_HOUR + i).padStart(2, '0')}h
-                  </span>
-                </div>
-              ))}
-            </div>
-
-            {/* Day columns */}
-            {days.map(day => {
-              const dateStr = format(day, 'yyyy-MM-dd');
-              const dayApts = appointments.filter(a => a.date === dateStr && a.status !== 'break' && a.status !== 'last_minute');
-              const dayBreaks = appointments.filter(a => a.date === dateStr && a.status === 'break');
-              const dayLastMinutes = appointments.filter(a => a.date === dateStr && a.status === 'last_minute');
-              const isToday = isSameDay(day, new Date());
-              const aptMeta = computeColumns(dayApts);
-
-              return (
-                <div
-                  key={dateStr}
-                  className={`flex-1 relative border-l border-foreground/15 select-none cursor-crosshair ${isToday ? 'bg-primary/[0.02]' : ''}`}
-                  style={{ minWidth: 0 }}
-                  onMouseDown={e => handlePointerStart(e, dateStr, e.currentTarget)}
-                  onTouchStart={e => handlePointerStart(e, dateStr, e.currentTarget)}
-                >
-                  {/* Hour lines + half-hour lines */}
-                  {Array.from({ length: TOTAL_HOURS }).map((_, i) => (
-                    <div key={i} className="absolute w-full border-t border-foreground/20" style={{ top: i * HOUR_HEIGHT, height: HOUR_HEIGHT }}>
-                      <div className="absolute w-full border-t border-foreground/10" style={{ top: HOUR_HEIGHT / 2 }} />
-                    </div>
-                  ))}
-
-                  {/* Leave overlay */}
-                  {(() => {
-                    const onLeaveEmps = employees.filter(emp =>
-                      timeOffs.some(t => String(t.employee_id) === String(emp.id) && dateStr >= String(t.start_date).slice(0,10) && dateStr <= String(t.end_date).slice(0,10))
-                    );
-                    // If filtering one barber and they're on leave, block the whole column
-                    if (employeeFilter !== 'all' && onLeaveEmps.some(e => String(e.id) === String(employeeFilter))) {
-                      return (
-                        <div className="absolute inset-0 z-20 pointer-events-none flex flex-col items-center justify-center"
-                          style={{ background: 'repeating-linear-gradient(135deg, rgba(239,68,68,0.18), rgba(239,68,68,0.18) 8px, rgba(239,68,68,0.08) 8px, rgba(239,68,68,0.08) 16px)' }}>
-                          <div className="bg-red-500/25 border-2 border-red-500/50 rounded-xl px-4 py-2.5 text-center shadow-lg">
-                            <p className="text-red-500 font-bold text-sm">CONGÉ</p>
-                            <p className="text-red-400 text-[10px] font-medium">Journée bloquée</p>
-                          </div>
-                        </div>
-                      );
-                    }
-                    // Show badges for barbers on leave (all view)
-                    if (onLeaveEmps.length > 0 && employeeFilter === 'all') {
-                      return (
-                        <>
-                          <div className="absolute inset-0 z-10 pointer-events-none"
-                            style={{ background: `rgba(239,68,68,${onLeaveEmps.length === employees.length ? 0.12 : 0.06})` }} />
-                          <div className="absolute top-1 left-1 right-1 z-20 pointer-events-none flex flex-wrap gap-0.5">
-                            {onLeaveEmps.map(emp => (
-                              <span key={emp.id} className="text-[9px] bg-red-500/20 text-red-500 border border-red-500/30 rounded px-1.5 py-0.5 font-semibold truncate max-w-full">
-                                {emp.name} congé
-                              </span>
-                            ))}
-                          </div>
-                        </>
-                      );
-                    }
-                    return null;
-                  })()}
-
-                  {/* Break blocks */}
-                  {dayBreaks.map(apt => (
-                    <div key={apt.id} data-block className="absolute left-1 right-1" style={{ top: 0, bottom: 0, pointerEvents: 'auto' }}>
-                      <BreakBlock apt={apt} onClick={onBreakClick} />
-                    </div>
-                  ))}
-
-                  {/* Last Minute blocks */}
-                  {dayLastMinutes.map(apt => (
-                    <div key={apt.id} data-block className="absolute left-1 right-1" style={{ top: 0, bottom: 0, pointerEvents: 'auto' }}>
-                      <LastMinuteBlock apt={apt} onClick={setSelected} />
-                    </div>
-                  ))}
-
-                  {/* Appointment blocks */}
-                  {dayApts.map(apt => {
-                    const meta = aptMeta[apt.id] || { col: 0, totalCols: 1 };
-                    const colWidth = 100 / meta.totalCols;
-                    const left = `calc(${meta.col * colWidth}% + 2px)`;
-                    const width = `calc(${colWidth}% - 4px)`;
-                    const empColor = getEmpColor(apt.employee_id);
-                    return (
-                      <div key={apt.id} data-block className="absolute" style={{ left, width, top: 0, bottom: 0, pointerEvents: 'none' }}>
-                        <div style={{ position: 'absolute', inset: 0, pointerEvents: 'auto' }}>
-                          <AppointmentBlock apt={apt} empColor={empColor} onStatusChange={onStatusChange} onClick={setSelected} />
-                        </div>
-                      </div>
-                    );
-                  })}
-
-                  {/* Drag preview */}
-                  {dragging && dragging.dateStr === dateStr && (() => {
-                    const s = Math.min(dragging.startMin, dragging.currentMin);
-                    const end = Math.max(dragging.startMin, dragging.currentMin);
-                    if (end - s < 5) return null;
-                    return <DragPreview startMin={s} endMin={end} />;
-                  })()}
-                </div>
-              );
-            })}
-          </div>
-        </div>
       </div>
-
-      <AppointmentDetailModal appointment={selected} onClose={() => setSelected(null)}
-        onUpdate={() => {
-          queryClient.invalidateQueries({ queryKey: ['appointments'] });
-          queryClient.invalidateQueries({ queryKey: ['agendaAppointments'] });
-          queryClient.invalidateQueries({ queryKey: ['adminAppointments'] });
-          setSelected(null);
-        }}
-        onDelete={() => {
-          queryClient.invalidateQueries({ queryKey: ['appointments'] });
-          queryClient.invalidateQueries({ queryKey: ['agendaAppointments'] });
-          queryClient.invalidateQueries({ queryKey: ['adminAppointments'] });
-          setSelected(null);
-        }}
-      />
-    </>
+    </div>
   );
 }
