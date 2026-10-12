@@ -492,6 +492,9 @@ Sept agents ont passé l'app en production au crible (profil iPhone, comptes `qa
 - Web : seulement dans l'app installée (écran d'accueil, `display-mode: standalone`), pas dans un onglet. **Règle Apple 4.5.4 : ne jamais rendre les notifications obligatoires** (toujours « Plus tard »)
 - Les apps des stores ne l'ont qu'avec un nouveau build natif
 
+### Pas de défilement horizontal (règle, 12 oct. 2026)
+- Le fil (`Feed.jsx`, `GlassCard`) a des halos animés qui glissent de ± 40 px sous chaque publication : ils dépassaient de l'écran et la page bougeait de gauche à droite. Le conteneur de `ClientLayout` et celui du contenu d'`AdminLayout` portent `overflow-x-clip` : aucun décor ne peut plus élargir la page. **Toujours `clip`, jamais `overflow-x-hidden`** à ce niveau : `hidden` ferait du conteneur une zone de défilement et casserait les éléments collants (chips des Prestations, recherche des Bons plans…)
+
 ### Fenêtres : fermeture par la croix uniquement (règle, 9 sept. 2026)
 - Un tap à côté d'une fenêtre ne la ferme plus (demande du client : sur mobile, ça refermait les formulaires et perdait la saisie). `DialogContent` (`src/components/ui/dialog.jsx`) neutralise `onPointerDownOutside` / `onInteractOutside` pour toutes les modales shadcn ; Échap reste actif au clavier. Les modales maison (fond `fixed inset-0`) n'ont plus de `onClick` sur le fond : panier de la Boutique, cartes cadeau (client et admin), horaires de l'accueil, fiche de pièce Textile, composeur / menu / signalement / blocage du Feed
 - Toute nouvelle fenêtre doit donc avoir une **croix (ou un bouton Fermer / Annuler) visible** ; ne pas remettre de fermeture au clic sur le fond. Seul le volet de navigation admin sur mobile (`AdminLayout`) se replie encore au tap à côté : c'est un menu, pas une fenêtre
