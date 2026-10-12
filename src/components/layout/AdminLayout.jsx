@@ -7,6 +7,7 @@ import {
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { useTheme } from '@/lib/ThemeContext';
 import { useAuth } from '@/lib/AuthContext';
+import NotificationPrompt from '@/components/shared/NotificationPrompt';
 import { useMusic } from '@/lib/MusicContext';
 
 // All nav items with their default category
@@ -388,6 +389,8 @@ export default function AdminLayout() {
           <Outlet />
         </main>
       </div>
+      {/* Staff : nouveaux rendez-vous, congés, signalements… arrivent aussi par notification */}
+      <NotificationPrompt />
     </div>
   );
 }
