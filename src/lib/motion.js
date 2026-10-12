@@ -6,10 +6,11 @@
  * - iOS 13+ (Safari et WKWebView de l'app) : `DeviceOrientationEvent.requestPermission()`
  *   doit être appelé pendant un vrai geste utilisateur, et pour Safari un appui (pointerdown)
  *   n'en est pas un : seuls le relâchement (touchend / pointerup), le clic et une touche comptent.
- *   On arme donc la demande au niveau de l'application : elle part au premier geste, où qu'il
- *   soit dans l'app, une seule fois, et le résultat est mémorisé (`localStorage`) pour que les
- *   cartes écoutent dès l'ouverture les fois suivantes. Un refus est mémorisé aussi : iOS ne
- *   réaffiche pas la boîte de dialogue, l'appel renvoie « denied » sans rien montrer.
+ *   La demande part du bouton « Activer » de la fenêtre `MotionPrompt` (profil d'un barber,
+ *   12 oct. 2026) ; avant, elle partait sans explication au premier geste n'importe où dans
+ *   l'app. Le résultat est mémorisé (`localStorage`) pour que les cartes écoutent dès
+ *   l'ouverture les fois suivantes. Un refus est mémorisé aussi : iOS ne réaffiche pas la
+ *   boîte de dialogue, l'appel renvoie « denied » sans rien montrer.
  *
  * Les composants s'abonnent avec `onMotionPermission` et lisent `motionPermissionState()`.
  */
@@ -81,6 +82,11 @@ export function requestMotionPermission() {
     .catch(() => state)
     .finally(() => { inFlight = null; });
   return inFlight;
+}
+
+/** Vrai quand une autorisation explicite est nécessaire (iOS) et pas encore décidée. */
+export function motionPermissionPending() {
+  return needsPermission() && initMotionState() === 'unknown';
 }
 
 const GESTURE_EVENTS = ['touchend', 'pointerup', 'click', 'keydown'];

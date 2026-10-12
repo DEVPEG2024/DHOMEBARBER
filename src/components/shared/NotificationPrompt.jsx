@@ -27,8 +27,9 @@ const RULES = {
   denied: { max: 2, gap: 30 * DAY },
 };
 const SHOW_DELAY = 2500;
-// Pas pendant un parcours : réservation, connexion, page de paramètres (interrupteur déjà là)
-const BLOCKED_PATHS = ['/booking', '/login', '/settings'];
+// Pas pendant un parcours : réservation, connexion, page de paramètres (interrupteur déjà là),
+// ni sur le profil d'un barber, où s'ouvre la fenêtre du gyroscope (MotionPrompt)
+const BLOCKED_PATHS = ['/booking', '/login', '/settings', '/barber/'];
 
 function readState() {
   try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; } catch { return {}; }

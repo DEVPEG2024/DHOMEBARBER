@@ -2,6 +2,7 @@ import React from 'react';
 import { Outlet } from 'react-router-dom';
 import BottomNav from './BottomNav';
 import NotificationPrompt from '@/components/shared/NotificationPrompt';
+import MotionPrompt from '@/components/shared/MotionPrompt';
 
 export default function ClientLayout() {
   return (
@@ -9,6 +10,7 @@ export default function ClientLayout() {
       <Outlet />
       <BottomNav />
       <NotificationPrompt />
+      <MotionPrompt />
     </div>
   );
 }
