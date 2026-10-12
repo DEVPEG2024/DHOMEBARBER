@@ -59,6 +59,30 @@ export function isPushSupported() {
   return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
 }
 
+/**
+ * État de l'autorisation des notifications sur cet appareil, sans rien demander :
+ * - `granted` : accordée ; `denied` : refusée (ne se rouvre que dans les réglages du téléphone) ;
+ * - `prompt` : jamais demandée (la fenêtre système peut encore s'afficher) ;
+ * - `optout` : désactivée volontairement dans Paramètres de l'app ; `unsupported` : pas de push ici.
+ */
+export async function getPushPermission() {
+  if (!isPushSupported()) return 'unsupported';
+  if (isNative) {
+    if (readLocal(PUSH_OPTOUT_KEY) === '1') return 'optout';
+    try {
+      const { receive } = await PushNotifications.checkPermissions();
+      if (receive === 'granted') return 'granted';
+      if (receive === 'denied') return 'denied';
+      return 'prompt';
+    } catch {
+      return 'unsupported';
+    }
+  }
+  if (Notification.permission === 'granted') return 'granted';
+  if (Notification.permission === 'denied') return 'denied';
+  return 'prompt';
+}
+
 // Check if already subscribed
 export async function isSubscribed() {
   if (!isPushSupported()) return false;
