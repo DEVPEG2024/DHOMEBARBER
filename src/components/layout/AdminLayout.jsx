@@ -360,7 +360,7 @@ export default function AdminLayout() {
       </aside>
 
       {/* Main content */}
-      <div className="flex-1 min-h-screen min-w-0">
+      <div className="flex-1 min-h-screen min-w-0 overflow-x-clip">
         {/* Mobile header */}
         <header className="sticky top-0 z-30 bg-background/80 backdrop-blur-xl border-b border-border px-3 h-14 flex items-center lg:hidden">
           <button className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-secondary transition-colors"
