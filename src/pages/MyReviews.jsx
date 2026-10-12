@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { api } from '@/api/apiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -21,12 +22,69 @@ function StarSelect({ rating, onRate }) {
   );
 }
 
+const formatDate = (value) => (value ? new Date(value).toLocaleDateString('fr-FR') : '');
+
+/** Carte d'un avis : nom (onglet « Tous les avis »), étoiles, date, barber éventuel, commentaire. */
+function ReviewCard({ review, index, showAuthor }) {
+  return (
+    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(index, 8) * 0.04 }}
+      className="rounded-2xl border border-white/8 bg-white/4 backdrop-blur-xl p-4">
+      <div className="flex items-start justify-between gap-3 mb-2">
+        <div className="flex items-center gap-2.5 min-w-0">
+          {showAuthor && (
+            <div className="w-9 h-9 rounded-full bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center text-sm font-bold text-primary border border-primary/20 shrink-0">
+              {(review.client_name || 'C').charAt(0).toUpperCase()}
+            </div>
+          )}
+          <div className="min-w-0">
+            {showAuthor && <p className="text-sm font-semibold text-foreground truncate">{review.client_name || 'Client'}</p>}
+            <div className="flex gap-0.5">
+              {[1, 2, 3, 4, 5].map(s => (
+                <Star key={s} className={`w-3.5 h-3.5 ${s <= review.rating ? 'text-primary fill-primary' : 'text-muted-foreground/20'}`} />
+              ))}
+            </div>
+          </div>
+        </div>
+        <span className="text-[10px] text-muted-foreground whitespace-nowrap">{formatDate(review.created_date)}</span>
+      </div>
+      {review.employee_name && <p className="text-[11px] text-primary/80 mb-1">avec {review.employee_name}</p>}
+      {review.comment && <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-line">{review.comment}</p>}
+    </motion.div>
+  );
+}
+
+const TABS = [
+  { key: 'all', label: 'Tous les avis' },
+  { key: 'mine', label: 'Mes avis' },
+];
+
+/**
+ * Avis (/reviews) : « Tous les avis » publiés (onglet par défaut, celui du « Voir tout » de
+ * l'accueil) et « Mes avis » (menu Profil, `?tab=mine`). Avant, la page ne montrait que les avis
+ * du client connecté : depuis l'accueil, on tombait sur « Aucun avis » alors que la section en
+ * affichait.
+ */
 export default function MyReviews() {
   const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = searchParams.get('tab') === 'mine' ? 'mine' : 'all';
+  const setTab = (key) => setSearchParams(key === 'all' ? {} : { tab: key }, { replace: true });
   const queryClient = useQueryClient();
   const [showForm, setShowForm] = useState(false);
   const [rating, setRating] = useState(0);
   const [comment, setComment] = useState('');
+
+  // Même requête et même clé que l'accueil (dédupliquée par React Query)
+  const { data: allReviews = [], isLoading: allLoading } = useQuery({
+    queryKey: ['reviews'],
+    queryFn: () => api.entities.Review.filter({ is_visible: true }, '-created_date', 500),
+  });
+  const stats = useMemo(() => {
+    const rated = allReviews.filter(r => Number(r.rating) > 0);
+    if (rated.length === 0) return null;
+    const avg = rated.reduce((sum, r) => sum + Number(r.rating), 0) / rated.length;
+    return { avg: avg.toFixed(1).replace('.', ','), count: rated.length };
+  }, [allReviews]);
 
   const { data: reviews = [], isLoading } = useQuery({
     queryKey: ['myReviews', user?.email],
@@ -43,6 +101,7 @@ export default function MyReviews() {
       setShowForm(false);
       setRating(0);
       setComment('');
+      setTab('mine');
     },
     onError: (err) => toast.error(err?.message || 'Erreur lors de l\'envoi'),
   });
@@ -66,11 +125,65 @@ export default function MyReviews() {
 
       <div className="relative max-w-lg mx-auto px-4 pt-8 pb-28">
         <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mb-7">
-          <p className="text-[11px] uppercase tracking-[0.3em] text-primary font-semibold mb-1">Vos évaluations</p>
-          <h1 className="font-display text-3xl font-bold text-foreground">Mes Avis</h1>
+          <p className="text-[11px] uppercase tracking-[0.3em] text-primary font-semibold mb-1">Témoignages</p>
+          <h1 className="font-display text-3xl font-bold text-foreground">Avis clients</h1>
           <div className="h-0.5 w-12 mt-2 rounded-full bg-gradient-to-r from-primary to-primary/30" />
         </motion.div>
 
+        {stats && (
+          <div className="flex items-center gap-3 mb-5">
+            <span className="font-display text-4xl font-bold text-foreground">{stats.avg}</span>
+            <div>
+              <div className="flex gap-0.5">
+                {[1, 2, 3, 4, 5].map(s => (
+                  <Star key={s} className={`w-4 h-4 ${s <= Math.round(Number(stats.avg.replace(',', '.'))) ? 'text-primary fill-primary' : 'text-muted-foreground/20'}`} />
+                ))}
+              </div>
+              <p className="text-[11px] text-muted-foreground mt-0.5">{stats.count} avis</p>
+            </div>
+          </div>
+        )}
+
+        <div className="flex p-1 rounded-2xl bg-white/4 border border-white/8 mb-6">
+          {TABS.map(t => (
+            <button key={t.key} type="button" onClick={() => setTab(t.key)}
+              className={`relative flex-1 h-10 rounded-xl text-xs font-semibold transition-colors ${tab === t.key ? 'text-primary-foreground' : 'text-muted-foreground'}`}>
+              {tab === t.key && <motion.span layoutId="reviews-tab" className="absolute inset-0 rounded-xl bg-primary" transition={{ type: 'spring', stiffness: 400, damping: 32 }} />}
+              <span className="relative">{t.label}{t.key === 'mine' && reviews.length > 0 ? ` (${reviews.length})` : ''}</span>
+            </button>
+          ))}
+        </div>
+
+        {tab === 'all' ? (
+          allLoading ? (
+            <div className="space-y-3">
+              {[1, 2, 3].map(i => <div key={i} className="h-24 rounded-2xl bg-white/5 animate-pulse" />)}
+            </div>
+          ) : allReviews.length === 0 ? (
+            <div className="text-center py-16">
+              <div className="w-20 h-20 rounded-3xl bg-white/5 border border-white/8 flex items-center justify-center mx-auto mb-5">
+                <MessageSquare className="w-8 h-8 text-muted-foreground/25" />
+              </div>
+              <p className="text-sm font-semibold text-foreground mb-1">Pas encore d'avis</p>
+              <p className="text-xs text-muted-foreground mb-5">Soyez le premier à partager votre expérience.</p>
+              <button type="button" onClick={() => { setTab('mine'); setShowForm(true); }}
+                className="px-5 py-2.5 rounded-xl bg-primary text-primary-foreground text-xs font-semibold">
+                Écrire un avis
+              </button>
+            </div>
+          ) : (
+            <>
+              <button type="button" onClick={() => { setTab('mine'); setShowForm(true); }}
+                className="w-full py-3 rounded-2xl border border-primary/20 bg-primary/5 text-primary text-sm font-semibold mb-4 hover:bg-primary/10 transition-colors">
+                Écrire un avis
+              </button>
+              <div className="space-y-3">
+                {allReviews.map((review, i) => <ReviewCard key={review.id} review={review} index={i} showAuthor />)}
+              </div>
+            </>
+          )
+        ) : (
+        <>
         {/* Google Review CTA */}
         <motion.a
           initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
@@ -133,30 +246,15 @@ export default function MyReviews() {
             <div className="w-20 h-20 rounded-3xl bg-white/5 border border-white/8 flex items-center justify-center mx-auto mb-5">
               <MessageSquare className="w-8 h-8 text-muted-foreground/25" />
             </div>
-            <p className="text-sm font-semibold text-foreground mb-1">Aucun avis</p>
+            <p className="text-sm font-semibold text-foreground mb-1">Vous n'avez pas encore laissé d'avis</p>
             <p className="text-xs text-muted-foreground">Partagez votre expérience après votre visite</p>
           </div>
         ) : (
           <div className="space-y-3">
-            {reviews.map((review, i) => (
-              <motion.div key={review.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
-                className="rounded-2xl border border-white/8 bg-white/4 backdrop-blur-xl p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex gap-0.5">
-                    {[1, 2, 3, 4, 5].map(s => (
-                      <Star key={s} className={`w-3.5 h-3.5 ${s <= review.rating ? 'text-primary fill-primary' : 'text-muted-foreground/20'}`} />
-                    ))}
-                  </div>
-                  <span className="text-[10px] text-muted-foreground">
-                    {review.created_date && new Date(review.created_date).toLocaleDateString('fr-FR')}
-                  </span>
-                </div>
-                {review.comment && (
-                  <p className="text-xs text-muted-foreground leading-relaxed">{review.comment}</p>
-                )}
-              </motion.div>
-            ))}
+            {reviews.map((review, i) => <ReviewCard key={review.id} review={review} index={i} />)}
           </div>
+        )}
+        </>
         )}
       </div>
     </div>

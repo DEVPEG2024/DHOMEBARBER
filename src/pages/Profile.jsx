@@ -14,7 +14,7 @@ const menuItems = [
   { icon: ShoppingBag, label: 'Mes Commandes', path: '/orders', desc: 'Suivi de vos achats' },
   { icon: Shirt, label: 'Textile & Drops', path: '/textile', desc: 'Concepts, votes & réservations' },
   { icon: Handshake, label: 'Bons plans du Gang', path: '/partners', desc: 'Remises chez nos partenaires' },
-  { icon: Star, label: 'Mes Avis', path: '/reviews', desc: 'Vos évaluations' },
+  { icon: Star, label: 'Avis', path: '/reviews', desc: 'Avis clients et les vôtres' },
   { icon: Settings, label: 'Paramètres', path: '/settings', desc: 'Compte & préférences' },
 ];
 
