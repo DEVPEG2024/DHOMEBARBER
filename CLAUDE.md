@@ -59,6 +59,7 @@ src/
 │   ├── hairUltra.js           # Essayage couleur : appel du mode AI ULTRA (backend)
 │   ├── aiWriter.js            # Assistant IA des notifications : features.aiWriter, POST /ai/notification-draft, retouches proposées
 │   ├── textileApi.js          # Textile & drops : client des routes /textile (overview, vote, alerte, réservation, notify), constantes et helpers partagés
+│   ├── feedbackApi.js         # Bugs et suggestions : types, statuts, endroits de l'app, contexte technique joint à l'envoi
 │   ├── partnersApi.js         # Bons plans du Gang : clé React Query, catégories, helpers (meilleure remise, expiration, liens sûrs)
 │   ├── salonEventsApi.js      # Événements du salon : client des routes /salon-events (mine, rsvp, invite, guests, remind), constantes et helpers
 │   ├── app-params.js          # Paramètres app (appId, token, etc.)
@@ -92,7 +93,7 @@ src/
 │   ├── Partners.jsx           # « Les bons plans du Gang » (/partners, lazy) : partenaires, remises, Carte Gang à présenter — composants dans components/partners/
 │   ├── SnapLenses.jsx         # « Filtres Snap » (/snap, lazy) : lentilles Snapchat du salon via Camera Kit
 │   ├── Profile.jsx            # Profil utilisateur
-│   ├── Settings.jsx           # Paramètres client (date de naissance, utilisateurs bloqués, suppression de compte, liens CGU / confidentialité)
+│   ├── Settings.jsx           # Paramètres client (bugs et suggestions — components/feedback/ —, date de naissance, utilisateurs bloqués, suppression de compte, liens CGU / confidentialité)
 │   ├── Login.jsx              # Connexion, inscription, mot de passe oublié (code à 6 chiffres par email)
 │   ├── ClientNotifications.jsx # Notifications client
 │   └── admin/
@@ -108,6 +109,7 @@ src/
 │       ├── AdminEvents.jsx    # Privatisations (demandes des clients) : devis, statut, notes admin
 │       ├── AdminSnap.jsx      # Filtres Snap (/admin/snap, admin) : interrupteur, état des lieux, statistiques d'usage, lentilles (visibilité, nom, ordre, filtre à l'ouverture), palette, styles de barbe, jeton / groupes Camera Kit — composants dans components/snap-admin/
 │       ├── AdminSalonEvents.jsx # Événements du salon (/admin/salon-events) : création (photos, date, lieu, prix, capacité, tenue, visibilité), publication, invitations ciblées ou à tous, liste des invités (RSVP, places, relances, export CSV) — composants dans components/salon-events-admin/
+│       ├── AdminFeedback.jsx  # Bugs et suggestions (/admin/feedback, admin, catégorie Clients) : filtres type / statut, statut, réponse au client (push), capture, suppression
 │       ├── AdminPartners.jsx  # Bons plans du Gang (/admin/partners, admin) : partenaires, offres (pourcentage facultatif), code promo, validité, coup de cœur, ordre
 │       ├── AdminGiftCards.jsx # Cartes cadeau : validation (scan QR ou code), solde restant
 │       ├── AdminTextile.jsx   # Textile & drops (/admin/textile) : drops, pièces (stock par taille, votes), réservations (payée / retirée), push aux abonnés — composants dans components/textile-admin/
@@ -131,7 +133,7 @@ public/
 ```
 
 Routes client : `/`, `/services`, `/booking`, `/shop`, `/appointments`, `/orders`, `/reviews`, `/settings`, `/notifications`, `/profile`, `/barber/:id`, `/feed`, `/events`, `/gift-cards`, `/textile`, `/partners`, `/try-on`, `/snap`, `/login`.
-Routes admin : `/admin`, `/admin/agenda`, `/admin/smart-agenda`, `/admin/services`, `/admin/team`, `/admin/clients`, `/admin/products`, `/admin/stock`, `/admin/orders`, `/admin/reviews`, `/admin/stats`, `/admin/settings`, `/admin/my-settings`, `/admin/notifications`, `/admin/cleaning`, `/admin/my-cleaning`, `/admin/barber-accounts`, `/admin/leave`, `/admin/my-leave`, `/admin/feed`, `/admin/events`, `/admin/gift-cards`, `/admin/textile`, `/admin/salon-events`, `/admin/snap`, `/admin/partners`.
+Routes admin : `/admin`, `/admin/agenda`, `/admin/smart-agenda`, `/admin/services`, `/admin/team`, `/admin/clients`, `/admin/products`, `/admin/stock`, `/admin/orders`, `/admin/reviews`, `/admin/stats`, `/admin/settings`, `/admin/my-settings`, `/admin/notifications`, `/admin/cleaning`, `/admin/my-cleaning`, `/admin/barber-accounts`, `/admin/leave`, `/admin/my-leave`, `/admin/feed`, `/admin/events`, `/admin/gift-cards`, `/admin/textile`, `/admin/salon-events`, `/admin/snap`, `/admin/partners`, `/admin/feedback`.
 
 ## Structure Backend
 
@@ -194,6 +196,7 @@ Mapping entité → table dans `routes/entities.js`.
 | — (routes/snap.js) | snap_config | ligne unique (id = 1) : enabled (interrupteur des filtres), api_token / lens_group_ids (vides = variables Heroku), lenses (JSONB {lensId: {hidden, name, order}}), default_lens (clé d'entrée, `none` = sans filtre), colors / beard_styles (JSONB, NULL = valeurs par défaut de l'app), updated_at, updated_by |
 | — (routes/snap.js) | snap_events | type (open / consent / lens / capture / share / book / error), lens_key (clé d'entrée ou motif d'erreur), lens_name, user_id (NULL à la suppression du compte), created_at |
 | Partner | partners | name, category (food / sport / style / beauty / auto / leisure / services / other), tagline, description, logo_url, cover_image_url, address, city, phone, website, instagram, offers (JSONB [{id, title, percent 1..100 ou null, details}], ≤ 8), promo_code, conditions, valid_until (DATE), is_featured, is_active, sort_order — backend v90, voir `docs/backend-partners.md` |
+| Feedback | feedbacks | type (bug / idea), message, area, screenshot_url, context (JSONB : platform, app_version, screen, user_agent), status (new / in_progress / done / dismissed), admin_reply, replied_at, client_email / client_name (forcés serveur) — **backend à déployer**, voir `docs/backend-feedback.md` |
 | SalonEventInvite | salon_event_invites | event_id, user_email, user_name, status (invited / accepted / declined), guests (places, 1..4), invited_at, responded_at, notified_at, UNIQUE(event_id, user_email) |
 | Order | orders | client_email, client_name, client_phone, items (JSONB), total_price, status, notes |
 | Review | reviews | client_name, client_email, rating, comment, employee_name, is_visible |
@@ -491,6 +494,11 @@ Sept agents ont passé l'app en production au crible (profil iPhone, comptes `qa
 - État lu par `getPushPermission()` (`src/lib/pushNotifications.js` : `granted` / `denied` / `prompt` / `optout` / `unsupported`). Jamais demandée → au plus 3 affichages, 7 jours d'écart ; refusée sur le téléphone → variante « Notifications désactivées » au plus 2 fois, 30 jours d'écart, avec **Ouvrir les réglages** sur iOS (`app-settings:`) et la marche à suivre ailleurs ; accordée ou désactivée volontairement dans Paramètres (`dhb-push-optout`) → jamais. Compteurs dans `localStorage['dhb-notif-prompt']`
 - Web : seulement dans l'app installée (écran d'accueil, `display-mode: standalone`), pas dans un onglet. **Règle Apple 4.5.4 : ne jamais rendre les notifications obligatoires** (toujours « Plus tard »)
 - Les apps des stores ne l'ont qu'avec un nouveau build natif
+
+### Bugs et suggestions (ajouté le 12 oct. 2026)
+- Client : Paramètres → bloc « Bugs et suggestions » (`components/feedback/FeedbackSection.jsx`) : « Signaler un bug » / « Proposer une amélioration » ouvrent `FeedbackSheet.jsx` (bascule bug / suggestion, message 10–2000 caractères, endroit de l'app facultatif, capture via `UploadFile`, contexte technique joint : plateforme, version native via `App.getInfo()`, écran, navigateur), puis « Mes envois » avec statut et réponse du salon. La fenêtre est rendue par portail dans `body` (le bloc parent est animé)
+- Admin : `/admin/feedback` (catégorie Clients, admin) — filtres type et « À traiter », statut modifiable, réponse au client (passe en « En cours », le serveur la pousse au client), capture en grand, suppression en deux taps
+- **Backend à déployer** (`docs/backend-feedback.md`) : tant que l'entité est inconnue (400 / 404), le client se voit proposer « Envoyer par email » vers `salon_settings.email` avec le message pré-rédigé, et l'admin un bandeau
 
 ### Pas de défilement horizontal (règle, 12 oct. 2026)
 - Le fil (`Feed.jsx`, `GlassCard`) a des halos animés qui glissent de ± 40 px sous chaque publication : ils dépassaient de l'écran et la page bougeait de gauche à droite. Le conteneur de `ClientLayout` et celui du contenu d'`AdminLayout` portent `overflow-x-clip` : aucun décor ne peut plus élargir la page. **Toujours `clip`, jamais `overflow-x-hidden`** à ce niveau : `hidden` ferait du conteneur une zone de défilement et casserait les éléments collants (chips des Prestations, recherche des Bons plans…)
