@@ -8,6 +8,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
 import { isNative, openExternalUrl } from '@/lib/capacitor';
+import FeedbackSection from '@/components/feedback/FeedbackSection';
 
 // Mêmes limites que l'inscription (routes/auth.js côté serveur)
 const NAME_MAX = 120;
@@ -316,6 +317,11 @@ export default function Settings() {
               <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${pushEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
             </div>
           </button>
+        </motion.div>
+
+        {/* Bugs et suggestions */}
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.11 }}>
+          <FeedbackSection user={user} />
         </motion.div>
 
         {/* Blocked users */}
