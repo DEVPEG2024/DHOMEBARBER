@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { motion, useMotionValue, useSpring, animate, useReducedMotion } from 'framer-motion';
 import { hapticFeedback } from '@/lib/capacitor';
-import { motionPermissionState, onMotionPermission, requestMotionPermission } from '@/lib/motion';
+import { motionPermissionState, onMotionPermission } from '@/lib/motion';
 
 /**
  * Carte de barber façon FUT (FIFA Ultimate Team, style « Team of the Season ») :
@@ -326,9 +326,6 @@ export default function BarberCard({ employee, stats = [], overall = null, logoU
   };
   const handlePointerUp = (e) => {
     lastPointerRef.current = Date.now();
-    // iOS : seconde chance si l'app a été ouverte directement sur un profil (le relâchement
-    // est un geste utilisateur valide) ; sans effet si déjà accordé ou refusé
-    if (!reduceMotion && !gyroEnabled) requestMotionPermission();
     resetTilt();
     const down = downPosRef.current;
     const moved = down ? Math.hypot(e.clientX - down.x, e.clientY - down.y) : 0;
