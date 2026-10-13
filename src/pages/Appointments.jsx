@@ -4,7 +4,7 @@ import { api } from '@/api/apiClient';
 import { useAuth } from '@/lib/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
-import { Calendar, CalendarPlus, CalendarClock, Clock, User, X, Scissors, Plus, Phone } from 'lucide-react';
+import { Calendar, CalendarPlus, CalendarClock, CalendarSearch, Clock, User, X, Scissors, Plus, Phone, Loader2, ArrowLeft } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { toast } from 'sonner';
@@ -17,6 +17,7 @@ import {
   SALON_PHONE, SALON_PHONE_HREF, CANCEL_REASON_MAX, APPOINTMENT_CANCEL_REASONS,
   useCancelFeatures, friendlyCancelError, cancelledByLabel, cleanReason,
 } from '@/lib/cancellation';
+import { findRescheduleSlots, moveAppointment } from '@/lib/reschedule';
 
 /** Cibles « Ajouter au calendrier ». */
 const CALENDAR_TARGETS = [
@@ -77,6 +78,11 @@ export default function Appointments() {
   const [cancelApt, setCancelApt] = useState(null);
   const [reasonChoice, setReasonChoice] = useState(null);
   const [reasonOther, setReasonOther] = useState('');
+  // La fenêtre propose d'abord de déplacer le rendez-vous ('move'), l'annulation vient ensuite ('cancel')
+  const [dialogMode, setDialogMode] = useState('move');
+  const [chosenSlot, setChosenSlot] = useState(null);
+  // Bouton d'origine : « Annuler » (on propose quand même de déplacer d'abord) ou « Déplacer »
+  const [intent, setIntent] = useState('cancel');
   const navigate = useNavigate();
   const features = useCancelFeatures();
   // Rendez-vous dont le petit menu « Ajouter au calendrier » est ouvert
@@ -105,6 +111,43 @@ export default function Appointments() {
   const salonPhone = settings?.phone || SALON_PHONE;
   const salonPhoneHref = settings?.phone ? telHref(settings.phone) : SALON_PHONE_HREF;
 
+  // Barbers actifs et congés : mêmes requêtes et mêmes caches que la réservation
+  const { data: employees = [], isPending: employeesPending } = useQuery({
+    queryKey: ['employees'],
+    staleTime: 5 * 60 * 1000,
+    queryFn: () => api.entities.Employee.filter({ is_active: true }, 'sort_order', 50),
+    enabled: !!cancelApt,
+  });
+  const { data: timeOffs = [], isPending: timeOffsPending } = useQuery({
+    queryKey: ['timeOffs'],
+    queryFn: () => api.entities.TimeOff.list('-start_date', 200),
+    enabled: !!cancelApt,
+  });
+  const moveBarber = useMemo(
+    () => (cancelApt ? employees.find(e => String(e.id) === String(cancelApt.employee_id)) || null : null),
+    [employees, cancelApt],
+  );
+  // Prochains créneaux libres avec le même barber et les mêmes prestations
+  const slotsQuery = useQuery({
+    queryKey: ['rescheduleSlots', cancelApt?.id, moveBarber?.id],
+    queryFn: () => findRescheduleSlots({ appointment: cancelApt, employee: moveBarber, timeOffs }),
+    enabled: !!cancelApt && dialogMode === 'move' && !!moveBarber && !timeOffsPending,
+    staleTime: 30 * 1000,
+    retry: false,
+  });
+  const suggestions = slotsQuery.data || [];
+  const suggestionsByDay = useMemo(() => {
+    const days = [];
+    for (const slot of suggestions) {
+      const last = days[days.length - 1];
+      if (last && last.date === slot.date) last.slots.push(slot);
+      else days.push({ date: slot.date, label: slot.label, slots: [slot] });
+    }
+    return days;
+  }, [suggestions]);
+  const barberGone = !!cancelApt && !employeesPending && !moveBarber;
+  const loadingSuggestions = !!cancelApt && !barberGone && (employeesPending || timeOffsPending || slotsQuery.isPending);
+
   // Horloge à la minute : un rendez-vous passe dans l'historique dès que son heure de fin est passée
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -119,10 +162,14 @@ export default function Appointments() {
     return reasonChoice;
   };
 
-  const openCancel = (apt) => {
+  /** Ouvre la fenêtre : d'abord la proposition de déplacement, l'annulation ensuite. */
+  const openCancel = (apt, from = 'cancel') => {
     hapticFeedback();
     setReasonChoice(null);
     setReasonOther('');
+    setChosenSlot(null);
+    setIntent(from);
+    setDialogMode('move');
     setCancelApt(apt);
   };
 
@@ -168,6 +215,41 @@ export default function Appointments() {
     },
     onSettled: () => setCancelApt(null),
   });
+
+  /** Déplacement en un geste vers un créneau proposé : nouveau RDV créé, puis l'ancien annulé. */
+  const moveMutation = useMutation({
+    mutationFn: (slot) => moveAppointment({
+      appointment: cancelApt,
+      employee: moveBarber,
+      user,
+      slot,
+      withReason: features.appointmentCancelReason,
+    }),
+    onSuccess: ({ oldCancelled }, slot) => {
+      hapticFeedback();
+      queryClient.invalidateQueries({ queryKey: ['myAppointments'] });
+      queryClient.invalidateQueries({ queryKey: ['appointments'] });
+      queryClient.invalidateQueries({ queryKey: ['appointments-confirmed'] });
+      queryClient.invalidateQueries({ queryKey: ['rescheduleSlots'] });
+      if (oldCancelled) {
+        toast.success(`Rendez-vous déplacé au ${slot.label} à ${slot.time}`);
+      } else {
+        toast.warning(
+          `Nouveau rendez-vous confirmé le ${slot.label} à ${slot.time}, mais l'ancien n'a pas pu être annulé : annulez-le ci-dessous ou appelez le salon au ${salonPhone}.`,
+          { duration: 12000 },
+        );
+      }
+      setCancelApt(null);
+    },
+    onError: (err) => {
+      const message = err?.data?.error || err?.message;
+      const shown = message && !/^HTTP \d+$/.test(message) ? message : 'Ce créneau n\'a pas pu être réservé.';
+      toast.error(`${shown} Choisissez un autre créneau.`);
+      setChosenSlot(null);
+      queryClient.invalidateQueries({ queryKey: ['rescheduleSlots'] });
+    },
+  });
+  const busy = cancelMutation.isPending || moveMutation.isPending;
 
   const confirmCancel = () => {
     if (!cancelApt || cancelMutation.isPending) return;
@@ -391,7 +473,7 @@ export default function Appointments() {
                               <div className="flex items-center gap-3 shrink-0">
                                 <button
                                   type="button"
-                                  onClick={() => goReschedule(apt)}
+                                  onClick={() => openCancel(apt, 'move')}
                                   className="flex items-center gap-1.5 text-[11px] font-semibold text-primary hover:text-primary/80 transition-colors"
                                 >
                                   <CalendarClock className="w-3.5 h-3.5" />
@@ -399,7 +481,7 @@ export default function Appointments() {
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => openCancel(apt)}
+                                  onClick={() => openCancel(apt, 'cancel')}
                                   className="flex items-center gap-1.5 text-[11px] font-semibold text-red-400 hover:text-red-300 transition-colors"
                                 >
                                   <X className="w-3.5 h-3.5" />
@@ -459,15 +541,21 @@ export default function Appointments() {
       {/* Annulation : fenêtre fermée par la croix (pas de tap sur le fond), ouverte pendant l'envoi */}
       <Dialog
         open={!!cancelApt}
-        onOpenChange={(open) => { if (!open && !cancelMutation.isPending) setCancelApt(null); }}
+        onOpenChange={(open) => { if (!open && !busy) setCancelApt(null); }}
       >
         <DialogContent className="w-[calc(100%-2rem)] max-w-md max-h-[85vh] overflow-y-auto bg-card/95 backdrop-blur-2xl border-white/10 rounded-3xl p-5">
           {cancelApt && (
             <>
               <DialogHeader className="text-left pr-6">
-                <DialogTitle className="font-display text-xl">Annuler ce rendez-vous ?</DialogTitle>
+                <DialogTitle className="font-display text-xl">
+                  {dialogMode === 'cancel'
+                    ? 'Annuler ce rendez-vous ?'
+                    : intent === 'cancel' ? 'Et si on le déplaçait ?' : 'Déplacer ce rendez-vous'}
+                </DialogTitle>
                 <DialogDescription className="text-muted-foreground text-sm">
-                  Le créneau sera libéré.
+                  {dialogMode === 'cancel'
+                    ? 'Le créneau sera libéré.'
+                    : `Plutôt que d'annuler, choisissez un autre créneau${cancelApt.employee_name ? ` avec ${cancelApt.employee_name}` : ''} : l'ancien sera libéré automatiquement.`}
                 </DialogDescription>
               </DialogHeader>
 
@@ -494,75 +582,159 @@ export default function Appointments() {
                 )}
               </div>
 
-              {/* Motif facultatif : seulement quand le serveur l'accepte */}
-              {features.appointmentCancelReason && (
-                <div>
-                  <p className="text-xs font-semibold text-foreground mb-2">Motif <span className="font-normal text-muted-foreground">(facultatif)</span></p>
-                  <div className="flex flex-wrap gap-2">
-                    {APPOINTMENT_CANCEL_REASONS.map(r => {
-                      const active = reasonChoice === r;
-                      return (
-                        <button
-                          key={r}
-                          type="button"
-                          disabled={cancelMutation.isPending}
-                          aria-pressed={active}
-                          onClick={() => setReasonChoice(active ? null : r)}
-                          className={`px-3 h-8 rounded-full border text-[11px] font-semibold transition-colors ${
-                            active
-                              ? 'bg-primary/15 border-primary/40 text-primary'
-                              : 'bg-white/5 border-white/10 text-muted-foreground hover:text-foreground'
-                          }`}
-                        >
-                          {r}
-                        </button>
-                      );
-                    })}
+              {dialogMode === 'move' ? (
+                <>
+                  {/* Créneaux libres proposés : même barber, mêmes prestations */}
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-foreground mb-2">Prochains créneaux disponibles</p>
+                    {barberGone ? (
+                      <p className="text-xs text-muted-foreground">
+                        {cancelApt.employee_name || 'Ce barber'} ne prend plus de rendez-vous en ligne : choisissez une date et un autre barber.
+                      </p>
+                    ) : loadingSuggestions ? (
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground py-3">
+                        <Loader2 className="w-4 h-4 animate-spin text-primary" /> Recherche des créneaux libres…
+                      </div>
+                    ) : slotsQuery.isError ? (
+                      <p className="text-xs text-muted-foreground">Impossible de charger les créneaux pour le moment : choisissez une date ci-dessous.</p>
+                    ) : suggestionsByDay.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">Aucun créneau libre dans les 3 prochaines semaines : choisissez une date plus lointaine ci-dessous.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {suggestionsByDay.map(day => (
+                          <div key={day.date} className="flex items-center gap-2 min-w-0">
+                            <span className="w-20 shrink-0 text-[11px] font-semibold text-muted-foreground first-letter:uppercase">{day.label}</span>
+                            <div className="flex flex-wrap gap-2">
+                              {day.slots.map(slot => {
+                                const active = chosenSlot && chosenSlot.date === slot.date && chosenSlot.time === slot.time;
+                                return (
+                                  <button
+                                    key={slot.time}
+                                    type="button"
+                                    disabled={busy}
+                                    aria-pressed={!!active}
+                                    onClick={() => { hapticFeedback(); setChosenSlot(active ? null : slot); }}
+                                    className={`px-3 h-9 rounded-xl border text-sm font-semibold tabular-nums transition-colors ${
+                                      active
+                                        ? 'bg-primary text-primary-foreground border-primary'
+                                        : 'bg-white/5 border-white/10 text-foreground hover:border-primary/40'
+                                    }`}
+                                  >
+                                    {slot.time}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  {reasonChoice === 'Autre' && (
-                    <div className="mt-2">
-                      <textarea
-                        value={reasonOther}
-                        onChange={(e) => setReasonOther(e.target.value.slice(0, CANCEL_REASON_MAX))}
-                        maxLength={CANCEL_REASON_MAX}
-                        rows={2}
-                        disabled={cancelMutation.isPending}
-                        placeholder="Précisez si vous le souhaitez"
-                        className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2 text-base sm:text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-primary/40 resize-none"
-                      />
-                      <p className="text-right text-[10px] text-muted-foreground">{reasonOther.length}/{CANCEL_REASON_MAX}</p>
+
+                  {chosenSlot && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => moveMutation.mutate(chosenSlot)}
+                      className="w-full h-11 rounded-2xl bg-primary text-primary-foreground text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-60"
+                    >
+                      {moveMutation.isPending
+                        ? <><Loader2 className="w-4 h-4 animate-spin" /> Déplacement…</>
+                        : <><CalendarClock className="w-4 h-4" /> {`Déplacer au ${chosenSlot.label} à ${chosenSlot.time}`}</>}
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => goReschedule(cancelApt)}
+                    className="w-full h-11 rounded-2xl border border-primary/30 bg-primary/10 text-primary text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    <CalendarSearch className="w-4 h-4" /> Choisir une autre date
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => { hapticFeedback(); setDialogMode('cancel'); }}
+                    className="mx-auto block text-xs font-semibold text-red-400 hover:text-red-300 disabled:opacity-50"
+                  >
+                    Non merci, je veux annuler
+                  </button>
+                </>
+              ) : (
+                <>
+                  {/* Motif facultatif : seulement quand le serveur l'accepte */}
+                  {features.appointmentCancelReason && (
+                    <div>
+                      <p className="text-xs font-semibold text-foreground mb-2">Motif <span className="font-normal text-muted-foreground">(facultatif)</span></p>
+                      <div className="flex flex-wrap gap-2">
+                        {APPOINTMENT_CANCEL_REASONS.map(r => {
+                          const active = reasonChoice === r;
+                          return (
+                            <button
+                              key={r}
+                              type="button"
+                              disabled={busy}
+                              aria-pressed={active}
+                              onClick={() => setReasonChoice(active ? null : r)}
+                              className={`px-3 h-8 rounded-full border text-[11px] font-semibold transition-colors ${
+                                active
+                                  ? 'bg-primary/15 border-primary/40 text-primary'
+                                  : 'bg-white/5 border-white/10 text-muted-foreground hover:text-foreground'
+                              }`}
+                            >
+                              {r}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {reasonChoice === 'Autre' && (
+                        <div className="mt-2">
+                          <textarea
+                            value={reasonOther}
+                            onChange={(e) => setReasonOther(e.target.value.slice(0, CANCEL_REASON_MAX))}
+                            maxLength={CANCEL_REASON_MAX}
+                            rows={2}
+                            disabled={busy}
+                            placeholder="Précisez si vous le souhaitez"
+                            className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2 text-base sm:text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-primary/40 resize-none"
+                          />
+                          <p className="text-right text-[10px] text-muted-foreground">{reasonOther.length}/{CANCEL_REASON_MAX}</p>
+                        </div>
+                      )}
                     </div>
                   )}
-                </div>
-              )}
 
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  disabled={cancelMutation.isPending}
-                  onClick={() => setCancelApt(null)}
-                  className="flex-1 h-11 rounded-2xl border border-white/10 bg-white/5 text-sm font-semibold text-foreground disabled:opacity-50"
-                >
-                  Non, garder
-                </button>
-                <button
-                  type="button"
-                  disabled={cancelMutation.isPending}
-                  onClick={confirmCancel}
-                  className="flex-1 h-11 rounded-2xl bg-red-500/90 text-white text-sm font-semibold hover:bg-red-500 disabled:opacity-60"
-                >
-                  {cancelMutation.isPending ? 'Annulation…' : 'Oui, annuler'}
-                </button>
-              </div>
-              <button
-                type="button"
-                disabled={cancelMutation.isPending}
-                onClick={() => goReschedule(cancelApt)}
-                className="mx-auto flex items-center gap-1.5 text-xs font-semibold text-primary disabled:opacity-50"
-              >
-                <CalendarClock className="w-3.5 h-3.5" />
-                Déplacer plutôt
-              </button>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => setCancelApt(null)}
+                      className="flex-1 h-11 rounded-2xl border border-white/10 bg-white/5 text-sm font-semibold text-foreground disabled:opacity-50"
+                    >
+                      Non, garder
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={confirmCancel}
+                      className="flex-1 h-11 rounded-2xl bg-red-500/90 text-white text-sm font-semibold hover:bg-red-500 disabled:opacity-60"
+                    >
+                      {cancelMutation.isPending ? 'Annulation…' : 'Oui, annuler'}
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => { hapticFeedback(); setDialogMode('move'); }}
+                    className="mx-auto flex items-center gap-1.5 text-xs font-semibold text-primary disabled:opacity-50"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                    Voir les créneaux pour le déplacer
+                  </button>
+                </>
+              )}
             </>
           )}
         </DialogContent>
