@@ -20,7 +20,7 @@ Textes et ressources utilisés pour la publication de l'app D'Home Barber. Les c
 - **Mots-clés** (100 caractères max) : `barbier,coiffeur,barbe,rendez-vous,réservation,douvaine,haute-savoie,homme,coupe,salon`
 - **Copyright** : 2026 D'Home Barber
 - **Captures 6,9 pouces** (1320 × 2868) : home, booking, services, shop, feed, gift-cards
-- **Nouvelles captures (12 oct. 2026)** : `screenshots/app-store-2026-10/` (1320 × 2868, 6,9 pouces) — accroche + iPhone mis en scène, app actuelle avec les vraies prestations, prix et photos produits (données de démonstration pour le client et les créneaux) : 01 accueil « Ton barber, dans ta poche », 02 prestations, 03 créneaux, 04 confirmation, 05 boutique, 06 mes rendez-vous. Générées par Playwright (build local + API simulée) puis composées en HTML. À poser sur la prochaine version modifiable (une version en examen ne peut plus changer ses captures)
+- **Nouvelles captures (12 oct. 2026)** : `screenshots/app-store-2026-10/` (1320 × 2868, 6,9 pouces) — accroche + iPhone mis en scène, app actuelle avec les vraies prestations, prix et photos produits (données de démonstration pour le client et les créneaux) : 01 accueil « Ton barber, dans ta poche », 02 prestations, 03 créneaux, 04 confirmation, 05 boutique, 06 mes rendez-vous. Générées par Playwright (build local + API simulée) puis composées en HTML. **Posées sur l'App Store le 13 oct. 2026 avec la version 1.0.3** (jeu 6,9 pouces, à la place des 6 captures du 2 sept.). Google Play ne les accepte pas telles quelles (rapport hauteur / largeur de 2,17, le maximum est 2)
 - **Chiffrement** : `ITSAppUsesNonExemptEncryption = false` dans Info.plist (HTTPS uniquement)
 - **Appareils** : iPhone uniquement (`TARGETED_DEVICE_FAMILY = 1`)
 
