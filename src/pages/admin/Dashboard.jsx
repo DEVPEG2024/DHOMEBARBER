@@ -124,11 +124,14 @@ export default function AdminDashboard() {
   const monthRevenue = monthPaid.reduce((sum, a) => sum + getTotal(a), 0);
   const monthTips = monthPaid.reduce((sum, a) => sum + (a.tip || 0), 0);
   const monthProducts = monthPaid.reduce((sum, a) => sum + (a.product_price || 0), 0);
-  // À encaisser = rendez-vous du mois **terminés** (heure de fin passée, heure de Paris) et pas encore
-  // clôturés (« Valider la prestation » : moyen de paiement ou statut terminé). Les RDV à venir n'y
-  // entrent pas : ils ne sont pas encore dus. Même règle que la pastille € de l'agenda (`needsClosing`).
+  // À encaisser (tableau de bord) = deux parts affichées séparément puis additionnées :
+  //  - RDV du mois **terminés** (heure de fin passée, heure de Paris) et pas encore clôturés
+  //    (« Valider la prestation »), même règle que la pastille € de l'agenda (`needsClosing`) ;
+  //  - RDV confirmés **à venir** du mois (pas encore dus).
   const unclosedMonth = thisMonth.filter(a => a.status === 'confirmed' && !isPaid(a) && needsClosing(a));
   const monthUnpaid = unclosedMonth.reduce((sum, a) => sum + (a.total_price || 0), 0);
+  const upcomingMonth = thisMonth.filter(a => a.status === 'confirmed' && !isPaid(a) && !needsClosing(a));
+  const monthUpcoming = upcomingMonth.reduce((sum, a) => sum + (a.total_price || 0), 0);
   const noShowsMonth = thisMonth.filter(a => a.status === 'no_show').length;
   const cancelledMonth = thisMonth.filter(a => a.status === 'cancelled').length;
 
@@ -316,7 +319,7 @@ export default function AdminDashboard() {
       </div>
 
       {/* Tous les canaux de vente : CA global, répartition, boutique, cartes cadeau, privatisations, textile */}
-      <SalesOverview appointments={{ today: todayRevenue, month: monthRevenue, unpaidToday: todayUnpaid, unpaidMonth: monthUnpaid, unpaidCount: unclosedMonth.length }} />
+      <SalesOverview appointments={{ today: todayRevenue, month: monthRevenue, unpaidToday: todayUnpaid, unpaidMonth: monthUnpaid, unpaidCount: unclosedMonth.length, upcomingMonth: monthUpcoming, upcomingCount: upcomingMonth.length }} />
 
       {/* Rendez-vous : prestations + produits vendus en RDV */}
       <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
