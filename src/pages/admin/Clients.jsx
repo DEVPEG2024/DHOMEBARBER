@@ -155,10 +155,12 @@ export default function Clients() {
     return allUsersPromise.current;
   }, [queryClient]);
 
-  // Dès qu'une recherche est saisie, on complète le chargement en tâche de fond
+  // Le nombre de clients affiché en tête doit être le vrai total : on complète le chargement de
+  // tous les comptes en tâche de fond dès l'ouverture (la liste ne transporte plus de photos,
+  // quelques lots légers). La recherche et les actions groupées en profitent aussi.
   useEffect(() => {
-    if (search.trim() && hasNextPage) ensureAllUsers().catch(() => {});
-  }, [search, hasNextPage, ensureAllUsers]);
+    if (hasNextPage) ensureAllUsers().catch(() => {});
+  }, [hasNextPage, ensureAllUsers]);
 
   const clients = useMemo(
     () => buildClients(registeredUsers, appointments, employees),
@@ -398,7 +400,7 @@ export default function Clients() {
           <p className="text-[11px] uppercase tracking-[0.2em] text-primary font-medium mb-1">CRM</p>
           <h1 className="font-display text-2xl font-bold">Clients</h1>
           <p className="text-xs text-muted-foreground mt-1">
-            {clients.length}{hasNextPage ? '+' : ''} clients enregistrés
+            {hasNextPage ? 'Comptage des clients…' : `${clients.length} client${clients.length > 1 ? 's' : ''} enregistré${clients.length > 1 ? 's' : ''}`}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 justify-end">
@@ -508,7 +510,7 @@ export default function Clients() {
             disabled={isFetchingNextPage}
             onClick={() => (canShowMore ? setVisibleCount(v => v + ROWS_STEP) : fetchNextPage())}
           >
-            {isFetchingNextPage ? 'Chargement...' : `Afficher plus (${visibleClients.length}/${filtered.length}${hasNextPage ? '+' : ''})`}
+            {isFetchingNextPage ? 'Chargement...' : `Afficher plus (${visibleClients.length}/${filtered.length})`}
           </Button>
         </div>
       )}
@@ -564,7 +566,7 @@ export default function Clients() {
           <AlertDialogHeader>
             <AlertDialogTitle>Supprimer tous les clients</AlertDialogTitle>
             <AlertDialogDescription>
-              Êtes-vous sûr de vouloir supprimer <strong>tous les {clients.length}{hasNextPage ? '+' : ''} clients</strong> ?
+              Êtes-vous sûr de vouloir supprimer <strong>tous les {clients.length} clients</strong> ?
               Tous les rendez-vous ({appointments.length}) seront également supprimés. Cette action est irréversible.
             </AlertDialogDescription>
           </AlertDialogHeader>
