@@ -90,7 +90,7 @@ function ChannelPanel({ title, icon: Icon, color, to, children, badge }) {
 
 /**
  * @param {object} props
- * @param {{ today: number, month: number, unpaidToday: number, unpaidMonth: number, unpaidCount: number }} props.appointments
+ * @param {{ today: number, month: number, unpaidToday: number, unpaidMonth: number, unpaidCount: number, upcomingMonth: number, upcomingCount: number }} props.appointments
  *   CA des rendez-vous encaissés (prestations + produits vendus en RDV) et montants non encaissés
  */
 export default function SalesOverview({ appointments }) {
@@ -189,15 +189,19 @@ export default function SalesOverview({ appointments }) {
     ];
     const totalToday = sum(channels, (c) => c.today);
     const totalMonth = sum(channels, (c) => c.month);
-    // À encaisser : uniquement les rendez-vous terminés et non clôturés (demande du salon, 13 oct. 2026).
-    // Commandes, cartes et précommandes en attente restent dans leurs panneaux respectifs.
-    const pendingAmount = appointments.unpaidMonth || 0;
-    const pendingCount = appointments.unpaidCount || 0;
+    // À encaisser : rendez-vous du mois seulement (demande du salon, 13 oct. 2026) = terminés non
+    // clôturés + à venir, chaque part détaillée sous le total. Commandes, cartes et précommandes en
+    // attente restent dans leurs panneaux respectifs.
+    const unclosedAmount = appointments.unpaidMonth || 0;
+    const unclosedCount = appointments.unpaidCount || 0;
+    const upcomingAmount = appointments.upcomingMonth || 0;
+    const upcomingCount = appointments.upcomingCount || 0;
+    const pending = { total: unclosedAmount + upcomingAmount, unclosedAmount, unclosedCount, upcomingAmount, upcomingCount };
 
-    return { boutique, cartes, privatisations, textile: textileStats, channels, totalToday, totalMonth, pendingAmount, pendingCount };
+    return { boutique, cartes, privatisations, textile: textileStats, channels, totalToday, totalMonth, pending };
   }, [orders, giftCards, events, textile, reservations, appointments, today, monthPrefix]);
 
-  const { boutique, cartes, privatisations, textile: tx, channels, totalToday, totalMonth, pendingAmount, pendingCount } = stats;
+  const { boutique, cartes, privatisations, textile: tx, channels, totalToday, totalMonth, pending } = stats;
   const otherToday = totalToday - (appointments.today || 0);
   const otherMonth = totalMonth - (appointments.month || 0);
   const drop = tx.currentDrop;
@@ -220,12 +224,19 @@ export default function SalesOverview({ appointments }) {
           onClick={() => navigate('/admin/agenda?view=week')}
           className="bg-card border border-border rounded-xl p-4 cursor-pointer hover:border-primary/30 active:scale-[0.98] transition-all">
           <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">À encaisser</p>
-          <p className="text-2xl font-bold mt-1 text-amber-400">{eur(pendingAmount)}</p>
-          <p className="text-[10px] text-muted-foreground mt-0.5">
-            {pendingCount === 0
-              ? 'Tous les RDV terminés du mois sont clôturés'
-              : `${pendingCount} RDV terminé${pendingCount > 1 ? 's' : ''} non clôturé${pendingCount > 1 ? 's' : ''} ce mois ▸`}
-          </p>
+          <p className="text-2xl font-bold mt-1 text-amber-400">{eur(pending.total)}</p>
+          <div className="mt-1 space-y-0.5 text-[10px] leading-tight">
+            <p className="flex justify-between gap-2">
+              <span className="text-muted-foreground">
+                {pending.unclosedCount} terminé{pending.unclosedCount > 1 ? 's' : ''} non clôturé{pending.unclosedCount > 1 ? 's' : ''}
+              </span>
+              <span className={`font-semibold tabular-nums shrink-0 ${pending.unclosedAmount > 0 ? 'text-amber-400' : 'text-muted-foreground'}`}>{eur(pending.unclosedAmount)}</span>
+            </p>
+            <p className="flex justify-between gap-2">
+              <span className="text-muted-foreground">{pending.upcomingCount} à venir ce mois</span>
+              <span className="font-semibold tabular-nums shrink-0 text-foreground">{eur(pending.upcomingAmount)}</span>
+            </p>
+          </div>
         </motion.div>
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
           onClick={() => navigate('/admin/textile')}
