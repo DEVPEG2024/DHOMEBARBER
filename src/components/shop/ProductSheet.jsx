@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import FavoriteButton from '@/components/shared/FavoriteButton';
+import { useFavorites } from '@/lib/favorites';
 import { AnimatePresence, motion } from 'framer-motion';
 import { X, ChevronLeft, ChevronRight, ShoppingBag, ShoppingCart, Minus, Plus, Store, PackageX, AlertTriangle } from 'lucide-react';
 import { hapticFeedback } from '@/lib/capacitor';
@@ -98,6 +100,7 @@ function ProductGallery({ images, name, reduceMotion, galleryRef }) {
  * est l'élément d'où part la vignette qui vole vers le panier (la galerie, sinon le bouton).
  */
 export default function ProductSheet({ product, cartQty = 0, onClose, onAdd, reduceMotion = false }) {
+  const favorites = useFavorites();
   const images = useMemo(() => productImages(product), [product]);
   const stock = useMemo(() => stockInfo(product), [product]);
   const [quantity, setQuantity] = useState(1);
@@ -178,7 +181,13 @@ export default function ProductSheet({ product, cartQty = 0, onClose, onAdd, red
                 )}
                 <h2 className="font-display text-xl font-bold leading-tight text-foreground mt-1">{product.name}</h2>
               </div>
-              <p className="font-fut text-3xl font-bold text-primary leading-none shrink-0">{formatPrice(price)}</p>
+              <div className="flex items-center gap-2 shrink-0">
+                <FavoriteButton
+                  active={favorites.products.has(String(product.id))}
+                  onToggle={() => favorites.toggle('products', product.id, product.name)}
+                />
+                <p className="font-fut text-3xl font-bold text-primary leading-none">{formatPrice(price)}</p>
+              </div>
             </div>
 
             {/* Stock : rien si non suivi ; « Plus que N » sous le seuil ; « Rupture » à zéro */}

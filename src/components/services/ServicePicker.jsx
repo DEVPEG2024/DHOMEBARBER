@@ -7,6 +7,8 @@ import { hapticFeedback } from '@/lib/capacitor';
 import ServiceItemCard, { KindIcon } from './ServiceItemCard';
 import CategoryChips from './CategoryChips';
 import FormulasBlock from './FormulasBlock';
+import FavoriteServicesBlock from './FavoriteServicesBlock';
+import { useFavorites } from '@/lib/favorites';
 import {
   EASE,
   OTHER_GROUP_ID,
@@ -50,6 +52,8 @@ const cheapest = (list) => [...list].sort((a, b) => (Number(a.price) || 0) - (Nu
  * @param {boolean} [props.loading]
  */
 export default function ServicePicker({ services = [], selectedIds, onToggle, onSwap, loading = false }) {
+  const favorites = useFavorites();
+  const toggleFavorite = useCallback((service) => favorites.toggle('services', service.id, service.name), [favorites]);
   const reduceMotion = useReducedMotion();
   const [query, setQuery] = useState('');
   const [activeCat, setActiveCat] = useState('all');
@@ -310,6 +314,20 @@ export default function ServicePicker({ services = [], selectedIds, onToggle, on
         )}
       </AnimatePresence>
 
+      {/* Favoris du client (hors recherche et pendant le chargement) */}
+      {!query && !loading && (
+        <FavoriteServicesBlock
+          services={services}
+          favoriteIds={favorites.services}
+          selectedIds={selectedSet}
+          popularIds={popularIds}
+          newIds={newIds}
+          onToggle={onToggle}
+          onFavorite={toggleFavorite}
+          reduceMotion={reduceMotion}
+        />
+      )}
+
       {/* Formules en vitrine (hors recherche) */}
       <FormulasBlock
         formulas={formulas}
@@ -363,6 +381,8 @@ export default function ServicePicker({ services = [], selectedIds, onToggle, on
                     popular={popularIds.has(id)}
                     isNew={newIds.has(id)}
                     onToggle={onToggle}
+                    favorite={favorites.services.has(id)}
+                    onFavorite={toggleFavorite}
                     reduceMotion={reduceMotion}
                     index={i}
                   />

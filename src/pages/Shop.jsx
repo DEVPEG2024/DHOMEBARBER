@@ -1,16 +1,18 @@
 import React, { useState, useRef, useLayoutEffect, useEffect, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '@/api/apiClient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { motion, AnimatePresence, useScroll, useTransform, useMotionValue, useReducedMotion, animate } from 'framer-motion';
 import { hapticFeedback } from '@/lib/capacitor';
-import { ShoppingBag, Plus, Minus, ShoppingCart, X, Trash2, Store, CheckCircle, Images } from 'lucide-react';
+import { ShoppingBag, Plus, Minus, ShoppingCart, X, Trash2, Store, CheckCircle, Images, Heart } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import ProductSheet from '@/components/shop/ProductSheet';
+import FavoriteButton from '@/components/shared/FavoriteButton';
+import { useFavorites } from '@/lib/favorites';
 import { productCategoryLabel, productImages, stockInfo } from '@/components/shop/productUtils';
 
 /** Vol de la vignette produit vers le panier : taille du disque (px) et durée (s). */
@@ -121,7 +123,10 @@ export default function Shop() {
   useEffect(() => {
     writeCart(cartState.key, cartState.items);
   }, [cartState]);
-  const [activeCategory, setActiveCategory] = useState('all');
+  const [searchParams] = useSearchParams();
+  // `/shop?filter=favorites` (page Mes favoris) : la boutique s'ouvre filtrée sur les favoris
+  const [activeCategory, setActiveCategory] = useState(() => (searchParams.get('filter') === 'favorites' ? 'favorites' : 'all'));
+  const favorites = useFavorites();
   const [showCart, setShowCart] = useState(false);
   const [notes, setNotes] = useState('');
   const [ordering, setOrdering] = useState(false);
@@ -170,7 +175,14 @@ export default function Shop() {
 
   const filtered = activeCategory === 'all'
     ? products
-    : products.filter(p => p.category === activeCategory);
+    : activeCategory === 'favorites'
+      ? products.filter(p => favorites.products.has(String(p.id)))
+      : products.filter(p => p.category === activeCategory);
+  const favoriteCount = products.filter(p => favorites.products.has(String(p.id))).length;
+  // Plus aucun favori pendant que le filtre est actif : retour à « Tout »
+  useEffect(() => {
+    if (productsLoaded && activeCategory === 'favorites' && favoriteCount === 0) setActiveCategory('all');
+  }, [productsLoaded, activeCategory, favoriteCount]);
 
   const categories = [...new Set(products.map(p => p.category).filter(Boolean))];
 
@@ -337,6 +349,18 @@ export default function Shop() {
         >
           Tout
         </button>
+        {favoriteCount > 0 && (
+          <button
+            onClick={() => setActiveCategory('favorites')}
+            aria-pressed={activeCategory === 'favorites'}
+            className={`flex-shrink-0 inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-medium transition-all ${
+              activeCategory === 'favorites' ? 'bg-rose-500 text-white' : 'bg-secondary text-muted-foreground'
+            }`}
+          >
+            <Heart className={`w-3.5 h-3.5 ${activeCategory === 'favorites' ? 'fill-white' : 'fill-rose-500 text-rose-500'}`} aria-hidden="true" />
+            Favoris ({favoriteCount})
+          </button>
+        )}
         {categories.map(cat => (
           <button
             key={cat}
@@ -365,8 +389,14 @@ export default function Shop() {
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: i * 0.05 }}
-                className="bg-card border border-border rounded-xl overflow-hidden"
+                className="relative bg-card border border-border rounded-xl overflow-hidden"
               >
+                <FavoriteButton
+                  variant="overlay"
+                  active={favorites.products.has(String(product.id))}
+                  onToggle={() => favorites.toggle('products', product.id, product.name)}
+                  className="absolute top-1.5 right-1.5 z-10"
+                />
                 <button
                   type="button"
                   onClick={() => openSheet(product)}
