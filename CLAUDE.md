@@ -128,7 +128,7 @@ src/
 │       ├── BarberLeave.jsx    # Congés (vue barber)
 │       ├── BarberAccounts.jsx # Comptes barbers
 │       ├── BarberCleaning.jsx # Nettoyage (vue barber)
-│       ├── Cleaning.jsx       # Gestion nettoyage (admin)
+│       ├── Cleaning.jsx       # Gestion nettoyage (admin) : planning réparti selon la présence réelle (ligne « Au salon », tâches tombées sur un absent signalées)
 │       ├── Notifications.jsx  # Notifications admin (push + email) avec l'Assistant IA de rédaction (components/notifications/AiWriterPanel.jsx)
 │       ├── Team.jsx           # Gestion équipe
 │       └── Stats.jsx          # Statistiques
@@ -163,6 +163,7 @@ dhomebarber-api/
 │   ├── pushHelper.js  # sendPushToRole, sendPushToEmail, sendPushToEmployee, sendToSubscriptions (Web Push, lots de 50)
 │   ├── hairUltra.js   # AI ULTRA : SAM 3 + FLUX Kontext (fal.ai) + fusion gardée par le masque (sharp)
 │   ├── aiWriter.js    # Assistant de rédaction des notifications : Claude via @anthropic-ai/sdk, sortie JSON structurée
+│   ├── cleaningPlan.js # Entretien : présence par jour (horaires − pauses de l'agenda, repos, congés, salon fermé), répartition au prorata de la présence
 │   ├── orders.js      # Commandes : création en transaction (stock décompté, quotas, doublon), annulation (stock rendu), transitions du staff
 │   ├── adminAlerts.js # Alertes push admin « Activité clients » (actions des clients seulement, préférences salon_settings.admin_alerts)
 │   └── snapConfig.js  # Filtres Snap : ligne snap_config (cache 30 s), jeton / groupes effectifs (admin > Heroku), bloc public, validation des modifications
@@ -184,7 +185,7 @@ dhomebarber-api/
     ├── push.js        # Web Push (vapid-key, subscribe, unsubscribe, send, subscribers) + subscribe-native (token FCM/APNs)
     ├── upload.js      # Upload fichiers (images)
     ├── barberAccounts.js  # Gestion comptes barbers
-    ├── cleaning.js    # generate-schedule, notify-today, toggle, history
+    ├── cleaning.js    # generate-schedule (présence réelle, garde jours passés et tâches faites), availability, notify-today, toggle, history
     ├── leave.js       # PATCH /leave/:id/status : admin approuve/refuse un congé + push au barber
     ├── textile.js     # Textile & drops : GET /textile/overview, vote, alerte, réservation (transaction + stock), cancel, notify (staff) — lib/textileNotify.js pour le push d'ouverture
     ├── salonEvents.js # Événements du salon : GET /salon-events/mine, rsvp (transaction + capacité), invite (staff : push + email), guests, remind ; helpers de push exposés sur le routeur
@@ -304,7 +305,7 @@ Rapport complet : https://claude.ai/code/artifact/406820a6-13b7-43f2-bd32-65cd3e
 - **Battement de cœur WebSocket** (backend v80) : le routeur Heroku ferme toute connexion sans trafic au bout de 55 s. Le compteur `/ws/live` n'envoyant rien quand le nombre de connectés ne bouge pas, la socket était tuée (`H15 Idle connection`, visible dans les journaux depuis au moins le 3 sept.) et `useLiveCount` se reconnectait 3 s plus tard, en boucle — une poignée de main par client et par minute. Un `ws.ping()` toutes les 30 s la maintient ouverte ; le `pong` (renvoyé automatiquement par les navigateurs, aucun code client) sert à terminer les sockets réellement mortes. Minuteur annulé dans `gracefulShutdown`
 - **`POST /cleaning/notify-today`** utilise désormais `ac.parisToday()` : avec `toISOString()` il notifiait le ménage de la veille entre minuit et 2 h du matin à Paris
 - **Ramasse-miettes des médias** : `cleanup-media.js` supprime les images que plus aucune colonne ne cite (une image est référencée par une URL dans du texte, aucune clé étrangère ne peut le faire). **Simulation par défaut**, suppression avec `--apply`, délai de grâce de 7 jours (`--days=N`) pour ne pas emporter un fichier envoyé mais pas encore rattaché à une entité. `heroku run "node cleanup-media.js" --app dhomebarber-api`. La logique vit dans `jobs/mediaCleanup.js` et tourne **automatiquement le dimanche à 03h30 heure de Paris** (backend v81) ; le script en ligne de commande reste disponible pour un passage à la demande
-- **Tests dans le dépôt** : `cd dhomebarber-api && npm test` — 19 harnais au 13 oct. 2026 (dont `test-ai-writer.js` depuis le 7 oct. 2026, `test-snap.js`, 35 vérifications, depuis le pilotage des filtres Snap le 25 sept. 2026), sans dépendance ni accès à la base de production (le pool, `http2` et `fetch` sont remplacés avant le chargement du code testé)
+- **Tests dans le dépôt** : `cd dhomebarber-api && npm test` — 20 harnais au 14 oct. 2026 (dont `test-ai-writer.js` depuis le 7 oct. 2026, `test-snap.js`, 35 vérifications, depuis le pilotage des filtres Snap le 25 sept. 2026), sans dépendance ni accès à la base de production (le pool, `http2` et `fetch` sont remplacés avant le chargement du code testé)
 
 ### Types de données
 - Les colonnes `decimal` de PostgreSQL sont converties en nombres dans `normalizeRow()`
@@ -353,6 +354,12 @@ Le `server.js` exécute des migrations automatiques au démarrage (`ADD COLUMN I
 - Le bouton « Valider la prestation » sauvegarde : payment_method, tip, tip_method, product_sold, product_price, grand_total, status='completed' ; toute modification invalide `appointments`, `agendaAppointments`, `adminAppointments`, `allAppointments`, `planningAppointments` (`invalidateAppointmentQueries`)
 - Planning : congés modifiables (crayon ou tap sur la ligne), suppression confirmée, badge « En attente » / « Refusé » ; les compteurs ignorent pauses, last minute, annulés et absents
 - Vérifié le 8 oct. 2026 sur build local servi à l'adresse dhomebarber.fr (Playwright, 390 × 844 et 1366 × 900, jeton admin d'1 h, lectures réelles + RDV fictifs injectés dans le navigateur, toute écriture interceptée)
+
+### Entretien du salon (planning du ménage, revu le 14 oct. 2026, backend v103)
+- **Présence réelle** (`lib/cleaningPlan.js`) : horaires du jour du barber (`working_hours`) moins ses **pauses de l'agenda** (`status = 'break'`, chevauchements fusionnés) ; absent si jour de repos, congé approuvé, salon fermé (`opening_hours`) ou **moins d'1 h de présence** — l'équipe bloque des journées entières avec une pause (Dom, 09:30–19:00). Sans horaires exploitables : journée type 09:30–19:00
+- **Répartition** : toutes les tâches actives chaque jour ouvert (lundi → samedi), chacune au barber présent le moins chargé au regard de son temps de présence depuis lundi ((tâches + 1) / minutes), donc au prorata de la présence (semaine du 12 oct. : Romain 16, Kevin 16, Dom 10)
+- **Régénérer** ne touche qu'aux tâches à faire d'aujourd'hui et des jours suivants (heure de Paris) : jours passés et tâches faites conservés et comptés dans la charge (avant : tout était effacé, coches comprises). Une pause ajoutée après la génération ne déplace rien toute seule
+- **Admin** (`Cleaning.jsx`) : `GET /cleaning/availability?weekStart=` (staff) → ligne « Au salon » (présence en heures, absents barrés avec la raison) ; une tâche à faire tombée sur un absent est en ambre « absent » avec un bandeau qui invite à régénérer. Tests : `test/test-cleaning.js` (7)
 
 ### Dashboard
 - **Tous les canaux de vente** (`src/components/admin/SalesOverview.jsx`, ajouté le 9 sept. 2026 à la demande du client) : en tête, CA global aujourd'hui / du mois (tous canaux), montant à encaisser, drop textile en cours ; répartition du CA du mois par canal (barres) ; puis un panneau par canal avec lien « Gérer ». Règles de comptage : prestations = RDV encaissés (calcul de `Dashboard.jsx`, passé en props) ; boutique = commandes `delivered` (payées au retrait), en cours = pending / confirmed / ready ; cartes cadeau = `validated` / `used` à la date `validated_at`, en attente = `pending`, solde en circulation = reste des cartes validées ; privatisations = événements `accepted` / `confirmed` avec prix, à la date de l'événement ; textile = précommandes `paid` / `ready` / `picked_up` (prix × quantité), à payer = `reserved`. Sans horodatage d'encaissement (commandes, textile), la date de création sert d'approximation. Clés React Query dédiées `['dashboard', …]` (commandes, cartes, événements) ; textile via `TEXTILE_QUERY_KEY` et `['textileReservations','all']`

@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { api, apiRequest, apiUrl } from '@/api/apiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
-import { Plus, Pencil, Trash2, Sparkles, ChevronLeft, ChevronRight, Bell, Check, RefreshCw, History, ChevronDown, ChevronUp } from 'lucide-react';
+import { Plus, Pencil, Trash2, Sparkles, ChevronLeft, ChevronRight, Bell, Check, RefreshCw, History, ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -15,6 +15,22 @@ import { fr } from 'date-fns/locale';
 
 
 const DAY_LABELS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
+
+// Temps de présence : 450 → « 7 h 30 »
+function formatPresence(minutes) {
+  const h = Math.floor(minutes / 60);
+  const m = Math.round(minutes % 60);
+  if (h === 0) return `${m} min`;
+  return m ? `${h} h ${String(m).padStart(2, '0')}` : `${h} h`;
+}
+
+// Raisons d'absence renvoyées par le serveur (lib/cleaningPlan.js), en version courte pour la grille
+const ABSENCE_SHORT = {
+  repos: 'repos',
+  'congé': 'congé',
+  'en pause toute la journée': 'pause',
+  'salon fermé': 'fermé',
+};
 
 export default function Cleaning() {
   const [weekOffset, setWeekOffset] = useState(0);
@@ -46,6 +62,24 @@ export default function Cleaning() {
     queryKey: ['employees'],
     queryFn: () => api.entities.Employee.filter({ is_active: true }),
   });
+
+  // Présence réelle de chaque barber par jour : horaires moins les pauses de l'agenda, repos et
+  // congés (GET /cleaning/availability, même calcul que la génération du planning)
+  const { data: availability } = useQuery({
+    queryKey: ['cleaningAvailability', weekStart],
+    queryFn: () => apiRequest('GET', apiUrl(`/cleaning/availability?weekStart=${weekStart}`)),
+    staleTime: 60 * 1000,
+  });
+  const presenceByDate = useMemo(() => {
+    const map = {};
+    for (const d of availability?.days || []) map[d.date] = d;
+    return map;
+  }, [availability]);
+  const isAbsent = (empId, date) => {
+    const d = presenceByDate[date];
+    const b = d?.barbers?.find((x) => String(x.id) === String(empId));
+    return b ? !b.present : false;
+  };
 
   const { data: history = [] } = useQuery({
     queryKey: ['cleaningHistory'],
@@ -92,7 +126,9 @@ export default function Cleaning() {
     try {
       const data = await apiRequest('POST', apiUrl('/cleaning/generate-schedule'), { weekStart });
       queryClient.invalidateQueries({ queryKey: ['cleaningSchedule'] });
-      toast.success(`Planning généré : ${data.count || 0} affectations`);
+      queryClient.invalidateQueries({ queryKey: ['cleaningAvailability', weekStart] });
+      const kept = data.kept ? ` (${data.kept} conservée${data.kept > 1 ? 's' : ''} : jours passés ou déjà faites)` : '';
+      toast.success(`Planning généré : ${data.count || 0} affectation${(data.count || 0) > 1 ? 's' : ''}${kept}`);
     } catch {
       toast.error('Erreur lors de la génération');
     }
@@ -132,6 +168,11 @@ export default function Cleaning() {
   }, [schedule, tasks, weekDates]);
 
   const getEmpColor = (empId) => employees.find(e => e.id === empId)?.color || '#3fcf8e';
+
+  // Tâches à faire, d'aujourd'hui ou plus tard, tombées sur un barber absent (pause, congé ou
+  // horaires changés depuis la génération) : il faut régénérer
+  const today = format(new Date(), 'yyyy-MM-dd');
+  const misplaced = schedule.filter(s => s.status !== 'done' && s.date >= today && isAbsent(s.employee_id, s.date)).length;
 
   return (
     <div>
@@ -194,6 +235,22 @@ export default function Cleaning() {
         </Button>
       </div>
 
+      <p className="text-[11px] text-muted-foreground mb-3">
+        Les tâches vont aux barbers présents ce jour-là : horaires du jour moins les pauses de l'agenda,
+        hors repos et congés. Moins d'1 h de présence compte comme une absence. La répartition suit le
+        temps de présence de la semaine. Régénérer garde les jours passés et les tâches déjà faites.
+      </p>
+
+      {misplaced > 0 && (
+        <div className="flex items-start gap-2 bg-amber-500/10 border border-amber-500/30 text-amber-300 rounded-xl px-3 py-2.5 mb-4 text-xs">
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+          <p>
+            {misplaced} tâche{misplaced > 1 ? 's' : ''} {misplaced > 1 ? 'tombent' : 'tombe'} sur un barber absent
+            (pause ou congé ajouté depuis). Cliquez sur « Générer planning » pour les redistribuer.
+          </p>
+        </div>
+      )}
+
       {/* Schedule grid */}
       {Object.keys(scheduleGrid).length === 0 ? (
         <div className="text-center py-12 bg-card border border-border rounded-xl">
@@ -215,6 +272,26 @@ export default function Cleaning() {
                     </th>
                   ))}
                 </tr>
+                {availability?.days && (
+                  <tr className="border-b border-border bg-secondary/20">
+                    <td className="px-3 py-2 align-top text-[11px] font-semibold text-muted-foreground">Au salon</td>
+                    {weekDates.map(date => {
+                      const d = presenceByDate[date];
+                      return (
+                        <td key={date} className="px-1.5 py-2 align-top">
+                          <div className="flex flex-col items-center gap-0.5">
+                            {(d?.barbers || []).map(b => (
+                              <span key={b.id}
+                                className={`text-[10px] leading-tight whitespace-nowrap ${b.present ? 'text-foreground' : 'text-muted-foreground/50 line-through'}`}>
+                                {b.name} {b.present ? formatPresence(b.minutes) : (ABSENCE_SHORT[b.reason] || b.reason)}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                )}
               </thead>
               <tbody>
                 {Object.entries(scheduleGrid).map(([taskName, days]) => (
@@ -225,6 +302,7 @@ export default function Cleaning() {
                       if (!item) return <td key={date} className="text-center px-2 py-2.5 text-muted-foreground/30">—</td>;
 
                       const isDone = item.status === 'done';
+                      const absent = !isDone && date >= today && isAbsent(item.employee_id, date);
                       return (
                         <td key={date} className="text-center px-2 py-2.5">
                           <button
@@ -232,7 +310,9 @@ export default function Cleaning() {
                             className={`inline-flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-lg transition-all ${
                               isDone
                                 ? 'bg-green-500/10 text-green-400'
-                                : 'bg-secondary hover:bg-secondary/80 text-foreground'
+                                : absent
+                                  ? 'bg-amber-500/10 text-amber-300 ring-1 ring-amber-500/40'
+                                  : 'bg-secondary hover:bg-secondary/80 text-foreground'
                             }`}
                           >
                             <span className="flex items-center gap-1">
@@ -240,6 +320,7 @@ export default function Cleaning() {
                               <span className="w-2 h-2 rounded-full shrink-0" style={{ background: getEmpColor(item.employee_id) }} />
                             </span>
                             <span className="text-[10px] font-medium truncate max-w-[60px]">{item.employee_name}</span>
+                            {absent && <span className="text-[9px]">absent</span>}
                           </button>
                         </td>
                       );
