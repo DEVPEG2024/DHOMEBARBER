@@ -14,6 +14,7 @@ import EmployeeCard from '@/components/shared/EmployeeCard';
 import { hapticFeedback } from '@/lib/capacitor';
 import { BARBER_PHOTO_ASPECT } from '@/lib/barberPhoto';
 import { appointmentEvent, openCalendar, parisInstant } from '@/lib/calendarLinks';
+import { SALON_PHONE, SALON_PHONE_HREF, useCancelFeatures } from '@/lib/cancellation';
 
 const STEPS = ['services', 'barber', 'datetime', 'confirm'];
 const STEP_LABELS = ['Prestations', 'Barber', 'Date & Heure', 'Confirmation'];
@@ -631,6 +632,34 @@ export default function Booking() {
   const urlParams = new URLSearchParams(window.location.search);
   const preSelectedIds = urlParams.get('services')?.split(',') || [];
   const preSelectedBarberId = urlParams.get('barber') || null;
+  // « Déplacer » depuis Mes rendez-vous : l'ancien RDV n'est annulé qu'une fois le nouveau confirmé
+  const rescheduleId = urlParams.get('reschedule') || null;
+  const features = useCancelFeatures();
+
+  // Mêmes clé et requête que Mes rendez-vous (cache partagé)
+  const { data: myAppointments = [] } = useQuery({
+    queryKey: ['myAppointments', user?.email],
+    queryFn: () => api.entities.Appointment.filter({ client_email: user.email }, '-date', 100),
+    enabled: !!rescheduleId && !!user?.email,
+  });
+  // RDV à déplacer : le sien, confirmé, pas encore commencé ; sinon le paramètre est ignoré
+  const oldApt = useMemo(() => {
+    if (!rescheduleId) return null;
+    const apt = myAppointments.find(a => String(a.id) === String(rescheduleId));
+    if (!apt || apt.status !== 'confirmed' || !apt.date) return null;
+    return parisInstant(apt.date, apt.start_time || '00:00') > Date.now() ? apt : null;
+  }, [myAppointments, rescheduleId]);
+  const oldAptLabel = oldApt
+    ? `${format(new Date(`${oldApt.date}T12:00:00`), 'EEE d MMM', { locale: fr })} à ${oldApt.start_time}`
+    : '';
+
+  /** « Ne pas déplacer » : on garde le parcours, sans le paramètre `reschedule`. */
+  const dropReschedule = () => {
+    const params = new URLSearchParams(window.location.search);
+    params.delete('reschedule');
+    const query = params.toString();
+    navigate(query ? `/booking?${query}` : '/booking', { replace: true });
+  };
 
   const { data: services = [], isPending: servicesPending } = useQuery({
     queryKey: ['services'],
@@ -691,7 +720,7 @@ export default function Booking() {
 
   React.useEffect(() => {
     if (preSelectedIds.length > 0 && services.length > 0 && selectedServices.length === 0) {
-      const preSelected = services.filter(s => preSelectedIds.includes(s.id));
+      const preSelected = services.filter(s => preSelectedIds.includes(String(s.id)));
       if (preSelected.length > 0) setSelectedServices(preSelected);
     }
   }, [services]);
@@ -849,6 +878,32 @@ export default function Booking() {
     setTimeout(() => goToStep(3), 250);
   };
 
+  /**
+   * Annule l'ancien rendez-vous après un déplacement. Sans `features.appointmentCancelReason`,
+   * exactement `{ status: 'cancelled' }` (un champ inconnu ferait refuser l'annulation).
+   */
+  const cancelPreviousAppointment = async (previous) => {
+    const oldLabel = `${format(new Date(`${previous.date}T12:00:00`), 'EEE d MMM', { locale: fr })} ${previous.start_time || ''}`.trim();
+    const newLabel = selectedDate && selectedTime ? `${format(selectedDate, 'EEE d MMM', { locale: fr })} ${selectedTime}` : '';
+    try {
+      await api.entities.Appointment.update(
+        previous.id,
+        features.appointmentCancelReason
+          ? { status: 'cancelled', cancellation_reason: `Client : déplacé au ${newLabel}`.trim() }
+          : { status: 'cancelled' },
+      );
+      toast.success('Ancien rendez-vous annulé');
+    } catch {
+      toast.warning(
+        `Nouveau rendez-vous confirmé, mais l'ancien (${oldLabel}) n'a pas pu être annulé : annulez-le dans Mes rendez-vous ou appelez le salon au ${SALON_PHONE}.`,
+        { duration: 12000 },
+      );
+    } finally {
+      queryClient.invalidateQueries({ queryKey: ['myAppointments'] });
+      queryClient.invalidateQueries({ queryKey: ['appointments'] });
+    }
+  };
+
   const createAppointment = useMutation({
     mutationFn: async () => {
       if (!isAuthenticated || !user) {
@@ -860,7 +915,9 @@ export default function Booking() {
       const [sh, sm] = selectedTime.split(':').map(Number);
       const endMin = sh * 60 + sm + totalDuration;
       const endTime = `${String(Math.floor(endMin / 60)).padStart(2, '0')}:${String(endMin % 60).padStart(2, '0')}`;
-      return api.entities.Appointment.create({
+      // RDV à déplacer figé au moment de l'envoi
+      const previous = oldApt;
+      const created = await api.entities.Appointment.create({
         client_email: user.email,
         client_name: user.full_name || user.name || '',
         employee_id: selectedEmployee.id,
@@ -874,8 +931,9 @@ export default function Booking() {
         status: 'confirmed',
         notes,
       });
+      return { created, previous };
     },
-    onSuccess: (created) => {
+    onSuccess: ({ created, previous }) => {
       queryClient.invalidateQueries({ queryKey: ['appointments-confirmed'] });
       // Le rendez-vous créé (id, heure de fin et prix recalculés par le serveur) alimente
       // l'« Ajouter au calendrier » de l'écran de succès
@@ -885,6 +943,8 @@ export default function Booking() {
       setSuccess(true);
       hapticFeedback();
       setTimeout(() => navigate('/appointments'), SUCCESS_DURATION);
+      // Déplacement : le nouveau RDV est confirmé, on annule l'ancien (jamais avant)
+      if (previous) cancelPreviousAppointment(previous);
     },
     onError: (err) => {
       // Le serveur vérifie désormais la disponibilité et refuse pour des raisons précises
@@ -892,7 +952,17 @@ export default function Booking() {
       // Afficher son message : « Erreur lors de la création » laissait l'utilisateur sans
       // rien à faire, et sur un créneau pris entre-temps il retentait le même en boucle.
       const message = err?.data?.error || err?.message;
-      toast.error(message && !/^HTTP \d+$/.test(message) ? message : 'Erreur lors de la création du rendez-vous');
+      const shown = message && !/^HTTP \d+$/.test(message) ? message : 'Erreur lors de la création du rendez-vous';
+      if (oldApt && err?.status === 409) {
+        // Déplacement : l'ancien RDV, encore confirmé, occupe son créneau et compte dans le
+        // plafond des rendez-vous à venir. Un décalage de quelques minutes passe par le salon.
+        toast.error(`${shown} Pour décaler sur le même créneau ou juste à côté, appelez le salon au ${SALON_PHONE}.`, {
+          duration: 10000,
+          action: { label: 'Appeler', onClick: () => { window.location.href = SALON_PHONE_HREF; } },
+        });
+      } else {
+        toast.error(shown);
+      }
       if (err?.status === 409 || err?.status === 400) {
         // Les créneaux affichés datent d'au plus une minute : on les recharge et on
         // désélectionne l'horaire refusé pour que le client en choisisse un autre.
@@ -1019,6 +1089,23 @@ export default function Booking() {
               </p>
             </motion.div>
           </AnimatePresence>
+
+          {/* Déplacement d'un rendez-vous existant */}
+          {oldApt && !success && (
+            <div className="mt-4 rounded-2xl border border-primary/25 bg-primary/10 px-3.5 py-3 text-xs leading-relaxed text-foreground/90 break-words">
+              Déplacement de votre rendez-vous du <span className="font-semibold">{oldAptLabel}</span>
+              {oldApt.employee_name ? <> avec <span className="font-semibold">{oldApt.employee_name}</span></> : null}
+              {' '}: l'ancien sera annulé une fois le nouveau confirmé.
+              {' '}
+              <button type="button" onClick={dropReschedule} className="font-semibold text-primary underline underline-offset-2 whitespace-nowrap">
+                Ne pas déplacer
+              </button>
+              <span className="mt-1.5 block text-muted-foreground">
+                Pour décaler sur le même créneau ou juste à côté, appelez le salon au{' '}
+                <a href={SALON_PHONE_HREF} className="font-semibold text-primary whitespace-nowrap">{SALON_PHONE}</a>.
+              </span>
+            </div>
+          )}
         </div>
 
         <div className="relative">

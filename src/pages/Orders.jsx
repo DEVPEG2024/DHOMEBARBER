@@ -1,30 +1,122 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useAuth } from '@/lib/AuthContext';
 import { api } from '@/api/apiClient';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
-import { ShoppingBag, Package } from 'lucide-react';
-import { format, parseISO } from 'date-fns';
+import { ShoppingBag, Package, Phone, XCircle } from 'lucide-react';
+import { format, parseISO, isValid } from 'date-fns';
 import { fr } from 'date-fns/locale';
+import { toast } from 'sonner';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from '@/components/ui/dialog';
+import { formatPrice } from '@/components/shop/productUtils';
+import {
+  ORDER_STATUSES, OPEN_ORDER_STATUSES, normalizeOrderStatus, canClientCancelOrder,
+  useCancelFeatures, cancelOrder, friendlyCancelError, invalidateOrderQueries,
+  cancelledByLabel, cleanReason, CANCEL_REASON_MAX, CANCEL_FEATURES_QUERY_KEY,
+  SALON_PHONE, SALON_PHONE_HREF,
+} from '@/lib/cancellation';
 
-const statusConfig = {
-  pending:   { label: 'En attente',       bg: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' },
-  confirmed: { label: 'Confirmée',        bg: 'bg-blue-500/10 text-blue-400 border-blue-500/20' },
-  ready:     { label: 'Prête à retirer',  bg: 'bg-primary/10 text-primary border-primary/20' },
-  delivered: { label: 'Retirée',          bg: 'bg-green-500/10 text-green-400 border-green-500/20' },
-  completed: { label: 'Livrée',           bg: 'bg-green-500/10 text-green-400 border-green-500/20' },
-  cancelled: { label: 'Annulée',          bg: 'bg-red-500/10 text-red-400 border-red-500/20' },
+const parisDateTime = new Intl.DateTimeFormat('fr-FR', {
+  timeZone: 'Europe/Paris',
+  day: 'numeric',
+  month: 'long',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+});
+
+/** Date de la commande : date seule (anciennes lignes) ou date + heure de Paris. */
+function formatOrderDate(value) {
+  if (!value) return '';
+  const s = String(value);
+  if (s.length === 10) {
+    const d = parseISO(s);
+    return isValid(d) ? format(d, 'd MMMM yyyy', { locale: fr }) : '';
+  }
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? '' : parisDateTime.format(d);
+}
+
+const itemCount = (order) => (order.items || [])
+  .reduce((sum, item) => sum + (Math.max(0, Number(item?.quantity) || 0)), 0);
+
+const orderTotal = (order) => {
+  const t = Number(order.total_price);
+  if (Number.isFinite(t)) return t;
+  return (order.items || []).reduce((s, it) => s + (Number(it.price) || 0) * (Number(it.quantity) || 0), 0);
 };
 
 export default function Orders() {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const features = useCancelFeatures();
+  const [orderToCancel, setOrderToCancel] = useState(null);
+  const [reason, setReason] = useState('');
 
+  const ordersKey = ['myOrders', user?.email];
   const { data: orders = [], isLoading } = useQuery({
-    queryKey: ['myOrders', user?.email],
+    queryKey: ordersKey,
     queryFn: () => api.entities.Order.filter({ client_email: user?.email }, '-created_date', 100),
     enabled: !!user?.email,
     refetchInterval: 30000, // Auto-refresh toutes les 30s
   });
+
+  const cancelMutation = useMutation({
+    mutationFn: ({ id, reason: r }) => cancelOrder(id, r),
+    onSuccess: ({ order, already }, { id, reason: r }) => {
+      const trimmed = String(r || '').trim().slice(0, CANCEL_REASON_MAX);
+      queryClient.setQueryData(ordersKey, (prev) => (Array.isArray(prev)
+        ? prev.map((o) => (String(o.id) === String(id)
+          ? {
+            ...o,
+            status: 'cancelled',
+            cancelled_by: o.cancelled_by || 'client',
+            cancellation_reason: o.cancellation_reason || trimmed || null,
+            ...(order && typeof order === 'object' ? order : {}),
+          }
+          : o))
+        : prev));
+      invalidateOrderQueries(queryClient);
+      toast.success(already ? 'Cette commande était déjà annulée' : 'Commande annulée');
+      setOrderToCancel(null);
+      setReason('');
+    },
+    onError: (err) => {
+      const e = friendlyCancelError(err, 'order');
+      toast.error(e.message, e.callSalon
+        ? { action: { label: 'Appeler', onClick: () => { window.location.href = SALON_PHONE_HREF; } } }
+        : undefined);
+      if (e.refetch) {
+        queryClient.invalidateQueries({ queryKey: ['myOrders'] });
+        queryClient.invalidateQueries({ queryKey: CANCEL_FEATURES_QUERY_KEY });
+      }
+      setOrderToCancel(null);
+      setReason('');
+    },
+  });
+
+  const openCancel = (order) => {
+    setReason('');
+    setOrderToCancel(order);
+  };
+
+  const closeCancel = (open) => {
+    if (open) return;
+    if (cancelMutation.isPending) return; // pas de fermeture pendant l'envoi
+    setOrderToCancel(null);
+    setReason('');
+  };
+
+  const confirmCancel = () => {
+    if (!orderToCancel || cancelMutation.isPending) return;
+    cancelMutation.mutate({ id: orderToCancel.id, reason });
+  };
+
+  const pending = cancelMutation.isPending;
 
   return (
     <div className="min-h-screen relative overflow-hidden">
@@ -54,40 +146,136 @@ export default function Orders() {
         ) : (
           <div className="space-y-3">
             {orders.map((order, i) => {
-              const status = statusConfig[order.status] || statusConfig.pending;
+              const statusKey = normalizeOrderStatus(order.status);
+              const status = ORDER_STATUSES[statusKey];
+              const count = itemCount(order);
+              const canCancel = canClientCancelOrder(order, features);
+              const isOpen = OPEN_ORDER_STATUSES.includes(statusKey);
+              const byLabel = statusKey === 'cancelled' ? cancelledByLabel(order, 'client') : null;
+              const motive = statusKey === 'cancelled' ? cleanReason(order.cancellation_reason) : '';
               return (
                 <motion.div key={order.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
                   className="rounded-2xl border border-white/8 bg-white/4 backdrop-blur-xl p-4">
-                  <div className="flex items-start justify-between mb-3">
-                    <div>
-                      <p className="font-bold text-sm text-foreground">
-                        {order.created_date && format(parseISO(order.created_date), 'd MMMM yyyy', { locale: fr })}
+                  <div className="flex items-start justify-between gap-3 mb-3">
+                    <div className="min-w-0">
+                      <p className="font-bold text-sm text-foreground break-words">
+                        {formatOrderDate(order.created_date)}
                       </p>
-                      <p className="text-xs text-muted-foreground mt-0.5">{order.items?.length || 0} article(s)</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{count} article{count > 1 ? 's' : ''}</p>
                     </div>
-                    <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${status.bg}`}>
-                      {status.label}
-                    </span>
+                    <div className="flex flex-col items-end gap-1 shrink-0">
+                      <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${status.bg}`}>
+                        {status.label}
+                      </span>
+                      {byLabel && <span className="text-[10px] text-muted-foreground">{byLabel}</span>}
+                    </div>
                   </div>
+                  {motive && (
+                    <p className="text-[11px] text-muted-foreground mb-2 break-words">Motif : {motive}</p>
+                  )}
                   {order.items?.map((item, j) => (
-                    <div key={j} className="flex justify-between items-center py-1">
-                      <div className="flex items-center gap-2">
-                        <Package className="w-3 h-3 text-muted-foreground" />
-                        <span className="text-xs text-muted-foreground">{item.name} x{item.quantity}</span>
+                    <div key={j} className="flex justify-between items-start gap-3 py-1">
+                      <div className="flex items-start gap-2 min-w-0">
+                        <Package className="w-3 h-3 text-muted-foreground mt-0.5 shrink-0" />
+                        <span className="text-xs text-muted-foreground break-words min-w-0">{item.name} ×{item.quantity}</span>
                       </div>
-                      <span className="text-xs font-bold text-primary">{(item.price * item.quantity).toFixed(0)}€</span>
+                      <span className="text-xs font-bold text-primary shrink-0">
+                        {formatPrice((Number(item.price) || 0) * (Number(item.quantity) || 0))}
+                      </span>
                     </div>
                   ))}
                   <div className="mt-2 pt-2 border-t border-white/6 flex justify-between">
                     <span className="text-xs text-muted-foreground">Total</span>
-                    <span className="text-sm font-bold text-foreground">{order.total_price}€</span>
+                    <span className="text-sm font-bold text-foreground">{formatPrice(orderTotal(order))}</span>
                   </div>
+
+                  {canCancel ? (
+                    <div className="mt-3 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => openCancel(order)}
+                        className="inline-flex items-center gap-1.5 text-xs font-medium text-red-400 hover:text-red-300 px-2 py-1.5 -mr-2 rounded-lg active:scale-95 transition-transform"
+                      >
+                        <XCircle className="w-3.5 h-3.5" />
+                        Annuler la commande
+                      </button>
+                    </div>
+                  ) : isOpen && (
+                    <p className="mt-3 text-[11px] text-muted-foreground leading-relaxed">
+                      {statusKey === 'ready'
+                        ? 'Votre commande est prête au salon : pour l\'annuler, appelez le '
+                        : 'Besoin de modifier ou d\'annuler ? Appelez le salon au '}
+                      <a href={SALON_PHONE_HREF} className="inline-flex items-center gap-1 text-primary font-semibold whitespace-nowrap">
+                        <Phone className="w-3 h-3" />{SALON_PHONE}
+                      </a>
+                    </p>
+                  )}
                 </motion.div>
               );
             })}
           </div>
         )}
       </div>
+
+      <Dialog open={!!orderToCancel} onOpenChange={closeCancel}>
+        <DialogContent
+          className="w-[calc(100%-2rem)] max-w-sm rounded-2xl p-5"
+          onEscapeKeyDown={(e) => { if (pending) e.preventDefault(); }}
+        >
+          <DialogHeader className="text-left pr-6">
+            <DialogTitle>Annuler cette commande ?</DialogTitle>
+            <DialogDescription>
+              Rien n'a été payé en ligne : il n'y a rien à rembourser.
+            </DialogDescription>
+          </DialogHeader>
+
+          {orderToCancel && (
+            <div className="rounded-xl border border-border bg-card p-3 space-y-1">
+              {(orderToCancel.items || []).map((item, j) => (
+                <div key={j} className="flex justify-between items-start gap-3 text-xs">
+                  <span className="text-muted-foreground break-words min-w-0">{item.name} ×{item.quantity}</span>
+                  <span className="font-semibold shrink-0">
+                    {formatPrice((Number(item.price) || 0) * (Number(item.quantity) || 0))}
+                  </span>
+                </div>
+              ))}
+              <div className="flex justify-between pt-1.5 mt-1.5 border-t border-border text-sm">
+                <span className="text-muted-foreground">Total</span>
+                <span className="font-bold">{formatPrice(orderTotal(orderToCancel))}</span>
+              </div>
+            </div>
+          )}
+
+          <div>
+            <label htmlFor="order-cancel-reason" className="text-xs text-muted-foreground mb-1 block">
+              Motif (facultatif)
+            </label>
+            <Textarea
+              id="order-cancel-reason"
+              value={reason}
+              onChange={(e) => setReason(e.target.value.slice(0, CANCEL_REASON_MAX))}
+              maxLength={CANCEL_REASON_MAX}
+              disabled={pending}
+              placeholder="Ex. : je me suis trompé de produit"
+              className="bg-card border-border text-sm resize-none h-20"
+            />
+            <p className="text-[10px] text-muted-foreground text-right mt-1">{reason.length}/{CANCEL_REASON_MAX}</p>
+          </div>
+
+          <div className="flex flex-col-reverse sm:flex-row gap-2">
+            <Button variant="outline" className="flex-1" disabled={pending} onClick={() => closeCancel(false)}>
+              Non, garder
+            </Button>
+            <Button
+              className="flex-1 bg-red-500 hover:bg-red-600 text-white"
+              disabled={pending}
+              onClick={confirmCancel}
+            >
+              {pending ? 'Annulation…' : 'Oui, annuler'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
