@@ -90,7 +90,7 @@ function ChannelPanel({ title, icon: Icon, color, to, children, badge }) {
 
 /**
  * @param {object} props
- * @param {{ today: number, month: number, unpaidToday: number, unpaidMonth: number }} props.appointments
+ * @param {{ today: number, month: number, unpaidToday: number, unpaidMonth: number, unpaidCount: number }} props.appointments
  *   CA des rendez-vous encaissés (prestations + produits vendus en RDV) et montants non encaissés
  */
 export default function SalesOverview({ appointments }) {
@@ -189,8 +189,10 @@ export default function SalesOverview({ appointments }) {
     ];
     const totalToday = sum(channels, (c) => c.today);
     const totalMonth = sum(channels, (c) => c.month);
-    const pendingAmount = (appointments.unpaidMonth || 0) + boutique.openAmount + cartes.pendingAmount + textileStats.toPayAmount;
-    const pendingCount = boutique.openCount + cartes.pendingCount + textileStats.toPayCount;
+    // À encaisser : uniquement les rendez-vous terminés et non clôturés (demande du salon, 13 oct. 2026).
+    // Commandes, cartes et précommandes en attente restent dans leurs panneaux respectifs.
+    const pendingAmount = appointments.unpaidMonth || 0;
+    const pendingCount = appointments.unpaidCount || 0;
 
     return { boutique, cartes, privatisations, textile: textileStats, channels, totalToday, totalMonth, pendingAmount, pendingCount };
   }, [orders, giftCards, events, textile, reservations, appointments, today, monthPrefix]);
@@ -214,11 +216,15 @@ export default function SalesOverview({ appointments }) {
           <p className="text-2xl font-bold mt-1 text-foreground">{eur(totalMonth)}</p>
           <p className="text-[10px] text-muted-foreground mt-0.5">tous canaux · dont {eur(otherMonth)} hors RDV</p>
         </motion.div>
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-card border border-border rounded-xl p-4">
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+          onClick={() => navigate('/admin/agenda?view=week')}
+          className="bg-card border border-border rounded-xl p-4 cursor-pointer hover:border-primary/30 active:scale-[0.98] transition-all">
           <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">À encaisser</p>
           <p className="text-2xl font-bold mt-1 text-amber-400">{eur(pendingAmount)}</p>
           <p className="text-[10px] text-muted-foreground mt-0.5">
-            RDV non encaissés + {pendingCount} commande{pendingCount > 1 ? 's' : ''} / carte{pendingCount > 1 ? 's' : ''} / précommande{pendingCount > 1 ? 's' : ''} en attente
+            {pendingCount === 0
+              ? 'Tous les RDV terminés du mois sont clôturés'
+              : `${pendingCount} RDV terminé${pendingCount > 1 ? 's' : ''} non clôturé${pendingCount > 1 ? 's' : ''} ce mois ▸`}
           </p>
         </motion.div>
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
