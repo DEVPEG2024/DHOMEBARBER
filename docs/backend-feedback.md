@@ -1,5 +1,7 @@
 # Backend — « Bugs et suggestions » (entité `Feedback`)
 
+> **Déployé le 13 oct. 2026** (Heroku v101, commit `549b006` de `dhomebarber-api`), tests dans `test/test-feedback.js`.
+
 Le frontend (`src/components/feedback/`, `src/pages/admin/AdminFeedback.jsx`, `src/lib/feedbackApi.js`)
 passe par le CRUD générique : `api.entities.Feedback.list / create / update / delete`.
 Tant que ce correctif n'est pas déployé, le serveur répond 400 sur l'entité inconnue : le client voit
