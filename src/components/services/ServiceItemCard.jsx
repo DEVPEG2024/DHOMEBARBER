@@ -1,3 +1,4 @@
+import FavoriteButton from '@/components/shared/FavoriteButton';
 import React, { useLayoutEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Check, Clock, ChevronDown, Flame, Sparkles } from 'lucide-react';
@@ -53,7 +54,7 @@ export function ServiceBadges({ popular, isNew, light = false }) {
  * coche à ressort et halo quand la carte est sélectionnée. Tout le bloc est un bouton à bascule
  * (`aria-pressed`), le « voir plus » est un bouton distinct qui n'y touche pas.
  */
-export default function ServiceItemCard({ service, kind, selected, popular, isNew, onToggle, reduceMotion = false, index = 0 }) {
+export default function ServiceItemCard({ service, kind, selected, popular, isNew, onToggle, reduceMotion = false, index = 0, favorite = false, onFavorite }) {
   const [expanded, setExpanded] = useState(false);
   const [overflows, setOverflows] = useState(false);
   const descRef = useRef(null);
@@ -125,7 +126,12 @@ export default function ServiceItemCard({ service, kind, selected, popular, isNe
             </div>
 
             <div className="flex flex-col items-end gap-2 shrink-0">
-              <span className="font-fut text-2xl font-bold leading-none text-primary tabular-nums">{formatPrice(service.price)}</span>
+              <div className="flex items-center gap-1.5">
+                {onFavorite && (
+                  <FavoriteButton active={favorite} onToggle={() => onFavorite(service)} className="-my-1.5" />
+                )}
+                <span className="font-fut text-2xl font-bold leading-none text-primary tabular-nums">{formatPrice(service.price)}</span>
+              </div>
               <span
                 aria-hidden="true"
                 className={`w-7 h-7 rounded-full flex items-center justify-center transition-colors duration-300 ${

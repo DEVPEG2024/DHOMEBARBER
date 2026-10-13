@@ -39,6 +39,7 @@ const SnapLenses = React.lazy(() => import('@/pages/SnapLenses'));
 const Textile = React.lazy(() => import('@/pages/Textile'));
 // Bons plans du Gang (partenaires du salon, lazy)
 const Partners = React.lazy(() => import('@/pages/Partners'));
+const Favorites = React.lazy(() => import('@/pages/Favorites'));
 
 // Admin pages (lazy-loaded - only for admin/barber users)
 const AdminDashboard = React.lazy(() => import('@/pages/admin/Dashboard'));
@@ -235,6 +236,7 @@ const AppRoutes = () => {
           <Route path="/snap" element={<Suspense fallback={<LazyFallback />}><SnapLenses /></Suspense>} />
           <Route path="/textile" element={<Suspense fallback={<LazyFallback />}><Textile /></Suspense>} />
           <Route path="/partners" element={<Suspense fallback={<LazyFallback />}><Partners /></Suspense>} />
+          <Route path="/favorites" element={<Suspense fallback={<LazyFallback />}><Favorites /></Suspense>} />
         </Route>
       </Route>
 

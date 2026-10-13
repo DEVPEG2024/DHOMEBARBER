@@ -60,6 +60,7 @@ src/
 │   ├── hairUltra.js           # Essayage couleur : appel du mode AI ULTRA (backend)
 │   ├── aiWriter.js            # Assistant IA des notifications : features.aiWriter, POST /ai/notification-draft, retouches proposées
 │   ├── textileApi.js          # Textile & drops : client des routes /textile (overview, vote, alerte, réservation, notify), constantes et helpers partagés
+│   ├── favorites.js           # Favoris du client (prestations, produits) : useFavorites, rangés sur l'appareil par compte
 │   ├── slots.js               # Créneaux libres d'un barber (analyzeDay…), partagés par la réservation et le déplacement
 │   ├── reschedule.js          # Déplacer un RDV : prochains créneaux libres (même barber, mêmes prestations), création puis annulation de l'ancien
 │   ├── feedbackApi.js         # Bugs et suggestions : types, statuts, endroits de l'app, contexte technique joint à l'envoi
@@ -96,6 +97,7 @@ src/
 │   ├── GiftCards.jsx          # Cartes cadeau : achat (code DHB + QR), affichage
 │   ├── Textile.jsx            # « DHB Textile » (/textile, lazy) : drop en vedette (compte à rebours, alerte), pièces (vote 🔥 + taille, réservation), Labo, mes réservations — composants dans components/textile/
 │   ├── TryOn.jsx              # « Nouvelle tête » (/try-on, lazy) : essayage couleur cheveux / barbe, FAST sur l'appareil + AI ULTRA serveur
+│   ├── Favorites.jsx          # « Mes favoris » (/favorites, lazy) : prestations (Réserver) et produits (boutique filtrée)
 │   ├── Partners.jsx           # « Les bons plans du Gang » (/partners, lazy) : partenaires, remises, Carte Gang à présenter — composants dans components/partners/
 │   ├── SnapLenses.jsx         # « Filtres Snap » (/snap, lazy) : lentilles Snapchat du salon via Camera Kit
 │   ├── Profile.jsx            # Profil utilisateur
@@ -139,7 +141,7 @@ public/
 ├── manifest.json, sw.js       # PWA + service worker push
 ```
 
-Routes client : `/`, `/services`, `/booking`, `/shop`, `/appointments`, `/orders`, `/reviews`, `/settings`, `/notifications`, `/profile`, `/barber/:id`, `/feed`, `/events`, `/gift-cards`, `/textile`, `/partners`, `/try-on`, `/snap`, `/login`.
+Routes client : `/`, `/services`, `/booking`, `/shop`, `/appointments`, `/orders`, `/reviews`, `/settings`, `/notifications`, `/profile`, `/barber/:id`, `/feed`, `/events`, `/gift-cards`, `/textile`, `/partners`, `/favorites`, `/try-on`, `/snap`, `/login`.
 Routes admin : `/admin`, `/admin/activity`, `/admin/agenda`, `/admin/smart-agenda`, `/admin/services`, `/admin/team`, `/admin/clients`, `/admin/products`, `/admin/stock`, `/admin/orders`, `/admin/reviews`, `/admin/stats`, `/admin/settings`, `/admin/my-settings`, `/admin/notifications`, `/admin/cleaning`, `/admin/my-cleaning`, `/admin/barber-accounts`, `/admin/leave`, `/admin/my-leave`, `/admin/feed`, `/admin/events`, `/admin/gift-cards`, `/admin/textile`, `/admin/salon-events`, `/admin/snap`, `/admin/partners`, `/admin/feedback`.
 
 ## Structure Backend
@@ -530,6 +532,11 @@ Revue du système de commande (Boutique, Mes commandes, admin) et de l'annulatio
 - **Règles** : motif staff préfixé « Salon », motif client « Client : », motif du last minute expiré = système (`LAST_MINUTE_EXPIRED_REASON`) ; `cancelled_by` du serveur prime quand il existe (`cancellationActor`, `cancelledByLabel`, `cleanReason`). Erreurs toujours traduites par `friendlyCancelError` : réseau → « Pas de connexion… », 403 / 405 / 404 sans message → « appelez le salon au 06 66 08 36 05 », 400 / 404 / 409 / 429 avec message → message du serveur et rechargement. Invalidations communes : `invalidateOrderQueries` (`myOrders`, `products`, `adminOrders`, `['dashboard','orders']`, `adminActivity`)
 - **Serveur prévu** (notice) : route d'annulation transactionnelle avec remise en stock, colonnes `cancelled_at` / `cancelled_by` / `cancelled_by_email` (jamais renvoyé hors staff) / `cancellation_reason` / `stock_reserved` / `stock_restored` / `delivered_at`, **décrément du stock à la création** sous verrou, lignes agrégées par produit, `name` / `price` réécrits, `created_date = NOW()`, quotas (5 commandes ouvertes, 10 / 24 h, doublon de 60 s), pushs (admins à l'annulation client, client à l'annulation staff et à « prête ») ; RDV : `cancellation_reason` client ≤ 300, `cancelled_at` / `cancelled_by`, message de délai en français avec le téléphone, push au barber
 - **Stores** : rien n'a été poussé ; les apps natives n'auront ces changements qu'avec un nouveau build (à faire plus tard, d'autres modifications sont prévues)
+
+### Favoris (ajoutés le 13 oct. 2026)
+- Cœur (`components/shared/FavoriteButton.jsx`, `stopPropagation` : ne sélectionne jamais la carte qui le contient) sur chaque prestation (`ServiceItemCard`, props `favorite` / `onFavorite`) et chaque produit (carte de la Boutique, fiche `ProductSheet`). Toast « « Coupe » dans vos favoris ❤️ » à l'ajout
+- **Rangement** : `src/lib/favorites.js`, `useFavorites()` → `{ services, products (Set d'ids en string), count, isFavorite, toggle(kind, id, name) }`, `localStorage['dhb-favorites:<user.id>']` (invité : `guest`), 100 par type, composants synchronisés par l'événement `dhb:favorites`. **Aucun backend** : les favoris restent sur l'appareil (pas de synchronisation entre téléphones ; une v2 pourrait les stocker sur le compte)
+- **Où ils servent** : bloc « Mes favoris » en tête de la page Prestations et du choix des prestations de la réservation (`components/services/FavoriteServicesBlock.jsx`, hors recherche) ; chip « ❤️ Favoris (N) » dans la Boutique (`/shop?filter=favorites` l'ouvre filtrée, retour à « Tout » quand il n'en reste plus) ; page **`/favorites`** (menu Profil → « Mes favoris ») : prestations avec « Réserver » (`/booking?services=<id>`, « Tout réserver » pour plusieurs), produits avec lien vers la boutique filtrée ; une prestation ou un produit retiré du catalogue n'apparaît plus
 
 ### Pas de défilement horizontal (règle, 12 oct. 2026)
 - Le fil (`Feed.jsx`, `GlassCard`) a des halos animés qui glissent de ± 40 px sous chaque publication : ils dépassaient de l'écran et la page bougeait de gauche à droite. Le conteneur de `ClientLayout` et celui du contenu d'`AdminLayout` portent `overflow-x-clip` : aucun décor ne peut plus élargir la page. **Toujours `clip`, jamais `overflow-x-hidden`** à ce niveau : `hidden` ferait du conteneur une zone de défilement et casserait les éléments collants (chips des Prestations, recherche des Bons plans…)

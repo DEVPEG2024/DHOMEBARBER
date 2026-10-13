@@ -8,6 +8,8 @@ import ServiceItemCard, { KindIcon } from '@/components/services/ServiceItemCard
 import CategoryChips from '@/components/services/CategoryChips';
 import SelectionBar from '@/components/services/SelectionBar';
 import FormulasBlock from '@/components/services/FormulasBlock';
+import FavoriteServicesBlock from '@/components/services/FavoriteServicesBlock';
+import { useFavorites } from '@/lib/favorites';
 import {
   EASE,
   OTHER_GROUP_ID,
@@ -32,6 +34,8 @@ const SCROLL_LOCK_MS = 900;
  */
 export default function Services() {
   const reduceMotion = useReducedMotion();
+  const favorites = useFavorites();
+  const toggleFavorite = useCallback((service) => favorites.toggle('services', service.id, service.name), [favorites]);
   const [query, setQuery] = useState('');
   const [selectedIds, setSelectedIds] = useState([]);   // ordre de sélection conservé
   const [activeCat, setActiveCat] = useState('all');
@@ -227,6 +231,20 @@ export default function Services() {
           )}
         </div>
 
+        {/* Favoris du client (hors recherche et pendant le chargement) */}
+        {!query && !servicesPending && (
+          <FavoriteServicesBlock
+            services={services}
+            favoriteIds={favorites.services}
+            selectedIds={selectedSet}
+            popularIds={popularIds}
+            newIds={newIds}
+            onToggle={toggleService}
+            onFavorite={toggleFavorite}
+            reduceMotion={reduceMotion}
+          />
+        )}
+
         {/* Formules en vitrine (hors recherche) */}
         <FormulasBlock
           formulas={formulas}
@@ -278,6 +296,8 @@ export default function Services() {
                       popular={popularIds.has(id)}
                       isNew={newIds.has(id)}
                       onToggle={toggleService}
+                      favorite={favorites.services.has(id)}
+                      onFavorite={toggleFavorite}
                       reduceMotion={reduceMotion}
                       index={i}
                     />
