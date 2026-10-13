@@ -2,16 +2,21 @@ import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { Outlet, Link, useLocation, Navigate } from 'react-router-dom';
 import {
   LayoutDashboard, Calendar, Users, Scissors, UserCircle,
-  BarChart3, Settings, Menu, X, ChevronLeft, ChevronDown, ShoppingBag, Star, Bell, Brain, Sun, Moon, ClipboardList, ShieldCheck, Sparkles, CalendarDays, Newspaper, Warehouse, PartyPopper, LogOut, Gift, GripVertical, Shirt, Camera, Handshake, Volume2, VolumeX, Bug } from 'lucide-react';
+  BarChart3, Settings, Menu, X, ChevronLeft, ChevronDown, ShoppingBag, Star, Bell, Brain, Sun, Moon, ClipboardList, ShieldCheck, Sparkles, CalendarDays, Newspaper, Warehouse, PartyPopper, LogOut, Gift, GripVertical, Shirt, Camera, Handshake, Volume2, VolumeX, Bug, Activity } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { useTheme } from '@/lib/ThemeContext';
 import { useAuth } from '@/lib/AuthContext';
 import NotificationPrompt from '@/components/shared/NotificationPrompt';
 import { useMusic } from '@/lib/MusicContext';
+import ActivityBell from '@/components/admin-activity/ActivityBell';
+import { useUnreadActivity, useActivityToasts } from '@/lib/adminActivity';
 
 // All nav items with their default category
 const allNavItems = [
   { path: '/admin', icon: LayoutDashboard, label: 'Dashboard', exact: true, perm: 'dashboard' },
+  // Activité clients : chronologie des actions des clients (RDV, commandes, avis…), admin seulement,
+  // pastille du nombre d'actions non lues (src/lib/adminActivity.js)
+  { path: '/admin/activity', icon: Activity, label: 'Activité clients', adminOnly: true, badge: 'activity' },
   { path: '/admin/agenda', icon: Calendar, label: 'Agenda', perm: 'agenda' },
   { path: '/admin/smart-agenda', icon: Brain, label: 'Agenda IA', perm: 'smart-agenda' },
   { path: '/admin/clients', icon: UserCircle, label: 'Clients', perm: 'clients', category: 'Clients' },
@@ -111,6 +116,11 @@ export default function AdminLayout() {
   // Musique d'ambiance : le bouton flottant global est masqué dans l'admin (il recouvrait le contenu),
   // la musique démarrant seule au premier tap, on garde de quoi la couper dans l'en-tête et le menu
   const { playing: musicPlaying, toggle: toggleMusic } = useMusic();
+  // Activité clients (admin seulement : le hook de données est désactivé pour un barber) — toasts
+  // montés une seule fois ici, compteur partagé par l'entrée de menu et les cloches de l'en-tête
+  const isAdmin = user?.role === 'admin';
+  const { count: activityUnread } = useUnreadActivity();
+  useActivityToasts();
 
   // Filter items by role/permissions
   const filteredItems = useMemo(() => {
@@ -249,6 +259,7 @@ export default function AdminLayout() {
               <p className="text-[10px] text-muted-foreground tracking-[0.15em] uppercase">Back Office</p>
             </div>
           </div>
+          {isAdmin && <ActivityBell placement="sidebar" className="hidden lg:flex" />}
           <button className="lg:hidden w-9 h-9 flex items-center justify-center rounded-lg hover:bg-secondary transition-colors"
             onClick={() => setSidebarOpen(false)}>
             <X className="w-4 h-4" />
@@ -311,7 +322,12 @@ export default function AdminLayout() {
                                 }`}
                               >
                                 <entry.icon className="w-4 h-4 shrink-0" />
-                                {entry.label}
+                                <span className="flex-1 min-w-0 truncate">{entry.label}</span>
+                                {entry.badge === 'activity' && isAdmin && activityUnread > 0 && (
+                                  <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold leading-[18px] text-center shrink-0">
+                                    {activityUnread > 99 ? '99+' : activityUnread}
+                                  </span>
+                                )}
                               </Link>
                             </div>
                           )}
@@ -373,6 +389,7 @@ export default function AdminLayout() {
               <ChevronLeft className="w-4 h-4" />
             </Link>
           )}
+          {isAdmin && <ActivityBell placement="mobile" />}
           <button className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-secondary transition-colors"
             onClick={toggleMusic}
             aria-label={musicPlaying ? 'Couper la musique' : 'Activer la musique'}>

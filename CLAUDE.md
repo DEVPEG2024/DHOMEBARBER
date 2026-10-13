@@ -61,6 +61,7 @@ src/
 │   ├── aiWriter.js            # Assistant IA des notifications : features.aiWriter, POST /ai/notification-draft, retouches proposées
 │   ├── textileApi.js          # Textile & drops : client des routes /textile (overview, vote, alerte, réservation, notify), constantes et helpers partagés
 │   ├── feedbackApi.js         # Bugs et suggestions : types, statuts, endroits de l'app, contexte technique joint à l'envoi
+│   ├── adminActivity.js       # Activité clients (admin) : agrégation des entités en chronologie, lu / non lu, toasts, formatActivityTime
 │   ├── partnersApi.js         # Bons plans du Gang : clé React Query, catégories, helpers (meilleure remise, expiration, liens sûrs)
 │   ├── salonEventsApi.js      # Événements du salon : client des routes /salon-events (mine, rsvp, invite, guests, remind), constantes et helpers
 │   ├── app-params.js          # Paramètres app (appId, token, etc.)
@@ -69,6 +70,7 @@ src/
 │   ├── utils.js               # Utilitaires (cn, etc.)
 │   └── PageNotFound.jsx       # Page 404
 ├── components/
+│   ├── admin-activity/        # Activité clients : ActivityBell (cloche de l'en-tête admin), lignes, filtres, statistiques du panneau
 │   ├── agenda/                # DayView, WeekView, MonthView, AgendaToolbar, AppointmentCard (+ DragGhost), AppointmentDetailModal + AppointmentEditForm, MoveDialog, BreakModal, useBreakDrag, useCardDrag, agendaUtils (période, chevauchements, horaires, slotIssues)
 │   ├── layout/                # ClientLayout, AdminLayout, BottomNav
 │   ├── shared/                # ServiceCard, EmployeeCard, BarberCard (carte style FUT), StarRating, SectionHeader, ImageCropDialog, MusicToggle
@@ -99,6 +101,7 @@ src/
 │   ├── ClientNotifications.jsx # Notifications client
 │   └── admin/
 │       ├── Dashboard.jsx      # Tableau de bord (CA, CB/Espèces, pourboires séparés, compteur live)
+│       ├── AdminActivity.jsx  # Activité clients (/admin/activity, admin) : chronologie des actions des clients (RDV, commandes, avis…)
 │       ├── Agenda.jsx         # Agenda admin avec DayView/WeekView/MonthView + envoi push "Last Minute" sur un créneau libre
 │       ├── SmartAgenda.jsx    # Agenda intelligent
 │       ├── Clients.jsx        # Gestion clients
@@ -134,7 +137,7 @@ public/
 ```
 
 Routes client : `/`, `/services`, `/booking`, `/shop`, `/appointments`, `/orders`, `/reviews`, `/settings`, `/notifications`, `/profile`, `/barber/:id`, `/feed`, `/events`, `/gift-cards`, `/textile`, `/partners`, `/try-on`, `/snap`, `/login`.
-Routes admin : `/admin`, `/admin/agenda`, `/admin/smart-agenda`, `/admin/services`, `/admin/team`, `/admin/clients`, `/admin/products`, `/admin/stock`, `/admin/orders`, `/admin/reviews`, `/admin/stats`, `/admin/settings`, `/admin/my-settings`, `/admin/notifications`, `/admin/cleaning`, `/admin/my-cleaning`, `/admin/barber-accounts`, `/admin/leave`, `/admin/my-leave`, `/admin/feed`, `/admin/events`, `/admin/gift-cards`, `/admin/textile`, `/admin/salon-events`, `/admin/snap`, `/admin/partners`, `/admin/feedback`.
+Routes admin : `/admin`, `/admin/activity`, `/admin/agenda`, `/admin/smart-agenda`, `/admin/services`, `/admin/team`, `/admin/clients`, `/admin/products`, `/admin/stock`, `/admin/orders`, `/admin/reviews`, `/admin/stats`, `/admin/settings`, `/admin/my-settings`, `/admin/notifications`, `/admin/cleaning`, `/admin/my-cleaning`, `/admin/barber-accounts`, `/admin/leave`, `/admin/my-leave`, `/admin/feed`, `/admin/events`, `/admin/gift-cards`, `/admin/textile`, `/admin/salon-events`, `/admin/snap`, `/admin/partners`, `/admin/feedback`.
 
 ## Structure Backend
 
@@ -500,6 +503,16 @@ Sept agents ont passé l'app en production au crible (profil iPhone, comptes `qa
 - Client : Paramètres → bloc « Bugs et suggestions » (`components/feedback/FeedbackSection.jsx`) : « Signaler un bug » / « Proposer une amélioration » ouvrent `FeedbackSheet.jsx` (bascule bug / suggestion, message 10–2000 caractères, endroit de l'app facultatif, capture via `UploadFile`, contexte technique joint : plateforme, version native via `App.getInfo()`, écran, navigateur), puis « Mes envois » avec statut et réponse du salon. La fenêtre est rendue par portail dans `body` (le bloc parent est animé)
 - Admin : `/admin/feedback` (catégorie Clients, admin) — filtres type et « À traiter », statut modifiable, réponse au client (passe en « En cours », le serveur la pousse au client), capture en grand, suppression en deux taps
 - **Backend déployé le 13 oct. 2026 (Heroku v101, commit 549b006)**, conforme à `docs/backend-feedback.md` : table `feedbacks` (auto-migration), lecture admin / ses envois, création par tout compte connecté (identité forcée, statut `new`, message 10–2000, capture https ≤ 500, contexte ≤ 2000 sinon ignoré, **10 envois / 24 h → 429**), push « 🐞 Nouveau bug » / « 💡 Nouvelle suggestion » aux admins, modification / suppression admin (statut, réponse ≤ 1000 datée `replied_at`), nouvelle réponse → push « 💬 Le salon t'a répondu » au client, envois effacés à la suppression du compte, `feedbacks.screenshot_url` protégée par le ramasse-miettes (garde-fou de `test-cleanup-media.js` étendu à `screenshot`). Tests : `test/test-feedback.js` (32 vérifications), `npm test` → 17 harnais. Le repli « Envoyer par email » (entité inconnue, 400 / 404) ne sert plus qu'aux anciennes versions
+
+### Activité clients (admin, ajoutée le 13 oct. 2026)
+- **But** (demande du propriétaire) : un fil réservé à l'admin de toutes les actions menées par les clients — RDV réservés ou annulés, commandes, avis, cartes cadeau, demandes de privatisation et réponses aux devis, précommandes textile, réponses aux événements du salon, bugs et suggestions, inscriptions, signalements dans le fil. **Admin seulement** : rien pour un barber (entrée de menu `adminOnly`, hook de données désactivé si `role !== 'admin'`)
+- **v1 sans backend** : `src/lib/adminActivity.js` agrège les entités que l'admin lit déjà (`fetchAdminActivity({ days })` → `{ events, failedSources }`, une source par `try/catch` : une entité inconnue du serveur est ignorée et listée dans `failedSources`). Événement = `{ id: '<type>:<entityId>', type, at, title, detail, clientName, clientEmail, amount, link, entityId }`, types et couleurs dans `ACTIVITY_TYPES`. Hook `useAdminActivity` (clé `ADMIN_ACTIVITY_QUERY_KEY = ['adminActivity']`, rafraîchi toutes les 60 s et au retour sur l'onglet)
+- **Limites v1** (toutes réglées par la table d'audit `admin_activity`, v2 de `docs/backend-admin-alerts.md`, § 5) : une action dont la ligne a été supprimée disparaît du fil ; un RDV saisi par le staff dans l'agenda avec l'email d'un client apparaît comme une action client ; une annulation n'indique pas qui l'a faite (« client ou salon ») ; les annulations et les réponses aux devis sont datées par `updated_date` / `updated_at` (non confirmées côté serveur : si aucune n'existe, ces deux sources ne s'affichent pas, sans repli sur la date de création ; et toute retouche de l'admin sur la ligne la fait remonter en tête du fil) ; le lu / non lu est propre à chaque navigateur ; chaque onglet admin envoie environ 14 requêtes par minute, y compris en arrière-plan
+- **Lu / non lu par admin** : `localStorage['dhb-admin-activity-seen:<user.id>']` (dernier instant vu), `markActivitySeen` émet `dhb:activity-seen` ; `useUnreadActivity()` → `{ unread, count, lastSeen, markAllSeen }`. Premier usage : seules les actions des dernières 24 h comptent comme non lues
+- **Panneau** `/admin/activity` (`src/pages/admin/AdminActivity.jsx`, composants dans `src/components/admin-activity/`) ; entrée de menu « Activité clients » juste sous Dashboard, avec pastille rouge du nombre de non lus
+- **Cloche** (`components/admin-activity/ActivityBell.jsx`) dans l'en-tête mobile (à côté du bouton musique) et dans l'en-tête du volet latéral sur ordinateur : badge, panneau des 8 dernières actions non lues (tap = navigation vers l'élément), « Tout marquer comme lu », « Voir toute l'activité ». Panneau rendu par portail dans `body` (le `backdrop-blur` de l'en-tête et le `transform` du volet serviraient sinon de repère au `fixed`), borné à la largeur de l'écran. **Exception assumée à la règle des fenêtres** : il se ferme aussi au tap à côté et à Échap, car c'est un menu de lecture sans saisie (comme le volet de navigation), en plus de la croix
+- **Toasts** : `useActivityToasts()` monté une seule fois dans `AdminLayout` : un toast `sonner` (bouton « Voir ») par action apparue depuis l'ouverture de l'app, 3 au plus puis « + N autres actions clients » ; notification système si la permission est accordée et l'onglet caché
+- **Push hors de l'app : backend à déployer**, voir `docs/backend-admin-alerts.md` (`notifyAdminsOfClientAction` → `sendPushToRole('admin')`, jamais pour une action du staff, préférences par type dans `salon_settings.admin_alerts`, sans doublon avec les pushs admin existants : textile, RSVP, bugs et suggestions, signalements ; option v2 : table d'audit `admin_activity`)
 
 ### Pas de défilement horizontal (règle, 12 oct. 2026)
 - Le fil (`Feed.jsx`, `GlassCard`) a des halos animés qui glissent de ± 40 px sous chaque publication : ils dépassaient de l'écran et la page bougeait de gauche à droite. Le conteneur de `ClientLayout` et celui du contenu d'`AdminLayout` portent `overflow-x-clip` : aucun décor ne peut plus élargir la page. **Toujours `clip`, jamais `overflow-x-hidden`** à ce niveau : `hidden` ferait du conteneur une zone de défilement et casserait les éléments collants (chips des Prestations, recherche des Bons plans…)
