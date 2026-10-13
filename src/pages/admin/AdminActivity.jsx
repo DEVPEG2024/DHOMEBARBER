@@ -7,7 +7,7 @@
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, CheckCheck, RefreshCw, Inbox } from 'lucide-react';
+import { AlertTriangle, CheckCheck, RefreshCw, Inbox, BellRing } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/lib/AuthContext';
 import { useAdminActivity, useUnreadActivity, markActivitySeen } from '@/lib/adminActivity';
@@ -15,6 +15,8 @@ import ActivityStats from '@/components/admin-activity/ActivityStats';
 import ActivityFilters from '@/components/admin-activity/ActivityFilters';
 import ActivityRow, { ActivityRowSkeleton } from '@/components/admin-activity/ActivityRow';
 import { groupByDay, normalizeSearch } from '@/components/admin-activity/activityUi';
+import AlertSettingsDialog from '@/components/admin-activity/AlertSettingsDialog';
+import { useAdminAlertPrefs } from '@/lib/adminAlerts';
 
 export default function AdminActivity() {
   const navigate = useNavigate();
@@ -26,6 +28,9 @@ export default function AdminActivity() {
   const [typeFilter, setTypeFilter] = useState('all');
   const [unreadOnly, setUnreadOnly] = useState(false);
   const [search, setSearch] = useState('');
+  const [alertsOpen, setAlertsOpen] = useState(false);
+  const alertPrefs = useAdminAlertPrefs();
+  const silencedCount = Object.keys(alertPrefs.prefs).length;
 
   // Tout est marqué comme lu en quittant la page : les points « non lu » restent visibles pendant la consultation.
   const userIdRef = useRef(user?.id);
@@ -106,6 +111,28 @@ export default function AdminActivity() {
           </Button>
         </div>
       </div>
+
+      <button
+        type="button"
+        onClick={() => setAlertsOpen(true)}
+        className="mb-4 w-full flex items-center gap-3 rounded-2xl border border-primary/30 bg-primary/5 px-3 py-2.5 text-left hover:bg-primary/10 transition-colors"
+      >
+        <span className="w-9 h-9 rounded-xl bg-primary/15 flex items-center justify-center shrink-0">
+          <BellRing className="w-4 h-4 text-primary" aria-hidden="true" />
+        </span>
+        <span className="flex-1 min-w-0">
+          <span className="block text-sm font-semibold text-foreground">Réglages des alertes</span>
+          <span className="block text-[11px] text-muted-foreground">
+            {alertPrefs.isLoading
+              ? 'Chargement…'
+              : silencedCount === 0
+                ? 'Toutes les actions vous notifient · choisir lesquelles'
+                : `${silencedCount} type${silencedCount > 1 ? 's' : ''} noté${silencedCount > 1 ? 's' : ''} sans notification · modifier`}
+          </span>
+        </span>
+        <span className="text-xs font-semibold text-primary shrink-0">Régler ▸</span>
+      </button>
+      <AlertSettingsDialog open={alertsOpen} onOpenChange={setAlertsOpen} />
 
       {failedSources.length > 0 && (
         <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200 flex gap-2 items-start">

@@ -40,6 +40,7 @@ import { toast } from 'sonner';
 import { api } from '@/api/apiClient';
 import { useAuth } from '@/lib/AuthContext';
 import { cancellationActor, cleanReason } from '@/lib/cancellation';
+import { useAdminAlertPrefs } from '@/lib/adminAlerts';
 
 export const ADMIN_ACTIVITY_QUERY_KEY = ['adminActivity'];
 
@@ -549,6 +550,9 @@ export function useActivityToasts() {
   const knownFor = useRef(user?.id);
   // Instant du premier chargement : seules les actions postérieures (marge comprise) sont annoncées.
   const mountedAt = useRef(Date.now());
+  const { prefs: alertPrefs } = useAdminAlertPrefs();
+  const alertPrefsRef = useRef(alertPrefs);
+  alertPrefsRef.current = alertPrefs;
 
   useEffect(() => {
     if (!isAdmin || !data?.events) return;
@@ -567,7 +571,8 @@ export function useActivityToasts() {
     // Un événement inconnu mais antérieur à l'ouverture (source en échec au premier chargement
     // puis rétablie, RDV ancien qui entre dans la limite de 300…) est simplement mémorisé.
     const threshold = mountedAt.current - TOAST_GRACE_MS;
-    const fresh = unseen.filter((e) => Date.parse(e.at) >= threshold);
+    // Types réglés « sans notification » (Réglages des alertes) : notés dans le fil, sans toast
+    const fresh = unseen.filter((e) => Date.parse(e.at) >= threshold && alertPrefsRef.current[e.type] !== false);
     if (!fresh.length) return;
 
     // Du plus ancien au plus récent, pour que le dernier toast soit la dernière action
