@@ -1,6 +1,7 @@
 # Backend — Alertes admin « Activité clients » (push 🔔)
 
-> **À déployer** (session Mac, `dhomebarber-api/`, hors de ce dépôt), puis `git push heroku main`.
+> **v1 déployée le 13 oct. 2026** (Heroku v102, commit `5d83696` de `dhomebarber-api`) : `lib/adminAlerts.js`, tests
+> `test/test-admin-alerts.js`. La v2 (table d'audit, § 5) et l'écran des préférences ne sont pas faits.
 > Le frontend n'en dépend pas : la page **Activité clients** (`/admin/activity`), la cloche de l'en-tête
 > admin et les toasts fonctionnent déjà en lisant les entités (`src/lib/adminActivity.js`). Mais ils ne
 > préviennent que **pendant qu'un admin a l'app ouverte**. Ce correctif ajoute le push hors de l'app

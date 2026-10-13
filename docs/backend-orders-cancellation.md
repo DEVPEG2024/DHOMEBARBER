@@ -1,6 +1,7 @@
 # Backend — Commandes et annulations (commandes boutique, rendez-vous)
 
-> **À déployer** (session Mac, `dhomebarber-api/`, hors de ce dépôt), puis `git push heroku main`.
+> **Déployé le 13 oct. 2026** (Heroku v102, commit `5d83696` de `dhomebarber-api`) : `lib/orders.js`, `routes/orders.js`,
+> tests `test/test-orders.js`. Notice conservée comme référence du contrat.
 > Le frontend du 13 oct. 2026 fonctionne **avant et après** ce déploiement : tout ce qui dépend d'une
 > nouvelle règle serveur est conditionné par trois drapeaux des paramètres publics (§ 7), et chaque refus
 > (400 / 403 / 404 / 405 / 409 / 429) est traduit en message utile par `src/lib/cancellation.js`
