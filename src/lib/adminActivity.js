@@ -16,11 +16,18 @@
  *    « fiches client » créées par l'admin dans Clients (RDV `cancelled` de 09:00 à 09:00 sans
  *    prestation) ne sont jamais des actions client ;
  *  - toute ligne dont l'email client appartient à un compte staff (admin / barber) est ignorée ;
- *  - une annulation de RDV ne dit pas qui l'a faite (le client depuis Mes rendez-vous ou le
- *    salon depuis l'agenda) : le détail le précise.
+ *  - qui a annulé un RDV : `cancellationActor` (src/lib/cancellation.js) lit `cancelled_by` quand
+ *    le serveur le fournit, sinon le déduit du motif (motif last minute → système, « Salon… »
+ *    posé par l'agenda → staff, « Client… » → client). Les annulations du salon et du système
+ *    sont ignorées ; sans indice, le détail indique « Annulé (client ou salon) » ;
+ *  - commandes annulées : `order_cancelled` n'est émis que si le serveur fournit
+ *    `cancelled_by === 'client'` et `cancelled_at` (docs/backend-orders-cancellation.md) ;
+ *    une commande annulée garde son `order_new`, marqué `cancelled: true` (« annulée depuis »),
+ *    et n'entre plus dans le chiffre du jour.
  *
  * Limites connues (horodatages) :
- *  - annulations de RDV et réponses aux devis sont datées par `updated_date` / `updated_at`,
+ *  - annulations de RDV (sauf si le serveur fournit `cancelled_at`) et réponses aux devis sont
+ *    datées par `updated_date` / `updated_at`,
  *    c'est-à-dire la dernière modification de la ligne, par le client OU par le salon : une
  *    retouche de l'admin (note, prix, confirmation) fait remonter l'élément et le rend non lu ;
  *  - si le serveur ne sait pas trier les RDV par `updated_*` (400), les annulations sont
@@ -32,6 +39,7 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { api } from '@/api/apiClient';
 import { useAuth } from '@/lib/AuthContext';
+import { cancellationActor, cleanReason } from '@/lib/cancellation';
 
 export const ADMIN_ACTIVITY_QUERY_KEY = ['adminActivity'];
 
@@ -44,6 +52,7 @@ export const ACTIVITY_TYPES = {
   appointment_new: { label: 'Nouveau rendez-vous', emoji: '📅', adminPath: '/admin/agenda', tone: 'green' },
   appointment_cancelled: { label: 'Rendez-vous annulé', emoji: '❌', adminPath: '/admin/agenda', tone: 'red' },
   order_new: { label: 'Nouvelle commande', emoji: '🛍️', adminPath: '/admin/orders', tone: 'blue' },
+  order_cancelled: { label: 'Commande annulée', emoji: '❌', adminPath: '/admin/orders', tone: 'red' },
   review_new: { label: 'Nouvel avis', emoji: '⭐', adminPath: '/admin/reviews', tone: 'amber' },
   giftcard_new: { label: 'Carte cadeau achetée', emoji: '🎁', adminPath: '/admin/gift-cards', tone: 'violet' },
   event_request: { label: 'Demande de privatisation', emoji: '🎉', adminPath: '/admin/events', tone: 'violet' },
@@ -94,6 +103,13 @@ function shortDateTime(iso) {
 }
 
 const join = (...parts) => parts.filter(Boolean).join(' · ');
+
+/** Motif nettoyé de son préfixe, tronqué et entre guillemets (« … »), ou chaîne vide. */
+function quotedReason(reason, max = 60) {
+  const r = cleanReason(reason);
+  if (!r) return '';
+  return `« ${r.length > max ? `${r.slice(0, max)}…` : r} »`;
+}
 
 /** Exécute une source ; en cas d'échec, la note dans `failed` et renvoie une liste vide. */
 async function safe(name, failed, fn) {
@@ -261,15 +277,21 @@ export async function fetchAdminActivity({ days = DEFAULT_DAYS } = {}) {
     });
   }
 
-  // Rendez-vous annulés : seulement si la ligne porte une date de modification fiable
+  // Rendez-vous annulés : seulement les annulations du client (ou d'auteur inconnu), datées
   for (const apt of cancelledAppointments) {
     if (!isClientAppointment(apt, staffEmails) || isClientPlaceholder(apt)) continue;
-    if (apt.cancellation_reason) continue; // last minute expiré, posé par le salon
-    const at = updatedIso(apt);
+    const actor = cancellationActor(apt);
+    if (actor === 'staff' || actor === 'system') continue; // agenda du salon, last minute expiré
+    const at = toIso(apt.cancelled_at) || updatedIso(apt);
     if (!at) continue;
     push('appointment_cancelled', apt, at, {
       ...who(apt),
-      detail: join(serviceNames(apt), appointmentWhen(apt), 'Annulé (client ou salon)'),
+      detail: join(
+        serviceNames(apt),
+        appointmentWhen(apt),
+        actor === 'client' ? 'Annulé par le client' : 'Annulé (client ou salon)',
+        actor === 'client' ? quotedReason(apt.cancellation_reason) : '',
+      ),
       amount: toNumber(apt.grand_total) ?? toNumber(apt.total_price),
       link: appointmentLink(apt),
     });
@@ -280,11 +302,23 @@ export async function fetchAdminActivity({ days = DEFAULT_DAYS } = {}) {
     const items = Array.isArray(o.items) ? o.items : [];
     const count = items.reduce((n, it) => n + (Number(it?.quantity) || 1), 0);
     const names = items.map((it) => it?.name).filter(Boolean).slice(0, 3).join(', ');
+    const articles = count ? `${count} article${count > 1 ? 's' : ''}` : '';
+    const cancelled = o.status === 'cancelled';
     push('order_new', o, toIso(o.created_date || o.created_at), {
       ...who(o),
-      detail: join(names, count ? `${count} article${count > 1 ? 's' : ''}` : ''),
+      detail: join(names, articles, cancelled ? 'annulée depuis' : ''),
       amount: toNumber(o.total_price),
+      cancelled,
     });
+    // Annulation par le client : seulement quand le serveur dit qui et quand (cancelled_by / cancelled_at)
+    if (cancelled && cancellationActor(o) === 'client' && o.cancelled_at) {
+      push('order_cancelled', o, toIso(o.cancelled_at), {
+        ...who(o),
+        detail: join(names, articles, quotedReason(o.cancellation_reason)),
+        amount: toNumber(o.total_price),
+        link: '/admin/orders',
+      });
+    }
   }
 
   for (const r of reviews) {

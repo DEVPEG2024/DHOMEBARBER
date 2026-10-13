@@ -1,6 +1,6 @@
 /**
  * Compteurs du jour (heure de Paris) calculés depuis les événements : RDV réservés, commandes,
- * chiffre des commandes + cartes cadeau, nouveaux clients.
+ * chiffre des commandes (hors commandes annulées depuis) + cartes cadeau, nouveaux clients.
  */
 import React, { useMemo } from 'react';
 import { CalendarCheck, ShoppingBag, Euro, UserPlus } from 'lucide-react';
@@ -30,7 +30,8 @@ export default function ActivityStats({ events }) {
       if (ev.type === 'appointment_new') s.appointments += 1;
       else if (ev.type === 'order_new') {
         s.orders += 1;
-        if (hasAmount) s.revenue += amount;
+        // Une commande annulée depuis reste comptée comme commande passée, mais pas dans le chiffre
+        if (hasAmount && !ev.cancelled) s.revenue += amount;
       } else if (ev.type === 'giftcard_new') {
         s.giftcards += 1;
         if (hasAmount) s.revenue += amount;

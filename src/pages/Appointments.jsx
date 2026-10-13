@@ -1,19 +1,22 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api } from '@/api/apiClient';
 import { useAuth } from '@/lib/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
-import { Calendar, CalendarPlus, Clock, User, X, Scissors, Plus, Phone } from 'lucide-react';
+import { Calendar, CalendarPlus, CalendarClock, Clock, User, X, Scissors, Plus, Phone } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { toast } from 'sonner';
 import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog';
 import { hapticFeedback } from '@/lib/capacitor';
 import { appointmentEvent, openCalendar, parisInstant } from '@/lib/calendarLinks';
+import {
+  SALON_PHONE, SALON_PHONE_HREF, CANCEL_REASON_MAX, APPOINTMENT_CANCEL_REASONS,
+  useCancelFeatures, friendlyCancelError, cancelledByLabel, cleanReason,
+} from '@/lib/cancellation';
 
 /** Cibles « Ajouter au calendrier ». */
 const CALENDAR_TARGETS = [
@@ -35,6 +38,31 @@ const endsAt = (apt) => parisInstant(apt.date, apt.end_time || apt.start_time ||
 /** « 06 66 08 36 05 » → « tel:0666083605 ». */
 const telHref = (phone) => `tel:${String(phone || '').replace(/[^\d+]/g, '')}`;
 
+/** Ids des prestations d'un RDV (`services` JSONB : `service_id` ou `id`), comme RebookCard. */
+const serviceIdsOf = (apt) => (Array.isArray(apt?.services) ? apt.services : [])
+  .map(s => s?.service_id ?? s?.id)
+  .filter(id => id !== undefined && id !== null && id !== '')
+  .map(String);
+
+/** Lien « Déplacer » : même barber, mêmes prestations, l'ancien RDV annulé après la nouvelle réservation. */
+function rescheduleHref(apt) {
+  const parts = [];
+  if (apt.employee_id !== undefined && apt.employee_id !== null && apt.employee_id !== '') {
+    parts.push(`barber=${encodeURIComponent(String(apt.employee_id))}`);
+  }
+  const ids = serviceIdsOf(apt);
+  if (ids.length > 0) parts.push(`services=${ids.map(encodeURIComponent).join(',')}`);
+  parts.push(`reschedule=${encodeURIComponent(String(apt.id))}`);
+  return `/booking?${parts.join('&')}`;
+}
+
+/** Total affiché d'un RDV (prix serveur, sinon somme des prestations). */
+const totalOf = (apt) => {
+  const total = Number(apt?.total_price);
+  if (total > 0) return total;
+  return (Array.isArray(apt?.services) ? apt.services : []).reduce((sum, s) => sum + (Number(s?.price) || 0), 0);
+};
+
 const statusConfig = {
   pending:   { label: 'En attente', bg: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' },
   confirmed: { label: 'Confirmé',   bg: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
@@ -45,7 +73,12 @@ const statusConfig = {
 
 export default function Appointments() {
   const [tab, setTab] = useState('upcoming');
-  const [cancelId, setCancelId] = useState(null);
+  // Rendez-vous dont la fenêtre d'annulation est ouverte, et motif choisi (si le serveur l'accepte)
+  const [cancelApt, setCancelApt] = useState(null);
+  const [reasonChoice, setReasonChoice] = useState(null);
+  const [reasonOther, setReasonOther] = useState('');
+  const navigate = useNavigate();
+  const features = useCancelFeatures();
   // Rendez-vous dont le petit menu « Ajouter au calendrier » est ouvert
   const [calendarOpenId, setCalendarOpenId] = useState(null);
   const reduceMotion = useReducedMotion();
@@ -68,6 +101,9 @@ export default function Appointments() {
   });
   const settings = settingsData[0] || null;
   const cancelHours = parseInt(settings?.cancellation_hours, 10) || 0;
+  // Téléphone du salon : celui des paramètres, sinon le numéro connu
+  const salonPhone = settings?.phone || SALON_PHONE;
+  const salonPhoneHref = settings?.phone ? telHref(settings.phone) : SALON_PHONE_HREF;
 
   // Horloge à la minute : un rendez-vous passe dans l'historique dès que son heure de fin est passée
   const [now, setNow] = useState(() => Date.now());
@@ -76,19 +112,74 @@ export default function Appointments() {
     return () => clearInterval(timer);
   }, []);
 
+  /** Motif saisi dans la fenêtre (vide si aucun ou si le serveur ne l'accepte pas encore). */
+  const chosenReason = () => {
+    if (!features.appointmentCancelReason || !reasonChoice) return '';
+    if (reasonChoice === 'Autre') return reasonOther.trim().slice(0, CANCEL_REASON_MAX);
+    return reasonChoice;
+  };
+
+  const openCancel = (apt) => {
+    hapticFeedback();
+    setReasonChoice(null);
+    setReasonOther('');
+    setCancelApt(apt);
+  };
+
   const cancelMutation = useMutation({
-    mutationFn: (id) => api.entities.Appointment.update(id, { status: 'cancelled' }),
-    onSuccess: () => {
+    // Règle : sans `features.appointmentCancelReason`, exactement `{ status: 'cancelled' }` comme
+    // avant (un champ inconnu ferait refuser une annulation qui fonctionne).
+    mutationFn: ({ id, reason }) => api.entities.Appointment.update(
+      id,
+      features.appointmentCancelReason && reason
+        ? { status: 'cancelled', cancellation_reason: `Client : ${reason}`.slice(0, CANCEL_REASON_MAX) }
+        : { status: 'cancelled' },
+    ),
+    onSuccess: (_data, { id, reason }) => {
+      hapticFeedback();
+      // Mise à jour immédiate de la liste, puis rechargement de tout ce qui montre ce créneau
+      queryClient.setQueryData(['myAppointments', user?.email], (old) => (Array.isArray(old)
+        ? old.map(a => (String(a.id) === String(id)
+          ? {
+            ...a,
+            status: 'cancelled',
+            cancelled_by: 'client',
+            ...(features.appointmentCancelReason && reason ? { cancellation_reason: `Client : ${reason}` } : {}),
+          }
+          : a))
+        : old));
       queryClient.invalidateQueries({ queryKey: ['myAppointments'] });
-      toast.success('Rendez-vous annulé');
-      setCancelId(null);
+      queryClient.invalidateQueries({ queryKey: ['appointments'] }); // « Comme la dernière fois »
+      queryClient.invalidateQueries({ queryKey: ['appointments-confirmed'] }); // créneaux de la réservation
+      toast.success('Rendez-vous annulé : le créneau est libéré', {
+        action: { label: 'Réserver', onClick: () => navigate('/booking') },
+      });
     },
     onError: (err) => {
-      // Le serveur refuse l'annulation dans le délai du salon (cancellation_hours) : afficher son message
-      toast.error(err?.message || "Impossible d'annuler ce rendez-vous");
-      setCancelId(null);
+      // Délai d'annulation, RDV déjà passé, refus du serveur : message utile, jamais « HTTP 403 »
+      const e = friendlyCancelError(err, 'appointment');
+      toast.error(e.message, e.callSalon
+        ? { action: { label: 'Appeler', onClick: () => { window.location.href = salonPhoneHref; } } }
+        : undefined);
+      if (e.refetch) {
+        queryClient.invalidateQueries({ queryKey: ['salonSettings'] });
+        queryClient.invalidateQueries({ queryKey: ['myAppointments'] });
+      }
     },
+    onSettled: () => setCancelApt(null),
   });
+
+  const confirmCancel = () => {
+    if (!cancelApt || cancelMutation.isPending) return;
+    cancelMutation.mutate({ id: cancelApt.id, reason: chosenReason() });
+  };
+
+  /** « Déplacer » : nouvelle réservation pré-remplie, l'ancien RDV n'est annulé qu'une fois le nouveau confirmé. */
+  const goReschedule = (apt) => {
+    hapticFeedback();
+    setCancelApt(null);
+    navigate(rescheduleHref(apt));
+  };
 
   /** Ouvre Google Agenda ou télécharge le .ics d'un rendez-vous (UID stable : réimporter met à jour au lieu de dupliquer). */
   const addToCalendar = (kind, apt) => {
@@ -201,6 +292,11 @@ export default function Appointments() {
                 const notStarted = apt.status === 'confirmed' && startMs > now;
                 const tooLateToCancel = notStarted && cancelHours > 0 && startMs - now < cancelHours * 3600 * 1000;
                 const canCancel = notStarted && !tooLateToCancel;
+                // RDV à venir qu'on ne peut pas annuler en ligne (délai dépassé, en attente…) : téléphone du salon
+                const callInstead = !canCancel && !CLOSED_STATUSES.includes(apt.status) && startMs > now;
+                // Historique : qui a annulé et pourquoi (rien pour le last minute expiré : cancelledByLabel renvoie null)
+                const cancelledLabel = apt.status === 'cancelled' ? cancelledByLabel(apt, 'client', 'rdv') : null;
+                const cancelledReason = cancelledLabel ? cleanReason(apt.cancellation_reason) : '';
                 // À venir (fin du RDV pas encore passée) et ni annulé ni terminé : proposer l'ajout au calendrier
                 const canAddToCalendar = !CLOSED_STATUSES.includes(apt.status) && endsAt(apt) > now;
                 const calendarOpen = calendarOpenId === apt.id;
@@ -264,10 +360,20 @@ export default function Appointments() {
                         </div>
                       )}
 
-                      {/* Actions : ajout au calendrier (RDV à venir) et annulation */}
-                      {(canAddToCalendar || canCancel || tooLateToCancel) && (
+                      {/* Annulé : par qui, et le motif s'il est connu */}
+                      {cancelledLabel && (
                         <div className="mt-3 pt-3 border-t border-white/6">
-                          <div className="flex items-center justify-between gap-3">
+                          <p className="text-[11px] font-semibold text-red-400">{cancelledLabel}</p>
+                          {cancelledReason && (
+                            <p className="mt-0.5 text-[11px] text-muted-foreground break-words">Motif : {cancelledReason}</p>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Actions : ajout au calendrier (RDV à venir), déplacement et annulation */}
+                      {(canAddToCalendar || canCancel || callInstead) && (
+                        <div className="mt-3 pt-3 border-t border-white/6">
+                          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
                             {canAddToCalendar ? (
                               <button
                                 type="button"
@@ -282,25 +388,36 @@ export default function Appointments() {
                               </button>
                             ) : <span />}
                             {canCancel && (
-                              <button
-                                onClick={() => setCancelId(apt.id)}
-                                className="flex items-center gap-1.5 text-[11px] font-semibold text-red-400 hover:text-red-300 transition-colors"
-                              >
-                                <X className="w-3.5 h-3.5" />
-                                Annuler le rendez-vous
-                              </button>
+                              <div className="flex items-center gap-3 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => goReschedule(apt)}
+                                  className="flex items-center gap-1.5 text-[11px] font-semibold text-primary hover:text-primary/80 transition-colors"
+                                >
+                                  <CalendarClock className="w-3.5 h-3.5" />
+                                  Déplacer
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => openCancel(apt)}
+                                  className="flex items-center gap-1.5 text-[11px] font-semibold text-red-400 hover:text-red-300 transition-colors"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                  Annuler
+                                </button>
+                              </div>
                             )}
                           </div>
-                          {tooLateToCancel && (
+                          {callInstead && (
                             <p className="mt-2.5 text-[11px] leading-relaxed text-muted-foreground">
-                              Annulation en ligne possible jusqu'à {cancelHours} h avant le rendez-vous.
-                              {' '}Un empêchement ?{' '}
-                              {settings?.phone ? (
-                                <a href={telHref(settings.phone)} className="inline-flex items-center gap-1 font-semibold text-primary whitespace-nowrap">
-                                  <Phone className="w-3 h-3" />
-                                  Appelez le salon
-                                </a>
-                              ) : 'Appelez le salon.'}
+                              {tooLateToCancel
+                                ? `Annulation en ligne possible jusqu'à ${cancelHours} h avant le rendez-vous. Un empêchement ? `
+                                : 'Pour modifier ou annuler ce rendez-vous, '}
+                              <a href={salonPhoneHref} className="inline-flex items-center gap-1 font-semibold text-primary whitespace-nowrap">
+                                <Phone className="w-3 h-3" />
+                                {tooLateToCancel ? 'Appelez le salon' : 'appelez le salon'}
+                              </a>
+                              <span className="whitespace-nowrap"> au {salonPhone}</span>.
                             </p>
                           )}
                           <AnimatePresence initial={false}>
@@ -339,25 +456,117 @@ export default function Appointments() {
         )}
       </div>
 
-      <AlertDialog open={!!cancelId} onOpenChange={() => setCancelId(null)}>
-        <AlertDialogContent className="bg-card/90 backdrop-blur-2xl border-white/10 rounded-3xl mx-4">
-          <AlertDialogHeader>
-            <AlertDialogTitle className="font-display text-xl">Annuler ce rendez-vous ?</AlertDialogTitle>
-            <AlertDialogDescription className="text-muted-foreground text-sm">
-              Cette action est irréversible. Le créneau sera libéré.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter className="gap-2">
-            <AlertDialogCancel className="flex-1 rounded-2xl border-white/10 bg-white/5">Non, garder</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => cancelMutation.mutate(cancelId)}
-              className="flex-1 rounded-2xl bg-red-500/90 text-white hover:bg-red-500"
-            >
-              Oui, annuler
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {/* Annulation : fenêtre fermée par la croix (pas de tap sur le fond), ouverte pendant l'envoi */}
+      <Dialog
+        open={!!cancelApt}
+        onOpenChange={(open) => { if (!open && !cancelMutation.isPending) setCancelApt(null); }}
+      >
+        <DialogContent className="w-[calc(100%-2rem)] max-w-md max-h-[85vh] overflow-y-auto bg-card/95 backdrop-blur-2xl border-white/10 rounded-3xl p-5">
+          {cancelApt && (
+            <>
+              <DialogHeader className="text-left pr-6">
+                <DialogTitle className="font-display text-xl">Annuler ce rendez-vous ?</DialogTitle>
+                <DialogDescription className="text-muted-foreground text-sm">
+                  Le créneau sera libéré.
+                </DialogDescription>
+              </DialogHeader>
+
+              {/* Rappel du rendez-vous */}
+              <div className="rounded-2xl bg-white/4 border border-white/8 p-3 space-y-1.5 min-w-0">
+                <p className="text-sm font-bold text-foreground capitalize">
+                  {cancelApt.date && format(parseISO(cancelApt.date), 'EEEE d MMMM', { locale: fr })}
+                </p>
+                <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Clock className="w-3 h-3 text-primary shrink-0" />
+                  {cancelApt.start_time}{cancelApt.end_time ? ` — ${cancelApt.end_time}` : ''}
+                </p>
+                <p className="flex items-center gap-1.5 text-xs text-muted-foreground min-w-0">
+                  <User className="w-3 h-3 text-primary shrink-0" />
+                  <span className="truncate">{cancelApt.employee_name || 'Barber non assigné'}</span>
+                </p>
+                {Array.isArray(cancelApt.services) && cancelApt.services.length > 0 && (
+                  <p className="text-xs text-muted-foreground break-words">
+                    {cancelApt.services.map(s => s?.name).filter(Boolean).join(' + ')}
+                  </p>
+                )}
+                {totalOf(cancelApt) > 0 && (
+                  <p className="text-xs font-bold text-foreground">{totalOf(cancelApt)}€</p>
+                )}
+              </div>
+
+              {/* Motif facultatif : seulement quand le serveur l'accepte */}
+              {features.appointmentCancelReason && (
+                <div>
+                  <p className="text-xs font-semibold text-foreground mb-2">Motif <span className="font-normal text-muted-foreground">(facultatif)</span></p>
+                  <div className="flex flex-wrap gap-2">
+                    {APPOINTMENT_CANCEL_REASONS.map(r => {
+                      const active = reasonChoice === r;
+                      return (
+                        <button
+                          key={r}
+                          type="button"
+                          disabled={cancelMutation.isPending}
+                          aria-pressed={active}
+                          onClick={() => setReasonChoice(active ? null : r)}
+                          className={`px-3 h-8 rounded-full border text-[11px] font-semibold transition-colors ${
+                            active
+                              ? 'bg-primary/15 border-primary/40 text-primary'
+                              : 'bg-white/5 border-white/10 text-muted-foreground hover:text-foreground'
+                          }`}
+                        >
+                          {r}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {reasonChoice === 'Autre' && (
+                    <div className="mt-2">
+                      <textarea
+                        value={reasonOther}
+                        onChange={(e) => setReasonOther(e.target.value.slice(0, CANCEL_REASON_MAX))}
+                        maxLength={CANCEL_REASON_MAX}
+                        rows={2}
+                        disabled={cancelMutation.isPending}
+                        placeholder="Précisez si vous le souhaitez"
+                        className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2 text-base sm:text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-primary/40 resize-none"
+                      />
+                      <p className="text-right text-[10px] text-muted-foreground">{reasonOther.length}/{CANCEL_REASON_MAX}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  disabled={cancelMutation.isPending}
+                  onClick={() => setCancelApt(null)}
+                  className="flex-1 h-11 rounded-2xl border border-white/10 bg-white/5 text-sm font-semibold text-foreground disabled:opacity-50"
+                >
+                  Non, garder
+                </button>
+                <button
+                  type="button"
+                  disabled={cancelMutation.isPending}
+                  onClick={confirmCancel}
+                  className="flex-1 h-11 rounded-2xl bg-red-500/90 text-white text-sm font-semibold hover:bg-red-500 disabled:opacity-60"
+                >
+                  {cancelMutation.isPending ? 'Annulation…' : 'Oui, annuler'}
+                </button>
+              </div>
+              <button
+                type="button"
+                disabled={cancelMutation.isPending}
+                onClick={() => goReschedule(cancelApt)}
+                className="mx-auto flex items-center gap-1.5 text-xs font-semibold text-primary disabled:opacity-50"
+              >
+                <CalendarClock className="w-3.5 h-3.5" />
+                Déplacer plutôt
+              </button>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

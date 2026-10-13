@@ -7,6 +7,18 @@ import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import AppointmentEditForm from './AppointmentEditForm';
 import { STATUS_META } from './agendaUtils';
+import { formatStaffReason, cancellationActor, cancelledByLabel, cleanReason } from '@/lib/cancellation';
+
+/** Message d'erreur lisible : celui du serveur, sinon celui de l'erreur sauf « HTTP 403 », sinon le repli. */
+function errorMessage(err, fallback) {
+  const server = typeof err?.data?.error === 'string' ? err.data.error.trim() : '';
+  if (server && !/^HTTP \d+$/.test(server)) return server;
+  const msg = typeof err?.message === 'string' ? err.message.trim() : '';
+  if (msg && !/^HTTP/.test(msg)) return msg;
+  return fallback;
+}
+
+const STAFF_CANCEL_REASON_MAX = 200;
 
 const initialState = (apt) => ({
   saving: false,
@@ -52,6 +64,11 @@ function ModalInner({ appointment, onUpdate, onDelete, onEdit }) {
   const [correcting, setCorrecting] = React.useState(false);
   const [clientSearch, setClientSearch] = React.useState('');
   const [assignedClient, setAssignedClient] = React.useState(null);
+  // Annulation en deux temps : le premier tap ouvre le panneau de confirmation dans la fiche
+  const [confirmingCancel, setConfirmingCancel] = React.useState(false);
+  const [cancelReason, setCancelReason] = React.useState('');
+  // Suppression en deux temps, sur le même modèle (plus de window.confirm)
+  const [confirmingDelete, setConfirmingDelete] = React.useState(false);
   const isLastMinute = appointment.status === 'last_minute';
   const isCompleted = appointment.status === 'completed';
   const locked = isCompleted && !correcting; // récapitulatif en lecture seule
@@ -93,6 +110,43 @@ function ModalInner({ appointment, onUpdate, onDelete, onEdit }) {
   const serviceTotal = appointment.total_price || manualServiceTotal || 0;
   const grandTotal = locked ? (appointment.grand_total || serviceTotal + tipValue + prodValue) : (serviceTotal + tipValue + prodValue);
   const canValidate = !locked && state.paymentMethod && (tipValue === 0 || state.tipMethod);
+
+  // Motif d'annulation affiché sur un RDV annulé / absent
+  const cancelActor = isClosedOut ? cancellationActor(appointment) : null;
+  const cancelByLabel = isClosedOut ? cancelledByLabel(appointment, 'admin', 'rdv') : null;
+  const cancelMotif = isClosedOut && cancelActor !== 'system' ? cleanReason(appointment.cancellation_reason) : '';
+
+  const handleConfirmCancel = async () => {
+    dispatch({ type: 'SAVING', value: true });
+    try {
+      await api.entities.Appointment.update(appointment.id, {
+        status: 'cancelled',
+        cancellation_reason: formatStaffReason(cancelReason),
+      });
+      toast.success('Rendez-vous annulé');
+      setConfirmingCancel(false);
+      setCancelReason('');
+      onUpdate?.();
+    } catch (e) {
+      toast.error(errorMessage(e, 'Annulation impossible'));
+    } finally {
+      dispatch({ type: 'SAVING', value: false });
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    dispatch({ type: 'SAVING', value: true });
+    try {
+      await api.entities.Appointment.delete(appointment.id);
+      toast.success('Rendez-vous supprimé');
+      setConfirmingDelete(false);
+      onDelete?.();
+    } catch (e) {
+      toast.error(errorMessage(e, 'Suppression impossible'));
+    } finally {
+      dispatch({ type: 'SAVING', value: false });
+    }
+  };
 
   const handleValidate = async () => {
     dispatch({ type: 'SAVING', value: true });
@@ -588,22 +642,49 @@ function ModalInner({ appointment, onUpdate, onDelete, onEdit }) {
             </button>
           )}
 
+          {/* Cancel confirmation (second tap) */}
+          {!correcting && !isClosedOut && confirmingCancel && (
+            <div className="rounded-xl border border-red-500/25 bg-red-500/5 p-3 space-y-2.5">
+              <p className="text-sm font-semibold text-red-400 flex items-center gap-1.5">
+                <X className="w-4 h-4 shrink-0" />
+                Annuler ce rendez-vous ?
+              </p>
+              <input
+                type="text"
+                value={cancelReason}
+                maxLength={STAFF_CANCEL_REASON_MAX}
+                onChange={(e) => setCancelReason(e.target.value)}
+                placeholder="Motif (facultatif)"
+                aria-label="Motif de l'annulation (facultatif)"
+                className="w-full min-w-0 bg-white/5 border border-white/10 rounded-lg px-2.5 py-2 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-red-500/40"
+              />
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setConfirmingCancel(false); setCancelReason(''); }}
+                  disabled={state.saving}
+                  className="flex-1 py-2.5 rounded-xl text-xs font-medium bg-white/5 border border-white/10 hover:bg-white/10 transition-all disabled:opacity-60"
+                >
+                  Garder
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmCancel}
+                  disabled={state.saving}
+                  className="flex-1 py-2.5 rounded-xl text-xs font-semibold bg-red-500 text-white hover:bg-red-600 transition-all disabled:opacity-60"
+                >
+                  {state.saving ? 'Annulation…' : "Confirmer l'annulation"}
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Cancel / No-show buttons */}
-          {!correcting && appointment.status !== 'cancelled' && appointment.status !== 'no_show' && (
+          {!correcting && !confirmingCancel && appointment.status !== 'cancelled' && appointment.status !== 'no_show' && (
             <div className="flex gap-2">
               <button
-                onClick={async () => {
-                  dispatch({ type: 'SAVING', value: true });
-                  try {
-                    await api.entities.Appointment.update(appointment.id, { status: 'cancelled' });
-                    toast.success('Rendez-vous annulé');
-                    onUpdate?.();
-                  } catch (e) {
-                    toast.error('Erreur');
-                  } finally {
-                    dispatch({ type: 'SAVING', value: false });
-                  }
-                }}
+                type="button"
+                onClick={() => setConfirmingCancel(true)}
                 disabled={state.saving}
                 className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-medium bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 transition-all disabled:opacity-60"
               >
@@ -634,6 +715,24 @@ function ModalInner({ appointment, onUpdate, onDelete, onEdit }) {
         </>
       )}
 
+      {/* Motif d'annulation (RDV annulé ou absent) */}
+      {isClosedOut && (cancelActor === 'system' || cancelByLabel || cancelMotif) && (
+        <div className="flex items-start gap-2 bg-red-500/5 border border-red-500/15 rounded-lg px-3 py-2 min-w-0">
+          <X className="w-3.5 h-3.5 text-red-400 mt-0.5 shrink-0" />
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold text-red-400">Motif d'annulation</p>
+            {cancelActor === 'system' ? (
+              <p className="text-xs text-muted-foreground">Last minute non pris</p>
+            ) : (
+              <>
+                {cancelByLabel && <p className="text-xs text-muted-foreground">{cancelByLabel}</p>}
+                {cancelMotif && <p className="text-xs text-foreground/80 break-words">« {cancelMotif} »</p>}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Notes */}
       {appointment.notes && (
         <div className="flex items-start gap-2">
@@ -648,27 +747,46 @@ function ModalInner({ appointment, onUpdate, onDelete, onEdit }) {
         </div>
       )}
 
-      {/* Delete */}
-      <button
-        onClick={async () => {
-          if (!window.confirm('Supprimer définitivement ce rendez-vous ?')) return;
-          dispatch({ type: 'SAVING', value: true });
-          try {
-            await api.entities.Appointment.delete(appointment.id);
-            toast.success('Rendez-vous supprimé');
-            onDelete?.();
-          } catch {
-            toast.error('Erreur lors de la suppression');
-          } finally {
-            dispatch({ type: 'SAVING', value: false });
-          }
-        }}
-        disabled={state.saving}
-        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-medium bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 transition-all disabled:opacity-60 mt-2"
-      >
-        <Trash2 className="w-3.5 h-3.5" />
-        Supprimer le rendez-vous
-      </button>
+      {/* Delete (deux taps : le premier ouvre la confirmation dans la fiche) */}
+      {confirmingDelete ? (
+        <div className="rounded-xl border border-red-500/25 bg-red-500/5 p-3 space-y-2.5 mt-2">
+          <p className="text-sm font-semibold text-red-400 flex items-center gap-1.5">
+            <Trash2 className="w-4 h-4 shrink-0" />
+            Supprimer définitivement ce rendez-vous ?
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Il disparaîtra de l'agenda et des statistiques. Pour libérer le créneau en gardant une trace, préférez « Annuler ».
+          </p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setConfirmingDelete(false)}
+              disabled={state.saving}
+              className="flex-1 py-2.5 rounded-xl text-xs font-medium bg-white/5 border border-white/10 hover:bg-white/10 transition-all disabled:opacity-60"
+            >
+              Garder
+            </button>
+            <button
+              type="button"
+              onClick={handleConfirmDelete}
+              disabled={state.saving}
+              className="flex-1 py-2.5 rounded-xl text-xs font-semibold bg-red-500 text-white hover:bg-red-600 transition-all disabled:opacity-60"
+            >
+              {state.saving ? 'Suppression…' : 'Supprimer'}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setConfirmingDelete(true)}
+          disabled={state.saving}
+          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-medium bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 transition-all disabled:opacity-60 mt-2"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+          Supprimer le rendez-vous
+        </button>
+      )}
     </div>
   );
 }

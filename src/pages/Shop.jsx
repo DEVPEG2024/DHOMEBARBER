@@ -1,4 +1,5 @@
-import React, { useState, useRef, useLayoutEffect } from 'react';
+import React, { useState, useRef, useLayoutEffect, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '@/api/apiClient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
@@ -29,6 +30,39 @@ const cartLimit = (product) => {
 const stockLimitMessage = (limit) => (limit <= 0
   ? 'Ce produit est en rupture de stock'
   : `Plus que ${limit} en stock : tout est déjà dans votre panier`);
+
+/** Longueur maximale de la note jointe à la commande. */
+const NOTES_MAX = 500;
+
+/**
+ * Panier conservé par compte dans le navigateur (`dhb-cart:<id>`) : il survit à un changement de
+ * page ou à la fermeture de l'app. Simple confort : stockage absent ou illisible = panier vide.
+ */
+const cartStorageKey = (userId) => `dhb-cart:${userId || 'guest'}`;
+
+function readCart(key) {
+  try {
+    const raw = JSON.parse(localStorage.getItem(key) || 'null');
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+    const cart = {};
+    Object.entries(raw).forEach(([id, qty]) => {
+      const n = Number(qty);
+      if (id && Number.isInteger(n) && n >= 1) cart[String(id)] = n;
+    });
+    return cart;
+  } catch {
+    return {};
+  }
+}
+
+function writeCart(key, cart) {
+  try {
+    if (Object.keys(cart).length === 0) localStorage.removeItem(key);
+    else localStorage.setItem(key, JSON.stringify(cart));
+  } catch {
+    // stockage indisponible (navigation privée…) : le panier reste en mémoire
+  }
+}
 
 function GlassCard({ children }) {
   const ref = useRef(null);
@@ -69,7 +103,24 @@ function GlassCard({ children }) {
 }
 
 export default function Shop() {
-  const [cart, setCart] = useState({});
+  const { user } = useAuth();
+  // Panier rattaché au compte : à un changement de compte, on relit la bonne clé (ajustement
+  // pendant le rendu, sans écrire l'ancien panier sous la nouvelle clé).
+  const cartKey = cartStorageKey(user?.id);
+  const [cartState, setCartState] = useState(() => ({ key: cartKey, items: readCart(cartKey) }));
+  if (cartState.key !== cartKey) {
+    setCartState({ key: cartKey, items: readCart(cartKey) });
+  }
+  const cart = cartState.key === cartKey ? cartState.items : {};
+  const setCart = useCallback((updater) => {
+    setCartState(prev => ({
+      key: prev.key,
+      items: typeof updater === 'function' ? updater(prev.items) : updater,
+    }));
+  }, []);
+  useEffect(() => {
+    writeCart(cartState.key, cartState.items);
+  }, [cartState]);
   const [activeCategory, setActiveCategory] = useState('all');
   const [showCart, setShowCart] = useState(false);
   const [notes, setNotes] = useState('');
@@ -77,7 +128,8 @@ export default function Shop() {
   const [orderSuccess, setOrderSuccess] = useState(false);
   // Fiche produit ouverte (bottom sheet) : id du produit, résolu dans la liste à chaque rendu
   const [openProductId, setOpenProductId] = useState(null);
-  const { user } = useAuth();
+  // Garde contre le double envoi (deux taps avant que `ordering` ne soit rendu)
+  const submittingRef = useRef(false);
   const queryClient = useQueryClient();
   const reduceMotion = useReducedMotion();
 
@@ -96,11 +148,25 @@ export default function Shop() {
   const cartIconScale = useTransform(cartBump, v => 1 + v * 0.25);
   const cartCountScale = useTransform(cartBump, v => 1 + v * 0.2);
 
-  const { data: products = [] } = useQuery({
+  const { data: products = [], isSuccess: productsLoaded } = useQuery({
     queryKey: ['products'],
     staleTime: 5 * 60 * 1000, // catalogue : change rarement
     queryFn: () => api.entities.Product.filter({ is_active: true }, 'name', 100),
   });
+
+  // Produits retirés du catalogue (supprimés ou masqués) depuis leur ajout au panier : on les
+  // enlève une fois le catalogue chargé avec succès (jamais pendant le chargement ni sur une erreur).
+  useEffect(() => {
+    if (!productsLoaded) return;
+    const known = new Set(products.map(p => String(p.id)));
+    setCart(prev => {
+      const ids = Object.keys(prev);
+      if (ids.every(id => known.has(String(id)))) return prev;
+      const next = {};
+      ids.forEach(id => { if (known.has(String(id))) next[id] = prev[id]; });
+      return next;
+    });
+  }, [productsLoaded, products, setCart]);
 
   const filtered = activeCategory === 'all'
     ? products
@@ -183,10 +249,12 @@ export default function Shop() {
     hapticFeedback();
   };
 
-  const cartItems = Object.entries(cart);
+  // Seules les lignes dont le produit est connu comptent (total, nombre, envoi)
+  const cartItems = Object.entries(cart)
+    .filter(([id]) => products.some(p => String(p.id) === String(id)));
   const cartTotal = cartItems.reduce((sum, [id, qty]) => {
     const product = products.find(p => String(p.id) === String(id));
-    return sum + (product?.price || 0) * qty;
+    return sum + (Number(product?.price) || 0) * qty;
   }, 0);
   const cartCount = cartItems.reduce((sum, [, qty]) => sum + qty, 0);
   // Un article dépasse le stock (stock rechargé à la baisse depuis l'ajout) : commande bloquée
@@ -196,6 +264,7 @@ export default function Shop() {
   });
 
   const handleOrder = async () => {
+    if (submittingRef.current || ordering) return;
     if (cartItems.length === 0) {
       toast.error('Votre panier est vide');
       return;
@@ -204,14 +273,15 @@ export default function Shop() {
       toast.error('Ajustez les quantités : certains produits n\'ont plus assez de stock');
       return;
     }
+    submittingRef.current = true;
     setOrdering(true);
     try {
       const items = cartItems.map(([id, qty]) => {
         const product = products.find(p => String(p.id) === String(id));
         return {
           product_id: id,
-          name: product?.name || '',
-          price: product?.price || 0,
+          name: product.name || '',
+          price: Number(product.price) || 0,
           quantity: qty,
         };
       });
@@ -223,8 +293,9 @@ export default function Shop() {
         items,
         total_price: cartTotal,
         status: 'pending',
-        notes: notes.trim(),
-        created_date: new Date().toISOString().split('T')[0],
+        notes: notes.trim().slice(0, NOTES_MAX),
+        // Horodatage complet : « Mes commandes » affiche l'heure de Paris
+        created_date: new Date().toISOString(),
       });
 
       setCart({});
@@ -232,6 +303,8 @@ export default function Shop() {
       setOrderSuccess(true);
       // Le stock a bougé côté serveur : la grille doit le refléter
       queryClient.invalidateQueries({ queryKey: ['products'] });
+      queryClient.invalidateQueries({ queryKey: ['myOrders'] });
+      queryClient.invalidateQueries({ queryKey: ['adminOrders'] });
     } catch (err) {
       // Message du serveur (ex. 409 « plus que N en stock ») plutôt qu'une erreur générique
       const message = err?.data?.error || err?.message;
@@ -239,6 +312,7 @@ export default function Shop() {
       // Stock insuffisant ou produit modifié : on recharge le catalogue, le panier signale l'écart
       if (err?.status === 409 || err?.status === 400) queryClient.invalidateQueries({ queryKey: ['products'] });
     } finally {
+      submittingRef.current = false;
       setOrdering(false);
     }
   };
@@ -482,13 +556,16 @@ export default function Shop() {
                     Votre commande a bien été enregistrée.
                   </p>
                   <p className="text-xs text-muted-foreground text-center mb-6">
-                    Vous serez notifié quand elle sera prête à retirer au salon.
+                    Le salon prépare votre commande. Suivez son état dans Mes commandes ; le paiement se fait au retrait.
                   </p>
                   <div className="flex items-center gap-2 text-xs text-primary bg-primary/10 rounded-lg px-4 py-2">
                     <Store className="w-4 h-4" />
                     Retrait au salon
                   </div>
-                  <Button className="mt-6 w-full max-w-xs" onClick={closeCart}>
+                  <Button asChild variant="outline" className="mt-6 w-full max-w-xs">
+                    <Link to="/orders" onClick={closeCart}>Voir mes commandes</Link>
+                  </Button>
+                  <Button className="mt-3 w-full max-w-xs" onClick={closeCart}>
                     Continuer mes achats
                   </Button>
                 </div>
@@ -560,9 +637,11 @@ export default function Shop() {
                         <Textarea
                           placeholder="Instructions spéciales..."
                           value={notes}
-                          onChange={e => setNotes(e.target.value)}
+                          onChange={e => setNotes(e.target.value.slice(0, NOTES_MAX))}
+                          maxLength={NOTES_MAX}
                           className="bg-card border-border text-sm resize-none h-16"
                         />
+                        <p className="text-[10px] text-muted-foreground text-right mt-1">{notes.length}/{NOTES_MAX}</p>
                       </div>
                     )}
                   </div>
