@@ -2,14 +2,22 @@ import React, { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { motion, useReducedMotion } from 'framer-motion';
-import { ArrowRight, RotateCcw } from 'lucide-react';
+import { ArrowRight, CalendarClock, RotateCcw } from 'lucide-react';
 import { format, parseISO, isValid } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { api } from '@/api/apiClient';
 import { BARBER_PHOTO_ASPECT, BARBER_PHOTO_BG } from '@/lib/barberPhoto';
+import { parisInstant } from '@/lib/calendarLinks';
+import { formatPrice } from '@/components/services/serviceUtils';
 
-// Statuts qui ne correspondent pas à une vraie visite du client
-const IGNORED_STATUSES = ['cancelled', 'break'];
+// Statuts qui ne correspondent pas à une vraie visite du client (absent = pas venu)
+const IGNORED_STATUSES = ['cancelled', 'break', 'no_show'];
+
+/** RDV confirmé pas encore terminé (heure de fin à Paris, sinon heure de début). */
+function isUpcoming(apt, nowMs) {
+  if (apt?.status !== 'confirmed' || !apt.date) return false;
+  return parisInstant(apt.date, apt.end_time || apt.start_time || '23:59') > nowMs;
+}
 
 /** Date du jour (YYYY-MM-DD) à l'heure de Paris, comparable aux dates des RDV. */
 function todayInParis() {
@@ -20,7 +28,9 @@ function todayInParis() {
 /**
  * Bloc « Comme la dernière fois » : relance en un tap de la dernière visite
  * du client connecté (même barber, mêmes prestations). Ne rend rien sans
- * utilisateur connecté ou sans rendez-vous exploitable.
+ * utilisateur connecté ou sans rendez-vous exploitable. Un client qui a déjà
+ * un rendez-vous confirmé à venir voit celui-ci (lien vers Mes rendez-vous)
+ * au lieu d'une invitation à re-réserver.
  *
  * @param {object} user       utilisateur connecté (useAuth)
  * @param {Array}  employees  barbers actifs (déjà chargés par l'accueil)
@@ -37,15 +47,17 @@ export default function RebookCard({ user, employees = [], services = [] }) {
   });
 
   const last = useMemo(() => {
+    const nowMs = Date.now();
     const valid = appointments
       .filter(a => a?.date && !IGNORED_STATUSES.includes(a.status))
       // Tri décroissant date puis heure : le serveur ne trie que par date
       .sort((a, b) => (b.date + (b.start_time || '')).localeCompare(a.date + (a.start_time || '')));
-    if (valid.length === 0) return null;
-    // On préfère la dernière visite passée ; à défaut (client avec un seul RDV
-    // à venir), on propose quand même de reprendre ce prochain rendez-vous
+    // Prochain RDV confirmé (le plus proche) : on le montre, sans proposer de re-réserver
+    const next = valid.filter(a => isUpcoming(a, nowMs)).pop();
+    if (next) return next;
+    // Sinon la dernière visite passée
     const today = todayInParis();
-    return valid.find(a => a.date <= today) || valid[0];
+    return valid.find(a => a.date <= today) || null;
   }, [appointments]);
 
   const details = useMemo(() => {
@@ -66,7 +78,7 @@ export default function RebookCard({ user, employees = [], services = [] }) {
     const query = params.toString();
 
     const parsed = parseISO(last.date);
-    const isFuture = last.date > todayInParis();
+    const isFuture = isUpcoming(last, Date.now());
     const sameYear = isValid(parsed) && parsed.getFullYear() === new Date().getFullYear();
     const dateLabel = isValid(parsed) ? format(parsed, sameYear ? 'EEE d MMM' : 'EEE d MMM yyyy', { locale: fr }) : last.date;
 
@@ -77,8 +89,8 @@ export default function RebookCard({ user, employees = [], services = [] }) {
       activeServices,
       total: activeServices.reduce((sum, s) => sum + (Number(s.price) || 0), 0),
       duration: activeServices.reduce((sum, s) => sum + (Number(s.duration) || 0), 0),
-      href: query ? `/booking?${query}` : '/booking',
-      dateLabel,
+      href: isFuture ? '/appointments' : (query ? `/booking?${query}` : '/booking'),
+      dateLabel: isFuture && last.start_time ? `${dateLabel} à ${last.start_time}` : dateLabel,
       isFuture,
     };
   }, [last, employees, services]);
@@ -116,15 +128,17 @@ export default function RebookCard({ user, employees = [], services = [] }) {
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 mb-0.5">
-            <RotateCcw className="w-3.5 h-3.5 text-primary shrink-0" />
-            <p className="text-sm font-bold text-foreground truncate">Comme la dernière fois</p>
+            {isFuture
+              ? <CalendarClock className="w-3.5 h-3.5 text-primary shrink-0" />
+              : <RotateCcw className="w-3.5 h-3.5 text-primary shrink-0" />}
+            <p className="text-sm font-bold text-foreground truncate">{isFuture ? 'Votre prochain rendez-vous' : 'Comme la dernière fois'}</p>
           </div>
           {/* Deux lignes max, retour à la ligne plutôt que troncature : lisible sur tous les écrans */}
           <p className="text-xs text-muted-foreground leading-snug line-clamp-2">{subtitle}</p>
           <p className="text-[11px] text-muted-foreground/80 mt-1 leading-snug">
-            {isFuture ? 'Prochain RDV : ' : 'Dernière visite : '}<span className="text-foreground/80">{dateLabel}</span>
-            {activeServices.length > 0 && (
-              <span className="text-foreground/60 whitespace-nowrap"> · {total}€ · {duration} min</span>
+            {isFuture ? '' : 'Dernière visite : '}<span className="text-foreground/80">{dateLabel}</span>
+            {!isFuture && activeServices.length > 0 && (
+              <span className="text-foreground/60 whitespace-nowrap"> · {formatPrice(total)} · {duration} min</span>
             )}
           </p>
 
@@ -133,7 +147,7 @@ export default function RebookCard({ user, employees = [], services = [] }) {
               whileTap={reduceMotion ? undefined : { scale: 0.96 }}
               className="flex items-center justify-center gap-1.5 h-9 px-4 rounded-xl bg-primary text-primary-foreground text-xs font-semibold shadow-lg shadow-primary/25 hover:bg-primary/90 transition-colors"
             >
-              Réserver à nouveau <ArrowRight className="w-3.5 h-3.5" />
+              {isFuture ? 'Voir mes rendez-vous' : 'Réserver à nouveau'} <ArrowRight className="w-3.5 h-3.5" />
             </motion.span>
           </Link>
         </div>

@@ -41,8 +41,18 @@ export const FEEDBACK_AREAS = [
 
 export const areaLabel = (value) => FEEDBACK_AREAS.find(a => a.value === value)?.label || null;
 
-/** Le serveur ne connaît pas encore l'entité (backend pas déployé). */
-export const isBackendMissing = (err) => err?.status === 400 || err?.status === 404;
+/**
+ * Le serveur ne connaît pas l'entité (backend pas déployé, ou ancienne version) : 404, ou 400
+ * dont le message parle d'une entité / table inconnue. Un autre 400 (message trop court, quota,
+ * capture refusée…) est un vrai refus : son message est affiché, pas le repli par email.
+ */
+export const isBackendMissing = (err) => {
+  if (err?.status === 404) return true;
+  if (err?.status !== 400) return false;
+  const message = String(err.data?.error || err.data?.message || err.message || '');
+  // \b : « identité » (qui contient « entité ») ne doit pas compter
+  return /\bentit(y|ies|é)|unknown table|table inconnue/i.test(message);
+};
 
 export async function fetchMyFeedback() {
   try {

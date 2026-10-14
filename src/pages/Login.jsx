@@ -2,14 +2,32 @@ import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { motion } from 'framer-motion';
-import { Mail, Lock, User, Phone, Eye, EyeOff, Download, Bell, CheckCircle, ArrowRight, Share, Plus, KeyRound } from 'lucide-react';
+import { Mail, Lock, User, Phone, Eye, EyeOff, Download, Bell, CheckCircle, ArrowRight, Share, Plus, KeyRound, WifiOff, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import LegalLink from '@/components/shared/LegalLink';
 import { isPushSupported, subscribeToPush } from '@/lib/pushNotifications';
 import { isNative } from '@/lib/capacitor';
-import { API_SERVER_URL, resolvedAppId } from '@/api/apiClient';
+import { apiRequest, apiUrl, getToken } from '@/api/apiClient';
 
 const LOGO_URL = '/logo.png';
+// Délai avant de pouvoir redemander un code de réinitialisation
+const RESEND_DELAY = 30;
+
+const NETWORK_MESSAGE = 'Pas de connexion internet. Vérifiez votre réseau.';
+
+/**
+ * Message à afficher pour une erreur de l'API d'authentification : sans réponse du serveur
+ * (hors ligne) → message réseau ; réponse sans message lisible (page d'erreur HTML, 5xx) →
+ * serveur indisponible ; sinon le message du serveur, ou `fallback`.
+ */
+function authErrorMessage(err, fallback) {
+  if (!err?.status) return NETWORK_MESSAGE;
+  const serverMessage = err.data?.error || err.data?.message || err.response?.data?.error;
+  if (serverMessage) return serverMessage;
+  if (err.status === 429) return 'Trop de tentatives. Réessayez dans quelques minutes.';
+  if (err.status >= 500) return 'Le serveur ne répond pas. Réessayez dans un instant.';
+  return fallback;
+}
 
 export default function Login() {
   const [mode, setMode] = useState('login');
@@ -27,11 +45,25 @@ export default function Login() {
   const [resetCode, setResetCode] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  // Fin du délai avant « Renvoyer le code » (horodatage), et seconde courante pour l'afficher
+  const [resendAt, setResendAt] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
+  const resendIn = Math.max(0, Math.ceil((resendAt - now) / 1000));
 
   // Après une connexion ou une inscription, la redirection (paramètre `redirect` compris)
   // est faite par la garde GuestOnly d'App.jsx, dès que la session est ouverte.
-  const { login, register, welcomePending, dismissWelcome } = useAuth();
+  const { login, register, welcomePending, dismissWelcome, authError, retryAuth, isRetryingAuth, dismissAuthError } = useAuth();
   const [searchParams] = useSearchParams();
+
+  useEffect(() => {
+    if (resendAt <= Date.now()) return undefined;
+    const timer = setInterval(() => {
+      const t = Date.now();
+      setNow(t);
+      if (t >= resendAt) clearInterval(timer);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [resendAt]);
 
   // Session expirée en cours d'utilisation (voir AuthContext) : dire pourquoi on est ici,
   // plutôt que de renvoyer l'utilisateur sur un écran de connexion sans explication.
@@ -67,8 +99,8 @@ export default function Login() {
       const user = await login(email, password);
       toast.success(`Bienvenue ${user.full_name || ''} !`);
     } catch (err) {
-      const msg = err?.response?.data?.error || err?.data?.error || 'Email ou mot de passe incorrect';
-      toast.error(msg);
+      // Une panne réseau n'est pas un mauvais mot de passe
+      toast.error(authErrorMessage(err, 'Email ou mot de passe incorrect'));
     } finally {
       setLoading(false);
     }
@@ -94,35 +126,51 @@ export default function Login() {
       await register({ email, password, full_name: fullName, phone });
       toast.success('Compte créé avec succès !');
     } catch (err) {
-      const msg = err?.response?.data?.error || err?.data?.error || "Erreur lors de l'inscription";
-      toast.error(msg);
+      toast.error(authErrorMessage(err, "Erreur lors de l'inscription"));
     } finally {
       setLoading(false);
     }
   };
 
-  const handleForgotPassword = async (e) => {
-    e.preventDefault();
+  // Demande (ou redemande) du code à 6 chiffres. Passe par le client de l'API : avant, un
+  // fetch brut affichait « Failed to fetch » hors ligne et « Unexpected token '<' » quand le
+  // serveur renvoyait une page d'erreur.
+  const requestResetCode = async () => {
     if (!email) {
       toast.error('Entrez votre adresse email');
       return;
     }
     setLoading(true);
     try {
-      const res = await fetch(`${API_SERVER_URL}/api/apps/${resolvedAppId}/auth/forgot-password`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      await apiRequest('POST', apiUrl('/auth/forgot-password'), { email: email.trim() });
       toast.success('Si un compte existe avec cet email, un code vous a été envoyé.');
       setResetStep('code');
+      setResendAt(Date.now() + RESEND_DELAY * 1000);
+      setNow(Date.now());
     } catch (err) {
-      toast.error(err.message || 'Erreur lors de la demande');
+      toast.error(authErrorMessage(err, 'Erreur lors de la demande'));
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleForgotPassword = (e) => {
+    e.preventDefault();
+    requestResetCode();
+  };
+
+  const handleResendCode = () => {
+    if (loading || resendIn > 0) return;
+    setResetCode('');
+    requestResetCode();
+  };
+
+  // Retour à l'étape email (faute de frappe) : le code éventuel ne vaut plus rien
+  const handleChangeEmail = () => {
+    setResetStep('email');
+    setResetCode('');
+    setNewPassword('');
+    setConfirmNewPassword('');
   };
 
   const handleResetPassword = async (e) => {
@@ -141,13 +189,9 @@ export default function Login() {
     }
     setLoading(true);
     try {
-      const res = await fetch(`${API_SERVER_URL}/api/apps/${resolvedAppId}/auth/reset-password`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, code: resetCode, new_password: newPassword }),
+      await apiRequest('POST', apiUrl('/auth/reset-password'), {
+        email: email.trim(), code: resetCode, new_password: newPassword,
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
       toast.success('Mot de passe réinitialisé ! Connectez-vous.');
       setMode('login');
       setResetStep('email');
@@ -155,8 +199,9 @@ export default function Login() {
       setNewPassword('');
       setConfirmNewPassword('');
       setPassword('');
+      setResendAt(0);
     } catch (err) {
-      toast.error(err.message || 'Erreur lors de la réinitialisation');
+      toast.error(authErrorMessage(err, 'Erreur lors de la réinitialisation'));
     } finally {
       setLoading(false);
     }
@@ -301,6 +346,45 @@ export default function Login() {
     );
   }
 
+  // Hors ligne au lancement avec une session enregistrée : rien n'est perdu, il suffit de
+  // retrouver le réseau (nouvelle tentative automatique au retour de la connexion).
+  // « Se connecter avec un autre compte » efface l'échec (dismissAuthError) : formulaire.
+  if (authError && getToken()) {
+    const offline = authError.type === 'network';
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center px-5 py-6 bg-background">
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+          role="alert" className="w-full max-w-sm text-center">
+          <div className="w-16 h-16 rounded-3xl bg-amber-500/10 border border-amber-500/25 flex items-center justify-center mx-auto mb-5">
+            <WifiOff className="w-7 h-7 text-amber-400" aria-hidden="true" />
+          </div>
+          <h1 className="font-display text-xl font-bold text-foreground">
+            {offline ? 'Pas de connexion internet' : 'Le serveur ne répond pas'}
+          </h1>
+          <p className="text-sm text-muted-foreground mt-2">
+            {offline
+              ? 'Votre session est bien enregistrée. Vérifiez votre réseau : l’app se reconnecte dès qu’internet revient.'
+              : 'Votre session est bien enregistrée. Réessayez dans un instant.'}
+          </p>
+          <button type="button" disabled={isRetryingAuth}
+            onClick={async () => {
+              if (await retryAuth() === 'failed') {
+                toast.error(offline ? 'Toujours pas de connexion. Réessayez dans un instant.' : 'Le serveur ne répond toujours pas.');
+              }
+            }}
+            className="mt-6 w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl bg-primary text-primary-foreground font-semibold text-sm shadow-lg shadow-primary/25 disabled:opacity-60">
+            <RefreshCw className={`w-4 h-4 ${isRetryingAuth ? 'animate-spin' : ''}`} aria-hidden="true" />
+            {isRetryingAuth ? 'Connexion…' : 'Réessayer'}
+          </button>
+          <button type="button" onClick={dismissAuthError}
+            className="mt-3 text-xs text-muted-foreground hover:text-foreground transition-colors">
+            Se connecter avec un autre compte
+          </button>
+        </motion.div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-5 py-6 bg-background">
       {/* Logo */}
@@ -376,8 +460,9 @@ export default function Login() {
                 <div className="relative">
                   <KeyRound className={iconClass} />
                   <input type="text" placeholder="Code à 6 chiffres *" value={resetCode}
-                    onChange={e => setResetCode(e.target.value)} maxLength={6}
-                    className={inputClass} autoComplete="one-time-code" />
+                    onChange={e => setResetCode(e.target.value.replace(/\D/g, '').slice(0, 6))} maxLength={6}
+                    inputMode="numeric" pattern="[0-9]*" autoComplete="one-time-code"
+                    className={inputClass} />
                 </div>
                 <div className="relative">
                   <Lock className={iconClass} />
@@ -408,9 +493,21 @@ export default function Login() {
             </button>
 
             {resetStep === 'code' && (
-              <p className="text-center text-xs text-muted-foreground/70 mt-2">
-                Un code à 6 chiffres a été envoyé à votre adresse email. Vérifiez aussi vos spams.
-              </p>
+              <>
+                <p className="text-center text-xs text-muted-foreground/70 mt-2">
+                  Un code à 6 chiffres a été envoyé à votre adresse email. Vérifiez aussi vos spams.
+                </p>
+                <div className="flex items-center justify-center gap-4 text-xs">
+                  <button type="button" onClick={handleResendCode} disabled={loading || resendIn > 0}
+                    className="font-semibold text-primary disabled:text-muted-foreground disabled:font-normal">
+                    {resendIn > 0 ? `Renvoyer le code (${resendIn} s)` : 'Renvoyer le code'}
+                  </button>
+                  <button type="button" onClick={handleChangeEmail} disabled={loading}
+                    className="text-muted-foreground hover:text-foreground transition-colors">
+                    Changer d'email
+                  </button>
+                </div>
+              </>
             )}
           </motion.form>
         )}

@@ -28,16 +28,29 @@ export function hairUltraAvailable() {
  */
 export async function requestHairUltra({ imageDataUrl, target, color, params }) {
   const token = localStorage.getItem('base44_access_token') || localStorage.getItem('token') || '';
-  const res = await fetch(`${API_BASE}/ai/hair-ultra`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ image: imageDataUrl, target, color: { hex: color.hex, name: color.name }, params }),
-  });
+  let res;
+  try {
+    res = await fetch(`${API_BASE}/ai/hair-ultra`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ image: imageDataUrl, target, color: { hex: color.hex, name: color.name }, params }),
+    });
+  } catch (cause) {
+    // Pas de réponse du serveur (hors ligne, coupure) : distingué d'un refus pour le message
+    const err = new Error('Réseau indisponible');
+    err.network = true;
+    err.cause = cause;
+    throw err;
+  }
   const data = await res.json().catch(() => null);
   if (!res.ok) {
     const err = new Error(data?.error || `HTTP ${res.status}`);
     err.status = res.status;
     err.code = data?.code;
+    // Même signal que apiClient : AuthContext referme la session expirée et renvoie vers la connexion
+    if (res.status === 401 && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('dhb:unauthorized'));
+    }
     throw err;
   }
   return data;

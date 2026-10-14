@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { Handshake, Search, X, Sparkles } from 'lucide-react';
@@ -12,6 +12,7 @@ import PartnerCard from '@/components/partners/PartnerCard';
 import PartnerSheet from '@/components/partners/PartnerSheet';
 import PartnerLogo from '@/components/partners/PartnerLogo';
 import PercentBadge from '@/components/partners/PercentBadge';
+import LoadError from '@/components/shared/LoadError';
 
 const normalize = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
@@ -55,20 +56,40 @@ export default function Partners() {
   const { user } = useAuth();
   const reduceMotion = useReducedMotion();
   const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [category, setCategory] = useState('all');
   const [query, setQuery] = useState('');
 
-  const { data, isLoading } = useQuery({ queryKey: PARTNERS_QUERY_KEY, queryFn: fetchPartners, staleTime: 5 * 60 * 1000 });
+  // fetchPartners renvoie déjà [] quand le serveur ne connaît pas l'entité (400 / 404) : une erreur
+  // ici est donc une vraie panne (réseau, serveur), à ne pas confondre avec « aucun partenaire ».
+  const { data, isLoading, isError, error, refetch, isFetching } = useQuery({ queryKey: PARTNERS_QUERY_KEY, queryFn: fetchPartners, staleTime: 5 * 60 * 1000 });
   const partners = useMemo(() => visiblePartners(data), [data]);
 
   // Fiche ouverte = paramètre d'URL `p` (lien depuis l'accueil, bouton retour du téléphone)
   const openId = searchParams.get('p');
   const openPartner = useMemo(() => partners.find(p => String(p.id) === String(openId)) || null, [partners, openId]);
+  // Ouverte depuis la page : une entrée d'historique marquée `partnerFromList`, que la fermeture
+  // dépile (navigate(-1)) au lieu d'empiler un doublon de /partners. Arrivée directe par un lien
+  // ?p= (accueil, lien partagé) : rien à dépiler, on retire le paramètre en remplaçant l'entrée.
+  const closingRef = useRef(false);
+  useEffect(() => { closingRef.current = false; }, [openId]);
   const open = (partner) => {
     hapticFeedback();
-    setSearchParams(prev => { const next = new URLSearchParams(prev); next.set('p', partner.id); return next; });
+    setSearchParams(
+      prev => { const next = new URLSearchParams(prev); next.set('p', partner.id); return next; },
+      { state: { ...(location.state || {}), partnerFromList: true } },
+    );
   };
-  const close = () => setSearchParams(prev => { const next = new URLSearchParams(prev); next.delete('p'); return next; }, { replace: true });
+  const close = () => {
+    if (closingRef.current) return; // croix + Échap, double tap : une seule fermeture
+    closingRef.current = true;
+    if (location.state?.partnerFromList) {
+      navigate(-1);
+      return;
+    }
+    setSearchParams(prev => { const next = new URLSearchParams(prev); next.delete('p'); return next; }, { replace: true });
+  };
 
   // Bloque le défilement de la page derrière la fiche
   useEffect(() => {
@@ -98,7 +119,8 @@ export default function Partners() {
   const filtering = category !== 'all' || query.trim();
 
   return (
-    <div className="min-h-screen relative overflow-hidden">
+    <div className="min-h-screen relative overflow-x-clip">
+      {/* overflow-x-clip et non overflow-hidden : ce dernier casserait la barre de recherche collante */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden">
         <div className="absolute -top-32 left-1/2 -translate-x-1/2 w-96 h-96 bg-primary/8 rounded-full blur-3xl" />
       </div>
@@ -117,6 +139,8 @@ export default function Partners() {
           <div className="space-y-3">
             {[0, 1, 2].map(i => <div key={i} className="h-24 rounded-2xl bg-card border border-border animate-pulse" />)}
           </div>
+        ) : isError && !data ? (
+          <LoadError what="les bons plans" error={error} onRetry={refetch} retrying={isFetching} />
         ) : partners.length === 0 ? (
           <div className="rounded-3xl border border-dashed border-border bg-card/50 p-8 text-center">
             <Handshake className="w-10 h-10 text-muted-foreground/40 mx-auto mb-3" />

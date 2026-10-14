@@ -6,6 +6,7 @@ import { api } from '@/api/apiClient';
 import { getServiceColor } from '@/utils/serviceColors';
 import {
   timeToMinutes, addMinutesToTime, parseDateParam, slotIssues, isUpcomingSlot,
+  LAST_MINUTE_MARKER, withLastMinuteMarker, stripLastMinuteMarker,
 } from './agendaUtils';
 
 const inputCls = 'w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-primary/50';
@@ -42,7 +43,9 @@ export default function AppointmentEditForm({ appointment, employees, onCancel, 
   const [durationTouched, setDurationTouched] = useState(false);
   const [clientName, setClientName] = useState(appointment.client_name || '');
   const [clientPhone, setClientPhone] = useState(appointment.client_phone || '');
-  const [internalNotes, setInternalNotes] = useState(appointment.internal_notes || '');
+  // Le repère d'un last minute pris reste hors du champ (invisible, conservé à l'enregistrement)
+  const hadLastMinuteMarker = String(appointment.internal_notes || '').includes(LAST_MINUTE_MARKER);
+  const [internalNotes, setInternalNotes] = useState(stripLastMinuteMarker(appointment.internal_notes));
   const [notify, setNotify] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -105,7 +108,7 @@ export default function AppointmentEditForm({ appointment, employees, onCancel, 
       employee_name: employee?.name || appointment.employee_name || '',
       client_name: clientName.trim() || appointment.client_name,
       client_phone: clientPhone.trim(),
-      internal_notes: internalNotes.trim(),
+      internal_notes: hadLastMinuteMarker ? withLastMinuteMarker(internalNotes) : internalNotes.trim(),
       notify_client: canNotify ? notify : false,
     };
     if (servicesChanged) {

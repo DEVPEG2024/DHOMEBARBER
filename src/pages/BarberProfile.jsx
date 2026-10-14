@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeft, ChevronRight, Scissors, Calendar, Clock } from 'lucide-react';
 import { hapticFeedback } from '@/lib/capacitor';
 import { Button } from '@/components/ui/button';
+import LoadError from '@/components/shared/LoadError';
 import BarberCard, { buildCardStats, overallRating } from '@/components/shared/BarberCard';
 
 function SkillBar({ category, level, delay }) {
@@ -164,12 +165,17 @@ function MediaBlock({ videoUrl, photoUrl }) {
   );
 }
 
+const WEEK_DAYS = [
+  ['monday', 'Lundi'], ['tuesday', 'Mardi'], ['wednesday', 'Mercredi'], ['thursday', 'Jeudi'],
+  ['friday', 'Vendredi'], ['saturday', 'Samedi'], ['sunday', 'Dimanche'],
+];
+
 // Contenu du profil d'un barber (carte, vidéo, à propos, horaires, CTA).
 // Rendu dans un bloc glissable : un swipe gauche / droite passe au barber suivant / précédent.
 function BarberProfileContent({ employee, skillCategories }) {
   const employeeSkills = employee.skills || [];
   const allSkills = skillCategories.map(cat => {
-    const s = employeeSkills.find(s => s.category_id === cat.id);
+    const s = employeeSkills.find(s => String(s.category_id) === String(cat.id));
     return { category: cat, level: s?.level || 0 };
   });
 
@@ -234,29 +240,32 @@ function BarberProfileContent({ employee, skillCategories }) {
         </GlassCard>
       )}
 
-      {/* Working hours - Glass card */}
-      {employee.working_hours && Object.keys(employee.working_hours).length > 0 && (
+      {/* Horaires : working_hours[jour] = { start, end, closed } (Team.jsx, lib/slots.js) ;
+          anciennes lignes en open / close lues en repli. Ordre fixe lundi → dimanche. */}
+      {employee.working_hours && typeof employee.working_hours === 'object' && Object.keys(employee.working_hours).length > 0 && (
         <GlassCard className="p-5 mb-6" delay={0.25}>
           <h3 className="text-[10px] uppercase tracking-[0.2em] text-primary/60 font-semibold mb-3 flex items-center gap-2">
             <Clock className="w-3.5 h-3.5" />
             Horaires
           </h3>
           <div className="space-y-2">
-            {Object.entries(employee.working_hours).map(([day, hours]) => {
-              const dayLabels = { monday: 'Lundi', tuesday: 'Mardi', wednesday: 'Mercredi', thursday: 'Jeudi', friday: 'Vendredi', saturday: 'Samedi', sunday: 'Dimanche' };
-              const label = dayLabels[day] || day;
-              if (hours?.closed) {
+            {WEEK_DAYS.map(([day, label]) => {
+              const hours = employee.working_hours[day];
+              // Jour absent ou décoché dans l'équipe = pas de créneau (même règle que workingHoursOf)
+              if (!hours || hours.closed) {
                 return (
                   <div key={day} className="flex justify-between text-sm">
                     <span className="text-muted-foreground/50">{label}</span>
-                    <span className="text-muted-foreground/30 text-xs">Fermé</span>
+                    <span className="text-muted-foreground/30 text-xs">Repos</span>
                   </div>
                 );
               }
+              const start = hours.start || hours.open || '09:00';
+              const end = hours.end || hours.close || '19:00';
               return (
                 <div key={day} className="flex justify-between text-sm">
                   <span className="text-muted-foreground">{label}</span>
-                  <span className="text-foreground/80 font-medium tabular-nums">{hours?.open || '09:00'} – {hours?.close || '19:00'}</span>
+                  <span className="text-foreground/80 font-medium tabular-nums">{start} – {end}</span>
                 </div>
               );
             })}
@@ -295,7 +304,7 @@ export default function BarberProfile() {
   const [direction, setDirection] = useState(0);
 
   // Même requête (et même cache) que le carrousel de l'accueil
-  const { data: employees = [], isLoading } = useQuery({
+  const { data: employees = [], isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ['employees'],
     staleTime: 5 * 60 * 1000, // catalogue : change rarement
     queryFn: () => api.entities.Employee.filter({ is_active: true }, 'sort_order', 50),
@@ -356,6 +365,18 @@ export default function BarberProfile() {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
         <div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  // Liste en échec : ne pas annoncer « Barber introuvable »
+  if (!employee && isError) {
+    return (
+      <div className="max-w-lg mx-auto px-4 py-10">
+        <LoadError what="ce barber" error={error} onRetry={refetch} retrying={isFetching} />
+        <div className="text-center">
+          <Link to="/" className="text-primary text-sm mt-4 inline-block">Retour à l'accueil</Link>
+        </div>
       </div>
     );
   }

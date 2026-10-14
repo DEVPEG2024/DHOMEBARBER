@@ -3,11 +3,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Clock, User, Phone, Mail, Scissors, CreditCard, FileText, Calendar, Banknote, CheckCircle, Heart, ShoppingBag, ChevronDown, Check, BadgeCheck, X, AlertTriangle, Trash2, UserX, Gift, Pencil, RotateCcw, Undo2 } from 'lucide-react';
 import { getServiceColor } from '@/utils/serviceColors';
 import { api } from '@/api/apiClient';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import AppointmentEditForm from './AppointmentEditForm';
-import { STATUS_META } from './agendaUtils';
-import { formatStaffReason, cancellationActor, cancelledByLabel, cleanReason } from '@/lib/cancellation';
+import { STATUS_META, invalidateAppointmentQueries, withLastMinuteMarker, stripLastMinuteMarker, isConvertedLastMinute } from './agendaUtils';
+import { formatStaffReason, cancellationActor, cancelledByLabel, cleanReason, LAST_MINUTE_EXPIRED_REASON } from '@/lib/cancellation';
 
 /** Message d'erreur lisible : celui du serveur, sinon celui de l'erreur sauf « HTTP 403 », sinon le repli. */
 function errorMessage(err, fallback) {
@@ -19,6 +19,9 @@ function errorMessage(err, fallback) {
 }
 
 const STAFF_CANCEL_REASON_MAX = 200;
+
+/** `tel:` d'un numéro saisi librement (« 06 12 34 56 78 » → tel:0612345678). */
+const telHref = (phone) => `tel:${String(phone).replace(/[^\d+]/g, '')}`;
 
 const initialState = (apt) => ({
   saving: false,
@@ -59,6 +62,7 @@ async function fetchUsersForSearch() {
 }
 
 function ModalInner({ appointment, onUpdate, onDelete, onEdit }) {
+  const queryClient = useQueryClient();
   const [state, dispatch] = useReducer(reducer, appointment, initialState);
   // Prestation déjà validée : l'encaissement reste corrigeable (moyen de paiement, pourboire, produit)
   const [correcting, setCorrecting] = React.useState(false);
@@ -69,7 +73,10 @@ function ModalInner({ appointment, onUpdate, onDelete, onEdit }) {
   const [cancelReason, setCancelReason] = React.useState('');
   // Suppression en deux temps, sur le même modèle (plus de window.confirm)
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
-  const isLastMinute = appointment.status === 'last_minute';
+  // Parcours last minute : créneau encore libre, ou pris par un client mais pas encore encaissé (la fiche
+  // reste ouverte après l'assignation et se met à jour : le choix des prestations doit rester possible)
+  const isLastMinute = appointment.status === 'last_minute' || !!assignedClient
+    || (isConvertedLastMinute(appointment) && appointment.status === 'confirmed' && !appointment.services?.length);
   const isCompleted = appointment.status === 'completed';
   const locked = isCompleted && !correcting; // récapitulatif en lecture seule
   const isClosedOut = appointment.status === 'cancelled' || appointment.status === 'no_show';
@@ -95,7 +102,7 @@ function ModalInner({ appointment, onUpdate, onDelete, onEdit }) {
   const { data: allUsers = [], isFetching: usersFetching } = useQuery({
     queryKey: ['allUsersForSearch'],
     queryFn: fetchUsersForSearch,
-    enabled: searchActive && !appointment.client_email && !isCompleted,
+    enabled: searchActive && isLastMinute && !appointment.client_email && !isCompleted,
     staleTime: 5 * 60 * 1000,
   });
 
@@ -115,6 +122,8 @@ function ModalInner({ appointment, onUpdate, onDelete, onEdit }) {
   const cancelActor = isClosedOut ? cancellationActor(appointment) : null;
   const cancelByLabel = isClosedOut ? cancelledByLabel(appointment, 'admin', 'rdv') : null;
   const cancelMotif = isClosedOut && cancelActor !== 'system' ? cleanReason(appointment.cancellation_reason) : '';
+  // Note interne sans le repère technique du last minute
+  const internalNote = stripLastMinuteMarker(appointment.internal_notes);
 
   const handleConfirmCancel = async () => {
     dispatch({ type: 'SAVING', value: true });
@@ -167,8 +176,11 @@ function ModalInner({ appointment, onUpdate, onDelete, onEdit }) {
         updateData.total_price = manualServiceTotal;
         updateData.total_duration = selectedServices.reduce((sum, s) => sum + (s.duration || 0), 0);
       }
+      // Last minute validé sur place (walk-in) : compté comme converti par le tableau de bord
+      if (isLastMinute) updateData.internal_notes = withLastMinuteMarker(appointment.internal_notes);
       // For last_minute walk-ins: include manually entered client info
-      if (isLastMinute || !appointment.client_email) {
+      // (pas après l'assignation d'un compte : une saisie walk-in abandonnée écraserait son nom)
+      if (!assignedClient && (isLastMinute || !appointment.client_email)) {
         if (state.clientName && state.clientName !== 'Last Minute') {
           updateData.client_name = state.clientName;
         }
@@ -180,7 +192,7 @@ function ModalInner({ appointment, onUpdate, onDelete, onEdit }) {
       toast.success(correcting ? 'Encaissement corrigé' : 'Prestation validée !');
       onUpdate?.();
     } catch (e) {
-      toast.error('Erreur lors de la validation');
+      toast.error(errorMessage(e, 'Erreur lors de la validation'));
     } finally {
       dispatch({ type: 'SAVING', value: false });
     }
@@ -234,7 +246,7 @@ function ModalInner({ appointment, onUpdate, onDelete, onEdit }) {
                 toast.success('Rendez-vous rétabli');
                 onUpdate?.();
               } catch (e) {
-                toast.error(e?.message || 'Erreur');
+                toast.error(errorMessage(e, 'Rétablissement impossible'));
               } finally {
                 dispatch({ type: 'SAVING', value: false });
               }
@@ -247,8 +259,9 @@ function ModalInner({ appointment, onUpdate, onDelete, onEdit }) {
         )}
       </div>
 
-      {/* Client info */}
-      {!isCompleted && !appointment.client_email && !assignedClient ? (
+      {/* Client : recherche / walk-in seulement sur un créneau last minute libre. Un rendez-vous saisi
+          sans email (téléphone, sans rendez-vous) affiche simplement son client. */}
+      {isLastMinute && !isCompleted && !appointment.client_email && !assignedClient ? (
         <div className="bg-secondary rounded-xl p-3 space-y-2 relative">
           <div className="flex items-center gap-2">
             <User className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
@@ -273,16 +286,20 @@ function ModalInner({ appointment, onUpdate, onDelete, onEdit }) {
                         client_email: u.email,
                         client_phone: u.phone || '',
                       };
-                      // If last_minute, change status to confirmed to prevent auto-expire
+                      // Last minute pris : confirmé (plus d'expiration automatique) et repéré pour
+                      // « Convertis » du tableau de bord, note interne existante conservée
                       if (appointment.status === 'last_minute') {
                         updateData.status = 'confirmed';
+                        updateData.internal_notes = withLastMinuteMarker(appointment.internal_notes);
                       }
                       await api.entities.Appointment.update(appointment.id, updateData);
                       setAssignedClient({ name: u.full_name || u.email, email: u.email, phone: u.phone || '' });
                       toast.success(`Client ${u.full_name || u.email} assigné`);
                       setClientSearch('');
-                    } catch {
-                      toast.error('Erreur');
+                      // La fiche reste ouverte (encaissement juste après) : l'agenda et le tableau de bord suivent
+                      invalidateAppointmentQueries(queryClient);
+                    } catch (e) {
+                      toast.error(errorMessage(e, 'Assignation impossible'));
                     } finally {
                       dispatch({ type: 'SAVING', value: false });
                     }
@@ -329,12 +346,12 @@ function ModalInner({ appointment, onUpdate, onDelete, onEdit }) {
               try {
                 await api.entities.Appointment.update(appointment.id, {
                   status: 'no_show',
-                  cancellation_reason: 'Personne n\'a pris le créneau last minute',
+                  cancellation_reason: LAST_MINUTE_EXPIRED_REASON,
                 });
                 toast.success('Créneau marqué comme non pris');
                 onUpdate?.();
-              } catch {
-                toast.error('Erreur');
+              } catch (e) {
+                toast.error(errorMessage(e, 'Modification impossible'));
               } finally {
                 dispatch({ type: 'SAVING', value: false });
               }
@@ -359,10 +376,10 @@ function ModalInner({ appointment, onUpdate, onDelete, onEdit }) {
             </div>
           )}
           {(assignedClient?.phone || appointment.client_phone) && (
-            <div className="flex items-center gap-2">
+            <a href={telHref(assignedClient?.phone || appointment.client_phone)} className="flex items-center gap-2 w-fit">
               <Phone className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-              <span className="text-xs text-muted-foreground">{assignedClient?.phone || appointment.client_phone}</span>
-            </div>
+              <span className="text-xs text-primary underline-offset-2 hover:underline">{assignedClient?.phone || appointment.client_phone}</span>
+            </a>
           )}
         </div>
       )}
@@ -699,7 +716,7 @@ function ModalInner({ appointment, onUpdate, onDelete, onEdit }) {
                     toast.success('Marqué absent');
                     onUpdate?.();
                   } catch (e) {
-                    toast.error('Erreur');
+                    toast.error(errorMessage(e, 'Modification impossible'));
                   } finally {
                     dispatch({ type: 'SAVING', value: false });
                   }
@@ -740,10 +757,10 @@ function ModalInner({ appointment, onUpdate, onDelete, onEdit }) {
           <p className="text-xs text-muted-foreground">{appointment.notes}</p>
         </div>
       )}
-      {appointment.internal_notes && (
+      {internalNote && (
         <div className="flex items-start gap-2 bg-secondary rounded-lg px-3 py-2">
           <FileText className="w-3.5 h-3.5 text-yellow-400 mt-0.5 shrink-0" />
-          <p className="text-xs text-yellow-300/80">{appointment.internal_notes}</p>
+          <p className="text-xs text-yellow-300/80">{internalNote}</p>
         </div>
       )}
 

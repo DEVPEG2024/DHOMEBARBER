@@ -124,14 +124,23 @@ export function formatCountdown(ms) {
 /**
  * Disponibilité d'une taille : { tracked, remaining, soldOut }.
  * `stock[size]` absent → taille non suivie (illimitée).
+ * Sans taille : disponibilité de la pièce entière. Si une seule des tailles proposées
+ * (`concept.sizes`) n'est pas suivie, la pièce est illimitée (jamais épuisée, pas de
+ * « plus que N », `unlimited` vrai si d'autres tailles sont suivies) ; sinon somme des
+ * restants des tailles proposées.
  */
 export function conceptAvailability(concept, size) {
   const stock = concept?.stock && typeof concept.stock === 'object' ? concept.stock : {};
   const reserved = concept?.reserved && typeof concept.reserved === 'object' ? concept.reserved : {};
   if (size === undefined || size === null) {
-    const tracked = Object.keys(stock).length > 0;
-    if (!tracked) return { tracked: false, remaining: null, soldOut: false };
-    const remaining = Object.entries(stock).reduce((sum, [s, q]) => sum + Math.max(0, (Number(q) || 0) - (Number(reserved[s]) || 0)), 0);
+    const sizes = Array.isArray(concept?.sizes) ? concept.sizes.filter(Boolean) : [];
+    // Tailles proposées ; sans liste de tailles, celles du stock (pièce à taille unique / ancienne donnée)
+    const offered = sizes.length > 0 ? sizes : Object.keys(stock);
+    if (offered.length === 0) return { tracked: false, remaining: null, soldOut: false };
+    // `unlimited` : le stock est suivi pour d'autres tailles mais au moins une taille proposée ne l'est
+    // pas ; le serveur accepte alors toujours une réservation dans cette taille.
+    if (offered.some(s => !(s in stock))) return { tracked: false, unlimited: Object.keys(stock).length > 0, remaining: null, soldOut: false };
+    const remaining = offered.reduce((sum, s) => sum + Math.max(0, (Number(stock[s]) || 0) - (Number(reserved[s]) || 0)), 0);
     return { tracked: true, remaining, soldOut: remaining <= 0 };
   }
   if (!(size in stock)) return { tracked: false, remaining: null, soldOut: false };

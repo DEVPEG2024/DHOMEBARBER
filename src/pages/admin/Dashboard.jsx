@@ -8,13 +8,42 @@ import {
   CreditCard, Banknote, Euro, Star, UserCheck, ArrowUpRight, ArrowDownRight, Coffee, Heart, ShoppingBag, Zap, Gift, Wifi
 } from 'lucide-react';
 import { useLiveCount } from '@/lib/useLiveCount';
-import { format, subDays } from 'date-fns';
+import { format, subDays, startOfDay, startOfMonth, endOfMonth, parseISO, isValid } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { exportToCSV } from '@/utils/exportCSV';
 import SalesOverview from '@/components/admin/SalesOverview';
-import { needsClosing } from '@/components/agenda/agendaUtils';
+import {
+  needsClosing, datesBetween, fetchAppointmentsForDates, isCancelledLike, isConvertedLastMinute, isUnclaimedLastMinute,
+} from '@/components/agenda/agendaUtils';
+import LoadError from '@/components/shared/LoadError';
+
+// Plafond de `fetchAppointmentsForDates` : au-delà, les chiffres de la période seraient incomplets
+const APPOINTMENTS_LIMIT = 2000;
+
+/**
+ * CA d'un rendez-vous encaissé, **hors pourboire** : prestations + produit vendu. `grand_total`
+ * contient le pourboire, il ne sert plus que de repli (ancienne ligne sans `total_price`).
+ */
+function revenueOf(a) {
+  const product = Number(a.product_price) || 0;
+  const services = Number(a.total_price) || 0;
+  if (services > 0) return services + product;
+  const grand = Number(a.grand_total) || 0;
+  return grand > 0 ? Math.max(0, Math.round((grand - (Number(a.tip) || 0)) * 100) / 100) : product;
+}
+
+/** Somme en euros arrondie au centime (12.9 + 0.1 ne s'affiche pas « 13.000000000000002 € »). */
+const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
+const PAYMENT_LABELS = { cb: 'CB', especes: 'Espèces', carte_cadeau: 'Carte cadeau' };
+
+/** Jours du mois `yyyy-MM` (vide si la saisie est illisible). */
+function monthDates(month) {
+  const d = parseISO(`${month}-01`);
+  return isValid(d) ? datesBetween(startOfMonth(d), endOfMonth(d)) : [];
+}
 
 function StatCard({ title, value, subtitle, icon: Icon, trend, color = 'primary', onClick }) {
   const isUp = trend > 0;
@@ -67,33 +96,65 @@ export default function AdminDashboard() {
   const yesterday = format(subDays(new Date(), 1), 'yyyy-MM-dd');
   const monthPrefix = format(new Date(), 'yyyy-MM');
 
-  const { data: allAppointments = [] } = useQuery({
-    queryKey: ['adminAppointments'],
-    queryFn: () => api.entities.Appointment.list('-date', 1000),
+  // Uniquement la période affichée : le mois en cours et les 7 derniers jours (graphique, « vs hier »).
+  // Avant : les 1 000 derniers RDV de toute la base, dont les RDV futurs des mois suivants, donc un
+  // mois en cours tronqué dès que la base grossissait. Préfixe `adminAppointments` : couvert par
+  // invalidateAppointmentQueries.
+  const periodDates = useMemo(() => {
+    const now = new Date();
+    const weekStart = startOfDay(subDays(now, 6));
+    const monthStart = startOfMonth(now);
+    return datesBetween(weekStart < monthStart ? weekStart : monthStart, endOfMonth(now));
+  }, [today]); // recalculé au changement de jour
+  const periodSet = useMemo(() => new Set(periodDates), [periodDates]);
+
+  const appointmentsQuery = useQuery({
+    queryKey: ['adminAppointments', 'dashboard', periodDates[0], periodDates[periodDates.length - 1]],
+    queryFn: () => fetchAppointmentsForDates(periodDates),
   });
+  const allAppointments = useMemo(() => appointmentsQuery.data || [], [appointmentsQuery.data]);
+  const limitReached = allAppointments.length >= APPOINTMENTS_LIMIT;
+
+  // Export comptable : le mois choisi peut sortir de la période chargée, il est alors lu à part
+  const exportDates = useMemo(() => monthDates(exportMonth), [exportMonth]);
+  const exportInPeriod = exportDates.length > 0 && exportDates.every((d) => periodSet.has(d));
+  const exportQuery = useQuery({
+    queryKey: ['adminAppointments', 'export', exportMonth],
+    queryFn: () => fetchAppointmentsForDates(exportDates),
+    enabled: showExport && exportDates.length > 0 && !exportInPeriod,
+  });
+  const exportSource = exportInPeriod ? allAppointments : (exportQuery.data || []);
+  const exportLoading = !exportInPeriod && exportDates.length > 0 && exportQuery.isFetching && !exportQuery.data;
+  // Mois hors période pas encore lu (ou en échec) : pas d'export vide sans explication
+  const exportReady = exportInPeriod || !!exportQuery.data;
 
   const { data: employees = [] } = useQuery({
     queryKey: ['employees'],
     queryFn: () => api.entities.Employee.filter({ is_active: true }),
   });
 
-  // Filter out breaks and last_minute for regular stats
-  const realAppts = useMemo(() => allAppointments.filter(a => a.status !== 'break' && a.status !== 'last_minute'), [allAppointments]);
+  // Hors pauses, créneaux last minute encore libres et last minute que personne n'a pris
+  // (passés « absent » automatiquement : ni no-show ni annulation d'un client)
+  const isRealAppt = (a) => a.status !== 'break' && a.status !== 'last_minute' && !isUnclaimedLastMinute(a);
+  const realAppts = useMemo(() => allAppointments.filter(isRealAppt), [allAppointments]);
 
-  // Last Minute stats
-  const lastMinuteAppts = useMemo(() => allAppointments.filter(a => a.status === 'last_minute'), [allAppointments]);
+  // Last Minute : créneaux publiés = encore libres + pris par un client (repère dans la note interne)
+  // + non pris ; « Convertis » = pris et pas annulés depuis
+  const lastMinuteAppts = useMemo(() => allAppointments.filter(a =>
+    a.status === 'last_minute' || isConvertedLastMinute(a) || isUnclaimedLastMinute(a)
+  ), [allAppointments]);
   const lastMinuteToday = lastMinuteAppts.filter(a => a.date === today);
   const lastMinuteMonth = lastMinuteAppts.filter(a => a.date?.startsWith(monthPrefix));
-  // Last Minute who got converted to completed (client_name changed from 'Last Minute')
   const lastMinuteCompleted = useMemo(() => allAppointments.filter(a =>
-    a.internal_notes?.includes?.('last_minute') || (a.status === 'completed' && a.internal_notes?.includes?.('last_minute'))
+    isConvertedLastMinute(a) && !isCancelledLike(a)
   ), [allAppointments]);
   const lastMinuteCompletedMonth = lastMinuteCompleted.filter(a => a.date?.startsWith(monthPrefix));
-  const lastMinuteRevenueMonth = lastMinuteCompletedMonth.reduce((sum, a) => sum + (a.grand_total || a.total_price || 0), 0);
 
   // Helper: consider an appointment as "paid/done" if payment_status is 'paid' OR status is 'completed'
   const isPaid = (a) => a.payment_status === 'paid' || a.status === 'completed';
-  const getTotal = (a) => a.grand_total || a.total_price || 0;
+  // CA hors pourboire (les pourboires ont leur propre section)
+  const getTotal = revenueOf;
+  const lastMinuteRevenueMonth = round2(lastMinuteCompletedMonth.filter(isPaid).reduce((sum, a) => sum + getTotal(a), 0));
 
   // TODAY
   const todayAppts = realAppts.filter(a => a.date === today);
@@ -106,7 +167,7 @@ export default function AdminDashboard() {
   // Paid = payment_status 'paid' OR status 'completed'
   const paidToday = todayAppts.filter(isPaid);
   const unpaidToday = confirmedToday.filter(a => !isPaid(a));
-  const todayRevenue = paidToday.reduce((sum, a) => sum + getTotal(a), 0);
+  const todayRevenue = round2(paidToday.reduce((sum, a) => sum + getTotal(a), 0));
   const todayUnpaid = unpaidToday.reduce((sum, a) => sum + (a.total_price || 0), 0);
 
   // Tips & products today
@@ -121,7 +182,7 @@ export default function AdminDashboard() {
   // MONTH
   const thisMonth = realAppts.filter(a => a.date?.startsWith(monthPrefix));
   const monthPaid = thisMonth.filter(isPaid);
-  const monthRevenue = monthPaid.reduce((sum, a) => sum + getTotal(a), 0);
+  const monthRevenue = round2(monthPaid.reduce((sum, a) => sum + getTotal(a), 0));
   const monthTips = monthPaid.reduce((sum, a) => sum + (a.tip || 0), 0);
   const monthProducts = monthPaid.reduce((sum, a) => sum + (a.product_price || 0), 0);
   // À encaisser (tableau de bord) = deux parts affichées séparément puis additionnées :
@@ -136,17 +197,16 @@ export default function AdminDashboard() {
   const cancelledMonth = thisMonth.filter(a => a.status === 'cancelled').length;
 
   // Prestations CB vs Espèces vs Carte cadeau (sans pourboire)
-  const getServiceOnly = (a) => a.total_price || 0;
-  const getPayTotal = (a) => getServiceOnly(a) + (a.product_price || 0);
+  const getPayTotal = revenueOf;
   const todayCB = paidToday.filter(a => a.payment_method === 'cb').reduce((s, a) => s + getPayTotal(a), 0);
   const todayCash = paidToday.filter(a => a.payment_method === 'especes').reduce((s, a) => s + getPayTotal(a), 0);
-  const todayGift = paidToday.filter(a => a.payment_method === 'carte_cadeau').reduce((s, a) => s + getPayTotal(a), 0);
+  const todayGift = round2(paidToday.filter(a => a.payment_method === 'carte_cadeau').reduce((s, a) => s + getPayTotal(a), 0));
   const todayNoMethod = paidToday.filter(a => !a.payment_method).reduce((s, a) => s + getPayTotal(a), 0);
 
   // Month CB vs Espèces vs Carte cadeau (sans pourboire)
   const monthCB = monthPaid.filter(a => a.payment_method === 'cb').reduce((s, a) => s + getPayTotal(a), 0);
   const monthCash = monthPaid.filter(a => a.payment_method === 'especes').reduce((s, a) => s + getPayTotal(a), 0);
-  const monthGift = monthPaid.filter(a => a.payment_method === 'carte_cadeau').reduce((s, a) => s + getPayTotal(a), 0);
+  const monthGift = round2(monthPaid.filter(a => a.payment_method === 'carte_cadeau').reduce((s, a) => s + getPayTotal(a), 0));
   const monthNoMethod = monthPaid.filter(a => !a.payment_method).reduce((s, a) => s + getPayTotal(a), 0);
 
   // Pourboires CB vs Espèces
@@ -163,11 +223,11 @@ export default function AdminDashboard() {
   const revenueByEmployee = useMemo(() => {
     const map = {};
     paidToday.forEach(a => {
-      const emp = employees.find(e => e.id === a.employee_id);
+      const emp = employees.find(e => String(e.id) === String(a.employee_id));
       const name = emp?.name || a.employee_name || 'Inconnu';
       const color = emp?.color || '#3fcf8e';
       if (!map[name]) map[name] = { name, revenue: 0, tips: 0, products: 0, count: 0, color };
-      map[name].revenue += a.grand_total || a.total_price || 0;
+      map[name].revenue += revenueOf(a);
       map[name].tips += a.tip || 0;
       map[name].products += a.product_price || 0;
       map[name].count++;
@@ -222,7 +282,7 @@ export default function AdminDashboard() {
     if (!targetAmount || targetAmount <= 0) return;
 
     // Get paid appointments for the selected month
-    const monthAppts = realAppts.filter(a => a.date?.startsWith(exportMonth) && isPaid(a));
+    const monthAppts = exportSource.filter(a => a.date?.startsWith(exportMonth) && isRealAppt(a) && isPaid(a));
 
     // Build rows: prestations + products until we reach targetAmount
     const rows = [];
@@ -243,7 +303,7 @@ export default function AdminDashboard() {
               designation: svc.name || 'Prestation',
               client: apt.client_name || '',
               barber: apt.employee_name || '',
-              paiement: apt.payment_method === 'cb' ? 'CB' : apt.payment_method === 'especes' ? 'Espèces' : '',
+              paiement: PAYMENT_LABELS[apt.payment_method] || '',
               montant: price.toFixed(2),
             });
             remaining -= price;
@@ -259,7 +319,7 @@ export default function AdminDashboard() {
             designation: 'Prestation',
             client: apt.client_name || '',
             barber: apt.employee_name || '',
-            paiement: apt.payment_method === 'cb' ? 'CB' : apt.payment_method === 'especes' ? 'Espèces' : '',
+            paiement: PAYMENT_LABELS[apt.payment_method] || '',
             montant: price.toFixed(2),
           });
           remaining -= price;
@@ -275,7 +335,7 @@ export default function AdminDashboard() {
           designation: apt.product_sold,
           client: apt.client_name || '',
           barber: apt.employee_name || '',
-          paiement: apt.payment_method === 'cb' ? 'CB' : apt.payment_method === 'especes' ? 'Espèces' : '',
+          paiement: PAYMENT_LABELS[apt.payment_method] || '',
           montant: price.toFixed(2),
         });
         remaining -= price;
@@ -291,6 +351,22 @@ export default function AdminDashboard() {
     exportToCSV(rows, `export-comptable-${exportMonth}-${targetAmount}EUR`);
     setShowExport(false);
   };
+
+  // Rendez-vous illisibles : pas de tableau de bord à zéro, qui laisserait croire à un CA nul
+  if (appointmentsQuery.isError && !appointmentsQuery.data) {
+    return (
+      <div className="min-w-0">
+        <p className="text-[11px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Tableau de bord</p>
+        <h1 className="font-display text-2xl font-bold mb-4">Ciao le gang ! 🇮🇹🇵🇹</h1>
+        <LoadError
+          what="les rendez-vous du tableau de bord"
+          error={appointmentsQuery.error}
+          onRetry={appointmentsQuery.refetch}
+          retrying={appointmentsQuery.isFetching}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="min-w-0">
@@ -318,8 +394,14 @@ export default function AdminDashboard() {
         </button>
       </div>
 
+      {limitReached && (
+        <p className="mb-4 rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+          Plus de {APPOINTMENTS_LIMIT} rendez-vous sur la période : seuls les {APPOINTMENTS_LIMIT} premiers sont pris en compte, les chiffres peuvent être incomplets.
+        </p>
+      )}
+
       {/* Tous les canaux de vente : CA global, répartition, boutique, cartes cadeau, privatisations, textile */}
-      <SalesOverview appointments={{ today: todayRevenue, month: monthRevenue, unpaidToday: todayUnpaid, unpaidMonth: monthUnpaid, unpaidCount: unclosedMonth.length, upcomingMonth: monthUpcoming, upcomingCount: upcomingMonth.length }} />
+      <SalesOverview appointments={{ today: todayRevenue, month: monthRevenue, giftToday: todayGift, giftMonth: monthGift, unpaidToday: todayUnpaid, unpaidMonth: monthUnpaid, unpaidCount: unclosedMonth.length, upcomingMonth: monthUpcoming, upcomingCount: upcomingMonth.length }} />
 
       {/* Rendez-vous : prestations + produits vendus en RDV */}
       <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
@@ -344,7 +426,7 @@ export default function AdminDashboard() {
         <StatCard
           title="CA RDV du Mois"
           value={`${monthRevenue}€`}
-          subtitle={monthUnpaid > 0 ? `+ ${monthUnpaid}€ non encaissés` : `${monthPaid.length} RDV encaissés`}
+          subtitle={`${monthUnpaid > 0 ? `+ ${monthUnpaid}€ non encaissés` : `${monthPaid.length} RDV encaissés`}${monthGift > 0 ? ` · dont ${monthGift}€ réglés par carte cadeau` : ''}`}
           icon={TrendingUp}
         />
         <StatCard
@@ -583,7 +665,7 @@ export default function AdminDashboard() {
             {todayAppts
               .sort((a, b) => a.start_time?.localeCompare(b.start_time))
               .map(apt => {
-                const emp = employees.find(e => e.id === apt.employee_id);
+                const emp = employees.find(e => String(e.id) === String(apt.employee_id));
                 return (
                   <div key={apt.id}
                     onClick={() => { if (apt.status === 'confirmed') navigate('/admin/agenda'); }}
@@ -645,12 +727,17 @@ export default function AdminDashboard() {
             <div className="bg-secondary/50 rounded-lg p-3 text-xs text-muted-foreground">
               <p>L'export contiendra des prestations et produits du mois sélectionné jusqu'à atteindre le montant demandé.</p>
               <p className="mt-1 font-medium text-foreground">
-                CA du mois sélectionné : {realAppts.filter(a => a.date?.startsWith(exportMonth) && isPaid(a)).reduce((s, a) => s + getTotal(a), 0).toFixed(2)}€
+                {exportLoading
+                  ? 'Chargement du mois sélectionné…'
+                  : `CA du mois sélectionné : ${exportSource.filter(a => a.date?.startsWith(exportMonth) && isRealAppt(a) && isPaid(a)).reduce((s, a) => s + getTotal(a), 0).toFixed(2)}€`}
               </p>
+              {!exportInPeriod && exportQuery.isError && !exportQuery.data && (
+                <p className="mt-1 text-red-400">Impossible de charger ce mois (connexion ?). Réessayez.</p>
+              )}
             </div>
             <button
               onClick={handleExportComptable}
-              disabled={!exportAmount || parseFloat(exportAmount) <= 0}
+              disabled={!exportAmount || parseFloat(exportAmount) <= 0 || exportLoading || !exportReady}
               className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 disabled:opacity-50 transition-all"
             >
               Exporter en CSV

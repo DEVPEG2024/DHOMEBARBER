@@ -13,7 +13,8 @@ import { toast } from 'sonner';
 import ProductSheet from '@/components/shop/ProductSheet';
 import FavoriteButton from '@/components/shared/FavoriteButton';
 import { useFavorites } from '@/lib/favorites';
-import { productCategoryLabel, productImages, stockInfo } from '@/components/shop/productUtils';
+import { formatPrice, productCategoryLabel, productImages, stockInfo } from '@/components/shop/productUtils';
+import LoadError from '@/components/shared/LoadError';
 
 /** Vol de la vignette produit vers le panier : taille du disque (px) et durée (s). */
 const FLY_SIZE = 56;
@@ -32,6 +33,9 @@ const cartLimit = (product) => {
 const stockLimitMessage = (limit) => (limit <= 0
   ? 'Ce produit est en rupture de stock'
   : `Plus que ${limit} en stock : tout est déjà dans votre panier`);
+
+/** Montant arrondi au centime (évite « 29,999… » sur les sommes de prix décimaux). */
+const roundCents = (value) => Math.round((Number(value) || 0) * 100) / 100;
 
 /** Longueur maximale de la note jointe à la commande. */
 const NOTES_MAX = 500;
@@ -123,7 +127,7 @@ export default function Shop() {
   useEffect(() => {
     writeCart(cartState.key, cartState.items);
   }, [cartState]);
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   // `/shop?filter=favorites` (page Mes favoris) : la boutique s'ouvre filtrée sur les favoris
   const [activeCategory, setActiveCategory] = useState(() => (searchParams.get('filter') === 'favorites' ? 'favorites' : 'all'));
   const favorites = useFavorites();
@@ -153,11 +157,33 @@ export default function Shop() {
   const cartIconScale = useTransform(cartBump, v => 1 + v * 0.25);
   const cartCountScale = useTransform(cartBump, v => 1 + v * 0.2);
 
-  const { data: products = [], isSuccess: productsLoaded } = useQuery({
+  const productsQuery = useQuery({
     queryKey: ['products'],
     staleTime: 5 * 60 * 1000, // catalogue : change rarement
     queryFn: () => api.entities.Product.filter({ is_active: true }, 'name', 100),
   });
+  const { data: products = [], isSuccess: productsLoaded } = productsQuery;
+  // Catalogue disponible (y compris en cache quand un rechargement échoue)
+  const productsReady = productsQuery.data !== undefined;
+  const productsFailed = productsQuery.isError && !productsReady;
+
+  // `/shop?product=<id>` (page Mes favoris) : la fiche du produit s'ouvre une fois le catalogue
+  // chargé, puis le paramètre est retiré (retour arrière ou rechargement ne la rouvrent pas)
+  const linkedProductId = searchParams.get('product');
+  const handledLinkRef = useRef(null); // un seul passage par lien (double effet du mode strict)
+  useEffect(() => {
+    if (!linkedProductId) { handledLinkRef.current = null; return; }
+    if (!productsReady || handledLinkRef.current === linkedProductId) return;
+    handledLinkRef.current = linkedProductId;
+    const found = products.find(p => String(p.id) === String(linkedProductId));
+    if (found) setOpenProductId(found.id);
+    else toast.error('Ce produit n\'est plus disponible');
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      next.delete('product');
+      return next;
+    }, { replace: true });
+  }, [linkedProductId, productsReady, products, setSearchParams]);
 
   // Produits retirés du catalogue (supprimés ou masqués) depuis leur ajout au panier : on les
   // enlève une fois le catalogue chargé avec succès (jamais pendant le chargement ni sur une erreur).
@@ -264,10 +290,10 @@ export default function Shop() {
   // Seules les lignes dont le produit est connu comptent (total, nombre, envoi)
   const cartItems = Object.entries(cart)
     .filter(([id]) => products.some(p => String(p.id) === String(id)));
-  const cartTotal = cartItems.reduce((sum, [id, qty]) => {
+  const cartTotal = roundCents(cartItems.reduce((sum, [id, qty]) => {
     const product = products.find(p => String(p.id) === String(id));
     return sum + (Number(product?.price) || 0) * qty;
-  }, 0);
+  }, 0));
   const cartCount = cartItems.reduce((sum, [, qty]) => sum + qty, 0);
   // Un article dépasse le stock (stock rechargé à la baisse depuis l'ajout) : commande bloquée
   const cartOverStock = cartItems.some(([id, qty]) => {
@@ -374,6 +400,24 @@ export default function Shop() {
         ))}
       </div>
 
+      {/* Chargement : squelettes ; échec sans rien en cache : erreur (pas un faux « Aucun produit ») */}
+      {productsQuery.isPending && (
+        <div className="grid grid-cols-2 gap-4" aria-busy="true">
+          {[0, 1, 2, 3].map(i => (
+            <div key={i} className="bg-card border border-border rounded-xl overflow-hidden">
+              <div className="aspect-square bg-secondary animate-pulse" />
+              <div className="p-3 space-y-2">
+                <div className="h-3.5 w-3/4 rounded bg-secondary animate-pulse" />
+                <div className="h-3 w-1/3 rounded bg-secondary animate-pulse" />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {productsFailed && (
+        <LoadError what="les produits" error={productsQuery.error} onRetry={productsQuery.refetch} retrying={productsQuery.isFetching} />
+      )}
+
       {/* Products Grid : image et nom ouvrent la fiche, le « + » ajoute directement */}
       <div className="grid grid-cols-2 gap-4">
         {filtered.map((product, i) => {
@@ -439,7 +483,7 @@ export default function Shop() {
                     )}
                   </button>
                   <div className="flex items-center justify-between mt-2">
-                    <span className="text-sm font-bold text-primary">{product.price}€</span>
+                    <span className="text-sm font-bold text-primary">{formatPrice(product.price)}</span>
                     {cart[product.id] ? (
                       <div className="flex items-center gap-2.5">
                         <button onClick={() => updateCart(product.id, -1)} aria-label="Retirer une unité" className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center active:scale-95">
@@ -466,7 +510,7 @@ export default function Shop() {
         })}
       </div>
 
-      {filtered.length === 0 && (
+      {productsReady && filtered.length === 0 && (
         <div className="text-center py-16">
           <ShoppingBag className="w-12 h-12 text-muted-foreground/30 mx-auto mb-3" />
           <p className="text-sm text-muted-foreground">Aucun produit disponible</p>
@@ -494,7 +538,7 @@ export default function Shop() {
                     {' '}article{cartCount > 1 ? 's' : ''}
                   </span>
                 </motion.div>
-                <span className="text-sm font-bold">{cartTotal.toFixed(2)}€</span>
+                <span className="text-sm font-bold">{formatPrice(cartTotal)}</span>
               </div>
             </Button>
           </motion.div>
@@ -623,11 +667,11 @@ export default function Shop() {
                           <div className="flex items-center justify-between mb-2">
                             <p className="text-sm font-semibold truncate flex-1">{product.name}</p>
                             <p className="text-sm font-bold text-primary ml-2">
-                              {(product.price * qty).toFixed(2)}€
+                              {formatPrice(roundCents(Number(product.price) * qty))}
                             </p>
                           </div>
                           <div className="flex items-center justify-between">
-                            <p className="text-xs text-muted-foreground">{product.price.toFixed(2)}€ / unité</p>
+                            <p className="text-xs text-muted-foreground">{formatPrice(product.price)} / unité</p>
                             <div className="flex items-center gap-3">
                               <button onClick={() => updateCart(id, -1)} aria-label={qty === 1 ? 'Retirer du panier' : 'Retirer une unité'} className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center active:scale-95">
                                 {qty === 1 ? <Trash2 className="w-3.5 h-3.5 text-red-400" /> : <Minus className="w-3.5 h-3.5" />}
@@ -681,7 +725,7 @@ export default function Shop() {
                     <div className="border-t border-border px-5 pt-4 pb-6 space-y-3 flex-shrink-0">
                       <div className="flex items-center justify-between">
                         <span className="text-sm font-semibold">Total</span>
-                        <span className="text-lg font-bold text-primary">{cartTotal.toFixed(2)}€</span>
+                        <span className="text-lg font-bold text-primary">{formatPrice(cartTotal)}</span>
                       </div>
                       <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
                         <Store className="w-3.5 h-3.5" />
@@ -698,7 +742,7 @@ export default function Shop() {
                         disabled={ordering || cartOverStock}
                       >
                         <ShoppingCart className="w-4 h-4" />
-                        {ordering ? 'Validation...' : `Commander — ${cartTotal.toFixed(2)}€`}
+                        {ordering ? 'Validation...' : `Commander — ${formatPrice(cartTotal)}`}
                       </Button>
                     </div>
                   )}

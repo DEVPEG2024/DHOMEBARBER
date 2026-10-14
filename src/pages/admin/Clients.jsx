@@ -8,6 +8,9 @@ import { exportToCSV } from '@/utils/exportCSV';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
+import { useAuth } from '@/lib/AuthContext';
+import { parisInstant } from '@/lib/calendarLinks';
+import { invalidateAppointmentQueries } from '@/components/agenda/agendaUtils';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -27,6 +30,49 @@ const USERS_MAX_PAGES = 60; // garde-fou : 3 000 comptes
 const USERS_QUERY_KEY = ['registeredUsers', 'paged'];
 // Nombre de fiches rendues avant « Afficher plus »
 const ROWS_STEP = 50;
+// Historique des rendez-vous (visites, dépenses) : clé propre, préfixe couvert par invalidateAppointmentQueries
+const APPOINTMENTS_LIMIT = 2000;
+const APPOINTMENTS_QUERY_KEY = ['allAppointments', 'clients', APPOINTMENTS_LIMIT];
+const DELETED_ACCOUNT_REASON = 'Salon : compte client supprimé';
+
+const isStaffRole = (role) => role === 'admin' || role === 'barber';
+
+/** Date du jour à Paris (`yyyy-MM-dd`) : `toISOString()` donnait la veille entre minuit et 2 h. */
+const parisTodayStr = () => new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit',
+}).format(new Date());
+
+/** Fiche « Ajouter » / « Importer » : RDV annulé, sans prestation ni prix, posé pour faire exister le contact. */
+const isPlaceholderAppointment = (apt) =>
+  apt.status === 'cancelled' && !(apt.services?.length) && !Number(apt.total_price) && !apt.payment_method
+  && String(apt.start_time || '') === String(apt.end_time || '');
+
+/** RDV à venir (heure de Paris), pas encore encaissé : annulé à la suppression du compte. */
+const isUpcomingUnpaid = (apt, now = Date.now()) =>
+  ['confirmed', 'pending'].includes(apt.status) && !apt.payment_method && apt.payment_status !== 'paid'
+  && !!apt.date && parisInstant(apt.date, apt.start_time || '00:00') > now;
+
+/** Exécute `fn` sur chaque élément, par petits lots (le serveur limite le nombre de requêtes par minute). */
+async function runInBatches(items, fn, size = 8) {
+  let ok = 0;
+  let failed = 0;
+  for (let i = 0; i < items.length; i += size) {
+    const results = await Promise.allSettled(items.slice(i, i + size).map(fn));
+    for (const r of results) { if (r.status === 'fulfilled') ok++; else failed++; }
+  }
+  return { ok, failed };
+}
+
+/**
+ * Suppression d'un compte client sans effacer son historique : les RDV passés ou encaissés restent
+ * (CA, statistiques), les RDV à venir non encaissés sont annulés (le créneau se libère), seules les
+ * fiches de contact posées par « Ajouter » / « Importer » sont supprimées.
+ */
+const cancelUpcoming = (apt) => api.entities.Appointment.update(apt.id, {
+  status: 'cancelled',
+  cancellation_reason: DELETED_ACCOUNT_REASON,
+});
+const deletePlaceholder = (apt) => api.entities.Appointment.delete(apt.id);
 
 /** Fusionne comptes inscrits et rendez-vous en fiches clients (fonction pure : réutilisée
  *  par les actions groupées, qui travaillent sur la liste complète et non sur les lots chargés). */
@@ -39,7 +85,7 @@ function buildClients(registeredUsers, appointments, employees) {
     // Pour les barbers/admins, chercher la photo dans le profil employé
     let photo = user.photo_url || '';
     if (user.employee_id) {
-      const emp = employees.find(e => e.id === user.employee_id);
+      const emp = employees.find(e => String(e.id) === String(user.employee_id));
       if (emp?.photo_url) photo = emp.photo_url;
     }
     map[user.email.toLowerCase()] = {
@@ -95,11 +141,15 @@ export default function Clients() {
   const [deleting, setDeleting] = useState(false);
   const fileInputRef = useRef(null);
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  // Suppressions réservées à l'admin (un barber voit la liste, sans corbeille)
+  const isAdmin = user?.role === 'admin';
 
   const { data: appointments = [] } = useQuery({
-    queryKey: ['allAppointments'],
-    queryFn: () => api.entities.Appointment.list('-date', 1000),
+    queryKey: APPOINTMENTS_QUERY_KEY,
+    queryFn: () => api.entities.Appointment.list('-date', APPOINTMENTS_LIMIT),
   });
+  const appointmentsCapped = appointments.length >= APPOINTMENTS_LIMIT;
 
   const { data: employees = [] } = useQuery({
     queryKey: ['employees'],
@@ -172,6 +222,12 @@ export default function Clients() {
     c.email?.toLowerCase().includes(search.toLowerCase())
   ), [clients, search]);
 
+  // Rendez-vous qui seront annulés (aperçu dans les fenêtres de confirmation)
+  const clientUpcomingCount = clientToDelete
+    ? appointments.filter(a => a.client_email?.toLowerCase() === clientToDelete.email?.toLowerCase() && isUpcomingUnpaid(a)).length
+    : 0;
+  const allUpcomingCount = showDeleteAll ? appointments.filter(a => a.client_email && isUpcomingUnpaid(a)).length : 0;
+
   // Le rendu est lui aussi progressif : 300 fiches animées d'un coup, c'est une page qui rame
   const [visibleCount, setVisibleCount] = useState(ROWS_STEP);
   useEffect(() => { setVisibleCount(ROWS_STEP); }, [search]);
@@ -179,54 +235,79 @@ export default function Clients() {
   const canShowMore = filtered.length > visibleCount;
 
   const handleDeleteClient = async () => {
-    if (!clientToDelete) return;
+    if (!clientToDelete || !isAdmin) return;
+    if (isStaffRole(clientToDelete.role)) {
+      toast.error('Compte du personnel : gérez-le depuis Comptes barbers');
+      setClientToDelete(null);
+      return;
+    }
     setDeleting(true);
+    const email = clientToDelete.email?.toLowerCase();
     try {
-      // Supprimer les rendez-vous du client
-      const clientAppointments = appointments.filter(
-        apt => apt.client_email === clientToDelete.email
-      );
-      await Promise.all(
-        clientAppointments.map(apt => api.entities.Appointment.delete(apt.id))
-      );
-      // Supprimer le compte utilisateur s'il existe (il peut être dans un lot non encore chargé)
-      const sameEmail = u => u.email?.toLowerCase() === clientToDelete.email?.toLowerCase();
+      // Le compte d'abord (il peut être dans un lot non encore chargé) : un membre du personnel dont
+      // la fiche n'avait pas encore son rôle n'est jamais touché, ni lui ni ses rendez-vous
+      const sameEmail = u => u.email?.toLowerCase() === email;
       const registeredUser = registeredUsers.find(sameEmail)
         || (hasNextPage ? (await ensureAllUsers()).find(sameEmail) : undefined);
+      if (registeredUser && isStaffRole(registeredUser.role)) {
+        toast.error('Compte du personnel : gérez-le depuis Comptes barbers');
+        return;
+      }
+      // Ses rendez-vous lus côté serveur (la liste chargée ici est plafonnée)
+      const clientAppointments = (await api.entities.Appointment.filter({ client_email: clientToDelete.email }, '-date', 500))
+        .filter(apt => apt.client_email?.toLowerCase() === email);
+      const now = Date.now();
+      const upcoming = await runInBatches(clientAppointments.filter(apt => isUpcomingUnpaid(apt, now)), cancelUpcoming);
+      const placeholders = await runInBatches(clientAppointments.filter(isPlaceholderAppointment), deletePlaceholder);
       if (registeredUser) {
         await api.entities.User.delete(registeredUser.id);
       }
-      queryClient.invalidateQueries({ queryKey: ['allAppointments'] });
-      queryClient.invalidateQueries({ queryKey: ['registeredUsers'] });
-      toast.success(`Client "${clientToDelete.name || clientToDelete.email}" supprimé`);
+      const name = clientToDelete.name || clientToDelete.email;
+      if (upcoming.failed + placeholders.failed > 0) {
+        toast.warning(`Client "${name}" supprimé, mais ${upcoming.failed + placeholders.failed} rendez-vous n'ont pas pu être traités`);
+      } else {
+        toast.success(`Client "${name}" supprimé`, {
+          description: upcoming.ok > 0 ? `${upcoming.ok} rendez-vous à venir annulé${upcoming.ok > 1 ? 's' : ''}, historique conservé` : 'Historique conservé',
+        });
+      }
     } catch (err) {
-      toast.error('Erreur lors de la suppression du client');
+      toast.error(err?.message && !/^HTTP/.test(err.message) ? err.message : 'Erreur lors de la suppression du client');
     } finally {
+      invalidateAppointmentQueries(queryClient);
+      queryClient.invalidateQueries({ queryKey: ['registeredUsers'] });
       setDeleting(false);
       setClientToDelete(null);
     }
   };
 
+  // Même règle pour tous les comptes clients : historique conservé, RDV à venir annulés
   const handleDeleteAll = async () => {
+    if (!isAdmin) return;
     setDeleting(true);
     try {
-      // Supprimer tous les rendez-vous
-      await Promise.all(
-        appointments.map(apt => api.entities.Appointment.delete(apt.id))
-      );
-      // Supprimer tous les comptes utilisateurs (sauf admins et barbers) : on charge
-      // d'abord tous les lots, sinon seuls les comptes affichés seraient supprimés
+      // On charge d'abord tous les lots, sinon seuls les comptes affichés seraient supprimés
       const allUsers = await ensureAllUsers();
-      const removed = buildClients(allUsers, appointments, employees).length;
-      await Promise.all(
-        allUsers.filter(u => u.role === 'user').map(u => api.entities.User.delete(u.id))
-      );
-      queryClient.invalidateQueries({ queryKey: ['allAppointments'] });
-      queryClient.invalidateQueries({ queryKey: ['registeredUsers'] });
-      toast.success(`${removed} client(s) supprimé(s)`);
-    } catch (err) {
+      const clientUsers = allUsers.filter(u => u.role === 'user');
+      const staffEmails = new Set(allUsers.filter(u => isStaffRole(u.role)).map(u => u.email?.toLowerCase()));
+      const now = Date.now();
+      // RDV des clients (jamais ceux saisis au nom d'un membre du personnel)
+      const ofClients = appointments.filter(apt => apt.client_email && !staffEmails.has(apt.client_email.toLowerCase()));
+      const upcoming = await runInBatches(ofClients.filter(apt => isUpcomingUnpaid(apt, now)), cancelUpcoming);
+      const placeholders = await runInBatches(ofClients.filter(isPlaceholderAppointment), deletePlaceholder);
+      const accounts = await runInBatches(clientUsers, u => api.entities.User.delete(u.id));
+      const failed = upcoming.failed + placeholders.failed + accounts.failed;
+      if (failed > 0) {
+        toast.warning(`${accounts.ok} compte(s) supprimé(s), ${failed} opération(s) en échec : relancez pour terminer`);
+      } else {
+        toast.success(`${accounts.ok} compte(s) client supprimé(s)`, {
+          description: `${upcoming.ok} rendez-vous à venir annulé(s), historique conservé`,
+        });
+      }
+    } catch {
       toast.error('Erreur lors de la suppression des clients');
     } finally {
+      invalidateAppointmentQueries(queryClient);
+      queryClient.invalidateQueries({ queryKey: ['registeredUsers'] });
       setDeleting(false);
       setShowDeleteAll(false);
     }
@@ -250,7 +331,7 @@ export default function Clients() {
         client_name: newClient.name.trim(),
         client_email: newClient.email.trim(),
         client_phone: newClient.phone.trim(),
-        date: new Date().toISOString().split('T')[0],
+        date: parisTodayStr(),
         start_time: '09:00',
         end_time: '09:00',
         status: 'cancelled',
@@ -260,7 +341,7 @@ export default function Clients() {
         employee_name: emp.name || '',
         services: [],
       });
-      queryClient.invalidateQueries({ queryKey: ['allAppointments'] });
+      invalidateAppointmentQueries(queryClient);
       toast.success(`Client "${newClient.name || newClient.email}" ajouté`);
       setNewClient({ name: '', email: '', phone: '' });
       setShowAddClient(false);
@@ -369,7 +450,7 @@ export default function Clients() {
               client_name: c.nom || c.name || '',
               client_email: c.email,
               client_phone: c.telephone || c.phone || '',
-              date: new Date().toISOString().split('T')[0],
+              date: parisTodayStr(),
               start_time: '09:00',
               end_time: '09:00',
               status: 'cancelled',
@@ -382,7 +463,7 @@ export default function Clients() {
           )
         );
 
-        queryClient.invalidateQueries({ queryKey: ['allAppointments'] });
+        invalidateAppointmentQueries(queryClient);
         toast.success(`${newClients.length} client(s) importé(s) avec succès`);
       } catch (err) {
         toast.error('Erreur lors de l\'importation du fichier');
@@ -415,7 +496,7 @@ export default function Clients() {
             onClick={() => setShowAddClient(true)}>
             <UserPlus className="w-3.5 h-3.5" /> Ajouter
           </Button>
-          {clients.length > 0 && (
+          {isAdmin && clients.length > 0 && (
             <Button variant="outline" size="sm" className="border-border gap-1.5 text-red-500 hover:text-red-600 hover:bg-red-500/10"
               onClick={() => setShowDeleteAll(true)}>
               <Trash2 className="w-3.5 h-3.5" /> Supprimer tout
@@ -442,6 +523,12 @@ export default function Clients() {
         onChange={e => setSearch(e.target.value)}
         className="bg-card border-border mb-4"
       />
+
+      {appointmentsCapped && (
+        <p className="text-[11px] text-amber-400 -mt-2 mb-3">
+          Seuls les {APPOINTMENTS_LIMIT} derniers rendez-vous sont pris en compte (visites, dépenses, dernière visite).
+        </p>
+      )}
 
       {search.trim() && hasNextPage && (
         <p className="text-[11px] text-muted-foreground -mt-3 mb-3">
@@ -486,14 +573,17 @@ export default function Clients() {
                     {client.noShows}
                   </Badge>
                 )}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 text-muted-foreground hover:text-red-500"
-                  onClick={() => setClientToDelete(client)}
-                >
-                  <Trash2 className="w-4 h-4" />
-                </Button>
+                {isAdmin && !isStaffRole(client.role) && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-muted-foreground hover:text-red-500"
+                    aria-label={`Supprimer ${client.name || client.email}`}
+                    onClick={() => setClientToDelete(client)}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
+                )}
               </div>
             </div>
           </motion.div>
@@ -564,10 +654,11 @@ export default function Clients() {
       <AlertDialog open={showDeleteAll} onOpenChange={(open) => !open && setShowDeleteAll(false)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Supprimer tous les clients</AlertDialogTitle>
+            <AlertDialogTitle>Supprimer tous les comptes clients</AlertDialogTitle>
             <AlertDialogDescription>
-              Êtes-vous sûr de vouloir supprimer <strong>tous les {clients.length} clients</strong> ?
-              Tous les rendez-vous ({appointments.length}) seront également supprimés. Cette action est irréversible.
+              Êtes-vous sûr de vouloir supprimer <strong>tous les comptes clients</strong> ? Leurs rendez-vous à venir
+              non encaissés ({allUpcomingCount}) seront annulés. Les rendez-vous passés et encaissés sont conservés
+              (chiffre d'affaires, statistiques). Les comptes du personnel ne sont pas touchés. Cette action est irréversible.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -589,9 +680,9 @@ export default function Clients() {
           <AlertDialogHeader>
             <AlertDialogTitle>Supprimer le client</AlertDialogTitle>
             <AlertDialogDescription>
-              Êtes-vous sûr de vouloir supprimer <strong>{clientToDelete?.name || clientToDelete?.email}</strong> ?
-              Tous ses rendez-vous ({appointments.filter(a => a.client_email === clientToDelete?.email).length}) seront
-              également supprimés. Cette action est irréversible.
+              Êtes-vous sûr de vouloir supprimer le compte de <strong>{clientToDelete?.name || clientToDelete?.email}</strong> ?
+              Ses rendez-vous à venir non encaissés ({clientUpcomingCount}) seront annulés. Son historique (rendez-vous
+              passés et encaissés) est conservé : il restera visible ici tant qu'il a des rendez-vous. Cette action est irréversible.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

@@ -2,8 +2,11 @@
  * Tableau de bord : tous les canaux de vente, pas seulement les rendez-vous.
  *
  * Canaux et règle de comptage (demande du client, 9 sept. 2026) :
- *  - Prestations : CA des rendez-vous encaissés (calculé par Dashboard.jsx, reçu en props) ;
- *  - Boutique : commandes `delivered` (payées au retrait) ; en cours = pending / confirmed / ready ;
+ *  - Prestations : CA des rendez-vous encaissés, hors pourboires (calculé par Dashboard.jsx, reçu en
+ *    props). Dans le CA global, les rendez-vous réglés par carte cadeau sont retirés : cet argent est
+ *    déjà compté à la validation de la carte (sinon il entrerait deux fois) ;
+ *  - Boutique : commandes `delivered` (payées au retrait, date `delivered_at`, sinon `created_date`) ;
+ *    en cours = pending / confirmed / ready ;
  *  - Cartes cadeau : cartes `validated` / `used` (l'argent entre à la validation, date `validated_at`) ;
  *    en attente = `pending` ; solde en circulation = reste des cartes validées ;
  *  - Privatisations : événements `accepted` / `confirmed` avec un prix, à la date de l'événement ;
@@ -11,7 +14,7 @@
  *  - Textile (précommandes) : réservations `paid` / `ready` / `picked_up` (prix × quantité) ;
  *    à payer = `reserved`, prêtes à retirer = `ready`.
  * Les dates « aujourd'hui / ce mois » suivent la date de création quand aucun horodatage
- * d'encaissement n'existe (commandes, textile) : c'est une approximation assumée.
+ * d'encaissement n'existe (anciennes commandes sans `delivered_at`, textile) : approximation assumée.
  */
 import React, { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -90,8 +93,9 @@ function ChannelPanel({ title, icon: Icon, color, to, children, badge }) {
 
 /**
  * @param {object} props
- * @param {{ today: number, month: number, unpaidToday: number, unpaidMonth: number, unpaidCount: number, upcomingMonth: number, upcomingCount: number }} props.appointments
- *   CA des rendez-vous encaissés (prestations + produits vendus en RDV) et montants non encaissés
+ * @param {{ today: number, month: number, giftToday?: number, giftMonth?: number, unpaidToday: number, unpaidMonth: number, unpaidCount: number, upcomingMonth: number, upcomingCount: number }} props.appointments
+ *   CA des rendez-vous encaissés (prestations + produits vendus en RDV, hors pourboires), dont la part
+ *   réglée par carte cadeau (`gift*`), et montants non encaissés
  */
 export default function SalesOverview({ appointments }) {
   const navigate = useNavigate();
@@ -121,15 +125,17 @@ export default function SalesOverview({ appointments }) {
     const isMonth = (v) => dayOf(v).startsWith(monthPrefix);
 
     // ─── Boutique ───
+    // Encaissée au retrait : datée par `delivered_at` (serveur v102), la création pour les anciennes
     const delivered = orders.filter((o) => o.status === 'delivered');
+    const deliveredDate = (o) => o.delivered_at || o.created_date;
     const openOrders = orders.filter((o) => ORDER_OPEN.includes(o.status));
     const boutique = {
-      today: sum(delivered.filter((o) => isToday(o.created_date)), (o) => o.total_price),
-      month: sum(delivered.filter((o) => isMonth(o.created_date)), (o) => o.total_price),
+      today: sum(delivered.filter((o) => isToday(deliveredDate(o))), (o) => o.total_price),
+      month: sum(delivered.filter((o) => isMonth(deliveredDate(o))), (o) => o.total_price),
       openCount: openOrders.length,
       openAmount: sum(openOrders, (o) => o.total_price),
       readyCount: orders.filter((o) => o.status === 'ready').length,
-      monthCount: delivered.filter((o) => isMonth(o.created_date)).length,
+      monthCount: delivered.filter((o) => isMonth(deliveredDate(o))).length,
     };
 
     // ─── Cartes cadeau ───
@@ -180,8 +186,14 @@ export default function SalesOverview({ appointments }) {
       labVotes,
     };
 
+    // RDV réglés par carte cadeau : déjà comptés à la vente de la carte, retirés du CA global
+    const giftToday = Number(appointments.giftToday) || 0;
+    const giftMonth = Number(appointments.giftMonth) || 0;
+    const rdvToday = Math.max(0, (Number(appointments.today) || 0) - giftToday);
+    const rdvMonth = Math.max(0, (Number(appointments.month) || 0) - giftMonth);
     const channels = [
-      { key: 'prestations', label: 'Prestations & produits en RDV', today: appointments.today, month: appointments.month, color: CHANNEL_COLORS.prestations, icon: Scissors },
+      { key: 'prestations', label: 'Prestations & produits en RDV', today: rdvToday, month: rdvMonth, color: CHANNEL_COLORS.prestations, icon: Scissors,
+        note: giftMonth > 0 ? `hors ${eur(giftMonth)} réglés par carte cadeau ce mois (comptés à la vente de la carte)` : '' },
       { key: 'boutique', label: 'Boutique (commandes retirées)', today: boutique.today, month: boutique.month, color: CHANNEL_COLORS.boutique, icon: ShoppingBag },
       { key: 'cartes', label: 'Cartes cadeau validées', today: cartes.today, month: cartes.month, color: CHANNEL_COLORS.cartes, icon: Gift },
       { key: 'privatisations', label: 'Privatisations', today: privatisations.today, month: privatisations.month, color: CHANNEL_COLORS.privatisations, icon: PartyPopper },
@@ -198,12 +210,15 @@ export default function SalesOverview({ appointments }) {
     const upcomingCount = appointments.upcomingCount || 0;
     const pending = { total: unclosedAmount + upcomingAmount, unclosedAmount, unclosedCount, upcomingAmount, upcomingCount };
 
-    return { boutique, cartes, privatisations, textile: textileStats, channels, totalToday, totalMonth, pending };
+    return {
+      boutique, cartes, privatisations, textile: textileStats, channels, totalToday, totalMonth, pending,
+      rdvToday, rdvMonth, giftToday, giftMonth,
+    };
   }, [orders, giftCards, events, textile, reservations, appointments, today, monthPrefix]);
 
-  const { boutique, cartes, privatisations, textile: tx, channels, totalToday, totalMonth, pending } = stats;
-  const otherToday = totalToday - (appointments.today || 0);
-  const otherMonth = totalMonth - (appointments.month || 0);
+  const { boutique, cartes, privatisations, textile: tx, channels, totalToday, totalMonth, pending, giftToday, giftMonth } = stats;
+  const otherToday = totalToday - stats.rdvToday;
+  const otherMonth = totalMonth - stats.rdvMonth;
   const drop = tx.currentDrop;
 
   return (
@@ -214,11 +229,17 @@ export default function SalesOverview({ appointments }) {
           <p className="text-[10px] text-primary font-medium uppercase tracking-wider">CA global aujourd'hui</p>
           <p className="text-2xl font-bold mt-1 text-foreground">{eur(totalToday)}</p>
           <p className="text-[10px] text-muted-foreground mt-0.5">tous canaux · dont {eur(otherToday)} hors RDV</p>
+          {giftToday > 0 && (
+            <p className="text-[10px] text-muted-foreground mt-0.5">RDV réglés par carte cadeau : {eur(giftToday)}, non recomptés</p>
+          )}
         </motion.div>
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-card border border-primary/30 rounded-xl p-4">
           <p className="text-[10px] text-primary font-medium uppercase tracking-wider">CA global du mois</p>
           <p className="text-2xl font-bold mt-1 text-foreground">{eur(totalMonth)}</p>
           <p className="text-[10px] text-muted-foreground mt-0.5">tous canaux · dont {eur(otherMonth)} hors RDV</p>
+          {giftMonth > 0 && (
+            <p className="text-[10px] text-muted-foreground mt-0.5">RDV réglés par carte cadeau : {eur(giftMonth)}, non recomptés</p>
+          )}
         </motion.div>
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
           onClick={() => navigate('/admin/agenda?view=week')}
@@ -280,6 +301,7 @@ export default function SalesOverview({ appointments }) {
                   <motion.div initial={{ width: 0 }} animate={{ width: `${pct}%` }} transition={{ duration: 0.6, ease: 'easeOut' }}
                     className="h-full rounded-full" style={{ background: c.color }} />
                 </div>
+                {c.note && <p className="text-[10px] text-muted-foreground mt-1">{c.note}</p>}
               </div>
             );
           })}

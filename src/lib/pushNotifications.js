@@ -141,26 +141,18 @@ export function initNativePush() {
       console.warn('Push registration failed:', error);
     }),
 
-    // Notification received while app is in foreground
+    // Notification reçue app ouverte : rangée dans le centre de notifications du compte
     PushNotifications.addListener('pushNotificationReceived', (notification) => {
-      const NOTIF_KEY = 'dhome_notifications';
-      try {
-        const notifs = JSON.parse(localStorage.getItem(NOTIF_KEY) || '[]');
-        notifs.unshift({
-          id: Date.now(),
-          title: notification.title || '',
-          body: notification.body || '',
-          date: new Date().toISOString(),
-          read: false,
-        });
-        localStorage.setItem(NOTIF_KEY, JSON.stringify(notifs.slice(0, 50)));
-      } catch {}
+      addNotification(nativeEntry(notification));
     }),
 
     // Notification touchée : ouvre la page visée. L'app utilise des URL classiques
     // (BrowserRouter) : changer le « hash » ne faisait rien. pushState + popstate
     // fait suivre le routeur sans recharger l'app.
     PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
+      // Reçue app fermée ou en arrière-plan : « pushNotificationReceived » n'a rien vu, on la
+      // range ici (dédoublonnée si elle avait déjà été reçue au premier plan).
+      addNotification({ ...nativeEntry(action.notification), read: true });
       const url = action.notification?.data?.url;
       if (typeof url === 'string' && url.startsWith('/') && !url.startsWith('//')) {
         window.history.pushState({}, '', url);
@@ -242,6 +234,37 @@ async function subscribeWebPush() {
   return true;
 }
 
+/**
+ * Déconnexion : le serveur oublie cet appareil pour le compte qui s'en va (sinon ses rappels
+ * et last minute continuaient d'arriver sur un téléphone où il n'est plus connecté).
+ * Contrairement à `unsubscribeFromPush`, ce n'est pas un refus : ni `dhb-push-optout`, ni
+ * révocation du jeton natif, ni suppression de l'abonnement du navigateur — la prochaine
+ * connexion le rattache au nouveau compte (syncPushSubscription). Meilleur effort, sans erreur.
+ */
+export async function detachPushFromAccount() {
+  if (!getToken()) return;
+  try {
+    if (isNative) {
+      const token = readLocal(NATIVE_TOKEN_KEY);
+      lastSentNative = null;
+      if (!token) return;
+      await apiRequest('POST', apiUrl('/push/unsubscribe'), {
+        endpoint: `native://${Capacitor.getPlatform()}/${token}`,
+      });
+      return;
+    }
+    if (!('serviceWorker' in navigator)) return;
+    // getRegistration (et pas `ready`, qui attend indéfiniment sans service worker)
+    const reg = await navigator.serviceWorker.getRegistration();
+    const subscription = await reg?.pushManager?.getSubscription();
+    if (subscription) {
+      await apiRequest('POST', apiUrl('/push/unsubscribe'), { endpoint: subscription.endpoint });
+    }
+  } catch {
+    // Réseau, session déjà expirée : rien à faire, la déconnexion continue
+  }
+}
+
 // Unsubscribe from push
 export async function unsubscribeFromPush() {
   if (isNative) {
@@ -285,4 +308,230 @@ function urlBase64ToUint8Array(base64String) {
     outputArray[i] = rawData.charCodeAt(i);
   }
   return outputArray;
+}
+
+// ─── Centre de notifications (page /notifications) ───────────────────
+// Les notifications reçues sont rangées sur l'appareil, par compte : `dhome_notifications:<id>`.
+// Avant, une seule liste commune à l'appareil : après un changement de compte, le suivant
+// lisait les notifications du précédent. Le compte courant est retenu dans `dhb-notif-owner`
+// (posé par AuthContext) car une notification peut arriver avant la fin de la vérification de
+// session, au lancement de l'app depuis la notification elle-même.
+// Sur le web, le service worker range aussi chaque push dans IndexedDB (`dhb-notifs`, voir
+// public/sw.js) : les notifications reçues app fermée sont fusionnées à l'ouverture de la page.
+const NOTIFS_LEGACY_KEY = 'dhome_notifications';
+const NOTIFS_OWNER_KEY = 'dhb-notif-owner';
+const NOTIFS_MAX = 50;
+// Deux entrées sans identifiant commun, même titre et même texte à moins de 5 min : une seule
+const DUPLICATE_WINDOW = 5 * 60 * 1000;
+export const NOTIFICATIONS_EVENT = 'dhb:notifications';
+
+const notifsKey = (userId) => `${NOTIFS_LEGACY_KEY}:${userId}`;
+const ownerOr = (userId) => (userId != null && userId !== '' ? String(userId) : readLocal(NOTIFS_OWNER_KEY));
+
+function safeUrl(url) {
+  return typeof url === 'string' && url.startsWith('/') && !url.startsWith('//') ? url : null;
+}
+
+function normalizeEntry(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const title = String(raw.title || '').slice(0, 200);
+  const body = String(raw.body || '').slice(0, 1000);
+  if (!title && !body) return null;
+  const time = Date.parse(raw.date);
+  return {
+    id: raw.id != null && raw.id !== '' ? String(raw.id) : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    title,
+    body,
+    url: safeUrl(raw.url),
+    date: Number.isNaN(time) ? new Date().toISOString() : new Date(time).toISOString(),
+    read: !!raw.read,
+  };
+}
+
+function isSameNotification(a, b) {
+  if (a.id === b.id) return true;
+  return a.title === b.title && a.body === b.body
+    && Math.abs(Date.parse(a.date) - Date.parse(b.date)) < DUPLICATE_WINDOW;
+}
+
+// Notification Capacitor → entrée du centre (titre et texte parfois seulement dans `data` sur Android)
+function nativeEntry(notification) {
+  const n = notification || {};
+  return {
+    id: n.id ? `native-${n.id}` : null,
+    title: n.title || n.data?.title,
+    body: n.body || n.data?.body,
+    url: n.data?.url,
+  };
+}
+
+function parseList(value) {
+  try {
+    const list = JSON.parse(value || '[]');
+    return Array.isArray(list) ? list.map(normalizeEntry).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Ajoute `extra` à `base` sans doublon, plus récentes d'abord, 50 au plus. */
+function mergeNotifications(base, extra) {
+  const out = [...base];
+  for (const raw of extra) {
+    const entry = normalizeEntry(raw);
+    if (entry && !out.some(n => isSameNotification(n, entry))) out.push(entry);
+  }
+  return out.sort((a, b) => Date.parse(b.date) - Date.parse(a.date)).slice(0, NOTIFS_MAX);
+}
+
+/** Notifications du compte (le compte courant si `userId` est omis), plus récentes d'abord. */
+export function readNotifications(userId) {
+  const owner = ownerOr(userId);
+  if (!owner) return [];
+  return parseList(readLocal(notifsKey(owner)));
+}
+
+function storeNotifications(owner, list) {
+  writeLocal(notifsKey(owner), JSON.stringify(list.slice(0, NOTIFS_MAX)));
+  try { window.dispatchEvent(new CustomEvent(NOTIFICATIONS_EVENT)); } catch { /* hors navigateur */ }
+}
+
+/**
+ * Compte connecté sur l'appareil (AuthContext : à l'ouverture de session, `null` à la
+ * déconnexion). La première fois, l'ancienne liste commune est rattachée à ce compte puis effacée.
+ */
+export function setNotificationsOwner(userId) {
+  if (userId == null || userId === '') {
+    writeLocal(NOTIFS_OWNER_KEY, null);
+    return;
+  }
+  const owner = String(userId);
+  writeLocal(NOTIFS_OWNER_KEY, owner);
+  const legacy = readLocal(NOTIFS_LEGACY_KEY);
+  if (legacy != null) {
+    const old = parseList(legacy);
+    if (old.length) storeNotifications(owner, mergeNotifications(readNotifications(owner), old));
+    writeLocal(NOTIFS_LEGACY_KEY, null);
+  }
+}
+
+/** Range une notification reçue. Sans compte connu (déconnecté), elle n'est pas gardée. */
+export function addNotification(raw, userId) {
+  const owner = ownerOr(userId);
+  const entry = normalizeEntry({ ...raw, date: raw?.date || new Date().toISOString() });
+  if (!owner || !entry) return;
+  const list = readNotifications(owner);
+  const existing = list.find(n => isSameNotification(n, entry));
+  if (existing) {
+    // Déjà reçue app ouverte puis touchée : elle passe en lue (et garde le lien s'il manquait)
+    if ((entry.read && !existing.read) || (entry.url && !existing.url)) {
+      storeNotifications(owner, list.map(n => (n === existing
+        ? { ...n, read: n.read || entry.read, url: n.url || entry.url }
+        : n)));
+    }
+    return;
+  }
+  storeNotifications(owner, mergeNotifications(list, [entry]));
+}
+
+export function getUnreadCount(userId) {
+  return readNotifications(userId).filter(n => !n.read).length;
+}
+
+export function markAllNotificationsRead(userId) {
+  const owner = ownerOr(userId);
+  if (!owner) return;
+  const list = readNotifications(owner);
+  if (!list.some(n => !n.read)) return;
+  storeNotifications(owner, list.map(n => ({ ...n, read: true })));
+}
+
+export function removeNotification(id, userId) {
+  const owner = ownerOr(userId);
+  if (!owner) return;
+  storeNotifications(owner, readNotifications(owner).filter(n => n.id !== String(id)));
+}
+
+export function clearNotifications(userId) {
+  const owner = ownerOr(userId);
+  if (owner) storeNotifications(owner, []);
+}
+
+// IndexedDB partagée avec le service worker (même nom, même version, même magasin)
+const NOTIF_DB = 'dhb-notifs';
+const NOTIF_STORE = 'items';
+
+function openNotifDb() {
+  return new Promise((resolve) => {
+    // Jamais bloquant : navigation privée, IndexedDB absente ou bloquée → rien
+    const timer = setTimeout(() => resolve(null), 2000);
+    const done = (db) => { clearTimeout(timer); resolve(db); };
+    try {
+      if (typeof indexedDB === 'undefined' || !indexedDB) { done(null); return; }
+      const req = indexedDB.open(NOTIF_DB, 1);
+      req.onupgradeneeded = () => {
+        if (!req.result.objectStoreNames.contains(NOTIF_STORE)) {
+          req.result.createObjectStore(NOTIF_STORE, { keyPath: 'id' });
+        }
+      };
+      req.onsuccess = () => done(req.result);
+      req.onerror = () => done(null);
+      req.onblocked = () => done(null);
+    } catch {
+      done(null);
+    }
+  });
+}
+
+// Lit (et vide si `consume`) les notifications rangées par le service worker
+async function readServiceWorkerNotifications(consume) {
+  const db = await openNotifDb();
+  if (!db) return [];
+  return new Promise((resolve) => {
+    let items = [];
+    const finish = (value) => { try { db.close(); } catch { /* déjà fermée */ } resolve(value); };
+    try {
+      const tx = db.transaction(NOTIF_STORE, consume ? 'readwrite' : 'readonly');
+      const store = tx.objectStore(NOTIF_STORE);
+      const req = store.getAll();
+      req.onsuccess = () => {
+        items = Array.isArray(req.result) ? req.result : [];
+        if (consume) items.forEach(item => { if (item?.id != null) store.delete(item.id); });
+      };
+      tx.oncomplete = () => finish(items);
+      tx.onerror = () => finish([]);
+      tx.onabort = () => finish([]);
+    } catch {
+      finish([]);
+    }
+  });
+}
+
+/**
+ * Web : rattache au compte les notifications rangées par le service worker (reçues app fermée).
+ * Rien sur l'app native ni sans compte connu. Renvoie le nombre de notifications ajoutées.
+ */
+export async function syncServiceWorkerNotifications(userId) {
+  const owner = ownerOr(userId);
+  if (isNative || !owner) return 0;
+  const items = await readServiceWorkerNotifications(true);
+  if (!items.length) return 0;
+  const before = readNotifications(owner);
+  const merged = mergeNotifications(before, items);
+  storeNotifications(owner, merged);
+  return Math.max(0, merged.length - before.length);
+}
+
+/**
+ * Pastille de l'icône : non lues du compte + notifications du service worker pas encore
+ * rattachées (sans les compter deux fois quand l'app ouverte les avait déjà rangées).
+ */
+export async function getBadgeCount(userId) {
+  const local = readNotifications(userId);
+  const unread = local.filter(n => !n.read).length;
+  if (isNative || !ownerOr(userId)) return unread;
+  const pending = (await readServiceWorkerNotifications(false))
+    .map(normalizeEntry)
+    .filter(entry => entry && !local.some(n => isSameNotification(n, entry)));
+  return unread + pending.length;
 }

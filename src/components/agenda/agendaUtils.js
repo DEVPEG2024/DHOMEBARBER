@@ -1,6 +1,7 @@
 import { format, addDays, startOfWeek, endOfWeek, startOfMonth, endOfMonth, parseISO, isValid } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { api } from '@/api/apiClient';
+import { LAST_MINUTE_EXPIRED_REASON } from '@/lib/cancellation';
 
 // Grille commune aux vues Jour et Semaine
 export const START_HOUR = 7;
@@ -73,6 +74,40 @@ export function invalidateAppointmentQueries(queryClient) {
 export const isBreak = (apt) => apt.status === 'break';
 export const isLastMinuteSlot = (apt) => apt.status === 'last_minute';
 export const isCancelledLike = (apt) => apt.status === 'cancelled' || apt.status === 'no_show';
+
+// ─── Last minute ───
+/**
+ * Repère posé dans `internal_notes` quand un client prend un créneau last minute (assignation
+ * d'un compte ou walk-in validé) : c'est ce que compte « Convertis » du tableau de bord.
+ * Avant, rien ne l'écrivait et le compteur restait à 0.
+ */
+export const LAST_MINUTE_MARKER = '[last_minute]';
+
+/** Note interne avec le repère last minute en tête (note existante conservée, jamais en double). */
+export function withLastMinuteMarker(notes) {
+  const text = String(notes || '').trim();
+  if (text.includes(LAST_MINUTE_MARKER)) return text;
+  return text ? `${LAST_MINUTE_MARKER} ${text}` : LAST_MINUTE_MARKER;
+}
+
+/** Note interne sans le repère (affichage, champ « Note interne » de la fiche). */
+export function stripLastMinuteMarker(notes) {
+  return String(notes || '').replace(LAST_MINUTE_MARKER, '').trim();
+}
+
+/** Créneau last minute pris par un client (le texte « last_minute » des anciennes notes reste reconnu). */
+export const isConvertedLastMinute = (apt) =>
+  apt.status !== 'last_minute' && String(apt.internal_notes || '').includes('last_minute');
+
+/**
+ * Créneau last minute que personne n'a pris : passé en « absent » automatiquement (ou annulé).
+ * Ce n'est ni un no-show ni une annulation d'un client : exclu de ces compteurs.
+ */
+export function isUnclaimedLastMinute(apt) {
+  if (!isCancelledLike(apt)) return false;
+  return apt.cancellation_reason === LAST_MINUTE_EXPIRED_REASON
+    || (!apt.client_email && apt.client_name === 'Last Minute');
+}
 
 /** Instant de fin d'un rendez-vous (heure de l'appareil, comme le reste de l'agenda). */
 export function appointmentEnd(apt) {

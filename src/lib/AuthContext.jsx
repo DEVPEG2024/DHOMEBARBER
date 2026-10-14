@@ -1,7 +1,18 @@
-import React, { createContext, useState, useContext, useEffect, useCallback } from 'react';
+import React, { createContext, useState, useContext, useEffect, useCallback, useRef } from 'react';
 import { api } from '@/api/apiClient';
 import { queryClientInstance } from '@/lib/query-client';
-import { syncPushSubscription } from '@/lib/pushNotifications';
+import { syncPushSubscription, detachPushFromAccount, setNotificationsOwner } from '@/lib/pushNotifications';
+
+// Délai maximal accordé à la désinscription push avant de déconnecter quand même
+const LOGOUT_PUSH_TIMEOUT = 2000;
+
+const hasStoredToken = () => {
+  try {
+    return !!(localStorage.getItem('base44_access_token') || localStorage.getItem('token'));
+  } catch {
+    return false;
+  }
+};
 
 const AuthContext = createContext();
 
@@ -12,48 +23,86 @@ export const AuthProvider = ({ children }) => {
   // Vrai juste après une inscription : l'écran « Bienvenue ! » de Login (installer l'app,
   // activer les notifications) s'affiche avant la redirection (GuestOnly, App.jsx).
   const [welcomePending, setWelcomePending] = useState(false);
+  // Session impossible à vérifier au lancement alors qu'un jeton existe : `{ type: 'network' }`
+  // (pas de réponse : hors ligne) ou `{ type: 'server' }` (serveur en panne, 5xx). Login affiche
+  // alors « Pas de connexion internet » avec Réessayer au lieu du formulaire.
+  const [authError, setAuthError] = useState(null);
+  const [isRetryingAuth, setIsRetryingAuth] = useState(false);
+  // Déconnexion en cours : le 401 éventuel de la désinscription push (jeton déjà expiré,
+  // compte supprimé) ne doit pas déclencher « session expirée »
+  const loggingOutRef = useRef(false);
 
-  // Check token on mount
-  useEffect(() => {
-    checkAuth();
-  }, []);
-
-  const checkAuth = async () => {
+  const checkAuth = useCallback(async ({ retry = false } = {}) => {
+    if (retry) setIsRetryingAuth(true);
     try {
       // If there's a token in localStorage, the SDK already set Authorization header
-      const token = localStorage.getItem('base44_access_token') || localStorage.getItem('token');
-      if (!token) {
-        setIsLoadingAuth(false);
-        return;
+      if (!hasStoredToken()) {
+        setAuthError(null);
+        return 'signedOut';
       }
 
       const currentUser = await api.auth.me();
       setUser(currentUser);
       setIsAuthenticated(true);
+      setAuthError(null);
       // Rattache l'appareil au compte (jeton push obtenu hors session, autorisation déjà donnée)
       syncPushSubscription();
+      return 'ok';
     } catch (err) {
       // Ne jamais effacer le jeton sur une panne réseau : ouvrir l'app dans le métro ou
       // en avion déconnectait définitivement, il fallait retaper son mot de passe.
       // Seule une réponse d'authentification du serveur (401 / 403) invalide la session.
       if (err && (err.status === 401 || err.status === 403)) {
         clearSession();
+        setAuthError(null);
+        return 'signedOut';
       } else {
-        // Hors ligne : on garde le jeton et on retentera au prochain lancement.
-        // L'utilisateur reste « non connecté » le temps de la session, sans rien perdre.
+        // Hors ligne : on garde le jeton, l'écran « Pas de connexion internet » propose de
+        // réessayer et on retente seul au retour du réseau (événement « online » ci-dessous).
         setUser(null);
         setIsAuthenticated(false);
+        setAuthError({ type: err?.status ? 'server' : 'network' });
+        return 'failed';
       }
     } finally {
       setIsLoadingAuth(false);
+      if (retry) setIsRetryingAuth(false);
     }
-  };
+  // clearSession est stable (useCallback sans dépendance) : pas besoin de la lister
+  }, []);
+
+  // Check token on mount
+  useEffect(() => {
+    checkAuth();
+  }, [checkAuth]);
+
+  // « Réessayer » de l'écran hors ligne : 'ok' | 'failed' (toujours injoignable) | 'signedOut'
+  const retryAuth = useCallback(() => checkAuth({ retry: true }), [checkAuth]);
+  // « Se connecter avec un autre compte » : on oublie l'échec (le jeton reste jusqu'à la
+  // connexion suivante) et on cesse de retenter, sinon le retour du réseau rouvrait l'ancien
+  // compte pendant que le client se connecte avec un autre
+  const dismissAuthError = useCallback(() => setAuthError(null), []);
+
+  // Retour du réseau : nouvelle vérification de la session, sans geste du client
+  useEffect(() => {
+    if (!authError) return undefined;
+    const onOnline = () => { checkAuth({ retry: true }); };
+    window.addEventListener('online', onOnline);
+    return () => window.removeEventListener('online', onOnline);
+  }, [authError, checkAuth]);
+
+  // Centre de notifications rangé par compte : les notifications reçues sur l'appareil
+  // (y compris au lancement, avant la fin de cette vérification) vont au dernier compte connecté
+  useEffect(() => {
+    if (user?.id != null) setNotificationsOwner(user.id);
+  }, [user?.id]);
 
   // Efface la session : jeton, utilisateur et cache (les réponses dépendent du rôle)
   const clearSession = useCallback(() => {
     localStorage.removeItem('base44_access_token');
     localStorage.removeItem('token');
     queryClientInstance.clear();
+    setNotificationsOwner(null);
     setUser(null);
     setIsAuthenticated(false);
     setWelcomePending(false);
@@ -65,6 +114,7 @@ export const AuthProvider = ({ children }) => {
   // maintenant `dhb:unauthorized` sur le premier 401 et on referme proprement la session.
   useEffect(() => {
     const onUnauthorized = () => {
+      if (loggingOutRef.current) return;
       if (!localStorage.getItem('base44_access_token') && !localStorage.getItem('token')) return;
       clearSession();
       if (window.location.pathname !== '/login') {
@@ -85,6 +135,7 @@ export const AuthProvider = ({ children }) => {
     const fullUser = await api.auth.me();
     setUser(fullUser);
     setIsAuthenticated(true);
+    setAuthError(null);
     syncPushSubscription();
     return fullUser;
   }, []);
@@ -98,6 +149,7 @@ export const AuthProvider = ({ children }) => {
     queryClientInstance.clear();
     setUser(newUser);
     setIsAuthenticated(true);
+    setAuthError(null);
     setWelcomePending(true);
     syncPushSubscription();
     return newUser;
@@ -113,9 +165,24 @@ export const AuthProvider = ({ children }) => {
     } catch {}
   }, []);
 
-  const logout = useCallback(() => {
+  /**
+   * Déconnexion. L'appareil est d'abord détaché du compte côté serveur (sinon les rappels du
+   * compte qui s'en va continuaient d'arriver), au plus 2 s et sans bloquer sur une erreur.
+   * `logout({ detachPush: false })` saute cette étape (compte supprimé : le serveur a déjà tout
+   * effacé). Utilisable directement en `onClick` (l'événement reçu est ignoré).
+   */
+  const logout = useCallback(async (options) => {
+    if (loggingOutRef.current) return;
+    loggingOutRef.current = true;
+    if (options?.detachPush !== false) {
+      await Promise.race([
+        detachPushFromAccount().catch(() => {}),
+        new Promise((resolve) => setTimeout(resolve, LOGOUT_PUSH_TIMEOUT)),
+      ]);
+    }
     localStorage.removeItem('base44_access_token');
     localStorage.removeItem('token');
+    setNotificationsOwner(null);
     setUser(null);
     setIsAuthenticated(false);
     // Redirect to home
@@ -127,6 +194,10 @@ export const AuthProvider = ({ children }) => {
       user,
       isAuthenticated,
       isLoadingAuth,
+      authError,
+      isRetryingAuth,
+      retryAuth,
+      dismissAuthError,
       welcomePending,
       login,
       register,

@@ -413,10 +413,13 @@ export default function TryOn() {
       hapticFeedback();
     } catch (err) {
       ultraTimersRef.current.forEach(clearTimeout);
-      const msg = err?.code === 'not_configured' ? "AI ULTRA n'est pas encore activé sur ce salon."
-        : err?.code === 'rate_limited' ? "Trop d'essais AI ULTRA, réessayez dans une heure."
-          : err?.code === 'no_zone' ? 'Aucune zone cheveux ou barbe détectée sur cette photo.'
-            : 'Le traitement AI ULTRA a échoué, réessayez.';
+      const offline = err?.network || (typeof navigator !== 'undefined' && navigator.onLine === false);
+      const msg = offline ? 'Pas de connexion internet : vérifiez votre réseau puis réessayez AI ULTRA.'
+        : err?.status === 401 ? 'Votre session a expiré : reconnectez-vous pour utiliser AI ULTRA.'
+          : err?.code === 'not_configured' ? "AI ULTRA n'est pas encore activé sur ce salon."
+            : err?.code === 'rate_limited' || err?.status === 429 ? "Limite atteinte : 12 essais AI ULTRA par heure. Réessayez un peu plus tard."
+              : err?.code === 'no_zone' ? 'Aucune zone cheveux ou barbe détectée sur cette photo.'
+                : 'Le traitement AI ULTRA a échoué, réessayez.';
       setUltra({ status: 'error', stage: '', result: null, original: null, error: msg });
     }
   };

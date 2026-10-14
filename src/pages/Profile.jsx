@@ -7,6 +7,14 @@ import { motion } from 'framer-motion';
 import { Calendar, Star, ShoppingBag, Settings, LogOut, ChevronRight, Shield, Bell, Camera, Shirt, Handshake, Heart } from 'lucide-react';
 import { toast } from 'sonner';
 import ImageCropDialog, { unreadableImageMessage } from '@/components/shared/ImageCropDialog';
+import { parisInstant } from '@/lib/calendarLinks';
+import { formatPrice } from '@/components/services/serviceUtils';
+
+// Fin d'un rendez-vous à l'heure de Paris (sans heure de fin : son début, sinon fin de journée)
+const endsAt = (apt) => parisInstant(apt.date, apt.end_time || apt.start_time || '23:59');
+// Une visite = rendez-vous honoré : confirmé (le salon n'utilise pas « Valider la prestation »)
+// ou terminé, et dont l'heure de fin est passée
+const VISIT_STATUSES = ['confirmed', 'completed'];
 
 const menuItems = [
   { icon: Calendar, label: 'Mes Rendez-vous', path: '/appointments', desc: 'Historique & prochains RDV' },
@@ -24,6 +32,7 @@ export default function Profile() {
   const fileInputRef = useRef(null);
   const [cropImage, setCropImage] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   const handlePhotoSelect = (e) => {
     const file = e.target.files?.[0];
@@ -57,15 +66,20 @@ export default function Profile() {
     }
   };
 
-  const { data: appointments = [] } = useQuery({
+  const { data: appointments = [], isLoading: loadingStats, isError: statsError } = useQuery({
     queryKey: ['myAppointments', user?.email],
     queryFn: () => api.entities.Appointment.filter({ client_email: user?.email }, '-date', 100),
     enabled: !!user,
   });
 
-  const completedCount = appointments.filter(a => a.status === 'completed').length;
-  const totalSpent = appointments.filter(a => a.status === 'completed').reduce((sum, a) => sum + (a.grand_total || a.total_price || 0), 0);
-  const upcomingCount = appointments.filter(a => a.status === 'confirmed').length;
+  const now = Date.now();
+  const dated = (Array.isArray(appointments) ? appointments : []).filter(a => a?.date);
+  const visits = dated.filter(a => VISIT_STATUSES.includes(a.status) && endsAt(a) <= now);
+  const upcomingCount = dated.filter(a => a.status === 'confirmed' && endsAt(a) > now).length;
+  // Montant réglé (encaissement du salon, produits et pourboire compris) sinon prix des prestations
+  const totalSpent = visits.reduce((sum, a) => sum + (Number(a.grand_total) || Number(a.total_price) || 0), 0);
+  // Pas de « 0 » trompeur pendant le chargement ou après un échec
+  const statsReady = !loadingStats && !(statsError && !appointments.length);
   const initials = user?.full_name?.split(' ').map(n => n[0]).join('').slice(0, 2) || '?';
 
   return (
@@ -134,12 +148,13 @@ export default function Profile() {
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
           className="grid grid-cols-3 gap-3 mb-8">
           {[
-            { value: completedCount, label: 'Visites' },
-            { value: upcomingCount, label: 'À venir' },
-            { value: `${totalSpent}€`, label: 'Total' },
+            { value: statsReady ? visits.length : '–', label: 'Visites' },
+            { value: statsReady ? upcomingCount : '–', label: 'À venir' },
+            { value: statsReady ? formatPrice(totalSpent) : '–', label: 'Total' },
           ].map(({ value, label }) => (
             <div key={label} className="rounded-2xl bg-white/4 border border-white/8 backdrop-blur-xl p-4 text-center">
-              <p className="text-2xl font-bold text-primary font-display">{value}</p>
+              {/* Montant long (« 1250 € ») : plus petit pour tenir dans la colonne à 320 px */}
+              <p className={`${String(value).length > 5 ? 'text-lg leading-8' : 'text-2xl'} font-bold text-primary font-display whitespace-nowrap`}>{value}</p>
               <p className="text-[11px] uppercase tracking-widest text-muted-foreground mt-0.5">{label}</p>
             </div>
           ))}
@@ -174,11 +189,15 @@ export default function Profile() {
         <motion.button
           initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }}
           whileTap={{ scale: 0.97 }}
-          onClick={logout}
-          className="w-full h-12 rounded-2xl border border-red-500/20 bg-red-500/8 text-red-400 text-sm font-semibold flex items-center justify-center gap-2 hover:bg-red-500/12 transition-colors"
+          onClick={async () => {
+            setLoggingOut(true);
+            await logout();
+          }}
+          disabled={loggingOut}
+          className="w-full h-12 rounded-2xl border border-red-500/20 bg-red-500/8 text-red-400 text-sm font-semibold flex items-center justify-center gap-2 hover:bg-red-500/12 transition-colors disabled:opacity-60"
         >
           <LogOut className="w-4 h-4" />
-          Déconnexion
+          {loggingOut ? 'Déconnexion…' : 'Déconnexion'}
         </motion.button>
       </div>
     </div>
