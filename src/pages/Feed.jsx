@@ -11,6 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
 import { hapticFeedback } from '@/lib/capacitor';
+import LoadError, { isNetworkError } from '@/components/shared/LoadError';
 
 function timeAgo(dateStr) {
   const now = new Date();
@@ -155,6 +156,18 @@ function GlassCard({ children }) {
 }
 
 const REACTIONS = ['❤️', '🔥', '💪', '😂', '👏', '💈'];
+// Appui long sur « J'aime » : ouvre le sélecteur pour changer de réaction
+const LONG_PRESS_MS = 450;
+const LONG_PRESS_MOVE = 10;
+
+/** Message à afficher pour une erreur d'API : celui du serveur s'il en donne un, sinon le repli. */
+function errorText(err, fallback) {
+  if (isNetworkError(err)) return 'Pas de connexion internet. Réessayez dans un instant.';
+  // Erreur de programmation (TypeError…) : son texte anglais n'a rien à faire à l'écran
+  if (err && err.name && err.name !== 'Error' && !err.status) return fallback;
+  const msg = err?.message;
+  return msg && !/^HTTP \d+$/.test(msg) ? msg : fallback;
+}
 
 // Explosion d'emojis au moment de réagir : particules en transform / opacity uniquement
 function EmojiBurst({ emoji, onDone }) {
@@ -201,7 +214,7 @@ function PostCard({ post, currentUser, onLike, onDelete, likes, comments, onComm
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  const postLikes = likes.filter(l => l.post_id === post.id);
+  const postLikes = likes.filter(l => String(l.post_id) === String(post.id));
   const userLike = currentUser ? postLikes.find(l => isMine(l, currentUser, 'user_key', 'user_email')) : undefined;
   const likeCount = postLikes.length;
 
@@ -211,23 +224,81 @@ function PostCard({ post, currentUser, onLike, onDelete, likes, comments, onComm
     const r = l.reaction || '❤️';
     reactionCounts[r] = (reactionCounts[r] || 0) + 1;
   });
-  const postComments = comments.filter(c => c.post_id === post.id);
+  const postComments = comments.filter(c => String(c.post_id) === String(post.id));
   const commentCount = postComments.length;
   const badge = getRoleBadge(post.author_role);
   const initials = post.author_name?.split(' ').map(n => n[0]).join('').slice(0, 2) || '?';
   const isOwner = currentUser?.role === 'admin' || isMine(post, currentUser);
 
+  const myReaction = userLike ? (userLike.reaction || '❤️') : null;
+  // Une réaction à la fois : un second tap pendant l'envoi créerait un doublon (refusé par le serveur)
+  const likeBusy = useRef(false);
+  const sendReaction = async (emoji) => {
+    if (likeBusy.current) return;
+    likeBusy.current = true;
+    try {
+      await onLike(post.id, emoji);
+    } finally {
+      likeBusy.current = false;
+    }
+  };
+
+  // Emoji du sélecteur : même emoji que le mien = retirer, autre emoji = changer de réaction
   const react = (emoji) => {
-    setBurst({ emoji, key: Date.now() });
+    if (myReaction !== emoji) setBurst({ emoji, key: Date.now() });
     hapticFeedback();
-    onLike(post.id, !!userLike, emoji);
+    sendReaction(emoji);
   };
 
   const handleImageDoubleTap = () => {
     if (!currentUser) return;
     setHeartPop(Date.now());
     hapticFeedback();
-    if (!userLike) onLike(post.id, false, '❤️');
+    if (!userLike) sendReaction('❤️');
+  };
+
+  // Appui long (doigt ou souris) sur le bouton : ouvre le sélecteur sans toucher à la réaction.
+  // Le tap simple garde son effet (retirer ma réaction, ou ouvrir le sélecteur si je n'en ai pas).
+  const pressTimer = useRef(null);
+  const pressStart = useRef(null);
+  const longPressed = useRef(false);
+  const cancelPress = () => {
+    clearTimeout(pressTimer.current);
+    pressTimer.current = null;
+  };
+  useEffect(() => () => clearTimeout(pressTimer.current), []);
+  const onLikePointerDown = (e) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    longPressed.current = false;
+    pressStart.current = { x: e.clientX, y: e.clientY };
+    cancelPress();
+    pressTimer.current = setTimeout(() => {
+      pressTimer.current = null;
+      longPressed.current = true;
+      hapticFeedback();
+      setShowReactions(true);
+    }, LONG_PRESS_MS);
+  };
+  const onLikePointerMove = (e) => {
+    const start = pressStart.current;
+    if (!pressTimer.current || !start) return;
+    // Le doigt glisse : c'est un défilement, pas un appui long
+    if (Math.abs(e.clientX - start.x) > LONG_PRESS_MOVE || Math.abs(e.clientY - start.y) > LONG_PRESS_MOVE) cancelPress();
+  };
+  // Clic droit / menu contextuel du système (appui long sur Android) : le sélecteur à la place
+  const onLikeContextMenu = (e) => {
+    e.preventDefault();
+    cancelPress();
+    longPressed.current = true;
+    setShowReactions(true);
+  };
+  const onLikeClick = () => {
+    // Le clic qui suit un appui long ne doit ni retirer la réaction ni refermer le sélecteur
+    if (longPressed.current) { longPressed.current = false; return; }
+    // Sélecteur ouvert : le tap le referme sans rien changer
+    if (showReactions) { setShowReactions(false); return; }
+    if (userLike) sendReaction(myReaction);
+    else setShowReactions(v => !v);
   };
 
   const confirmAndDelete = async () => {
@@ -239,12 +310,15 @@ function PostCard({ post, currentUser, onLike, onDelete, likes, comments, onComm
   };
 
   const handleSubmitComment = async () => {
-    if (!commentText.trim()) return;
+    if (!commentText.trim() || submitting) return;
     setSubmitting(true);
-    await onComment(post.id, commentText.trim());
-    setCommentText('');
+    const ok = await onComment(post.id, commentText.trim());
     setSubmitting(false);
-    setShowComments(true);
+    // Refusé (réseau, serveur) : le texte reste dans le champ pour pouvoir réessayer
+    if (ok) {
+      setCommentText('');
+      setShowComments(true);
+    }
   };
 
   return (
@@ -377,7 +451,7 @@ function PostCard({ post, currentUser, onLike, onDelete, likes, comments, onComm
                     setShowReactions(false);
                   }}
                   className={`text-xl w-9 h-9 flex items-center justify-center rounded-full hover:bg-secondary transition-colors ${
-                    userLike?.reaction === emoji ? 'bg-primary/15' : ''
+                    myReaction === emoji ? 'bg-primary/15' : ''
                   }`}
                 >
                   {emoji}
@@ -393,9 +467,15 @@ function PostCard({ post, currentUser, onLike, onDelete, likes, comments, onComm
 
         <motion.button
           whileTap={{ scale: 0.85 }}
-          onClick={() => userLike ? onLike(post.id, true, userLike.reaction) : setShowReactions(!showReactions)}
-          onDoubleClick={() => setShowReactions(!showReactions)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full hover:bg-secondary transition-colors"
+          onClick={onLikeClick}
+          onPointerDown={onLikePointerDown}
+          onPointerMove={onLikePointerMove}
+          onPointerUp={cancelPress}
+          onPointerLeave={cancelPress}
+          onPointerCancel={cancelPress}
+          onContextMenu={onLikeContextMenu}
+          aria-label={userLike ? 'Retirer ma réaction (appui long pour la changer)' : 'Réagir'}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full hover:bg-secondary transition-colors select-none [-webkit-touch-callout:none]"
         >
           {userLike ? (
             <motion.span
@@ -510,6 +590,10 @@ export default function Feed() {
   const {
     data: postsPages,
     isLoading,
+    isError: postsError,
+    error: postsErrorObj,
+    refetch: refetchPosts,
+    isFetching: postsFetching,
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
@@ -599,14 +683,15 @@ export default function Feed() {
 
   const getAuthorPhoto = () => {
     if (user?.role === 'barber' || user?.role === 'admin') {
-      const emp = employees.find(e => e.id === user?.employee_id);
+      const emp = employees.find(e => String(e.id) === String(user?.employee_id));
       return emp?.photo_url || user?.photo_url || '';
     }
     return user?.photo_url || '';
   };
 
+  // Renvoie `true` si la publication est partie (le composeur ne se ferme qu'à ce moment-là)
   const createPost = async () => {
-    if (!content.trim() && !imageUrl) return;
+    if ((!content.trim() && !imageUrl) || posting) return false;
     setPosting(true);
     try {
       await api.entities.Post.create({
@@ -621,37 +706,54 @@ export default function Feed() {
       setImageUrl('');
       queryClient.invalidateQueries({ queryKey: ['posts'] });
       toast.success('Publication envoyée 🎉');
-    } catch {
-      toast.error('Erreur lors de la publication');
+      return true;
+    } catch (err) {
+      toast.error(errorText(err, 'Erreur lors de la publication'));
+      return false;
     } finally {
       setPosting(false);
     }
   };
 
   const handleImageUpload = async (e) => {
-    const file = e.target.files?.[0];
+    const input = e.target;
+    const file = input.files?.[0];
     if (!file) return;
     setUploading(true);
     try {
       const { file_url } = await api.integrations.Core.UploadFile({ file });
       setImageUrl(file_url);
-    } catch {
-      toast.error("Erreur lors de l'upload");
+    } catch (err) {
+      // Garde le message d'apiClient (photo HEIC : réglage iPhone à changer)
+      toast.error(errorText(err, "Erreur lors de l'envoi de la photo"));
     } finally {
       setUploading(false);
+      // Sinon reprendre la même photo après un échec ne déclencherait plus `change`
+      input.value = '';
     }
   };
 
-  const handleLike = async (postId, alreadyLiked, reaction = '❤️') => {
+  // Réaction : pas encore de réaction → création ; même emoji que la mienne → retrait ;
+  // autre emoji → changement (PostLike.update, `UNIQUE(post_id, user_email)` interdit une seconde ligne)
+  const handleLike = async (postId, reaction = '❤️') => {
+    const mine = likes.find(l => String(l.post_id) === String(postId) && isMine(l, user, 'user_key', 'user_email'));
     try {
-      if (alreadyLiked) {
-        const like = likes.find(l => l.post_id === postId && isMine(l, user, 'user_key', 'user_email'));
-        if (like) await api.entities.PostLike.delete(like.id);
+      if (mine && (mine.reaction || '❤️') === reaction) {
+        await api.entities.PostLike.delete(mine.id);
+      } else if (mine) {
+        await api.entities.PostLike.update(mine.id, { reaction });
       } else {
         await api.entities.PostLike.create({ post_id: postId, user_email: user.email, reaction });
       }
-      queryClient.invalidateQueries({ queryKey: ['postLikes'] });
-    } catch {}
+      return true;
+    } catch (err) {
+      toast.error(errorText(err, "Impossible d'enregistrer votre réaction"));
+      return false;
+    } finally {
+      // Succès comme échec (doublon, réaction déjà retirée ailleurs) : on resynchronise, et on
+      // attend le rechargement pour qu'un tap suivant parte de la réaction à jour
+      await queryClient.invalidateQueries({ queryKey: ['postLikes'] }).catch(() => {});
+    }
   };
 
   const handleComment = async (postId, text) => {
@@ -665,8 +767,10 @@ export default function Feed() {
         content: text,
       });
       queryClient.invalidateQueries({ queryKey: ['postComments'] });
-    } catch {
-      toast.error('Erreur lors du commentaire');
+      return true;
+    } catch (err) {
+      toast.error(errorText(err, "Erreur lors de l'envoi du commentaire"));
+      return false;
     }
   };
 
@@ -880,7 +984,7 @@ export default function Feed() {
                   <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
                 </div>
                 <Button
-                  onClick={async () => { await createPost(); setShowComposer(false); }}
+                  onClick={async () => { if (await createPost()) setShowComposer(false); }}
                   disabled={posting || (!content.trim() && !imageUrl)}
                   size="sm"
                   className="bg-primary text-primary-foreground text-xs rounded-full px-4"
@@ -1102,6 +1206,9 @@ export default function Feed() {
         <div className="flex justify-center py-12">
           <Loader2 className="w-6 h-6 animate-spin text-primary" />
         </div>
+      ) : postsError && !postsPages ? (
+        // Fil en échec : ne pas annoncer « Aucune publication »
+        <LoadError what="le fil" error={postsErrorObj} onRetry={refetchPosts} retrying={postsFetching} />
       ) : visiblePosts.length === 0 && !hasNextPage ? (
         <div className="text-center py-16">
           <MessageCircle className="w-12 h-12 text-muted-foreground/20 mx-auto mb-3" />

@@ -6,6 +6,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { Star, MessageSquare, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
+import LoadError, { isNetworkError } from '@/components/shared/LoadError';
 
 const GOOGLE_PLACE_ID = 'ChIJm6cgTFprjEcRZsuEqhCEPXY';
 const GOOGLE_REVIEW_URL = `https://search.google.com/local/writereview?placeid=${GOOGLE_PLACE_ID}`;
@@ -21,6 +22,10 @@ function StarSelect({ rating, onRate }) {
     </div>
   );
 }
+
+// Plafond serveur : 5 avis par compte (au-delà, refus). Commentaire borné côté client.
+const MAX_REVIEWS = 5;
+const MAX_COMMENT = 1000;
 
 const formatDate = (value) => (value ? new Date(value).toLocaleDateString('fr-FR') : '');
 
@@ -73,9 +78,14 @@ export default function MyReviews() {
   const [showForm, setShowForm] = useState(false);
   const [rating, setRating] = useState(0);
   const [comment, setComment] = useState('');
+  // Barber concerné (facultatif) : son nom part en `employee_name`, affiché « avec … » sur l'avis
+  const [barberId, setBarberId] = useState('');
 
   // Même requête et même clé que l'accueil (dédupliquée par React Query)
-  const { data: allReviews = [], isLoading: allLoading } = useQuery({
+  const {
+    data: allReviews = [], isLoading: allLoading, isError: allFailed, error: allError,
+    refetch: refetchAll, isFetching: allFetching,
+  } = useQuery({
     queryKey: ['reviews'],
     queryFn: () => api.entities.Review.filter({ is_visible: true }, '-created_date', 500),
   });
@@ -86,14 +96,40 @@ export default function MyReviews() {
     return { avg: avg.toFixed(1).replace('.', ','), count: rated.length };
   }, [allReviews]);
 
-  const { data: reviews = [], isLoading } = useQuery({
+  const {
+    data: myReviewsData, isLoading, isError: mineFailed, error: mineError,
+    refetch: refetchMine, isFetching: mineFetching,
+  } = useQuery({
     queryKey: ['myReviews', user?.email],
     queryFn: () => api.entities.Review.filter({ client_email: user?.email }, '-created_date', 50),
     enabled: !!user?.email,
   });
+  const reviews = myReviewsData || [];
+  // Liste reçue au moins une fois (un rechargement en échec garde les données, donc le plafond)
+  const reviewsLoaded = myReviewsData !== undefined;
+  // Plafond atteint seulement quand la liste est réellement chargée (une erreur ne bloque pas l'envoi)
+  const limitReached = reviewsLoaded && reviews.length >= MAX_REVIEWS;
+
+  // Même requête et même clé que l'accueil et le profil barber (barbers actifs)
+  const { data: barbers = [] } = useQuery({
+    queryKey: ['employees'],
+    staleTime: 5 * 60 * 1000, // catalogue : change rarement
+    queryFn: () => api.entities.Employee.filter({ is_active: true }, 'sort_order', 50),
+  });
 
   const createReview = useMutation({
-    mutationFn: (data) => api.entities.Review.create(data),
+    // `employee_name` n'est peut-être pas dans les champs acceptés à la création : sur un 400,
+    // on renvoie l'avis sans le barber plutôt que de bloquer le client (un 400 d'une autre
+    // cause échoue de nouveau et son message s'affiche)
+    mutationFn: async (data) => {
+      try {
+        return await api.entities.Review.create(data);
+      } catch (err) {
+        if (err?.status !== 400 || !data.employee_name) throw err;
+        const { employee_name: _ignored, ...rest } = data;
+        return api.entities.Review.create(rest);
+      }
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['myReviews'] });
       queryClient.invalidateQueries({ queryKey: ['reviews'] });
@@ -101,20 +137,24 @@ export default function MyReviews() {
       setShowForm(false);
       setRating(0);
       setComment('');
+      setBarberId('');
       setTab('mine');
     },
-    onError: (err) => toast.error(err?.message || 'Erreur lors de l\'envoi'),
+    onError: (err) => {
+      if (isNetworkError(err)) return toast.error('Pas de connexion internet. Réessayez dans un instant.');
+      const msg = err?.message;
+      toast.error(msg && !/^HTTP \d+$/.test(msg) && !(err instanceof TypeError) ? msg : 'Erreur lors de l\'envoi de votre avis');
+    },
   });
 
   const handleSubmit = () => {
     if (rating === 0) return toast.error('Veuillez donner une note');
-    createReview.mutate({
-      client_name: user?.full_name || 'Client',
-      client_email: user?.email,
-      rating,
-      comment,
-      is_visible: true,
-    });
+    if (limitReached) return toast.error(`Vous avez déjà publié ${MAX_REVIEWS} avis`);
+    // Nom, email et visibilité sont fixés par le serveur depuis le jeton : on n'envoie que l'avis
+    const barber = barberId ? barbers.find(b => String(b.id) === String(barberId)) : null;
+    const data = { rating, comment: comment.trim().slice(0, MAX_COMMENT) };
+    if (barber?.name) data.employee_name = barber.name;
+    createReview.mutate(data);
   };
 
   return (
@@ -159,6 +199,8 @@ export default function MyReviews() {
             <div className="space-y-3">
               {[1, 2, 3].map(i => <div key={i} className="h-24 rounded-2xl bg-white/5 animate-pulse" />)}
             </div>
+          ) : allFailed && allReviews.length === 0 ? (
+            <LoadError what="les avis" error={allError} onRetry={refetchAll} retrying={allFetching} />
           ) : allReviews.length === 0 ? (
             <div className="text-center py-16">
               <div className="w-20 h-20 rounded-3xl bg-white/5 border border-white/8 flex items-center justify-center mx-auto mb-5">
@@ -203,7 +245,16 @@ export default function MyReviews() {
         </motion.a>
 
         {/* Write review */}
-        {!showForm ? (
+        {reviewsLoaded && (
+          <p className="text-[11px] text-muted-foreground text-center -mt-3 mb-4">
+            {Math.min(reviews.length, MAX_REVIEWS)}/{MAX_REVIEWS} avis publiés
+          </p>
+        )}
+        {limitReached ? (
+          <div className="w-full py-3 px-4 rounded-2xl border border-white/8 bg-white/4 text-center text-xs text-muted-foreground mb-6">
+            Vous avez publié {MAX_REVIEWS} avis, le maximum par compte. Merci pour vos retours !
+          </div>
+        ) : !showForm ? (
           <motion.button
             initial={{ opacity: 0 }} animate={{ opacity: 1 }}
             onClick={() => setShowForm(true)}
@@ -216,13 +267,32 @@ export default function MyReviews() {
             className="rounded-2xl border border-white/8 bg-white/4 backdrop-blur-xl p-4 mb-6 space-y-4">
             <p className="text-sm font-semibold">Votre avis</p>
             <StarSelect rating={rating} onRate={setRating} />
-            <textarea
-              value={comment}
-              onChange={(e) => setComment(e.target.value)}
-              placeholder="Partagez votre expérience..."
-              rows={3}
-              className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-primary/40 resize-none"
-            />
+            {barbers.length > 0 && (
+              <select
+                value={barberId}
+                onChange={(e) => setBarberId(e.target.value)}
+                aria-label="Barber (facultatif)"
+                className="w-full h-10 bg-white/5 border border-white/10 rounded-xl px-3 text-sm text-foreground focus:outline-none focus:border-primary/40"
+              >
+                <option value="" className="bg-background text-foreground">Barber (facultatif)</option>
+                {barbers.map(b => (
+                  <option key={b.id} value={String(b.id)} className="bg-background text-foreground">{b.name}</option>
+                ))}
+              </select>
+            )}
+            <div>
+              <textarea
+                value={comment}
+                onChange={(e) => setComment(e.target.value)}
+                placeholder="Partagez votre expérience..."
+                rows={3}
+                maxLength={MAX_COMMENT}
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-primary/40 resize-none"
+              />
+              {comment.length > MAX_COMMENT - 200 && (
+                <p className="text-[10px] text-muted-foreground text-right mt-1">{comment.length}/{MAX_COMMENT}</p>
+              )}
+            </div>
             <div className="flex gap-2">
               <button onClick={() => setShowForm(false)}
                 className="flex-1 py-2.5 rounded-xl text-xs font-medium bg-white/5 border border-white/10 text-muted-foreground">
@@ -241,6 +311,8 @@ export default function MyReviews() {
           <div className="space-y-3">
             {[1, 2].map(i => <div key={i} className="h-24 rounded-2xl bg-white/5 animate-pulse" />)}
           </div>
+        ) : mineFailed && !reviewsLoaded ? (
+          <LoadError what="vos avis" error={mineError} onRetry={refetchMine} retrying={mineFetching} />
         ) : reviews.length === 0 ? (
           <div className="text-center py-16">
             <div className="w-20 h-20 rounded-3xl bg-white/5 border border-white/8 flex items-center justify-center mx-auto mb-5">

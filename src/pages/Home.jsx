@@ -583,7 +583,7 @@ export default function Home() {
             <SectionHeader title="Nos Prestations" subtitle="Services" linkTo="/services" />
             <div className="grid grid-cols-2 gap-2.5">
               {services.slice(0, 4).map((service, i) => (
-                <Link key={service.id} to="/booking">
+                <Link key={service.id} to={`/booking?services=${encodeURIComponent(service.id)}`}>
                   <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
                     whileTap={{ scale: 0.97 }} className="glass rounded-2xl p-4 relative overflow-hidden cursor-pointer group h-full">
                     <div className="absolute top-0 right-0 w-16 h-16 bg-gradient-to-bl from-primary/10 to-transparent rounded-bl-3xl" />

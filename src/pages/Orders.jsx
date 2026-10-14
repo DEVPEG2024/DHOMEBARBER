@@ -19,6 +19,7 @@ import {
   cancelledByLabel, cleanReason, CANCEL_REASON_MAX, CANCEL_FEATURES_QUERY_KEY,
   SALON_PHONE, SALON_PHONE_HREF,
 } from '@/lib/cancellation';
+import LoadError from '@/components/shared/LoadError';
 
 const parisDateTime = new Intl.DateTimeFormat('fr-FR', {
   timeZone: 'Europe/Paris',
@@ -58,12 +59,13 @@ export default function Orders() {
   const [reason, setReason] = useState('');
 
   const ordersKey = ['myOrders', user?.email];
-  const { data: orders = [], isLoading } = useQuery({
+  const ordersQuery = useQuery({
     queryKey: ordersKey,
     queryFn: () => api.entities.Order.filter({ client_email: user?.email }, '-created_date', 100),
     enabled: !!user?.email,
     refetchInterval: 30000, // Auto-refresh toutes les 30s
   });
+  const { data: orders = [], isLoading } = ordersQuery;
 
   const cancelMutation = useMutation({
     mutationFn: ({ id, reason: r }) => cancelOrder(id, r),
@@ -91,11 +93,15 @@ export default function Orders() {
         ? { action: { label: 'Appeler', onClick: () => { window.location.href = SALON_PHONE_HREF; } } }
         : undefined);
       if (e.refetch) {
+        // La commande a changé côté serveur (prête, déjà close…) ou ne s'annule plus en ligne :
+        // réessayer ne servirait à rien, on referme et la liste rechargée montre son état réel.
         queryClient.invalidateQueries({ queryKey: ['myOrders'] });
         queryClient.invalidateQueries({ queryKey: CANCEL_FEATURES_QUERY_KEY });
+        setOrderToCancel(null);
+        setReason('');
       }
-      setOrderToCancel(null);
-      setReason('');
+      // Sinon (réseau, serveur indisponible, trop d'essais) : la fenêtre reste ouverte avec le
+      // motif saisi, pour réessayer d'un tap.
     },
   });
 
@@ -135,6 +141,8 @@ export default function Orders() {
           <div className="space-y-3">
             {[1, 2].map(i => <div key={i} className="h-28 rounded-2xl bg-white/5 animate-pulse" />)}
           </div>
+        ) : ordersQuery.isError && !ordersQuery.data ? (
+          <LoadError what="vos commandes" error={ordersQuery.error} onRetry={ordersQuery.refetch} retrying={ordersQuery.isFetching} />
         ) : orders.length === 0 ? (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-20">
             <div className="w-20 h-20 rounded-3xl bg-white/5 border border-white/8 flex items-center justify-center mx-auto mb-5">

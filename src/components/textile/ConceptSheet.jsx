@@ -232,7 +232,9 @@ export default function ConceptSheet({
   const maxPerClient = Math.max(1, Number(concept.max_per_client) || 1);
   const availability = conceptAvailability(concept, selectedSize ?? undefined);
   const globalAvailability = conceptAvailability(concept);
-  const soldOut = Boolean(concept.sold_out) || (globalAvailability.tracked && globalAvailability.soldOut);
+  // Une taille proposée non suivie reste toujours réservable : la pièce n'est jamais « Épuisé »
+  // (les tailles épuisées une à une restent grisées dans le sélecteur)
+  const soldOut = !globalAvailability.unlimited && (Boolean(concept.sold_out) || (globalAvailability.tracked && globalAvailability.soldOut));
   const sizeSoldOut = selectedSize != null && availability.tracked && availability.soldOut;
 
   let maxQty = Math.max(0, maxPerClient - myActiveQty);

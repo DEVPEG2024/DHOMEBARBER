@@ -80,7 +80,9 @@ function ConceptCard({
   const sizes = Array.isArray(concept.sizes) ? concept.sizes : [];
   const votes = Number(concept.votes_count) || 0;
   const availability = conceptAvailability(concept);
-  const soldOut = Boolean(concept.sold_out) || (live && availability.tracked && availability.soldOut);
+  // Une taille proposée non suivie reste toujours réservable : jamais « Épuisé », même si un
+  // `sold_out` serveur calculé sur les seules tailles suivies dit le contraire
+  const soldOut = !availability.unlimited && (Boolean(concept.sold_out) || (live && availability.tracked && availability.soldOut));
   const lowStock = live && !soldOut && availability.tracked && availability.remaining <= 5;
 
   const handleVote = (e) => {

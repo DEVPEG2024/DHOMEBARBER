@@ -15,6 +15,14 @@ const STATUS_CONFIG = {
   expired: { label: 'Expirée', color: 'text-red-400', bg: 'bg-red-500/15 border-red-500/20', icon: XCircle },
 };
 
+/** Après toute modification d'une carte : la liste admin, le tableau de bord (CA « Cartes cadeau »,
+ *  solde en circulation) et le fil d'activité clients. */
+function invalidateGiftCardQueries(queryClient) {
+  for (const queryKey of [['adminGiftCards'], ['dashboard', 'giftCards'], ['adminActivity']]) {
+    queryClient.invalidateQueries({ queryKey });
+  }
+}
+
 function ValidateModal({ card, onClose, onValidated }) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -40,7 +48,7 @@ function ValidateModal({ card, onClose, onValidated }) {
         remaining_balance: card.amount,
       });
       toast.success('Carte validée !', { description: `${card.amount}€ - ${card.recipient_name}` });
-      queryClient.invalidateQueries({ queryKey: ['adminGiftCards'] });
+      invalidateGiftCardQueries(queryClient);
       onValidated?.();
       onClose();
     } catch (err) {
@@ -55,7 +63,7 @@ function ValidateModal({ card, onClose, onValidated }) {
     try {
       await api.entities.GiftCard.update(card.id, { status: 'expired' });
       toast.success('Carte rejetée');
-      queryClient.invalidateQueries({ queryKey: ['adminGiftCards'] });
+      invalidateGiftCardQueries(queryClient);
       onClose();
     } catch (err) {
       toast.error('Erreur', { description: err.message });
@@ -69,7 +77,7 @@ function ValidateModal({ card, onClose, onValidated }) {
     try {
       await api.entities.GiftCard.update(card.id, { status: 'expired', remaining_balance: 0 });
       toast.success('Carte annulée', { description: `${card.code} - ${card.recipient_name}` });
-      queryClient.invalidateQueries({ queryKey: ['adminGiftCards'] });
+      invalidateGiftCardQueries(queryClient);
       onClose();
     } catch (err) {
       toast.error('Erreur', { description: err.message });
@@ -100,7 +108,7 @@ function ValidateModal({ card, onClose, onValidated }) {
       toast.success(newBalance <= 0 ? 'Carte épuisée' : `${val}€ débité`, {
         description: newBalance > 0 ? `Nouveau solde: ${newBalance}€` : 'La carte est maintenant utilisée',
       });
-      queryClient.invalidateQueries({ queryKey: ['adminGiftCards'] });
+      invalidateGiftCardQueries(queryClient);
       onClose();
     } catch (err) {
       toast.error('Erreur', { description: err.message });
@@ -114,7 +122,7 @@ function ValidateModal({ card, onClose, onValidated }) {
     try {
       await api.entities.GiftCard.delete(card.id);
       toast.success('Carte supprimée');
-      queryClient.invalidateQueries({ queryKey: ['adminGiftCards'] });
+      invalidateGiftCardQueries(queryClient);
       onClose();
     } catch (err) {
       toast.error('Erreur', { description: err.message });

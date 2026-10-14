@@ -7,15 +7,16 @@ import { motion, AnimatePresence, animate, useReducedMotion } from 'framer-motio
 import { ChevronLeft, ChevronRight, Check, Calendar, CalendarPlus, Clock, User, Users, Scissors, Sparkles } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
-import { format, addDays, addMonths, isBefore, isSameDay, startOfDay } from 'date-fns';
+import { format, addDays, addMonths, isBefore, isSameDay } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import ServicePicker from '@/components/services/ServicePicker';
 import EmployeeCard from '@/components/shared/EmployeeCard';
+import LoadError from '@/components/shared/LoadError';
 import { hapticFeedback } from '@/lib/capacitor';
 import { BARBER_PHOTO_ASPECT } from '@/lib/barberPhoto';
 import { appointmentEvent, openCalendar, parisInstant } from '@/lib/calendarLinks';
 import { SALON_PHONE, SALON_PHONE_HREF, useCancelFeatures } from '@/lib/cancellation';
-import { analyzeDay, isOnLeave, workingHoursOf } from '@/lib/slots';
+import { analyzeDay, isOnLeave, parisDay, workingHoursOf } from '@/lib/slots';
 
 const STEPS = ['services', 'barber', 'datetime', 'confirm'];
 const STEP_LABELS = ['Prestations', 'Barber', 'Date & Heure', 'Confirmation'];
@@ -417,6 +418,9 @@ export function SuccessOverlay({ barberName, detail, calendarEvent = null, durat
   );
 }
 
+/** Liste vide stable (dépendance des `useMemo` tant qu'une requête n'a rien renvoyé). */
+const EMPTY_LIST = [];
+
 /** Horizon de réservation proposé au client, en mois à partir d'aujourd'hui. */
 const BOOKING_MONTHS_AHEAD = 3;
 /** Marge gauche de la bande de dates (`px-4`), retirée lors des défilements programmés. */
@@ -529,7 +533,7 @@ function DateStrip({ dates, selectedDate, onSelect, marks }) {
 export default function Booking() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, isLoadingAuth } = useAuth();
   const [step, setStep] = useState(0);
   // Sens de la dernière navigation entre étapes (1 = suivant, -1 = retour)
   const [direction, setDirection] = useState(1);
@@ -552,11 +556,12 @@ export default function Booking() {
   const features = useCancelFeatures();
 
   // Mêmes clé et requête que Mes rendez-vous (cache partagé)
-  const { data: myAppointments = [] } = useQuery({
+  const myAppointmentsQuery = useQuery({
     queryKey: ['myAppointments', user?.email],
     queryFn: () => api.entities.Appointment.filter({ client_email: user.email }, '-date', 100),
     enabled: !!rescheduleId && !!user?.email,
   });
+  const myAppointments = myAppointmentsQuery.data || EMPTY_LIST;
   // RDV à déplacer : le sien, confirmé, pas encore commencé ; sinon le paramètre est ignoré
   const oldApt = useMemo(() => {
     if (!rescheduleId) return null;
@@ -567,6 +572,15 @@ export default function Booking() {
   const oldAptLabel = oldApt
     ? `${format(new Date(`${oldApt.date}T12:00:00`), 'EEE d MMM', { locale: fr })} à ${oldApt.start_time}`
     : '';
+  // Tant qu'on ne sait pas si le RDV à déplacer existe, « Confirmer » attend : sinon le nouveau
+  // serait créé sans annuler l'ancien (doublon). Session en cours de vérification comprise.
+  const reschedulePending = !!rescheduleId && !oldApt && (
+    isLoadingAuth || (!!user?.email && myAppointmentsQuery.isPending)
+  );
+  // Lien « Déplacer » inutilisable (RDV introuvable, annulé, passé, ou liste impossible à charger) :
+  // on le dit clairement, la réservation devient un nouveau rendez-vous.
+  const rescheduleUnavailable = !!rescheduleId && !oldApt && !reschedulePending && !!user?.email;
+  const rescheduleCheckFailed = rescheduleUnavailable && myAppointmentsQuery.isError && !myAppointmentsQuery.data;
 
   /** « Ne pas déplacer » : on garde le parcours, sans le paramètre `reschedule`. */
   const dropReschedule = () => {
@@ -576,17 +590,19 @@ export default function Booking() {
     navigate(query ? `/booking?${query}` : '/booking', { replace: true });
   };
 
-  const { data: services = [], isPending: servicesPending } = useQuery({
+  const servicesQuery = useQuery({
     queryKey: ['services'],
     staleTime: 5 * 60 * 1000, // catalogue : change rarement
     queryFn: () => api.entities.Service.filter({ is_active: true }, 'sort_order', 100),
   });
+  const { data: services = [], isPending: servicesPending } = servicesQuery;
 
-  const { data: employees = [], isPending: employeesPending } = useQuery({
+  const employeesQuery = useQuery({
     queryKey: ['employees'],
     staleTime: 5 * 60 * 1000, // catalogue : change rarement
     queryFn: () => api.entities.Employee.filter({ is_active: true }, 'sort_order', 50),
   });
+  const { data: employees = EMPTY_LIST, isPending: employeesPending } = employeesQuery;
 
   // Barber passé dans l'URL (« Comme la dernière fois », relance « il est temps de revenir ») :
   // on ne saute l'étape 2 que s'il figure parmi les barbers actifs. Introuvable (parti du salon,
@@ -600,11 +616,12 @@ export default function Booking() {
   const barberParamPending = !!preSelectedBarberId && employeesPending;
   const missingBarber = !!preSelectedBarberId && !employeesPending && !preSelectedBarber;
 
-  const { data: timeOffs = [] } = useQuery({
+  const timeOffsQuery = useQuery({
     queryKey: ['timeOffs'],
     queryFn: () => api.entities.TimeOff.list('-start_date', 200),
     refetchOnMount: 'always',
   });
+  const timeOffs = timeOffsQuery.data || EMPTY_LIST;
 
   // RDV du jour servant au calcul des créneaux. En mode « peu importe » : une requête par statut,
   // sans filtre employee_id (tous les barbers) ; sinon uniquement ceux du barber choisi.
@@ -615,23 +632,42 @@ export default function Booking() {
   const fetchDayAppointments = (status) => {
     if (!slotsEnabled) return Promise.resolve([]);
     const filter = { date: selectedDateStr, status };
-    if (!anyBarber) filter.employee_id = selectedEmployee.id;
+    // Tous barbers : limite explicite, la limite par défaut du serveur pourrait tronquer la journée
+    if (anyBarber) return api.entities.Appointment.filter(filter, 'start_time', 1000);
+    filter.employee_id = selectedEmployee.id;
     return api.entities.Appointment.filter(filter);
   };
 
-  const { data: confirmedApts = [] } = useQuery({
+  const confirmedQuery = useQuery({
     queryKey: ['appointments-confirmed', selectedDateStr, slotScope],
     queryFn: () => fetchDayAppointments('confirmed'),
     enabled: slotsEnabled,
   });
 
-  const { data: breakApts = [] } = useQuery({
+  const breaksQuery = useQuery({
     queryKey: ['appointments-breaks', selectedDateStr, slotScope],
     queryFn: () => fetchDayAppointments('break'),
     enabled: slotsEnabled,
   });
 
-  const appointments = useMemo(() => [...confirmedApts, ...breakApts], [confirmedApts, breakApts]);
+  const confirmedApts = confirmedQuery.data;
+  const breakApts = breaksQuery.data;
+  const appointments = useMemo(() => [...(confirmedApts || []), ...(breakApts || [])], [confirmedApts, breakApts]);
+
+  // Créneaux calculables seulement quand RDV, pauses et congés sont là : sans eux, toute la
+  // journée paraîtrait libre. Chargement → squelette ; échec (sans données) → écran d'erreur.
+  // « Peu importe » : la liste des barbers fait aussi partie du calcul
+  const slotQueries = anyBarber
+    ? [confirmedQuery, breaksQuery, timeOffsQuery, employeesQuery]
+    : [confirmedQuery, breaksQuery, timeOffsQuery];
+  const slotsLoading = slotsEnabled && slotQueries.some(q => q.isPending);
+  const slotsFailedQuery = slotsEnabled && !slotsLoading
+    ? slotQueries.find(q => q.isError && q.data === undefined) || null
+    : null;
+  const slotsReady = slotsEnabled && !slotsLoading && !slotsFailedQuery;
+  const retrySlots = () => {
+    for (const q of slotQueries) if (q.isError || q.data === undefined) q.refetch();
+  };
 
   React.useEffect(() => {
     if (preSelectedIds.length > 0 && services.length > 0 && selectedServices.length === 0) {
@@ -650,13 +686,36 @@ export default function Booking() {
   // Plus courte prestation choisie : sert à dire si c'est la durée qui empêche tout créneau
   const shortestDuration = selectedServices.reduce((min, s) => Math.min(min, s.duration || 30), 30);
 
+  // Jour de Paris (et non celui de l'appareil), recalculé au retour au premier plan : l'app
+  // laissée ouverte la veille ne propose plus la date d'hier en tête.
+  const [todayKey, setTodayKey] = useState(() => parisDay(0).key);
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      const key = parisDay(0).key;
+      setTodayKey(prev => (prev === key ? prev : key));
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, []);
+
   const dates = useMemo(() => {
-    const today = startOfDay(new Date());
+    const [y, m, d0] = todayKey.split('-').map(Number);
+    const today = new Date(y, m - 1, d0, 12); // midi : même jour du calendrier, sans saut à l'heure d'été
     const end = addMonths(today, BOOKING_MONTHS_AHEAD);
     const d = [];
     for (let day = today; isBefore(day, end); day = addDays(day, 1)) d.push(day);
     return d;
-  }, []);
+  }, [todayKey]);
+
+  // Jour changé pendant la réservation : une date choisie désormais passée est retirée
+  useEffect(() => {
+    if (!selectedDate || format(selectedDate, 'yyyy-MM-dd') >= todayKey) return;
+    setSelectedDate(null);
+    setSelectedTime(null);
+    if (anyBarber) setSelectedEmployee(null);
+    if (step === 3) { setDirection(-1); setStep(2); }
+  }, [todayKey]);
 
   /**
    * Créneaux affichés à l'étape 3 : `options` = `{ time, employee }` triés par heure, et `reason`
@@ -667,7 +726,7 @@ export default function Booking() {
    *   l'ordre `sort_order`. Sans créneau, raisons des barbers fusionnées (`mergeDayReasons`).
    */
   const { options: slotOptions, reason: emptyReason } = useMemo(() => {
-    if (!selectedDate) return { options: [], reason: null };
+    if (!selectedDate || !slotsReady) return { options: [], reason: null };
     if (!anyBarber) {
       if (!selectedEmployee) return { options: [], reason: null };
       const { slots, reason } = analyzeDay(selectedEmployee, selectedDate, appointments, timeOffs, totalDuration, shortestDuration);
@@ -693,7 +752,7 @@ export default function Booking() {
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([time, employee]) => ({ time, employee }));
     return { options, reason: options.length > 0 ? null : mergeDayReasons(reasons) };
-  }, [anyBarber, selectedEmployee, selectedDate, appointments, timeOffs, totalDuration, shortestDuration, employees]);
+  }, [anyBarber, selectedEmployee, selectedDate, slotsReady, appointments, timeOffs, totalDuration, shortestDuration, employees]);
 
   /**
    * Repères du bandeau de dates (`yyyy-MM-dd` → `off` / `leave` / `closed`) : seulement ce qui est
@@ -742,10 +801,11 @@ export default function Booking() {
 
   const toggleService = (service) => {
     hapticFeedback();
-    if (!selectedServices.some(s => s.id === service.id)) scrollToBottomRef.current = true;
+    const same = (s) => String(s.id) === String(service.id);
+    if (!selectedServices.some(same)) scrollToBottomRef.current = true;
     setSelectedServices(prev =>
-      prev.find(s => s.id === service.id)
-        ? prev.filter(s => s.id !== service.id)
+      prev.some(same)
+        ? prev.filter(s => !same(s))
         : [...prev, service]
     );
   };
@@ -881,9 +941,19 @@ export default function Booking() {
       if (err?.status === 409 || err?.status === 400) {
         // Les créneaux affichés datent d'au plus une minute : on les recharge et on
         // désélectionne l'horaire refusé pour que le client en choisisse un autre.
-        queryClient.invalidateQueries({ queryKey: ['appointments-confirmed'] });
-        queryClient.invalidateQueries({ queryKey: ['appointments-breaks'] });
-        if (err?.status === 409) setSelectedTime(null);
+        if (err?.status === 409) {
+          // Retour au choix de l'heure : rester sur la confirmation laissait un récapitulatif sans
+          // heure et un bouton actif. Les créneaux sont vidés puis rechargés (squelette pendant ce
+          // temps) : l'heure refusée ne peut pas être reprise avant d'avoir les données à jour.
+          queryClient.resetQueries({ queryKey: ['appointments-confirmed'] });
+          queryClient.resetQueries({ queryKey: ['appointments-breaks'] });
+          setSelectedTime(null);
+          if (anyBarber) setSelectedEmployee(null);
+          goToStep(2);
+        } else {
+          queryClient.invalidateQueries({ queryKey: ['appointments-confirmed'] });
+          queryClient.invalidateQueries({ queryKey: ['appointments-breaks'] });
+        }
       }
     },
   });
@@ -897,10 +967,12 @@ export default function Booking() {
   };
 
   const hasRecap = selectedServices.length > 0 || !!selectedEmployee || anyBarber || !!selectedTime;
+  // « Confirmer » : sélection complète, et RDV à déplacer identifié (ou écarté) avant l'envoi
+  const canConfirm = !!selectedEmployee && !!selectedDate && !!selectedTime && !reschedulePending;
 
   // Date sans créneau : pourquoi (repos, congé, journée terminée ou complète), et le conseil sur la
   // durée des prestations seulement quand un créneau plus court tiendrait ce jour-là.
-  const emptyMessage = selectedDate && slotOptions.length === 0 && (anyBarber || selectedEmployee)
+  const emptyMessage = slotsReady && selectedDate && slotOptions.length === 0 && (anyBarber || selectedEmployee)
     ? emptyDayMessage(emptyReason, {
       barberName: anyBarber ? null : selectedEmployee.name,
       date: selectedDate,
@@ -1005,6 +1077,26 @@ export default function Booking() {
             </motion.div>
           </AnimatePresence>
 
+          {/* Lien « Déplacer » inutilisable : la réservation sera un nouveau rendez-vous */}
+          {rescheduleUnavailable && !success && (
+            <div role="status" className="mt-4 rounded-2xl border border-amber-500/25 bg-amber-500/10 px-3.5 py-3 text-xs leading-relaxed text-amber-200/90 break-words">
+              {rescheduleCheckFailed
+                ? 'Impossible de vérifier le rendez-vous à déplacer : si vous confirmez, celui-ci sera un nouveau rendez-vous et l\'ancien restera prévu.'
+                : 'Ce rendez-vous ne peut plus être déplacé : celui-ci sera un nouveau rendez-vous.'}
+              {' '}
+              {rescheduleCheckFailed ? (
+                <button type="button" onClick={() => myAppointmentsQuery.refetch()} disabled={myAppointmentsQuery.isFetching}
+                  className="font-semibold text-primary underline underline-offset-2 whitespace-nowrap disabled:opacity-60">
+                  {myAppointmentsQuery.isFetching ? 'Vérification…' : 'Réessayer'}
+                </button>
+              ) : (
+                <button type="button" onClick={dropReschedule} className="font-semibold text-primary underline underline-offset-2 whitespace-nowrap">
+                  Compris
+                </button>
+              )}
+            </div>
+          )}
+
           {/* Déplacement d'un rendez-vous existant */}
           {oldApt && !success && (
             <div className="mt-4 rounded-2xl border border-primary/25 bg-primary/10 px-3.5 py-3 text-xs leading-relaxed text-foreground/90 break-words">
@@ -1033,6 +1125,9 @@ export default function Booking() {
               <ServicePicker
                 services={services}
                 loading={servicesPending}
+                error={servicesQuery.isError && !servicesQuery.data ? servicesQuery.error : null}
+                onRetry={servicesQuery.refetch}
+                retrying={servicesQuery.isFetching}
                 selectedIds={selectedServices.map(s => String(s.id))}
                 onToggle={toggleService}
                 onSwap={swapServices}
@@ -1056,10 +1151,25 @@ export default function Booking() {
                 </motion.div>
                 {employees.map((emp, i) => (
                   <motion.div key={emp.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: (i + 1) * 0.05, duration: 0.3, ease: 'easeOut' }}>
-                    <EmployeeCard employee={emp} selected={!anyBarber && selectedEmployee?.id === emp.id} onClick={chooseBarber} />
+                    <EmployeeCard employee={emp} selected={!anyBarber && String(selectedEmployee?.id) === String(emp.id)} onClick={chooseBarber} />
                   </motion.div>
                 ))}
+                {/* Barbers en cours de chargement : cases d'attente plutôt qu'une liste qui paraît vide */}
+                {employeesPending && [0, 1, 2].map(i => (
+                  <div key={`barber-skeleton-${i}`} aria-hidden="true" className="rounded-2xl bg-white/5 border border-white/10 animate-pulse" style={{ aspectRatio: BARBER_PHOTO_ASPECT }} />
+                ))}
               </div>
+              {/* Barbers impossibles à charger : seule « Peu importe » resterait, sans explication */}
+              {employeesQuery.isError && !employeesQuery.data && (
+                <LoadError
+                  what="les barbers"
+                  error={employeesQuery.error}
+                  onRetry={employeesQuery.refetch}
+                  retrying={employeesQuery.isFetching}
+                  compact
+                  className="mt-4"
+                />
+              )}
             </motion.div>
           )}
 
@@ -1071,6 +1181,7 @@ export default function Booking() {
                   <Calendar className="w-4 h-4 text-primary" /> Choisir une date
                 </p>
                 <DateStrip
+                  key={todayKey}
                   dates={dates}
                   selectedDate={selectedDate}
                   onSelect={(date) => { setSelectedDate(date); setSelectedTime(null); if (anyBarber) setSelectedEmployee(null); hapticFeedback(); }}
@@ -1084,7 +1195,21 @@ export default function Booking() {
                     <Clock className="w-4 h-4 text-primary" /> Créneaux disponibles
                     {anyBarber && <span className="text-[11px] font-normal text-muted-foreground">· tous barbers</span>}
                   </p>
-                  {slotOptions.length > 0 ? (
+                  {slotsLoading ? (
+                    <div className="grid grid-cols-3 gap-2" aria-busy="true" aria-label="Chargement des créneaux">
+                      {Array.from({ length: 9 }, (_, i) => (
+                        <div key={i} className="h-12 rounded-xl bg-white/5 border border-white/10 animate-pulse" />
+                      ))}
+                    </div>
+                  ) : slotsFailedQuery ? (
+                    <LoadError
+                      what="les créneaux"
+                      error={slotsFailedQuery.error}
+                      onRetry={retrySlots}
+                      retrying={slotQueries.some(q => q.isFetching)}
+                      compact
+                    />
+                  ) : slotOptions.length > 0 ? (
                     <div className="grid grid-cols-3 gap-2">
                       {slotOptions.map(({ time, employee }, i) => {
                         const active = selectedTime === time;
@@ -1138,14 +1263,19 @@ export default function Booking() {
                     label: 'Date & Heure',
                     value: (
                       <>
-                        {selectedDate ? format(selectedDate, 'EEEE d MMMM', { locale: fr }) : ''} à{' '}
-                        <motion.span
-                          layoutId={`slot-${selectedTime}`}
-                          transition={springy}
-                          className="inline-block px-1.5 py-0.5 rounded-md bg-primary/15 text-primary font-bold tabular-nums"
-                        >
-                          {selectedTime}
-                        </motion.span>
+                        {selectedDate ? format(selectedDate, 'EEEE d MMMM', { locale: fr }) : ''}
+                        {selectedTime && (
+                          <>
+                            {' '}à{' '}
+                            <motion.span
+                              layoutId={`slot-${selectedTime}`}
+                              transition={springy}
+                              className="inline-block px-1.5 py-0.5 rounded-md bg-primary/15 text-primary font-bold tabular-nums"
+                            >
+                              {selectedTime}
+                            </motion.span>
+                          </>
+                        )}
                       </>
                     ),
                   },
@@ -1247,10 +1377,10 @@ export default function Booking() {
               Suivant <ChevronRight className="w-4 h-4" />
             </motion.button>
           ) : (
-            <span className="flex-1 pulse-cta rounded-2xl">
-              <motion.button whileTap={{ scale: 0.97 }} onClick={() => createAppointment.mutate()} disabled={createAppointment.isPending}
-                className="w-full flex items-center justify-center gap-2 h-12 rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/25 text-sm font-semibold hover:bg-primary/90 transition-all disabled:opacity-60">
-                {createAppointment.isPending ? 'Confirmation...' : 'Confirmer le rendez-vous'}
+            <span className={`flex-1 rounded-2xl ${canConfirm ? 'pulse-cta' : ''}`}>
+              <motion.button whileTap={canConfirm ? { scale: 0.97 } : undefined} onClick={() => createAppointment.mutate()} disabled={createAppointment.isPending || !canConfirm}
+                className="w-full flex items-center justify-center gap-2 h-12 rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/25 text-sm font-semibold hover:bg-primary/90 transition-all disabled:opacity-60 disabled:cursor-not-allowed">
+                {createAppointment.isPending ? 'Confirmation...' : reschedulePending ? 'Vérification du rendez-vous…' : 'Confirmer le rendez-vous'}
                 <Check className="w-4 h-4" />
               </motion.button>
             </span>

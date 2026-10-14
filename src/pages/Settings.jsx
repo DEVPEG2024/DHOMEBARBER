@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/lib/AuthContext';
 import { api, apiRequest, apiUrl } from '@/api/apiClient';
-import { isPushSupported, isSubscribed, subscribeToPush, unsubscribeFromPush } from '@/lib/pushNotifications';
+import { isPushSupported, isSubscribed, subscribeToPush, unsubscribeFromPush, getPushPermission, syncPushSubscription } from '@/lib/pushNotifications';
 import { motion } from 'framer-motion';
-import { User, Mail, Phone, Bell, Shield, ChevronRight, Cake, Trash2, Ban, Pencil } from 'lucide-react';
+import { User, Mail, Phone, Bell, Shield, ChevronRight, Cake, Trash2, Ban, Pencil, Settings as SettingsIcon } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
-import { isNative, openExternalUrl } from '@/lib/capacitor';
+import { isNative, platform, openExternalUrl } from '@/lib/capacitor';
 import FeedbackSection from '@/components/feedback/FeedbackSection';
 
 // Mêmes limites que l'inscription (routes/auth.js côté serveur)
@@ -107,6 +107,9 @@ export default function Settings() {
   const { user, refreshUser, logout } = useAuth();
   const [pushEnabled, setPushEnabled] = useState(false);
   const [pushLoading, setPushLoading] = useState(false);
+  // Autorisation du téléphone / du navigateur (getPushPermission) : 'denied' = refusée dans
+  // les réglages, l'interrupteur ne peut rien y faire, on explique comment la rouvrir
+  const [pushPermission, setPushPermission] = useState(null);
   const [birthDate, setBirthDate] = useState('');
   const [savingBirth, setSavingBirth] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -161,14 +164,47 @@ export default function Settings() {
     }
   };
 
-  // Check current subscription status on mount
+  // État de l'abonnement et de l'autorisation, relu au montage et au retour dans l'app
+  // (le client revient des réglages du téléphone après y avoir réactivé les notifications)
   useEffect(() => {
-    if (pushSupported) {
-      isSubscribed().then(setPushEnabled);
-    }
-  }, []);
+    if (!pushSupported) return undefined;
+    let cancelled = false;
+    let previous = null;
+    const refreshPush = async () => {
+      // L'autorisation d'abord : isSubscribed peut attendre le service worker sur le web
+      const permission = await getPushPermission().catch(() => 'unsupported');
+      if (cancelled) return;
+      setPushPermission(permission);
+      // Autorisation rendue dans les réglages : l'appareil est rattaché au compte sans autre geste
+      if (permission === 'granted' && previous && previous !== 'granted') syncPushSubscription();
+      previous = permission;
+      const subscribed = permission === 'denied' ? false : await isSubscribed().catch(() => false);
+      if (!cancelled) setPushEnabled(subscribed);
+    };
+    refreshPush();
+    const onVisible = () => { if (document.visibilityState === 'visible') refreshPush(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [pushSupported]);
+
+  const pushDenied = pushPermission === 'denied';
+  // iOS : le schéma app-settings: ouvre la page de l'app dans Réglages (comme NotificationPrompt)
+  const canOpenSettings = isNative && platform === 'ios';
+  const deniedHelp = isNative
+    ? (platform === 'android'
+      ? 'Pour les réactiver : Paramètres du téléphone → Applications → D’Home Barber → Notifications.'
+      : 'Pour les réactiver : Réglages → D’Home Barber → Notifications.')
+    : 'Pour les réactiver : autorisez les notifications pour dhomebarber.fr dans les réglages du navigateur (icône à gauche de l’adresse, ou Réglages → Notifications sur iPhone).';
+
+  const openPhoneSettings = () => {
+    window.location.href = 'app-settings:';
+  };
 
   const handleTogglePush = async () => {
+    if (pushDenied) return;
     setPushLoading(true);
     try {
       if (pushEnabled) {
@@ -178,10 +214,15 @@ export default function Settings() {
       } else {
         await subscribeToPush();
         setPushEnabled(true);
+        setPushPermission('granted');
         toast.success('Notifications activées');
       }
     } catch (err) {
-      toast.error(err.message || 'Erreur notifications');
+      // Refus dans la fenêtre du téléphone : l'explication s'affiche sous l'interrupteur
+      const permission = await getPushPermission().catch(() => null);
+      if (permission) setPushPermission(permission);
+      if (permission === 'denied') toast.error('Notifications refusées sur cet appareil');
+      else toast.error(err?.message || 'Erreur notifications');
     } finally {
       setPushLoading(false);
     }
@@ -295,7 +336,7 @@ export default function Settings() {
           {/* Notifications toggle */}
           <button
             onClick={handleTogglePush}
-            disabled={pushLoading || !pushSupported}
+            disabled={pushLoading || !pushSupported || pushDenied}
             className="flex items-center justify-between w-full px-4 py-3.5 hover:bg-white/5 transition-colors disabled:opacity-50"
           >
             <div className="flex items-center gap-3">
@@ -309,7 +350,9 @@ export default function Settings() {
                     ? (navigator.standalone !== undefined && !navigator.standalone
                       ? "Ajoutez l'app à l'écran d'accueil d'abord"
                       : 'Non supporté sur ce navigateur')
-                    : 'Rappels de rendez-vous'}
+                    : pushDenied
+                      ? (isNative ? 'Désactivées dans les réglages du téléphone' : 'Bloquées dans les réglages du navigateur')
+                      : 'Rappels de rendez-vous'}
                 </p>
               </div>
             </div>
@@ -317,6 +360,23 @@ export default function Settings() {
               <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${pushEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
             </div>
           </button>
+          {pushDenied && (
+            <div className="px-4 pb-4 -mt-1">
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                Vous ne recevrez ni le rappel de vos rendez-vous ni les créneaux last minute.
+                {canOpenSettings ? ' Réactivez-les en un geste dans les réglages.' : ` ${deniedHelp}`}
+              </p>
+              {canOpenSettings && (
+                <button
+                  type="button"
+                  onClick={openPhoneSettings}
+                  className="mt-2.5 inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-primary text-primary-foreground text-xs font-semibold"
+                >
+                  <SettingsIcon className="w-3.5 h-3.5" /> Ouvrir les réglages
+                </button>
+              )}
+            </div>
+          )}
         </motion.div>
 
         {/* Bugs et suggestions */}
@@ -410,7 +470,8 @@ export default function Settings() {
                       // logout() recharge la page : le toast serait perdu. La page de connexion
                       // affiche ce message au chargement.
                       try { sessionStorage.setItem('dhb-flash', 'Votre compte a bien été supprimé.'); } catch { /* stockage indisponible */ }
-                      logout();
+                      // Le serveur a déjà effacé les abonnements push du compte : pas de désinscription
+                      await logout({ detachPush: false });
                     } catch (err) {
                       toast.error(err?.message || 'Erreur lors de la suppression');
                     } finally {

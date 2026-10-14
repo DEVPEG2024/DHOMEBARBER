@@ -4,6 +4,7 @@ import { X, ImagePlus, Loader2, Send, Trash2, Mail } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/api/apiClient';
 import { hapticFeedback } from '@/lib/capacitor';
+import { isNetworkError } from '@/components/shared/LoadError';
 import {
   FEEDBACK_TYPES, FEEDBACK_AREAS, MESSAGE_MAX, collectContext, isBackendMissing,
 } from '@/lib/feedbackApi';
@@ -76,8 +77,14 @@ export default function FeedbackSheet({ type: initialType = 'bug', salonEmail, o
     } catch (err) {
       if (isBackendMissing(err) && salonEmail) {
         setFallback(true);
+      } else if (isNetworkError(err)) {
+        toast.error('Pas de connexion internet. Vérifie ton réseau puis réessaie.');
       } else {
-        toast.error(err?.message || "Erreur lors de l'envoi");
+        // Message du serveur (trop d'envois, message refusé…), sinon un texte lisible
+        const serverMessage = err?.data?.error || err?.data?.message;
+        toast.error(serverMessage || (err?.status >= 500
+          ? 'Le serveur ne répond pas. Réessaie dans un instant.'
+          : "Erreur lors de l'envoi"));
       }
     } finally {
       setSending(false);

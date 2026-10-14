@@ -229,7 +229,8 @@ function InfoRow({ icon: Icon, children, tone = '' }) {
 /**
  * Fiche d'un événement du salon en bottom sheet : galerie, titre, prix, infos (date, fin, lieu,
  * prix, tenue, jauge), description complète, ma réponse, « Ajouter au calendrier » si j'ai
- * accepté, et RSVP tant que l'événement est à venir : « Je viens » avec sélecteur de places
+ * accepté, et RSVP tant que l'événement n'est pas terminé (le serveur accepte une réponse
+ * sur tout événement publié, même commencé) : « Je viens » avec sélecteur de places
  * (1..MAX_GUESTS, borné par le restant) / « Je ne peux pas ». Fermeture par la croix (ou Échap) :
  * jamais au tap sur le fond.
  */
@@ -420,7 +421,7 @@ export default function SalonEventSheet({ event, onClose, onRsvp, pending = fals
                 <span className={`w-2 h-2 rounded-full shrink-0 ${style.dot}`} />
                 {phase === 'past'
                   ? "Tu avais répondu que tu ne pouvais pas venir."
-                  : "Tu as répondu que tu ne pouvais pas venir. Tu peux changer d'avis tant que l'événement n'a pas commencé."}
+                  : "Tu as répondu que tu ne pouvais pas venir. Tu peux changer d'avis tant que l'événement n'est pas terminé."}
               </div>
             ) : phase === 'past' ? (
               <div className="rounded-2xl bg-card border border-border p-3 flex items-center gap-3 text-xs text-muted-foreground">

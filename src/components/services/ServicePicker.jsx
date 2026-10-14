@@ -9,6 +9,8 @@ import CategoryChips from './CategoryChips';
 import FormulasBlock from './FormulasBlock';
 import FavoriteServicesBlock from './FavoriteServicesBlock';
 import { useFavorites } from '@/lib/favorites';
+import { useAuth } from '@/lib/AuthContext';
+import LoadError from '@/components/shared/LoadError';
 import {
   EASE,
   OTHER_GROUP_ID,
@@ -50,9 +52,16 @@ const cheapest = (list) => [...list].sort((a, b) => (Number(a.price) || 0) - (Nu
  * @param {(service: object) => void} props.onToggle
  * @param {(remove: object[], add: object[]) => void} [props.onSwap]  Remplacement (formule) ; sans lui, on bascule une à une
  * @param {boolean} [props.loading]
+ * @param {Error|null} [props.error]  Échec du chargement des prestations (sans données) : écran d'erreur
+ * @param {() => void} [props.onRetry]  « Réessayer » de l'écran d'erreur
+ * @param {boolean} [props.retrying]
  */
-export default function ServicePicker({ services = [], selectedIds, onToggle, onSwap, loading = false }) {
+export default function ServicePicker({ services = [], selectedIds, onToggle, onSwap, loading = false, error = null, onRetry, retrying = false }) {
   const favorites = useFavorites();
+  const { user } = useAuth();
+  // Seul le staff reçoit les `services` des RDV terminés : pour un client (ou un visiteur), la
+  // projection « créneaux » ne les contient pas, la requête ne servirait à rien.
+  const isStaff = user?.role === 'admin' || user?.role === 'barber';
   const toggleFavorite = useCallback((service) => favorites.toggle('services', service.id, service.name), [favorites]);
   const reduceMotion = useReducedMotion();
   const [query, setQuery] = useState('');
@@ -74,10 +83,11 @@ export default function ServicePicker({ services = [], selectedIds, onToggle, on
     },
   });
 
-  // Prestations les plus réservées (voir Services.jsx : repli silencieux sur sort_order)
+  // Prestations les plus réservées (voir Services.jsx : repli silencieux sur sort_order).
+  // Staff seulement ; client → directement l'ordre `sort_order`.
   const { data: completedApts, isPending: popularPending } = useQuery({
     queryKey: ['popularServices'],
-    enabled: services.length > 0,
+    enabled: services.length > 0 && isStaff,
     retry: false,
     staleTime: 5 * 60 * 1000,
     queryFn: async () => {
@@ -91,10 +101,12 @@ export default function ServicePicker({ services = [], selectedIds, onToggle, on
   });
 
   const popularIds = useMemo(() => {
-    if (popularPending || services.length === 0) return new Set();
+    if (services.length === 0) return new Set();
+    if (!isStaff) return new Set(fallbackPopularIds(services));
+    if (popularPending) return new Set();
     const computed = computePopularIds(completedApts, services);
     return new Set(computed || fallbackPopularIds(services));
-  }, [completedApts, popularPending, services]);
+  }, [completedApts, popularPending, services, isStaff]);
 
   const newIds = useMemo(
     () => new Set(services.filter(s => isNewService(s, nowMs)).map(s => String(s.id))),
@@ -233,6 +245,9 @@ export default function ServicePicker({ services = [], selectedIds, onToggle, on
     return () => { window.removeEventListener('scroll', onScroll); if (raf) cancelAnimationFrame(raf); };
   }, [groups, showChips]);
 
+  // Prestations impossibles à charger : pas d'état vide (« Aucune prestation »), un écran d'erreur
+  const loadFailed = !!error && !loading && services.length === 0;
+
   const SugIcon = ({ icon }) => {
     if (icon === 'flame') return <Flame className="w-3.5 h-3.5 text-amber-400" aria-hidden="true" />;
     if (icon === 'gift') return <Gift className="w-3.5 h-3.5" aria-hidden="true" />;
@@ -348,7 +363,9 @@ export default function ServicePicker({ services = [], selectedIds, onToggle, on
         </p>
       )}
 
-      {loading ? (
+      {loadFailed ? (
+        <LoadError what="les prestations" error={error} onRetry={onRetry} retrying={retrying} className="mt-4" />
+      ) : loading ? (
         <div className="space-y-3 mt-4" aria-busy="true" aria-label="Chargement des prestations">
           {[0, 1, 2, 3].map(i => (
             <div key={i} className="h-[92px] rounded-2xl bg-secondary border border-border animate-pulse" />
@@ -393,7 +410,7 @@ export default function ServicePicker({ services = [], selectedIds, onToggle, on
         ))
       )}
 
-      {!loading && groups.length === 0 && (
+      {!loading && !loadFailed && groups.length === 0 && (
         <div className="text-center py-12">
           <div className="w-16 h-16 rounded-2xl bg-card border border-border flex items-center justify-center mx-auto mb-4">
             {query ? <SearchX className="w-6 h-6 text-muted-foreground/40" aria-hidden="true" /> : <Scissors className="w-6 h-6 text-muted-foreground/30" aria-hidden="true" />}

@@ -1,72 +1,69 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Bell, Trash2 } from 'lucide-react';
+import { Bell, Trash2, ChevronRight } from 'lucide-react';
+import { useAuth } from '@/lib/AuthContext';
+import { isNative } from '@/lib/capacitor';
+import {
+  NOTIFICATIONS_EVENT, readNotifications, markAllNotificationsRead, removeNotification,
+  clearNotifications, syncServiceWorkerNotifications,
+} from '@/lib/pushNotifications';
 
-const STORAGE_KEY = 'dhome_notifications';
+const clearBadge = () => {
+  try { navigator.clearAppBadge?.()?.catch?.(() => {}); } catch { /* pastille non gérée */ }
+};
 
-// Helper to get/set notifications in localStorage
-function getNotifications() {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-  } catch {
-    return [];
-  }
-}
-
-function saveNotifications(notifs) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(notifs));
-}
-
-export function addNotification({ title, body }) {
-  const notifs = getNotifications();
-  notifs.unshift({
-    id: Date.now(),
-    title,
-    body,
-    date: new Date().toISOString(),
-    read: false,
-  });
-  // Keep max 50
-  saveNotifications(notifs.slice(0, 50));
-}
-
-export function getUnreadCount() {
-  return getNotifications().filter(n => !n.read).length;
-}
-
+// Notifications rangées sur l'appareil, par compte (voir pushNotifications.js) : celles reçues
+// app ouverte, celles touchées depuis l'écran verrouillé et, sur le web, celles que le service
+// worker a gardées app fermée (fusionnées à l'ouverture de la page).
 export default function ClientNotifications() {
-  const [notifications, setNotifications] = useState([]);
+  const { user } = useAuth();
+  const userId = user?.id;
+  const [notifications, setNotifications] = useState(() => (userId ? readNotifications(userId) : []));
+
+  // Relit la liste et la marque comme lue : la page est sous les yeux du client
+  const refresh = useCallback(() => {
+    if (!userId) return;
+    markAllNotificationsRead(userId);
+    setNotifications(readNotifications(userId));
+  }, [userId]);
 
   useEffect(() => {
-    const notifs = getNotifications();
-    // Mark all as read
-    const updated = notifs.map(n => ({ ...n, read: true }));
-    saveNotifications(updated);
-    setNotifications(updated);
-    // Clear badge
-    if (navigator.clearAppBadge) navigator.clearAppBadge();
-  }, []);
+    if (!userId) return undefined;
+    let cancelled = false;
+    refresh();
+    clearBadge();
+    // Web : notifications reçues app fermée, gardées par le service worker
+    syncServiceWorkerNotifications(userId)
+      .catch(() => 0)
+      .then(() => { if (!cancelled) refresh(); });
+    // Notification reçue pendant que la page est ouverte
+    window.addEventListener(NOTIFICATIONS_EVENT, refresh);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(NOTIFICATIONS_EVENT, refresh);
+    };
+  }, [userId, refresh]);
 
   const handleClear = () => {
-    saveNotifications([]);
+    clearNotifications(userId);
     setNotifications([]);
-    if (navigator.clearAppBadge) navigator.clearAppBadge();
+    clearBadge();
   };
 
   const handleDelete = (id) => {
-    const updated = notifications.filter(n => n.id !== id);
-    saveNotifications(updated);
-    setNotifications(updated);
+    removeNotification(id, userId);
+    setNotifications(readNotifications(userId));
   };
 
   const formatDate = (iso) => {
     const d = new Date(iso);
-    const now = new Date();
-    const diff = now - d;
+    if (Number.isNaN(d.getTime())) return '';
+    const diff = Date.now() - d.getTime();
     if (diff < 60000) return "À l'instant";
     if (diff < 3600000) return `Il y a ${Math.floor(diff / 60000)} min`;
     if (diff < 86400000) return `Il y a ${Math.floor(diff / 3600000)}h`;
-    return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' });
   };
 
   return (
@@ -98,31 +95,48 @@ export default function ClientNotifications() {
               <Bell className="w-7 h-7 text-muted-foreground/25" />
             </div>
             <p className="text-sm font-semibold text-foreground mb-1">Aucune notification</p>
-            <p className="text-xs text-muted-foreground">Vous serez notifié des rappels et promotions</p>
+            <p className="text-xs text-muted-foreground max-w-xs mx-auto leading-relaxed">
+              Rappels de rendez-vous, créneaux last minute, drops et événements : les notifications
+              reçues sur cet appareil s’affichent ici.
+              {isNative ? ' Une notification effacée de l’écran verrouillé sans être touchée n’y figure pas.' : ''}
+            </p>
+            <Link to="/settings" className="inline-flex items-center gap-1 mt-4 text-xs font-semibold text-primary">
+              Gérer les notifications <ChevronRight className="w-3.5 h-3.5" />
+            </Link>
           </motion.div>
         ) : (
           <div className="space-y-2.5">
-            {notifications.map((notif, i) => (
-              <motion.div
-                key={notif.id}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.03 }}
-                className="rounded-2xl border border-white/8 bg-white/4 backdrop-blur-xl p-4"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-foreground">{notif.title}</p>
-                    <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{notif.body}</p>
-                    <p className="text-[11px] text-muted-foreground/60 mt-2">{formatDate(notif.date)}</p>
+            {notifications.map((notif, i) => {
+              const target = notif.url && notif.url !== '/notifications' ? notif.url : null;
+              return (
+                <motion.div
+                  key={notif.id}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: Math.min(i, 10) * 0.03 }}
+                  className="rounded-2xl border border-white/8 bg-white/4 backdrop-blur-xl p-4"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      {notif.title && <p className="text-sm font-semibold text-foreground break-words">{notif.title}</p>}
+                      {notif.body && <p className="text-xs text-muted-foreground mt-1 leading-relaxed break-words">{notif.body}</p>}
+                      <div className="flex items-center gap-3 mt-2">
+                        <p className="text-[11px] text-muted-foreground/60">{formatDate(notif.date)}</p>
+                        {target && (
+                          <Link to={target} className="inline-flex items-center gap-0.5 text-[11px] font-semibold text-primary">
+                            Voir <ChevronRight className="w-3 h-3" />
+                          </Link>
+                        )}
+                      </div>
+                    </div>
+                    <button onClick={() => handleDelete(notif.id)} aria-label="Supprimer la notification"
+                      className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground/40 hover:text-red-400 hover:bg-red-500/10 transition-all shrink-0">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
                   </div>
-                  <button onClick={() => handleDelete(notif.id)}
-                    className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground/40 hover:text-red-400 hover:bg-red-500/10 transition-all shrink-0">
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </motion.div>
-            ))}
+                </motion.div>
+              );
+            })}
           </div>
         )}
       </div>

@@ -10,6 +10,8 @@ import SelectionBar from '@/components/services/SelectionBar';
 import FormulasBlock from '@/components/services/FormulasBlock';
 import FavoriteServicesBlock from '@/components/services/FavoriteServicesBlock';
 import { useFavorites } from '@/lib/favorites';
+import { useAuth } from '@/lib/AuthContext';
+import LoadError from '@/components/shared/LoadError';
 import {
   EASE,
   OTHER_GROUP_ID,
@@ -43,6 +45,9 @@ export default function Services() {
   const barRef = useRef(null);
   const lockUntilRef = useRef(0);
   const nowMs = useMemo(() => Date.now(), []);
+  const { user } = useAuth();
+  // Seul le staff lit les prestations des RDV terminés : pour un client, requête inutile
+  const isStaff = user?.role === 'admin' || user?.role === 'barber';
 
   const { data: categories = [] } = useQuery({
     queryKey: ['serviceCategories'],
@@ -56,7 +61,14 @@ export default function Services() {
     },
   });
 
-  const { data: services = [], isPending: servicesPending } = useQuery({
+  const {
+    data: services = [],
+    isPending: servicesPending,
+    isError: servicesFailed,
+    error: servicesError,
+    refetch: refetchServices,
+    isFetching: servicesFetching,
+  } = useQuery({
     queryKey: ['services'],
     staleTime: 5 * 60 * 1000, // catalogue : change rarement
     queryFn: () => api.entities.Service.filter({ is_active: true }, 'sort_order', 100),
@@ -67,7 +79,7 @@ export default function Services() {
   // `sort_order`. Toute erreur (403, réseau) donne une liste vide : la page ne bloque jamais.
   const { data: completedApts, isPending: popularPending } = useQuery({
     queryKey: ['popularServices'],
-    enabled: services.length > 0,
+    enabled: services.length > 0 && isStaff,
     retry: false,
     staleTime: 5 * 60 * 1000,
     queryFn: async () => {
@@ -81,10 +93,12 @@ export default function Services() {
   });
 
   const popularIds = useMemo(() => {
-    if (popularPending || services.length === 0) return new Set();
+    if (services.length === 0) return new Set();
+    if (!isStaff) return new Set(fallbackPopularIds(services));
+    if (popularPending) return new Set();
     const computed = computePopularIds(completedApts, services);
     return new Set(computed || fallbackPopularIds(services));
-  }, [completedApts, popularPending, services]);
+  }, [completedApts, popularPending, services, isStaff]);
 
   const newIds = useMemo(
     () => new Set(services.filter(s => isNewService(s, nowMs)).map(s => String(s.id))),
@@ -308,7 +322,12 @@ export default function Services() {
           ))
         )}
 
-        {!servicesPending && groups.length === 0 && (
+        {/* Catalogue en échec : ne pas annoncer « Aucune prestation » */}
+        {servicesFailed && services.length === 0 && (
+          <LoadError what="les prestations" error={servicesError} onRetry={refetchServices} retrying={servicesFetching} className="mt-6" />
+        )}
+
+        {!servicesPending && !(servicesFailed && services.length === 0) && groups.length === 0 && (
           <div className="text-center py-16">
             <div className="w-16 h-16 rounded-2xl bg-card border border-border flex items-center justify-center mx-auto mb-4">
               {query ? <SearchX className="w-6 h-6 text-muted-foreground/40" aria-hidden="true" /> : <Scissors className="w-6 h-6 text-muted-foreground/30" aria-hidden="true" />}

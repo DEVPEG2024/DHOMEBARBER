@@ -8,7 +8,7 @@
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { api } from '@/api/apiClient';
-import { analyzeDay } from '@/lib/slots';
+import { analyzeDay, parisDay } from '@/lib/slots';
 
 /** Jours parcourus pour trouver des créneaux, créneaux proposés au total et par jour. */
 export const RESCHEDULE_DAYS = 21;
@@ -33,29 +33,29 @@ export function appointmentDuration(apt) {
   return sum > 0 ? sum : 30;
 }
 
-/** « aaaa-mm-jj » du jour à Paris, décalé de `offset` jours. */
-function parisDay(offset) {
-  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit' })
-    .format(new Date());
-  const [y, m, d] = today.split('-').map(Number);
-  const date = new Date(y, m - 1, d + offset, 12); // midi local : pas de saut de jour à l'heure d'été
-  return { date, key: format(date, 'yyyy-MM-dd') };
-}
+/** Jours chargés un par un quand le filtre par liste de dates est refusé. */
+const FALLBACK_DAYS = 10;
 
-/** RDV confirmés et pauses du barber sur ces jours (projection « créneaux » côté client). */
+/**
+ * RDV confirmés et pauses du barber sur ces jours (projection « créneaux » côté client).
+ * `keys` = jours effectivement chargés : seuls ceux-là peuvent être proposés (un jour non chargé
+ * paraîtrait entièrement libre).
+ * @returns {Promise<{ rows: object[], keys: string[] }>}
+ */
 async function fetchBusy(employeeId, keys) {
   const load = (status, dates) => api.entities.Appointment.filter({ employee_id: employeeId, date: dates, status }, 'start_time', 1000);
   try {
     const [confirmed, breaks] = await Promise.all([load('confirmed', keys), load('break', keys)]);
-    return [...(confirmed || []), ...(breaks || [])];
+    return { rows: [...(confirmed || []), ...(breaks || [])], keys };
   } catch {
     // Filtre par liste de dates refusé : un jour à la fois, sur les 10 premiers jours seulement
     const rows = [];
-    for (const key of keys.slice(0, 10)) {
+    const loaded = keys.slice(0, FALLBACK_DAYS);
+    for (const key of loaded) {
       const [c, b] = await Promise.all([load('confirmed', key), load('break', key)]);
       rows.push(...(c || []), ...(b || []));
     }
-    return rows;
+    return { rows, keys: loaded };
   }
 }
 
@@ -69,8 +69,11 @@ export async function findRescheduleSlots({ appointment, employee, timeOffs = []
   if (!appointment || !employee) return [];
   const duration = appointmentDuration(appointment);
   const target = toMinutes(appointment.start_time);
-  const calendar = Array.from({ length: days }, (_, i) => parisDay(i));
-  const busy = await fetchBusy(employee.id, calendar.map(d => d.key));
+  const wanted = Array.from({ length: days }, (_, i) => parisDay(i));
+  const { rows: busy, keys: loadedKeys } = await fetchBusy(employee.id, wanted.map(d => d.key));
+  // Repli jour par jour : on ne parcourt que les jours dont les RDV ont été chargés
+  const loaded = new Set(loadedKeys);
+  const calendar = wanted.filter(d => loaded.has(d.key));
   const byDate = new Map();
   for (const row of busy) {
     const key = String(row.date || '').slice(0, 10);

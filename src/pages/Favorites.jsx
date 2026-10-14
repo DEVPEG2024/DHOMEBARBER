@@ -7,34 +7,50 @@ import { api } from '@/api/apiClient';
 import { useFavorites } from '@/lib/favorites';
 import FavoriteButton from '@/components/shared/FavoriteButton';
 import { formatDuration, formatPrice } from '@/components/services/serviceUtils';
+import LoadError from '@/components/shared/LoadError';
 
 /**
  * « Mes favoris » (/favorites) : les prestations et produits marqués d'un cœur. Une prestation
- * se réserve directement (réservation pré-remplie), un produit s'ouvre dans la boutique filtrée
- * sur les favoris. Mêmes requêtes et mêmes caches que les pages Prestations et Boutique.
+ * se réserve directement (réservation pré-remplie), un produit ouvre sa fiche dans la boutique
+ * (`/shop?product=<id>`). Mêmes requêtes et mêmes caches que les pages Prestations et Boutique.
  */
 export default function Favorites() {
   const reduceMotion = useReducedMotion();
   const favorites = useFavorites();
 
-  const { data: services = [], isPending: servicesPending } = useQuery({
+  const servicesQuery = useQuery({
     queryKey: ['services'],
     staleTime: 5 * 60 * 1000,
     queryFn: () => api.entities.Service.filter({ is_active: true }, 'sort_order', 100),
   });
-  const { data: products = [], isPending: productsPending } = useQuery({
+  const productsQuery = useQuery({
     queryKey: ['products'],
     staleTime: 5 * 60 * 1000,
     queryFn: () => api.entities.Product.filter({ is_active: true }, 'name', 100),
   });
+  const { data: services = [] } = servicesQuery;
+  const { data: products = [] } = productsQuery;
 
   const byService = new Map(services.map(s => [String(s.id), s]));
   const byProduct = new Map(products.map(p => [String(p.id), p]));
   // Ordre d'ajout ; une prestation ou un produit retiré du catalogue n'apparaît plus
   const favServices = [...favorites.services].map(id => byService.get(id)).filter(Boolean);
   const favProducts = [...favorites.products].map(id => byProduct.get(id)).filter(Boolean);
-  const loading = servicesPending || productsPending;
-  const empty = !loading && favServices.length === 0 && favProducts.length === 0;
+  // Seuls comptent les catalogues dont on a des favoris : sans aucun favori, rien à attendre du
+  // réseau et l'état vide s'affiche tout de suite
+  const neededQueries = [
+    favorites.services.size > 0 && servicesQuery,
+    favorites.products.size > 0 && productsQuery,
+  ].filter(Boolean);
+  const loading = neededQueries.some(q => q.isPending);
+  // Un catalogue n'a pas pu se charger (et rien en cache) : erreur plutôt qu'un faux « Aucun favori »
+  const failedQuery = neededQueries.find(q => q.isError && !q.data);
+  const failed = !loading && !!failedQuery;
+  const retry = () => {
+    if (servicesQuery.isError) servicesQuery.refetch();
+    if (productsQuery.isError) productsQuery.refetch();
+  };
+  const empty = !loading && !failed && favServices.length === 0 && favProducts.length === 0;
   const allServicesHref = `/booking?services=${favServices.map(s => encodeURIComponent(String(s.id))).join(',')}`;
 
   return (
@@ -50,6 +66,15 @@ export default function Favorites() {
           <div className="space-y-3" aria-busy="true">
             {[0, 1, 2].map(i => <div key={i} className="h-20 rounded-2xl bg-secondary animate-pulse" />)}
           </div>
+        )}
+
+        {failed && (
+          <LoadError
+            what="vos favoris"
+            error={failedQuery.error}
+            onRetry={retry}
+            retrying={servicesQuery.isFetching || productsQuery.isFetching}
+          />
         )}
 
         {empty && (
@@ -68,7 +93,7 @@ export default function Favorites() {
           </div>
         )}
 
-        {!loading && favServices.length > 0 && (
+        {!loading && !failed && favServices.length > 0 && (
           <section className="mb-8" aria-labelledby="fav-s">
             <div className="flex items-center justify-between mb-3">
               <h2 id="fav-s" className="flex items-center gap-2 font-display text-lg font-bold">
@@ -100,7 +125,7 @@ export default function Favorites() {
           </section>
         )}
 
-        {!loading && favProducts.length > 0 && (
+        {!loading && !failed && favProducts.length > 0 && (
           <section aria-labelledby="fav-p">
             <div className="flex items-center justify-between mb-3">
               <h2 id="fav-p" className="flex items-center gap-2 font-display text-lg font-bold">
@@ -124,7 +149,7 @@ export default function Favorites() {
                     </p>
                   </div>
                   <FavoriteButton active onToggle={() => favorites.toggle('products', p.id)} />
-                  <Link to="/shop?filter=favorites" aria-label={`Voir ${p.name} dans la boutique`} className="w-10 h-10 inline-flex items-center justify-center rounded-xl bg-secondary shrink-0">
+                  <Link to={`/shop?product=${encodeURIComponent(String(p.id))}`} aria-label={`Voir ${p.name} dans la boutique`} className="w-10 h-10 inline-flex items-center justify-center rounded-xl bg-secondary shrink-0">
                     <ChevronRight className="w-4 h-4" />
                   </Link>
                 </div>

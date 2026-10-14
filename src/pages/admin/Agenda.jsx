@@ -7,6 +7,7 @@ import { exportToCSV } from '@/utils/exportCSV';
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/AuthContext';
 import { RefreshCw } from 'lucide-react';
+import { LAST_MINUTE_EXPIRED_REASON } from '@/lib/cancellation';
 
 import AgendaToolbar from '@/components/agenda/AgendaToolbar';
 import DayView from '@/components/agenda/DayView';
@@ -19,7 +20,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import {
   BARBER_COLORS, timeToMinutes, toDateStr, parseDateParam, visibleRange, datesBetween,
   fetchAppointmentsForDates, agendaQueryKey, invalidateAppointmentQueries,
-  isBreak, isLastMinuteSlot, slotIssues, aptDuration,
+  isBreak, isLastMinuteSlot, slotIssues, aptDuration, isUnclaimedLastMinute,
 } from '@/components/agenda/agendaUtils';
 
 const VIEWS = ['day', 'week', 'month'];
@@ -365,10 +366,14 @@ export default function Agenda() {
 
     if (expired.length === 0) return;
 
-    Promise.all(expired.map((a) => api.entities.Appointment.update(a.id, {
+    // Motif « système » : le tableau de bord ne les compte ni en no-show ni en annulation
+    Promise.allSettled(expired.map((a) => api.entities.Appointment.update(a.id, {
       status: 'no_show',
-      cancellation_reason: 'Personne n\'a pris le créneau last minute',
-    }))).then(() => queryClient.invalidateQueries({ queryKey: ['agendaAppointments'] }));
+      cancellation_reason: LAST_MINUTE_EXPIRED_REASON,
+    }))).then((results) => {
+      // Rien d'écrit (hors ligne, refus) : pas de rechargement, sinon la boucle recommencerait aussitôt
+      if (results.some((r) => r.status === 'fulfilled')) invalidateAppointmentQueries(queryClient);
+    });
   }, [appointments, queryClient]);
 
   // ─── Navigation au clavier (← / →) et au doigt (glisser à gauche / à droite) ───
@@ -408,7 +413,14 @@ export default function Agenda() {
     }
   };
 
-  const realAppointmentCount = visible.filter((a) => a.status !== 'break' && a.status !== 'last_minute' && a.status !== 'cancelled').length;
+  const realAppointmentCount = visible.filter((a) =>
+    a.status !== 'break' && a.status !== 'last_minute' && a.status !== 'cancelled' && !isUnclaimedLastMinute(a)).length;
+
+  // Fiche ouverte tenue à jour par les rechargements (client assigné à un last minute, fiche restée ouverte)
+  const selectedFresh = useMemo(
+    () => (selected ? appointments.find((a) => String(a.id) === String(selected.id)) || selected : null),
+    [selected, appointments],
+  );
 
   return (
     <div className="flex flex-col h-full">
@@ -525,7 +537,7 @@ export default function Agenda() {
       </div>
 
       <AppointmentDetailModal
-        appointment={selected}
+        appointment={selectedFresh}
         employees={employees}
         onClose={() => setSelected(null)}
         onChanged={handleChanged}

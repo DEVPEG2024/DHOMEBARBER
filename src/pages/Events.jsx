@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import SalonEventsSection from '@/components/salon-events/SalonEventsSection';
+import LoadError from '@/components/shared/LoadError';
 
 // Le salon reçoit exclusivement une clientèle masculine : pas d'EVJF dans les formules.
 const EVENT_TYPES = [
@@ -22,6 +23,14 @@ const TIME_SLOTS = [
   { id: 'afternoon', label: 'Après-midi (14h-20h)' },
   { id: 'full_day', label: 'Journée complète (9h-20h)' },
 ];
+
+/** Message lisible d'une erreur d'API : celui du serveur s'il existe, sinon le repli. */
+const serverMessage = (err, fallback) => {
+  const message = err?.data?.error || err?.message;
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return 'Pas de connexion internet, réessayez.';
+  if (/failed to fetch|load failed|networkerror/i.test(String(message || ''))) return 'Pas de connexion internet, réessayez.';
+  return message && !/^HTTP \d+$/.test(message) ? message : fallback;
+};
 
 const STATUS_CONFIG = {
   pending: { label: 'En attente', color: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' },
@@ -49,11 +58,12 @@ export default function Events() {
     queryFn: () => api.entities.Employee.filter({ is_active: true }, 'sort_order', 50),
   });
 
-  const { data: myEvents = [] } = useQuery({
+  const myEventsQuery = useQuery({
     queryKey: ['myEvents', user?.email],
     queryFn: () => api.entities.Event.filter({ client_email: user?.email }, '-created_at', 20),
     enabled: !!user?.email,
   });
+  const myEvents = myEventsQuery.data || [];
 
   // Fetch all confirmed events to block taken slots
   const { data: confirmedEvents = [] } = useQuery({
@@ -85,6 +95,28 @@ export default function Events() {
     }
     return blocked;
   }, [form.date, confirmedEvents]);
+
+  // Réponse au devis : un seul envoi à la fois (boutons désactivés), refus confirmé par un second tap
+  const [confirmDeclineId, setConfirmDeclineId] = useState(null);
+  const answerQuote = useMutation({
+    mutationFn: ({ id, status }) => api.entities.Event.update(id, { status }),
+    onSuccess: (_data, { status }) => {
+      setConfirmDeclineId(null);
+      queryClient.invalidateQueries({ queryKey: ['myEvents'] });
+      if (status === 'accepted') {
+        queryClient.invalidateQueries({ queryKey: ['confirmedEvents'] });
+        toast.success('Devis accepté ! Rendez-vous au salon pour le paiement.');
+      } else {
+        toast.success('Devis refusé');
+      }
+    },
+    onError: (err) => {
+      setConfirmDeclineId(null);
+      toast.error(serverMessage(err, 'La réponse au devis n\'a pas pu être envoyée, réessayez.'));
+      // Le devis a pu changer entre-temps (modifié ou retiré par le salon) : on recharge
+      if (err?.status) queryClient.invalidateQueries({ queryKey: ['myEvents'] });
+    },
+  });
 
   const createEvent = useMutation({
     mutationFn: (data) => api.entities.Event.create(data),
@@ -330,7 +362,24 @@ export default function Events() {
         </motion.form>
       )}
 
-      {/* My events */}
+      {/* My events : squelette au premier chargement, erreur à la place de la liste */}
+      {myEventsQuery.isLoading && (
+        <div className="space-y-3" aria-busy="true" aria-label="Chargement de vos demandes">
+          <div className="h-4 w-32 rounded bg-secondary animate-pulse" />
+          {[0, 1].map(i => (
+            <div key={i} className="h-24 rounded-xl bg-card border border-border animate-pulse" />
+          ))}
+        </div>
+      )}
+      {myEventsQuery.isError && !myEventsQuery.data && (
+        <LoadError
+          what="vos demandes"
+          error={myEventsQuery.error}
+          onRetry={myEventsQuery.refetch}
+          retrying={myEventsQuery.isFetching}
+          compact
+        />
+      )}
       {myEvents.length > 0 && (
         <div>
           <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
@@ -398,40 +447,63 @@ export default function Events() {
                     </div>
                   )}
 
-                  {/* Boutons accepter/refuser le devis */}
-                  {isQuoted && (
-                    <div className="grid grid-cols-2 gap-2 mt-3">
-                      <motion.button
-                        whileTap={{ scale: 0.97 }}
-                        onClick={async () => {
-                          try {
-                            await api.entities.Event.update(event.id, { status: 'accepted' });
-                            queryClient.invalidateQueries({ queryKey: ['myEvents'] });
-                            queryClient.invalidateQueries({ queryKey: ['confirmedEvents'] });
-                            toast.success('Devis accepté ! Rendez-vous au salon pour le paiement.');
-                          } catch { toast.error('Erreur'); }
-                        }}
-                        className="flex items-center justify-center gap-2 py-3 rounded-xl bg-green-600 text-white text-sm font-semibold hover:bg-green-700 transition-all"
-                      >
-                        <ThumbsUp className="w-4 h-4" />
-                        Accepter
-                      </motion.button>
-                      <motion.button
-                        whileTap={{ scale: 0.97 }}
-                        onClick={async () => {
-                          try {
-                            await api.entities.Event.update(event.id, { status: 'declined' });
-                            queryClient.invalidateQueries({ queryKey: ['myEvents'] });
-                            toast.success('Devis refusé');
-                          } catch { toast.error('Erreur'); }
-                        }}
-                        className="flex items-center justify-center gap-2 py-3 rounded-xl bg-white/5 border border-white/10 text-sm font-medium text-muted-foreground hover:bg-white/10 transition-all"
-                      >
-                        <ThumbsDown className="w-4 h-4" />
-                        Refuser
-                      </motion.button>
-                    </div>
-                  )}
+                  {/* Boutons accepter/refuser le devis (refus en deux taps) */}
+                  {isQuoted && (() => {
+                    const sending = answerQuote.isPending && String(answerQuote.variables?.id) === String(event.id);
+                    const confirming = String(confirmDeclineId) === String(event.id);
+                    if (confirming) {
+                      return (
+                        <div className="mt-3 p-3 rounded-xl bg-red-500/5 border border-red-500/20">
+                          <p className="text-xs text-foreground text-center mb-2">Refuser ce devis ? Le salon sera prévenu.</p>
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeclineId(null)}
+                              disabled={answerQuote.isPending}
+                              className="py-3 rounded-xl bg-white/5 border border-white/10 text-sm font-medium text-muted-foreground hover:bg-white/10 transition-all disabled:opacity-50"
+                            >
+                              Non, garder
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => answerQuote.mutate({ id: event.id, status: 'declined' })}
+                              disabled={answerQuote.isPending}
+                              className="flex items-center justify-center gap-2 py-3 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 transition-all disabled:opacity-50"
+                            >
+                              {sending
+                                ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                : <><ThumbsDown className="w-4 h-4" />Oui, refuser</>}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="grid grid-cols-2 gap-2 mt-3">
+                        <motion.button
+                          type="button"
+                          whileTap={answerQuote.isPending ? undefined : { scale: 0.97 }}
+                          onClick={() => answerQuote.mutate({ id: event.id, status: 'accepted' })}
+                          disabled={answerQuote.isPending}
+                          className="flex items-center justify-center gap-2 py-3 rounded-xl bg-green-600 text-white text-sm font-semibold hover:bg-green-700 transition-all disabled:opacity-50"
+                        >
+                          {sending
+                            ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                            : <><ThumbsUp className="w-4 h-4" />Accepter</>}
+                        </motion.button>
+                        <motion.button
+                          type="button"
+                          whileTap={answerQuote.isPending ? undefined : { scale: 0.97 }}
+                          onClick={() => setConfirmDeclineId(event.id)}
+                          disabled={answerQuote.isPending}
+                          className="flex items-center justify-center gap-2 py-3 rounded-xl bg-white/5 border border-white/10 text-sm font-medium text-muted-foreground hover:bg-white/10 transition-all disabled:opacity-50"
+                        >
+                          <ThumbsDown className="w-4 h-4" />
+                          Refuser
+                        </motion.button>
+                      </div>
+                    );
+                  })()}
 
                   {/* Devis accepté - en attente paiement */}
                   {event.status === 'accepted' && (

@@ -1,8 +1,15 @@
 import React, { useMemo } from 'react';
 import { api } from '@/api/apiClient';
+import { isUnclaimedLastMinute } from '@/components/agenda/agendaUtils';
 import { useQuery } from '@tanstack/react-query';
+import LoadError from '@/components/shared/LoadError';
 import { TrendingUp, Calendar, Users, AlertTriangle, Target } from 'lucide-react';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+
+// Statistiques sur tout l'historique : les N rendez-vous les plus récents. Clé propre (plus de partage
+// de ['allAppointments'] avec Clients, qui en chargeait moins) ; le préfixe reste couvert par
+// invalidateAppointmentQueries.
+const APPOINTMENTS_LIMIT = 2000;
 
 const COLORS = ['hsl(38 65% 50%)', 'hsl(30 40% 35%)', 'hsl(25 30% 25%)', 'hsl(35 50% 60%)', 'hsl(20 45% 45%)'];
 
@@ -24,10 +31,12 @@ function StatBox({ title, value, sub, icon: Icon }) {
 }
 
 export default function Stats() {
-  const { data: appointments = [] } = useQuery({
-    queryKey: ['allAppointments'],
-    queryFn: () => api.entities.Appointment.list('-date', 2000),
+  const appointmentsQuery = useQuery({
+    queryKey: ['allAppointments', 'stats', APPOINTMENTS_LIMIT],
+    queryFn: () => api.entities.Appointment.list('-date', APPOINTMENTS_LIMIT),
   });
+  const appointments = useMemo(() => appointmentsQuery.data || [], [appointmentsQuery.data]);
+  const capped = appointments.length >= APPOINTMENTS_LIMIT;
 
   const { data: employees = [] } = useQuery({
     queryKey: ['employees'],
@@ -35,9 +44,13 @@ export default function Stats() {
   });
 
   const stats = useMemo(() => {
-    const completed = appointments.filter(a => a.status === 'completed');
-    const cancelled = appointments.filter(a => a.status === 'cancelled');
-    const noShows = appointments.filter(a => a.status === 'no_show');
+    // Taux calculés sur les vrais rendez-vous : ni pauses, ni créneaux last minute (libres ou non pris)
+    // ni fiches de contact « Ajouter / Importer » des Clients (RDV annulé sans prestation ni prix)
+    const real = appointments.filter(a => a.status !== 'break' && a.status !== 'last_minute' && !isUnclaimedLastMinute(a)
+      && !(a.status === 'cancelled' && !a.services?.length && !Number(a.total_price)));
+    const completed = real.filter(a => a.status === 'completed');
+    const cancelled = real.filter(a => a.status === 'cancelled');
+    const noShows = real.filter(a => a.status === 'no_show');
     const totalRevenue = completed.reduce((sum, a) => sum + (a.total_price || 0), 0);
     const avgTicket = completed.length > 0 ? totalRevenue / completed.length : 0;
 
@@ -74,18 +87,36 @@ export default function Stats() {
 
     return {
       totalRevenue, avgTicket, completed: completed.length,
-      cancelRate: appointments.length > 0 ? ((cancelled.length / appointments.length) * 100).toFixed(1) : 0,
-      noShowRate: appointments.length > 0 ? ((noShows.length / appointments.length) * 100).toFixed(1) : 0,
+      cancelRate: real.length > 0 ? ((cancelled.length / real.length) * 100).toFixed(1) : 0,
+      noShowRate: real.length > 0 ? ((noShows.length / real.length) * 100).toFixed(1) : 0,
       monthly, topServices, perEmployee,
     };
   }, [appointments]);
 
+  const header = (
+    <div className="mb-6">
+      <p className="text-[10px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Analytics</p>
+      <h1 className="font-display text-2xl font-bold">Statistiques</h1>
+      {capped && (
+        <p className="text-[11px] text-amber-400 mt-1">
+          Seuls les {APPOINTMENTS_LIMIT} derniers rendez-vous sont pris en compte.
+        </p>
+      )}
+    </div>
+  );
+
+  if (appointmentsQuery.isError && !appointmentsQuery.data) {
+    return (
+      <div>
+        {header}
+        <LoadError what="les statistiques" error={appointmentsQuery.error} onRetry={appointmentsQuery.refetch} retrying={appointmentsQuery.isFetching} />
+      </div>
+    );
+  }
+
   return (
     <div>
-      <div className="mb-6">
-        <p className="text-[10px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Analytics</p>
-        <h1 className="font-display text-2xl font-bold">Statistiques</h1>
-      </div>
+      {header}
 
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-8">
         <StatBox title="CA Total" value={`${stats.totalRevenue.toFixed(0)}€`} icon={TrendingUp} />

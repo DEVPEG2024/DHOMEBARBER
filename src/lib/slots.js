@@ -7,6 +7,19 @@
 import { format } from 'date-fns';
 import { parisInstant } from '@/lib/calendarLinks';
 
+/**
+ * Jour de Paris décalé de `offset` jours : `date` à midi heure locale de l'appareil (même jour du
+ * calendrier que Paris, sans saut de jour au passage à l'heure d'été) et sa clé `yyyy-MM-dd`.
+ * `format(date, …)` et `analyzeDay` lisent donc bien le jour de Paris, quel que soit le fuseau.
+ */
+export function parisDay(offset = 0) {
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit' })
+    .format(new Date());
+  const [y, m, d] = today.split('-').map(Number);
+  const date = new Date(y, m - 1, d + offset, 12);
+  return { date, key: format(date, 'yyyy-MM-dd') };
+}
+
 export function generateTimeSlots(start, end, interval = 30) {
   const slots = [];
   let [sh, sm] = start.split(':').map(Number);
