@@ -83,6 +83,23 @@ export const AuthProvider = ({ children }) => {
   // compte pendant que le client se connecte avec un autre
   const dismissAuthError = useCallback(() => setAuthError(null), []);
 
+  // App restée ouverte en arrière-plan plusieurs jours (cas courant sur téléphone) : au retour
+  // au premier plan, /me prolonge la session (nouveau jeton d'un an pour un client). Silencieux :
+  // une panne réseau ne change rien, un vrai 401 passe par `dhb:unauthorized` comme ailleurs.
+  const lastSessionCheckRef = useRef(Date.now());
+  useEffect(() => {
+    if (!isAuthenticated) return undefined;
+    const RENEW_EVERY_MS = 6 * 3600 * 1000;
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (Date.now() - lastSessionCheckRef.current < RENEW_EVERY_MS) return;
+      lastSessionCheckRef.current = Date.now();
+      api.auth.me().then((fresh) => { if (fresh && fresh.id != null) setUser(fresh); }).catch(() => {});
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [isAuthenticated]);
+
   // Retour du réseau : nouvelle vérification de la session, sans geste du client
   useEffect(() => {
     if (!authError) return undefined;

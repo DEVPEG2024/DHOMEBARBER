@@ -147,9 +147,19 @@ const entitiesProxy = new Proxy(
 
 // ── Auth module ──────────────────────────────────────────────────────
 const auth = {
-  /** GET /entities/User/me */
+  /**
+   * GET /entities/User/me. Pour un client, le serveur renvoie aussi `access_token` quand le
+   * jeton a plus de 12 h : la session est ainsi prolongée d'un an à chaque ouverture de l'app
+   * (un client n'est jamais déconnecté). Le jeton est rangé ici et retiré de l'utilisateur.
+   */
   async me() {
-    return request('GET', `${API_BASE}/entities/User/me`);
+    const data = await request('GET', `${API_BASE}/entities/User/me`);
+    if (data && typeof data === 'object' && data.access_token) {
+      saveToken(data.access_token);
+      const { access_token: _renewed, ...user } = data;
+      return user;
+    }
+    return data;
   },
 
   /** POST /auth/login */
