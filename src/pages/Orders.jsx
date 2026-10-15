@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useAuth } from '@/lib/AuthContext';
 import { api } from '@/api/apiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
-import { ShoppingBag, Package, Phone, XCircle } from 'lucide-react';
+import { ShoppingBag, Package, Phone, XCircle, CalendarClock } from 'lucide-react';
 import { format, parseISO, isValid } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { toast } from 'sonner';
@@ -42,6 +42,22 @@ function formatOrderDate(value) {
   return Number.isNaN(d.getTime()) ? '' : parisDateTime.format(d);
 }
 
+/** Motif posé par le serveur quand la commande est annulée avec son rendez-vous. */
+const isCancelledWithAppointment = (order) => /^rendez-vous annul[ée]$/i.test(cleanReason(order?.cancellation_reason));
+
+/** « Pour votre rendez-vous du mercredi 14 octobre à 09:30 avec Romain » (date du RDV, déjà en heure de Paris). */
+function appointmentLine(apt) {
+  if (!apt) return 'Pour votre rendez-vous';
+  const d = apt.date ? parseISO(apt.date) : null;
+  const day = d && isValid(d) ? format(d, 'EEEE d MMMM', { locale: fr }) : '';
+  const time = apt.start_time ? String(apt.start_time).slice(0, 5) : '';
+  let text = 'Pour votre rendez-vous';
+  if (day) text += ` du ${day}`;
+  if (time) text += ` à ${time}`;
+  if (apt.employee_name) text += ` avec ${apt.employee_name}`;
+  return text;
+}
+
 const itemCount = (order) => (order.items || [])
   .reduce((sum, item) => sum + (Math.max(0, Number(item?.quantity) || 0)), 0);
 
@@ -66,6 +82,20 @@ export default function Orders() {
     refetchInterval: 30000, // Auto-refresh toutes les 30s
   });
   const { data: orders = [], isLoading } = ordersQuery;
+
+  // Commandes ajoutées à un rendez-vous : on retrouve le RDV avec les mêmes clé et requête que
+  // Mes rendez-vous (cache partagé). Échec sans conséquence : « Pour votre rendez-vous » seul.
+  const hasLinked = orders.some((o) => !!o?.appointment_id);
+  const { data: myAppointments } = useQuery({
+    queryKey: ['myAppointments', user?.email],
+    queryFn: () => api.entities.Appointment.filter({ client_email: user.email }, '-date', 100),
+    enabled: !!user?.email && hasLinked,
+    retry: false,
+  });
+  const appointmentsById = useMemo(
+    () => new Map((Array.isArray(myAppointments) ? myAppointments : []).map((a) => [String(a.id), a])),
+    [myAppointments],
+  );
 
   const cancelMutation = useMutation({
     mutationFn: ({ id, reason: r }) => cancelOrder(id, r),
@@ -159,8 +189,15 @@ export default function Orders() {
               const count = itemCount(order);
               const canCancel = canClientCancelOrder(order, features);
               const isOpen = OPEN_ORDER_STATUSES.includes(statusKey);
-              const byLabel = statusKey === 'cancelled' ? cancelledByLabel(order, 'client') : null;
-              const motive = statusKey === 'cancelled' ? cleanReason(order.cancellation_reason) : '';
+              const linked = !!order.appointment_id;
+              const linkedApt = linked ? appointmentsById.get(String(order.appointment_id)) : null;
+              const withAppointment = statusKey === 'cancelled' && isCancelledWithAppointment(order);
+              const byLabel = statusKey === 'cancelled'
+                ? (withAppointment ? 'Annulée avec votre rendez-vous' : cancelledByLabel(order, 'client'))
+                : null;
+              const motive = statusKey === 'cancelled' && !withAppointment ? cleanReason(order.cancellation_reason) : '';
+              // Remise par le barber pendant le RDV, tant qu'elle n'est pas prête au salon
+              const handedAtAppointment = linked && (statusKey === 'pending' || statusKey === 'confirmed');
               return (
                 <motion.div key={order.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
                   className="rounded-2xl border border-white/8 bg-white/4 backdrop-blur-xl p-4">
@@ -170,12 +207,18 @@ export default function Orders() {
                         {formatOrderDate(order.created_date)}
                       </p>
                       <p className="text-xs text-muted-foreground mt-0.5">{count} article{count > 1 ? 's' : ''}</p>
+                      {linked && (
+                        <p className="flex items-start gap-1.5 text-[11px] text-primary mt-1 leading-relaxed break-words">
+                          <CalendarClock className="w-3 h-3 mt-0.5 shrink-0" />
+                          <span className="min-w-0">{appointmentLine(linkedApt)}</span>
+                        </p>
+                      )}
                     </div>
                     <div className="flex flex-col items-end gap-1 shrink-0">
                       <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${status.bg}`}>
                         {status.label}
                       </span>
-                      {byLabel && <span className="text-[10px] text-muted-foreground">{byLabel}</span>}
+                      {byLabel && <span className="text-[10px] text-muted-foreground text-right max-w-[8.5rem] leading-snug">{byLabel}</span>}
                     </div>
                   </div>
                   {motive && (
@@ -196,6 +239,12 @@ export default function Orders() {
                     <span className="text-xs text-muted-foreground">Total</span>
                     <span className="text-sm font-bold text-foreground">{formatPrice(orderTotal(order))}</span>
                   </div>
+
+                  {handedAtAppointment && (
+                    <p className="mt-3 text-[11px] text-muted-foreground leading-relaxed">
+                      Votre barber vous la remet pendant le rendez-vous.
+                    </p>
+                  )}
 
                   {canCancel ? (
                     <div className="mt-3 flex justify-end">

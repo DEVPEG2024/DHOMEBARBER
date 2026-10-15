@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import { useAuth } from '@/lib/AuthContext';
 import { RefreshCw } from 'lucide-react';
 import { LAST_MINUTE_EXPIRED_REASON } from '@/lib/cancellation';
+import { useAppointmentOrders } from '@/lib/appointmentProducts';
 
 import AgendaToolbar from '@/components/agenda/AgendaToolbar';
 import DayView from '@/components/agenda/DayView';
@@ -43,6 +44,12 @@ function stepDate(view, date, dir) {
 
 const SWIPE_MIN_PX = 70;
 const SWIPE_MAX_MS = 600;
+
+// Produits réservés avec un RDV : ids passés dans l'adresse de la requête (`q=JSON`), donc bornés
+// pour rester sous la limite de longueur d'URL du routeur Heroku (~8 Ko) ; les plus proches
+// d'aujourd'hui d'abord, la fiche ouverte toujours comprise.
+const LINKED_ORDERS_MAX_IDS = 100;
+const NO_LINKED_ORDERS = new Map();
 
 export default function Agenda() {
   const { user } = useAuth();
@@ -143,6 +150,31 @@ export default function Agenda() {
     () => (showCancelled ? forBarber : forBarber.filter((a) => a.status !== 'cancelled')),
     [forBarber, showCancelled],
   );
+
+  // ─── Produits à remettre : commandes rattachées aux RDV de la période (une seule requête) ───
+  // Seul un client connecté peut ajouter un produit à sa réservation : RDV avec email, non annulés.
+  const selectedId = selected ? String(selected.id) : null;
+  const linkedOrderIds = useMemo(() => {
+    const today = Date.parse(toDateStr(new Date()));
+    const candidates = inRange
+      .filter((a) => a.client_email && a.status !== 'cancelled' && !isBreak(a))
+      .map((a) => ({ id: String(a.id), gap: Math.abs(Date.parse(String(a.date).slice(0, 10)) - today) || 0 }))
+      .sort((a, b) => a.gap - b.gap)
+      .slice(0, LINKED_ORDERS_MAX_IDS)
+      .map((a) => a.id);
+    if (selectedId && !candidates.includes(selectedId)) candidates.push(selectedId);
+    return candidates;
+  }, [inRange, selectedId]);
+  const linkedOrdersQuery = useAppointmentOrders(linkedOrderIds);
+  // Pendant le rechargement (nouvelle clé) on garde la dernière carte connue : les pastilles ne clignotent pas.
+  // En cas d'échec : rien d'affiché, l'agenda reste identique.
+  const [lastLinkedOrders, setLastLinkedOrders] = useState(NO_LINKED_ORDERS);
+  useEffect(() => {
+    if (linkedOrdersQuery.data instanceof Map) setLastLinkedOrders(linkedOrdersQuery.data);
+  }, [linkedOrdersQuery.data]);
+  const linkedOrders = linkedOrdersQuery.isError || linkedOrderIds.length === 0
+    ? NO_LINKED_ORDERS
+    : (linkedOrdersQuery.data instanceof Map ? linkedOrdersQuery.data : lastLinkedOrders);
 
   const refreshAll = () => invalidateAppointmentQueries(queryClient);
 
@@ -508,6 +540,7 @@ export default function Agenda() {
             onFocusBarber={setEmployeeFilter}
             onMoveRequest={handleMoveRequest}
             onResizeRequest={handleResizeRequest}
+            linkedOrders={linkedOrders}
           />
         )}
         {view === 'week' && (
@@ -523,6 +556,7 @@ export default function Agenda() {
             onDayClick={openDay}
             onMoveRequest={handleMoveRequest}
             onResizeRequest={handleResizeRequest}
+            linkedOrders={linkedOrders}
           />
         )}
         {view === 'month' && (
@@ -539,6 +573,7 @@ export default function Agenda() {
       <AppointmentDetailModal
         appointment={selectedFresh}
         employees={employees}
+        linkedOrders={selectedFresh ? linkedOrders.get(String(selectedFresh.id)) : undefined}
         onClose={() => setSelected(null)}
         onChanged={handleChanged}
         onDeleted={handleDeleted}

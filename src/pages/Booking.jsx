@@ -4,7 +4,7 @@ import { api } from '@/api/apiClient';
 import { useAuth } from '@/lib/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence, animate, useReducedMotion } from 'framer-motion';
-import { ChevronLeft, ChevronRight, Check, Calendar, CalendarPlus, Clock, User, Users, Scissors, Sparkles } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Check, Calendar, CalendarPlus, Clock, User, Users, Scissors, ShoppingBag, Sparkles } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { format, addDays, addMonths, isBefore, isSameDay } from 'date-fns';
@@ -17,6 +17,9 @@ import { BARBER_PHOTO_ASPECT } from '@/lib/barberPhoto';
 import { appointmentEvent, openCalendar, parisInstant } from '@/lib/calendarLinks';
 import { SALON_PHONE, SALON_PHONE_HREF, useCancelFeatures } from '@/lib/cancellation';
 import { analyzeDay, isOnLeave, parisDay, workingHoursOf } from '@/lib/slots';
+import { addonItems, addonTotal, suggestAddonProducts } from '@/lib/appointmentProducts';
+import { formatPrice } from '@/components/shop/productUtils';
+import ProductAddon, { addonMaxQuantity, addonProductsQuery } from '@/components/booking/ProductAddon';
 
 const STEPS = ['services', 'barber', 'datetime', 'confirm'];
 const STEP_LABELS = ['Prestations', 'Barber', 'Date & Heure', 'Confirmation'];
@@ -421,6 +424,13 @@ export function SuccessOverlay({ barberName, detail, calendarEvent = null, durat
 /** Liste vide stable (dépendance des `useMemo` tant qu'une requête n'a rien renvoyé). */
 const EMPTY_LIST = [];
 
+/** Message d'erreur lisible du serveur (sans « HTTP 409 » ni message réseau en anglais), sans point final. */
+function serverMessage(err, fallback) {
+  const raw = err?.data?.error || err?.message || '';
+  if (!raw || /^HTTP \d+$/.test(raw) || /failed to fetch|network|load failed/i.test(raw)) return fallback;
+  return String(raw).trim().replace(/[.!\s]+$/, '');
+}
+
 /** Horizon de réservation proposé au client, en mois à partir d'aujourd'hui. */
 const BOOKING_MONTHS_AHEAD = 3;
 /** Marge gauche de la bande de dates (`px-4`), retirée lors des défilements programmés. */
@@ -547,6 +557,8 @@ export default function Booking() {
   const [notes, setNotes] = useState('');
   // « Peu importe » : aucun barber choisi, l'étape 3 propose l'union des créneaux de tous les barbers
   const [anyBarber, setAnyBarber] = useState(false);
+  // Produits de la boutique ajoutés au rendez-vous : `{ [productId]: quantité }`
+  const [addonSelection, setAddonSelection] = useState({});
 
   const urlParams = new URLSearchParams(window.location.search);
   const preSelectedIds = urlParams.get('services')?.split(',') || [];
@@ -683,6 +695,42 @@ export default function Booking() {
 
   const totalDuration = selectedServices.reduce((sum, s) => sum + (s.duration || 0), 0);
   const totalPrice = selectedServices.reduce((sum, s) => sum + (s.price || 0), 0);
+
+  // Produits ajoutés au rendez-vous (même catalogue et même cache que la Boutique). Pas proposés
+  // pour un déplacement : les produits de l'ancien RDV suivent le nouveau côté serveur
+  // (`reschedule_of`). Tant qu'on ne sait pas si c'est un déplacement, le bloc reste masqué.
+  const productsQuery = useQuery(addonProductsQuery);
+  const catalog = productsQuery.data;
+  const addonsEnabled = !rescheduleId || rescheduleUnavailable;
+  const addonProducts = useMemo(
+    () => (catalog ? suggestAddonProducts(catalog, selectedServices) : EMPTY_LIST),
+    [catalog, selectedServices],
+  );
+  const addonLines = useMemo(
+    () => (addonsEnabled && catalog ? addonItems(addonSelection, catalog) : EMPTY_LIST),
+    [addonsEnabled, catalog, addonSelection],
+  );
+  const addonSum = addonsEnabled && catalog ? addonTotal(addonSelection, catalog) : 0;
+  const grandTotal = totalPrice + addonSum;
+
+  // Prestations changées ou catalogue rechargé : la sélection est gardée, mais les produits qui ne
+  // sont plus proposés (épuisés, retirés, hors suggestions) disparaissent et la quantité est
+  // ramenée au stock restant. Rien n'est touché tant que le catalogue n'est pas chargé.
+  useEffect(() => {
+    if (!catalog) return;
+    setAddonSelection(prev => {
+      const allowed = new Map(addonProducts.map(p => [String(p.id), p]));
+      const next = {};
+      let changed = false;
+      for (const [id, qty] of Object.entries(prev)) {
+        const product = allowed.get(String(id));
+        const kept = product ? Math.min(qty, addonMaxQuantity(product)) : 0;
+        if (kept > 0) next[id] = kept;
+        if (kept !== qty) changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [catalog, addonProducts]);
   // Plus courte prestation choisie : sert à dire si c'est la durée qui empêche tout créneau
   const shortestDuration = selectedServices.reduce((min, s) => Math.min(min, s.duration || 30), 30);
 
@@ -876,6 +924,8 @@ export default function Booking() {
     } finally {
       queryClient.invalidateQueries({ queryKey: ['myAppointments'] });
       queryClient.invalidateQueries({ queryKey: ['appointments'] });
+      // Les produits de l'ancien RDV passent sur le nouveau : Mes commandes doit suivre
+      queryClient.invalidateQueries({ queryKey: ['myOrders'] });
     }
   };
 
@@ -905,15 +955,47 @@ export default function Booking() {
         total_price: totalPrice,
         status: 'confirmed',
         notes,
+        // Déplacement : le serveur fait suivre au nouveau RDV les produits ajoutés à l'ancien
+        ...(previous ? { reschedule_of: previous.id } : {}),
       });
-      return { created, previous };
+      // Produits ajoutés : commande rattachée au RDV, créée seulement une fois le RDV confirmé.
+      // Son échec ne remet jamais en cause la réservation (stock épuisé entre-temps, quota…).
+      const items = previous ? [] : addonLines;
+      let addon = null;
+      if (items.length > 0) {
+        const count = items.reduce((n, it) => n + it.quantity, 0);
+        try {
+          if (!created?.id) throw new Error('');
+          await api.entities.Order.create({ items, appointment_id: created.id });
+          addon = { ok: true, count };
+        } catch (err) {
+          addon = { ok: false, count, message: serverMessage(err, 'le serveur n\'a pas répondu') };
+        }
+      }
+      return { created, previous, addon };
     },
-    onSuccess: ({ created, previous }) => {
+    onSuccess: ({ created, previous, addon }) => {
       queryClient.invalidateQueries({ queryKey: ['appointments-confirmed'] });
       // Le rendez-vous créé (id, heure de fin et prix recalculés par le serveur) alimente
       // l'« Ajouter au calendrier » de l'écran de succès
       setCreatedAppointment(created && typeof created === 'object' ? created : null);
-      toast.success('Rendez-vous confirmé !');
+      if (addon) {
+        queryClient.invalidateQueries({ queryKey: ['products'] });
+        queryClient.invalidateQueries({ queryKey: ['myOrders'] });
+        queryClient.invalidateQueries({ queryKey: ['adminOrders'] });
+      }
+      const plural = addon?.count > 1;
+      if (addon?.ok) {
+        toast.success(plural ? 'Rendez-vous confirmé, vos produits vous attendront !' : 'Rendez-vous confirmé, votre produit vous attendra !');
+      } else if (addon) {
+        // Le message dit déjà que le rendez-vous est confirmé : pas de second toast
+        toast.warning(
+          `Rendez-vous confirmé, mais ${plural ? 'les produits n\'ont pas pu être ajoutés' : 'le produit n\'a pas pu être ajouté'} : ${addon.message}. Vous pouvez ${plural ? 'les' : 'le'} commander dans la Boutique.`,
+          { duration: 10000 },
+        );
+      } else {
+        toast.success('Rendez-vous confirmé !');
+      }
       // Explosion de lames, puis la liste des rendez-vous
       setSuccess(true);
       hapticFeedback();
@@ -1301,7 +1383,39 @@ export default function Booking() {
                     ))}
                   </div>
                 </motion.div>
+                {/* Produits ajoutés : remis par le barber pendant le RDV */}
+                <AnimatePresence initial={false}>
+                  {addonLines.length > 0 && (
+                    <motion.div
+                      key="addon-products"
+                      initial={{ opacity: 0, y: reduceMotion ? 0 : 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: reduceMotion ? 0 : 6 }}
+                      transition={{ duration: 0.2 }}
+                      className="flex items-start gap-4"
+                    >
+                      <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0">
+                        <ShoppingBag className="w-4 h-4 text-primary" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-[11px] uppercase tracking-widest text-muted-foreground mb-1">Produits</p>
+                        {addonLines.map(it => (
+                          <p key={it.product_id} className="text-sm text-foreground break-words">
+                            {it.name} ×{it.quantity} <span className="text-primary font-semibold whitespace-nowrap">{formatPrice(it.price * it.quantity)}</span>
+                          </p>
+                        ))}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
+
+              {/* Produits de la boutique à ajouter (pas pour un déplacement : ceux de l'ancien RDV suivent) */}
+              {addonsEnabled && (
+                <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="empty:hidden">
+                  <ProductAddon services={selectedServices} selection={addonSelection} onChange={setAddonSelection} />
+                </motion.div>
+              )}
 
               {/* Total */}
               <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.32 }} className="backdrop-blur-xl bg-primary/10 border border-primary/20 rounded-2xl p-4">
@@ -1309,10 +1423,23 @@ export default function Booking() {
                   <span className="text-xs text-muted-foreground">Durée totale</span>
                   <span className="text-xs font-medium text-foreground">{totalDuration} min</span>
                 </div>
+                {addonLines.length > 0 && (
+                  <>
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="text-xs text-muted-foreground">Prestations</span>
+                      <span className="text-xs font-medium text-foreground tabular-nums">{formatPrice(totalPrice)}</span>
+                    </div>
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="text-xs text-muted-foreground">Produits</span>
+                      <span className="text-xs font-medium text-foreground tabular-nums">{formatPrice(addonSum)}</span>
+                    </div>
+                  </>
+                )}
                 <div className="flex justify-between items-center pt-2 border-t border-primary/20">
                   <span className="text-sm font-semibold text-foreground">Total</span>
-                  <span className="text-xl font-bold text-primary">{totalPrice}€</span>
+                  <span className="text-xl font-bold text-primary tabular-nums">{addonLines.length > 0 ? formatPrice(grandTotal) : `${totalPrice}€`}</span>
                 </div>
+                <p className="mt-1 text-right text-[10px] text-muted-foreground/70">À régler au salon</p>
               </motion.div>
 
               <Textarea

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Coffee, Zap, Check, X, UserX, Euro } from 'lucide-react';
+import { Coffee, Zap, Check, X, UserX, Euro, ShoppingBag } from 'lucide-react';
 import { needsClosing, isCancelledLike, START_HOUR, END_HOUR, STATUS_META, minutesToTime } from './agendaUtils';
 
 const activate = (fn) => ({
@@ -14,7 +14,7 @@ const activate = (fn) => ({
 // Appui long au doigt = déplacer la carte : pas de bulle « Copier / Rechercher » d'iOS
 const NO_CALLOUT = { WebkitTouchCallout: 'none', WebkitUserSelect: 'none', userSelect: 'none' };
 
-function describe(apt) {
+function describe(apt, hasProducts = false) {
   const services = apt.services?.map((s) => s.name).filter(Boolean).join(' + ');
   return [
     `${apt.start_time}${apt.end_time ? ` – ${apt.end_time}` : ''}`,
@@ -22,14 +22,16 @@ function describe(apt) {
     services,
     apt.employee_name,
     STATUS_META[apt.status]?.label,
+    hasProducts ? 'Produit à remettre' : null,
   ].filter(Boolean).join(' · ');
 }
 
 /**
  * Carte d'un rendez-vous dans les grilles Jour / Semaine. La hauteur suit la durée ; le contenu
  * se déploie avec la place disponible (heure + client, puis prestations, puis barber).
+ * `hasProducts` : le client a ajouté des produits de la boutique à sa réservation (commande à remettre).
  */
-export function AppointmentCard({ apt, style, color, showBarber = false, dense = false, onSelect, dragProps, ghosted = false }) {
+export function AppointmentCard({ apt, style, color, showBarber = false, dense = false, onSelect, dragProps, ghosted = false, hasProducts = false }) {
   const height = style.height || 0;
   const cancelled = isCancelledLike(apt);
   const toClose = needsClosing(apt);
@@ -43,7 +45,7 @@ export function AppointmentCard({ apt, style, color, showBarber = false, dense =
       data-block
       {...activate(() => onSelect(apt))}
       {...dragProps}
-      title={describe(apt)}
+      title={describe(apt, hasProducts)}
       className={`absolute rounded-md overflow-hidden ${dragProps?.onMouseDown ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} transition-[filter,box-shadow,opacity] hover:brightness-110 hover:shadow-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-primary ${toClose ? 'ring-1 ring-amber-400/80' : ''}`}
       style={{
         ...style,
@@ -65,10 +67,16 @@ export function AppointmentCard({ apt, style, color, showBarber = false, dense =
           <span className={`${dense ? 'text-[10px]' : 'text-xs'} font-semibold text-foreground truncate ${cancelled ? 'line-through' : ''}`}>
             {apt.client_name || 'Client'}
           </span>
-          <span className="ml-auto shrink-0 flex items-center">
+          <span className="ml-auto shrink-0 flex items-center gap-0.5">
             {apt.status === 'completed' && apt.payment_method && <Check className="w-3 h-3 text-primary" />}
             {apt.status === 'cancelled' && <X className="w-3 h-3 text-red-400" />}
             {apt.status === 'no_show' && <UserX className="w-3 h-3 text-red-400" />}
+            {/* Produit réservé avec le RDV : sur la première ligne, donc visible même sur une carte de 15 min */}
+            {hasProducts && (
+              <span role="img" className="w-3.5 h-3.5 rounded-full bg-sky-400 text-black flex items-center justify-center" aria-label="Produit à remettre">
+                <ShoppingBag className="w-2.5 h-2.5" />
+              </span>
+            )}
             {toClose && (
               <span className="w-3.5 h-3.5 rounded-full bg-amber-400 text-black flex items-center justify-center" aria-label="À encaisser">
                 <Euro className="w-2.5 h-2.5" />

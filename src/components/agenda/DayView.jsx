@@ -28,7 +28,7 @@ function DragPreview({ startMin, endMin }) {
   );
 }
 
-export default function DayView({ date, appointments, employees, employeeFilter, timeOffs = [], onSelect, onBreakClick, onCreateBreak, onFocusBarber, onMoveRequest, onResizeRequest }) {
+export default function DayView({ date, appointments, employees, employeeFilter, timeOffs = [], onSelect, onBreakClick, onCreateBreak, onFocusBarber, onMoveRequest, onResizeRequest, linkedOrders }) {
   const scrollRef = useRef();
   const isToday = date === toDateStr(new Date());
 
@@ -121,6 +121,7 @@ export default function DayView({ date, appointments, employees, employeeFilter,
             <AppointmentCard
               key={apt.id}
               apt={apt}
+              hasProducts={!!linkedOrders?.get(String(apt.id))?.length}
               color={color}
               dense={multi}
               onSelect={selectCard}

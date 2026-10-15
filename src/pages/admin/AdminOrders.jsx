@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '@/api/apiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
-import { Package, Clock, CheckCircle, XCircle, Truck, ShoppingBag, Trash2, RotateCcw, Phone } from 'lucide-react';
+import { Package, Clock, CheckCircle, XCircle, Truck, ShoppingBag, Trash2, RotateCcw, Phone, CalendarDays } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { toast } from 'sonner';
@@ -84,6 +85,50 @@ function formatCancelledAt(value) {
   return `le ${date} à ${time}`;
 }
 
+// ── Commandes rattachées à un rendez-vous (produits ajoutés à la réservation) ──
+
+/** RDV lus pour les badges : ids dans l'adresse de la requête, donc bornés (limite d'URL). */
+const LINKED_APPOINTMENTS_MAX = 100;
+
+/** Annulée automatiquement par le serveur quand le client a annulé son RDV. */
+const CANCELLED_WITH_APPOINTMENT_RE = /^client\s*:\s*rendez-vous annulé/i;
+
+const WEEKDAYS = ['dim.', 'lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.'];
+const MONTHS = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
+
+/** « mer. 14 oct. 09:30 » depuis la date (YYYY-MM-DD) et l'heure du RDV, sans calcul de fuseau. */
+function formatAppointmentSlot(apt) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(apt?.date || ''));
+  if (!m) return '';
+  const day = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], 12));
+  const time = String(apt.start_time || '').slice(0, 5);
+  return `${WEEKDAYS[day.getUTCDay()]} ${+m[3]} ${MONTHS[+m[2] - 1]}${time ? ` ${time}` : ''}`;
+}
+
+/** Badge « Avec le RDV du … · barber », lien vers la journée de l'agenda. */
+function LinkedAppointmentBadge({ appointment }) {
+  const className = 'inline-flex items-center gap-1.5 max-w-full min-w-0 text-[11px] font-medium px-2.5 py-1 rounded-full border border-sky-400/30 bg-sky-400/10 text-sky-300';
+  const slot = appointment ? formatAppointmentSlot(appointment) : '';
+  if (!appointment || !slot) {
+    return (
+      <span className={className}>
+        <CalendarDays className="w-3 h-3 shrink-0" />
+        <span className="truncate">Avec un rendez-vous</span>
+      </span>
+    );
+  }
+  const params = new URLSearchParams({ view: 'day', date: String(appointment.date).slice(0, 10) });
+  if (appointment.employee_id) params.set('barber', String(appointment.employee_id));
+  return (
+    <Link to={`/admin/agenda?${params.toString()}`} className={`${className} hover:bg-sky-400/20 transition-colors`}>
+      <CalendarDays className="w-3 h-3 shrink-0" />
+      <span className="truncate">
+        Avec le RDV du {slot}{appointment.employee_name ? ` · ${appointment.employee_name}` : ''}
+      </span>
+    </Link>
+  );
+}
+
 const telHref = (phone) => `tel:${String(phone || '').replace(/[^\d+]/g, '')}`;
 
 const orderItems = (order) => (Array.isArray(order?.items) ? order.items : []);
@@ -144,6 +189,22 @@ export default function AdminOrders() {
   });
 
   const busy = updateMutation.isPending || deleteMutation.isPending;
+
+  // RDV des commandes passées avec une réservation : une seule requête, clé dédiée
+  const linkedAppointmentIds = useMemo(() => {
+    const ids = [...new Set(orders.map((o) => o.appointment_id).filter(Boolean).map(String))];
+    return ids.slice(0, LINKED_APPOINTMENTS_MAX).sort();
+  }, [orders]);
+  const { data: linkedAppointments = [] } = useQuery({
+    queryKey: ['adminOrdersAppointments', ...linkedAppointmentIds],
+    queryFn: () => api.entities.Appointment.filter({ id: linkedAppointmentIds }, 'date', 200),
+    enabled: linkedAppointmentIds.length > 0,
+    staleTime: 60 * 1000,
+  });
+  const appointmentById = useMemo(
+    () => new Map((Array.isArray(linkedAppointments) ? linkedAppointments : []).map((a) => [String(a.id), a])),
+    [linkedAppointments],
+  );
 
   const withStatus = orders.map((o) => ({ order: o, status: normalizeOrderStatus(o.status) }));
   const filtered = filter === 'all' ? withStatus : withStatus.filter((x) => x.status === filter);
@@ -226,6 +287,7 @@ export default function AdminOrders() {
           const byLabel = isCancelled ? cancelledByLabel(order, 'admin', 'commande') : null;
           const motif = isCancelled ? cleanReason(order.cancellation_reason) : '';
           const cancelledWhen = isCancelled ? formatCancelledAt(order.cancelled_at) : '';
+          const withAppointment = isCancelled && CANCELLED_WITH_APPOINTMENT_RE.test(String(order.cancellation_reason || '').trim());
           const created = formatCreated(order.created_date || order.created_at);
 
           return (
@@ -256,6 +318,13 @@ export default function AdminOrders() {
                 </span>
               </div>
 
+              {/* Produits ajoutés à une réservation : remis par le barber pendant le RDV */}
+              {order.appointment_id && (
+                <div className="mb-3 min-w-0">
+                  <LinkedAppointmentBadge appointment={appointmentById.get(String(order.appointment_id))} />
+                </div>
+              )}
+
               {/* Items */}
               <div className="space-y-1 mb-3">
                 {orderItems(order).map((item, j) => (
@@ -284,12 +353,12 @@ export default function AdminOrders() {
               )}
 
               {/* Cancellation details */}
-              {isCancelled && (byLabel || motif || cancelledWhen) && (
+              {isCancelled && (withAppointment || byLabel || motif || cancelledWhen) && (
                 <div className="mt-2 rounded-lg border border-red-500/15 bg-red-500/5 px-3 py-2 text-[11px] min-w-0">
                   <p className="text-red-400 font-semibold">
-                    {[byLabel || 'Annulée', cancelledWhen].filter(Boolean).join(' ')}
+                    {[withAppointment ? 'Annulée avec le rendez-vous' : (byLabel || 'Annulée'), cancelledWhen].filter(Boolean).join(' ')}
                   </p>
-                  {motif && <p className="text-foreground/80 break-words mt-0.5">« {motif} »</p>}
+                  {motif && !withAppointment && <p className="text-foreground/80 break-words mt-0.5">« {motif} »</p>}
                 </div>
               )}
 

@@ -7,7 +7,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import AppointmentEditForm from './AppointmentEditForm';
 import { STATUS_META, invalidateAppointmentQueries, withLastMinuteMarker, stripLastMinuteMarker, isConvertedLastMinute } from './agendaUtils';
-import { formatStaffReason, cancellationActor, cancelledByLabel, cleanReason, LAST_MINUTE_EXPIRED_REASON } from '@/lib/cancellation';
+import { formatStaffReason, cancellationActor, cancelledByLabel, cleanReason, LAST_MINUTE_EXPIRED_REASON, ORDER_STATUSES, normalizeOrderStatus, invalidateOrderQueries } from '@/lib/cancellation';
+import { orderItemsLabel } from '@/lib/appointmentProducts';
+import { formatPrice } from '@/components/shop/productUtils';
 
 /** Message d'erreur lisible : celui du serveur, sinon celui de l'erreur sauf « HTTP 403 », sinon le repli. */
 function errorMessage(err, fallback) {
@@ -61,9 +63,42 @@ async function fetchUsersForSearch() {
   return all;
 }
 
-function ModalInner({ appointment, onUpdate, onDelete, onEdit }) {
+/** Une commande liée au RDV a changé : agenda (pastilles), commandes, tableau de bord, stock, activité. */
+function invalidateLinkedOrders(queryClient) {
+  queryClient.invalidateQueries({ queryKey: ['agendaOrders'] });
+  invalidateOrderQueries(queryClient);
+}
+
+/** Passe une commande liée au RDV à « Retirée » : elle compte alors dans le CA de la boutique. */
+const deliverOrder = (order) => api.entities.Order.update(order.id, { status: 'delivered' });
+
+function ModalInner({ appointment, linkedOrders = [], onUpdate, onDelete, onEdit }) {
   const queryClient = useQueryClient();
   const [state, dispatch] = useReducer(reducer, appointment, initialState);
+  // Produits réservés avec le RDV (commandes ouvertes). Jamais recopiés dans product_sold / product_price :
+  // ils sont encaissés via leur commande, sinon le tableau de bord les compterait deux fois.
+  const [deliveredIds, setDeliveredIds] = React.useState(() => new Set());
+  const [deliveringId, setDeliveringId] = React.useState(null);
+  const [deliverOnValidate, setDeliverOnValidate] = React.useState(true);
+  const openOrders = linkedOrders.filter((o) => !deliveredIds.has(String(o.id)));
+  const openOrdersTotal = openOrders.reduce((sum, o) => sum + (Number(o.total_price) || 0), 0);
+  const openOrdersLabel = openOrders.map(orderItemsLabel).filter(Boolean).join(', ');
+  const markDelivered = (ids) => setDeliveredIds((prev) => new Set([...prev, ...ids.map(String)]));
+
+  const handleDeliver = async (order) => {
+    setDeliveringId(String(order.id));
+    try {
+      await deliverOrder(order);
+      markDelivered([order.id]);
+      toast.success('Produit remis et payé : compté dans la boutique');
+      invalidateLinkedOrders(queryClient);
+    } catch (e) {
+      toast.error(errorMessage(e, 'Mise à jour de la commande impossible'));
+      invalidateLinkedOrders(queryClient);
+    } finally {
+      setDeliveringId(null);
+    }
+  };
   // Prestation déjà validée : l'encaissement reste corrigeable (moyen de paiement, pourboire, produit)
   const [correcting, setCorrecting] = React.useState(false);
   const [clientSearch, setClientSearch] = React.useState('');
@@ -190,6 +225,19 @@ function ModalInner({ appointment, onUpdate, onDelete, onEdit }) {
       }
       await api.entities.Appointment.update(appointment.id, updateData);
       toast.success(correcting ? 'Encaissement corrigé' : 'Prestation validée !');
+      // Produits réservés remis pendant le RDV : leurs commandes passent à « Retirée », après la
+      // prestation. Un échec n'annule pas la validation : on prévient pour finir depuis Commandes.
+      if (deliverOnValidate && openOrders.length > 0) {
+        const results = await Promise.allSettled(openOrders.map(deliverOrder));
+        const failed = results.filter((r) => r.status === 'rejected');
+        markDelivered(openOrders.filter((_, i) => results[i].status === 'fulfilled').map((o) => o.id));
+        if (failed.length > 0) {
+          toast.warning(
+            `Prestation validée, mais ${failed.length > 1 ? `${failed.length} commandes n'ont pas pu être passées` : "la commande n'a pas pu être passée"} à « Retirée » : ${errorMessage(failed[0].reason, 'erreur inconnue')}. À faire depuis Commandes.`,
+          );
+        }
+        invalidateLinkedOrders(queryClient);
+      }
       onUpdate?.();
     } catch (e) {
       toast.error(errorMessage(e, 'Erreur lors de la validation'));
@@ -414,6 +462,39 @@ function ModalInner({ appointment, onUpdate, onDelete, onEdit }) {
         </div>
       )}
 
+      {/* Produits réservés par le client avec ce RDV : remis par le barber, payés sur place */}
+      {openOrders.length > 0 && (
+        <div className="rounded-xl border border-sky-400/25 bg-sky-400/5 p-3 space-y-2 min-w-0">
+          <p className="text-xs font-semibold text-sky-300">🛍️ À remettre au client</p>
+          {openOrders.map((order) => {
+            const st = normalizeOrderStatus(order.status);
+            const busy = deliveringId === String(order.id);
+            return (
+              <div key={order.id} className="rounded-lg bg-white/5 border border-white/10 px-3 py-2 space-y-2 min-w-0">
+                <div className="flex items-start justify-between gap-2 min-w-0">
+                  <p className="text-sm font-medium text-foreground min-w-0 break-words">{orderItemsLabel(order) || 'Produit'}</p>
+                  <span className="text-sm font-bold text-sky-300 shrink-0">{formatPrice(order.total_price)}</span>
+                </div>
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full border font-medium ${ORDER_STATUSES[st]?.bg || ''}`}>
+                    {ORDER_STATUSES[st]?.label || 'En attente'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleDeliver(order)}
+                    disabled={busy || state.saving}
+                    className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-sky-400 text-black hover:bg-sky-300 transition-colors disabled:opacity-60"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    {busy ? 'Enregistrement…' : 'Remis et payé'}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {/* Sélection prestation pour last minute sans services */}
       {isLastMinute && !isCompleted && (!appointment.services || appointment.services.length === 0) && (
         <div>
@@ -582,6 +663,11 @@ function ModalInner({ appointment, onUpdate, onDelete, onEdit }) {
                 <span>{prodValue}€</span>
               </div>
             )}
+            {linkedOrders.length > 0 && (
+              <p className="text-[11px] text-muted-foreground px-1">
+                Le produit réservé par le client est encaissé via sa commande : ne le saisissez pas ici.
+              </p>
+            )}
           </div>
 
           {/* Total + payment */}
@@ -607,8 +693,29 @@ function ModalInner({ appointment, onUpdate, onDelete, onEdit }) {
                 <span className="text-sm font-semibold text-foreground">Commande totale</span>
                 <span className="text-lg font-bold text-primary">{grandTotal}€</span>
               </div>
+              {/* À encaisser en plus, hors grand_total : compté dans la boutique via la commande */}
+              {openOrders.length > 0 && (
+                <div className="flex items-center justify-between gap-2 text-xs text-sky-300">
+                  <span>+ produits réservés</span>
+                  <span className="font-semibold shrink-0">{formatPrice(openOrdersTotal)}</span>
+                </div>
+              )}
               <p className="text-[10px] text-muted-foreground text-right">{appointment.total_duration} min</p>
             </div>
+
+            {openOrders.length > 0 && (
+              <label className="flex items-start gap-2.5 rounded-lg bg-white/5 border border-white/10 px-3 py-2.5 cursor-pointer min-w-0">
+                <input
+                  type="checkbox"
+                  checked={deliverOnValidate}
+                  onChange={(e) => setDeliverOnValidate(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 shrink-0 accent-sky-400"
+                />
+                <span className="text-xs text-foreground min-w-0 break-words">
+                  Produits remis et payés ({openOrdersLabel || 'produits'} · {formatPrice(openOrdersTotal)})
+                </span>
+              </label>
+            )}
 
             {/* Payment method selector */}
             <div>
@@ -810,9 +917,10 @@ function ModalInner({ appointment, onUpdate, onDelete, onEdit }) {
 
 /**
  * Fiche d'un rendez-vous de l'agenda. `onChanged(rdv?)` après toute modification (avec le rendez-vous
- * à jour quand il a été modifié / déplacé), `onDeleted()` après suppression.
+ * à jour quand il a été modifié / déplacé), `onDeleted()` après suppression. `linkedOrders` : commandes
+ * ouvertes rattachées au RDV (produits réservés par le client, à remettre pendant la prestation).
  */
-export default function AppointmentDetailModal({ appointment, employees = [], onClose, onChanged, onDeleted }) {
+export default function AppointmentDetailModal({ appointment, employees = [], linkedOrders, onClose, onChanged, onDeleted }) {
   const [editing, setEditing] = React.useState(false);
   React.useEffect(() => { setEditing(false); }, [appointment?.id]);
 
@@ -839,6 +947,7 @@ export default function AppointmentDetailModal({ appointment, employees = [], on
               <ModalInner
                 key={appointment.id}
                 appointment={appointment}
+                linkedOrders={Array.isArray(linkedOrders) ? linkedOrders : undefined}
                 onEdit={() => setEditing(true)}
                 onUpdate={() => onChanged?.()}
                 onDelete={() => onDeleted?.()}

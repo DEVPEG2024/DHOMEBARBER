@@ -4,7 +4,7 @@ import { api } from '@/api/apiClient';
 import { useAuth } from '@/lib/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
-import { Calendar, CalendarPlus, CalendarClock, CalendarSearch, Clock, User, X, Scissors, Plus, Phone, Loader2, ArrowLeft } from 'lucide-react';
+import { Calendar, CalendarPlus, CalendarClock, CalendarSearch, Clock, User, X, Scissors, Plus, Phone, Loader2, ArrowLeft, ShoppingBag, ChevronRight } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { toast } from 'sonner';
@@ -18,6 +18,26 @@ import {
   useCancelFeatures, friendlyCancelError, cancelledByLabel, cleanReason,
 } from '@/lib/cancellation';
 import { findRescheduleSlots, moveAppointment } from '@/lib/reschedule';
+import { openOrdersByAppointment, orderItemsLabel } from '@/lib/appointmentProducts';
+import { formatPrice } from '@/components/shop/productUtils';
+
+/** Aucune commande : valeur stable (évite de recalculer la carte des commandes à chaque rendu). */
+const NO_ORDERS = [];
+
+/** Total d'une commande (prix serveur, sinon somme des lignes). */
+const orderTotalOf = (order) => {
+  const t = Number(order?.total_price);
+  if (Number.isFinite(t) && t > 0) return t;
+  return (Array.isArray(order?.items) ? order.items : [])
+    .reduce((s, it) => s + (Number(it?.price) || 0) * (Number(it?.quantity) || 0), 0);
+};
+
+/** Libellé des produits de plusieurs commandes : « Cire mate ×1, Huile à barbe ×2 ». */
+const ordersLabel = (orders) => orders.map(orderItemsLabel).filter(Boolean).join(', ') || 'Produit';
+
+/** Plusieurs produits différents (accord du texte : « Les produits ajoutés … seront annulés »). */
+const manyProducts = (orders) => orders
+  .reduce((n, o) => n + (Array.isArray(o?.items) ? o.items.length : 0), 0) > 1;
 
 /** Cibles « Ajouter au calendrier ». */
 const CALENDAR_TARGETS = [
@@ -97,6 +117,19 @@ export default function Appointments() {
     enabled: !!user?.email,
     refetchInterval: 30000, // Auto-refresh toutes les 30s
   });
+
+  // Produits ajoutés aux rendez-vous : mêmes clé et requête que Mes commandes (cache partagé).
+  // Simple bonus : si la requête échoue, rien n'est affiché. Rechargée à chaque arrivée sur la
+  // page, car un déplacement fait depuis la réservation rattache la commande au nouveau RDV.
+  const { data: myOrders = NO_ORDERS } = useQuery({
+    queryKey: ['myOrders', user?.email],
+    queryFn: () => api.entities.Order.filter({ client_email: user?.email }, '-created_date', 100),
+    enabled: !!user?.email,
+    refetchOnMount: 'always',
+    refetchInterval: 30000,
+    retry: false,
+  });
+  const ordersByAppointment = useMemo(() => openOrdersByAppointment(myOrders), [myOrders]);
 
   // Délai d'annulation du salon (même requête et même cache que l'accueil). Dans ce délai le
   // serveur refuse l'annulation : on affiche le téléphone du salon au lieu du bouton.
@@ -198,6 +231,9 @@ export default function Appointments() {
       queryClient.invalidateQueries({ queryKey: ['myAppointments'] });
       queryClient.invalidateQueries({ queryKey: ['appointments'] }); // « Comme la dernière fois »
       queryClient.invalidateQueries({ queryKey: ['appointments-confirmed'] }); // créneaux de la réservation
+      // Le serveur annule avec le RDV les produits ajoutés encore à préparer (stock rendu)
+      queryClient.invalidateQueries({ queryKey: ['myOrders'] });
+      queryClient.invalidateQueries({ queryKey: ['products'] });
       toast.success('Rendez-vous annulé : le créneau est libéré', {
         action: { label: 'Réserver', onClick: () => navigate('/booking') },
       });
@@ -231,6 +267,7 @@ export default function Appointments() {
       queryClient.invalidateQueries({ queryKey: ['appointments'] });
       queryClient.invalidateQueries({ queryKey: ['appointments-confirmed'] });
       queryClient.invalidateQueries({ queryKey: ['rescheduleSlots'] });
+      queryClient.invalidateQueries({ queryKey: ['myOrders'] }); // les produits ajoutés suivent le nouveau RDV
       if (oldCancelled) {
         toast.success(`Rendez-vous déplacé au ${slot.label} à ${slot.time}`);
       } else {
@@ -283,6 +320,11 @@ export default function Appointments() {
     return { upcoming: up, past: done };
   }, [appointments, now]);
   const list = tab === 'upcoming' ? upcoming : past;
+
+  // Fenêtre d'annulation : produits ajoutés à ce RDV, annulés avec lui s'ils ne sont pas encore prêts
+  const cancelLinked = cancelApt ? (ordersByAppointment.get(String(cancelApt.id)) || NO_ORDERS) : NO_ORDERS;
+  const cancelLinkedToCancel = cancelLinked.filter(o => o.status === 'pending' || o.status === 'confirmed');
+  const cancelLinkedReady = cancelLinked.filter(o => o.status === 'ready');
 
   return (
     <div className="min-h-screen relative overflow-hidden">
@@ -382,6 +424,8 @@ export default function Appointments() {
                 // À venir (fin du RDV pas encore passée) et ni annulé ni terminé : proposer l'ajout au calendrier
                 const canAddToCalendar = !CLOSED_STATUSES.includes(apt.status) && endsAt(apt) > now;
                 const calendarOpen = calendarOpenId === apt.id;
+                // Produits ajoutés à ce RDV à venir, encore à remettre
+                const linkedOrders = canAddToCalendar ? (ordersByAppointment.get(String(apt.id)) || NO_ORDERS) : NO_ORDERS;
                 return (
                   <motion.div
                     key={apt.id}
@@ -439,6 +483,28 @@ export default function Appointments() {
                         <div className="mt-3 pt-3 border-t border-white/6 flex justify-between items-center">
                           <span className="text-xs text-muted-foreground">Total</span>
                           <span className="text-sm font-bold text-foreground">{apt.total_price}€</span>
+                        </div>
+                      )}
+
+                      {/* Produits ajoutés à la réservation : remis par le barber, payés sur place */}
+                      {linkedOrders.length > 0 && (
+                        <div className="mt-3 space-y-1.5">
+                          {linkedOrders.map(order => (
+                            <Link
+                              key={order.id}
+                              to="/orders"
+                              className="flex items-start gap-2.5 p-2.5 rounded-xl bg-primary/5 border border-primary/15 hover:bg-primary/10 transition-colors min-w-0"
+                            >
+                              <ShoppingBag className="w-3.5 h-3.5 text-primary mt-0.5 shrink-0" />
+                              <span className="flex-1 min-w-0 text-[11px] leading-relaxed text-muted-foreground break-words">
+                                <span className="font-semibold text-foreground">{orderItemsLabel(order) || 'Produit'}</span>
+                                {' · '}
+                                <span className="font-semibold text-foreground whitespace-nowrap">{formatPrice(orderTotalOf(order))}</span>
+                                {order.status === 'ready' ? ' — prêt au salon' : ' — à régler au salon'}
+                              </span>
+                              <ChevronRight className="w-3.5 h-3.5 text-muted-foreground mt-0.5 shrink-0" />
+                            </Link>
+                          ))}
                         </div>
                       )}
 
@@ -702,6 +768,30 @@ export default function Appointments() {
                           />
                           <p className="text-right text-[10px] text-muted-foreground">{reasonOther.length}/{CANCEL_REASON_MAX}</p>
                         </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Produits ajoutés au RDV : ce qu'il advient d'eux */}
+                  {(cancelLinkedToCancel.length > 0 || cancelLinkedReady.length > 0) && (
+                    <div className="space-y-1.5">
+                      {cancelLinkedToCancel.length > 0 && (
+                        <p className="flex items-start gap-2 text-xs leading-relaxed text-muted-foreground break-words">
+                          <ShoppingBag className="w-3.5 h-3.5 text-red-400 mt-0.5 shrink-0" />
+                          <span className="min-w-0">
+                            {manyProducts(cancelLinkedToCancel) ? 'Les produits ajoutés' : 'Le produit ajouté'}
+                            {' '}({ordersLabel(cancelLinkedToCancel)}) {manyProducts(cancelLinkedToCancel) ? 'seront annulés' : 'sera annulé'} aussi.
+                          </span>
+                        </p>
+                      )}
+                      {cancelLinkedReady.length > 0 && (
+                        <p className="flex items-start gap-2 text-xs leading-relaxed text-muted-foreground break-words">
+                          <ShoppingBag className="w-3.5 h-3.5 text-primary mt-0.5 shrink-0" />
+                          <span className="min-w-0">
+                            {manyProducts(cancelLinkedReady) ? 'Vos produits' : 'Votre produit'}
+                            {' '}({ordersLabel(cancelLinkedReady)}) {manyProducts(cancelLinkedReady) ? 'sont prêts : ils restent disponibles' : 'est prêt : il reste disponible'} au salon.
+                          </span>
+                        </p>
                       )}
                     </div>
                   )}

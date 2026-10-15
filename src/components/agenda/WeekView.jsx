@@ -28,7 +28,7 @@ function DragPreview({ startMin, endMin }) {
   );
 }
 
-export default function WeekView({ currentDate, appointments, employees, employeeFilter, timeOffs = [], onSelect, onBreakClick, onCreateBreak, onDayClick, onMoveRequest, onResizeRequest }) {
+export default function WeekView({ currentDate, appointments, employees, employeeFilter, timeOffs = [], onSelect, onBreakClick, onCreateBreak, onDayClick, onMoveRequest, onResizeRequest, linkedOrders }) {
   const scrollRef = useRef();
   const weekStart = startOfWeek(currentDate, { weekStartsOn: 1 });
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
@@ -171,6 +171,7 @@ export default function WeekView({ currentDate, appointments, employees, employe
                     <AppointmentCard
                       key={apt.id}
                       apt={apt}
+                      hasProducts={!!linkedOrders?.get(String(apt.id))?.length}
                       color={colorOf(apt.employee_id)}
                       showBarber={!single}
                       dense

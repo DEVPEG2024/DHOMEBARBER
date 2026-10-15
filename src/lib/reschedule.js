@@ -126,6 +126,8 @@ export async function moveAppointment({ appointment, employee, user, slot, withR
     total_price: Number(appointment.total_price) || services.reduce((t, s) => t + (Number(s.price) || 0), 0),
     status: 'confirmed',
     notes: appointment.notes || '',
+    // Le serveur fait suivre au nouveau RDV les produits ajoutés à l'ancien
+    reschedule_of: appointment.id,
   });
   let oldCancelled = true;
   try {
