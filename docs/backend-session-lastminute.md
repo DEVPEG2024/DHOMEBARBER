@@ -1,5 +1,7 @@
 # Notice backend : créneau Last Minute réservable, session de 30 jours
 
+> **Appliquée le 15 oct. 2026.** Point 1 : backend v106 (commit 102102b), index `idx_appointments_unique_slot_v2`, tests `test/test-last-minute.js` (40). Point 2 : session d'un an pour tous les rôles, renouvelée à chaque ouverture (commits 4db8cc4 et 3c4a382, v104 / v105), plus long que les 30 jours demandés. Détail dans CLAUDE.md.
+
 > Constatés par la revue du 14 oct. 2026. Ces deux points se règlent dans `dhomebarber-api`
 > (Heroku), pas dans le frontend. À appliquer par la session du Mac, avec tests, puis
 > `git push heroku main`.
