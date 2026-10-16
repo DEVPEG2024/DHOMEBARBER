@@ -10,6 +10,26 @@ import { STATUS_META, invalidateAppointmentQueries, withLastMinuteMarker, stripL
 import { formatStaffReason, cancellationActor, cancelledByLabel, cleanReason, LAST_MINUTE_EXPIRED_REASON, ORDER_STATUSES, normalizeOrderStatus, invalidateOrderQueries } from '@/lib/cancellation';
 import { orderItemsLabel } from '@/lib/appointmentProducts';
 import { formatPrice } from '@/components/shop/productUtils';
+import { useGangSummaries } from '@/lib/gangCardApi';
+import { gangPalette } from '@/components/gang/gangTheme';
+
+/** Pastille « Or · 12 visites » du client (carte Gang) ; rien sans données ou en cas d'erreur. */
+function GangClientBadge({ email }) {
+  const { data } = useGangSummaries(email ? [email] : []);
+  const summary = email && data && !data.error ? data[String(email).toLowerCase()] : null;
+  if (!summary?.tier) return null;
+  const palette = gangPalette({ tier: summary.tier });
+  const visits = Number(summary.visits) || 0;
+  return (
+    <span
+      className="shrink-0 inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold whitespace-nowrap"
+      style={{ color: palette.accent, borderColor: `${palette.accent}55` }}
+      title="Carte Gang du client"
+    >
+      {summary.tier_label || palette.label} · {visits} visite{visits > 1 ? 's' : ''}
+    </span>
+  );
+}
 
 /** Message d'erreur lisible : celui du serveur, sinon celui de l'erreur sauf « HTTP 403 », sinon le repli. */
 function errorMessage(err, fallback) {
@@ -416,6 +436,7 @@ function ModalInner({ appointment, linkedOrders = [], onUpdate, onDelete, onEdit
           <div className="flex items-center gap-2">
             <User className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
             <span className="text-sm font-semibold">{assignedClient?.name || appointment.client_name}</span>
+            <GangClientBadge email={assignedClient?.email || appointment.client_email} />
           </div>
           {(assignedClient?.email || appointment.client_email) && (
             <div className="flex items-center gap-2">

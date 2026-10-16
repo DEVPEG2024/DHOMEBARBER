@@ -3,6 +3,7 @@ import { Outlet } from 'react-router-dom';
 import BottomNav from './BottomNav';
 import NotificationPrompt from '@/components/shared/NotificationPrompt';
 import MotionPrompt from '@/components/shared/MotionPrompt';
+import GangLevelUp from '@/components/gang/GangLevelUp';
 
 export default function ClientLayout() {
   return (
@@ -14,6 +15,8 @@ export default function ClientLayout() {
       <BottomNav />
       <NotificationPrompt />
       <MotionPrompt />
+      {/* Révélation plein écran quand la carte Gang du client monte de niveau */}
+      <GangLevelUp />
     </div>
   );
 }

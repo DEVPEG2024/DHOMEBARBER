@@ -4,11 +4,14 @@ import { api } from '@/api/apiClient';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { motion } from 'framer-motion';
-import { Calendar, Star, ShoppingBag, Settings, LogOut, ChevronRight, Shield, Bell, Camera, Shirt, Handshake, Heart } from 'lucide-react';
+import { Calendar, Star, ShoppingBag, Settings, LogOut, ChevronRight, Shield, Bell, Camera, Shirt, Handshake, Heart, IdCard } from 'lucide-react';
 import { toast } from 'sonner';
 import ImageCropDialog, { unreadableImageMessage } from '@/components/shared/ImageCropDialog';
 import { parisInstant } from '@/lib/calendarLinks';
 import { formatPrice } from '@/components/services/serviceUtils';
+import { useGangCard } from '@/lib/gangCardApi';
+import GangCard from '@/components/gang/GangCard';
+import { gangPalette } from '@/components/gang/gangTheme';
 
 // Fin d'un rendez-vous à l'heure de Paris (sans heure de fin : son début, sinon fin de journée)
 const endsAt = (apt) => parisInstant(apt.date, apt.end_time || apt.start_time || '23:59');
@@ -65,6 +68,13 @@ export default function Profile() {
       setUploading(false);
     }
   };
+
+  // Carte Gang : mini-carte et niveau dans l'entrée du menu (rien de bloquant si la requête échoue)
+  const { data: gangData } = useGangCard({ enabled: !!user });
+  const gangCard = gangData?.card || null;
+  const gangDesc = gangCard
+    ? `${gangPalette(gangCard).label} · ${gangCard.visits} visite${Number(gangCard.visits) > 1 ? 's' : ''}`
+    : 'Ta carte de collection du Gang';
 
   const { data: appointments = [], isLoading: loadingStats, isError: statsError } = useQuery({
     queryKey: ['myAppointments', user?.email],
@@ -163,6 +173,28 @@ export default function Profile() {
         {/* Menu */}
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
           className="rounded-2xl overflow-hidden border border-white/8 bg-white/4 backdrop-blur-xl mb-5">
+          <Link
+            to="/gang-card"
+            className="flex items-center justify-between px-4 py-3 hover:bg-white/5 transition-colors group border-b border-white/6"
+          >
+            <div className="flex items-center gap-3.5 min-w-0">
+              {gangCard ? (
+                // Mini-carte (300 × 440 à l'échelle 0,13 → 39 × 57 px)
+                <div className="w-10 flex justify-center flex-shrink-0" aria-hidden="true">
+                  <GangCard card={gangCard} size={0.13} flippable={false} interactive={false} />
+                </div>
+              ) : (
+                <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/15 flex items-center justify-center flex-shrink-0 group-hover:bg-primary/15 transition-colors">
+                  <IdCard className="w-4 h-4 text-primary" />
+                </div>
+              )}
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-foreground">Ma carte Gang</p>
+                <p className="text-[11px] text-muted-foreground truncate">{gangDesc}</p>
+              </div>
+            </div>
+            <ChevronRight className="w-4 h-4 text-muted-foreground/40 group-hover:text-muted-foreground transition-colors shrink-0" />
+          </Link>
           {menuItems.map((item, i) => (
             <Link
               key={item.path}

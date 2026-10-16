@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
 import { hapticFeedback } from '@/lib/capacitor';
 import LoadError, { isNetworkError } from '@/components/shared/LoadError';
+import GangLeaderboard from '@/components/gang/GangLeaderboard';
 
 function timeAgo(dateStr) {
   const now = new Date();
@@ -890,6 +891,9 @@ export default function Feed() {
         <p className="text-[10px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Communauté</p>
         <h1 className="font-sans text-2xl font-bold">Ca dit quoi le Gang ?</h1>
       </div>
+
+      {/* Team of the Season (côté client seulement) : rien tant que personne n'y figure */}
+      {!inAdmin && <GangLeaderboard variant="feed" />}
 
       {/* Floating publish button */}
       <motion.button
