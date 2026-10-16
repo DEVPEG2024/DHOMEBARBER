@@ -2,6 +2,7 @@ import { format, addDays, startOfWeek, endOfWeek, startOfMonth, endOfMonth, pars
 import { fr } from 'date-fns/locale';
 import { api } from '@/api/apiClient';
 import { LAST_MINUTE_EXPIRED_REASON } from '@/lib/cancellation';
+import { parisInstant } from '@/lib/calendarLinks';
 
 // Grille commune aux vues Jour et Semaine
 export const START_HOUR = 7;
@@ -115,6 +116,17 @@ export function appointmentEnd(apt) {
   if (!d) return null;
   const end = timeToMinutes(apt.end_time || apt.start_time);
   return new Date(d.getFullYear(), d.getMonth(), d.getDate(), Math.floor(end / 60), end % 60);
+}
+
+/**
+ * Instant réel (ms) de la fin d'un rendez-vous, l'heure saisie étant celle du salon (Paris),
+ * quel que soit le fuseau de l'appareil. À comparer à `Date.now()` ; `null` si la date est invalide.
+ * Sert là où l'heure saisie vient elle-même de l'heure de Paris (« Ajouter un client » : `nowRounded`).
+ */
+export function appointmentEndParis(apt) {
+  const day = String(apt.date || '').slice(0, 10);
+  if (!parseDateParam(day)) return null;
+  return parisInstant(day, minutesToTime(timeToMinutes(apt.end_time || apt.start_time)));
 }
 
 /**

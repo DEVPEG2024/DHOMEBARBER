@@ -35,8 +35,9 @@ const FX = {
   nouvel_an: { arrival: 'countdown', offset: 2.1, ms: 3000, emblem: '🍾', emblemLabel: 'Faire sauter le bouchon' },
 };
 FX.or.side = 40;
+const FX_BY_KEY = Object.fromEntries(Object.entries(FX).map(([key, v]) => [key, Object.freeze({ key, ...v })]));
 
-export const gangFx = (p) => (p?.fx && FX[p.fx] ? { key: p.fx, ...FX[p.fx] } : null);
+export const gangFx = (p) => (p?.fx && FX_BY_KEY[p.fx]) || null;
 
 /** Place prise au-dessus de la carte par ses ornements (repère 300 × 440). */
 export const gangFxOverhangTop = (p) => gangFx(p)?.top || 0;
@@ -98,7 +99,7 @@ const DRIPS = [18, 44, 71, 103, 132, 165, 196, 224, 252, 280].map((x, i) => ({ x
 const CSS = `
 .gfx-a{position:absolute;pointer-events:none}
 .gfx-still .gfx-anim,.gfx-still.gfx-anim{animation:none!important}
-@media (prefers-reduced-motion:reduce){.gfx-anim{animation:none!important}}
+@media (prefers-reduced-motion:reduce){.gfx-anim{animation:none!important}.gfx-anim,.gfx-tr{transition:none!important}}
 @keyframes gfx-slide{from{opacity:0;transform:translateY(40px)}to{opacity:1;transform:none}}
 @keyframes gfx-holo-in{0%{opacity:0;transform:scale(.94)}60%{opacity:1}100%{opacity:1;transform:none}}
 @keyframes gfx-drop{0%,55%{opacity:0;transform:translateY(-120px)}80%{opacity:1;transform:translateY(6px)}100%{opacity:1;transform:none}}
@@ -157,16 +158,11 @@ const CSS = `
 .gfx-in-countdown{animation:gfx-ny-in 2.8s ease-out both}
 `;
 
-let cssInjected = false;
-function useFxCss() {
-  useEffect(() => {
-    if (cssInjected || typeof document === 'undefined') return;
-    cssInjected = true;
-    const el = document.createElement('style');
-    el.id = 'gang-fx-css';
-    el.textContent = CSS;
-    document.head.appendChild(el);
-  }, []);
+if (typeof document !== 'undefined' && !document.getElementById('gang-fx-css')) {
+  const el = document.createElement('style');
+  el.id = 'gang-fx-css';
+  el.textContent = CSS;
+  document.head.appendChild(el);
 }
 
 const abs = { position: 'absolute', pointerEvents: 'none' };
@@ -294,7 +290,6 @@ const useSvgId = (name) => `gfx-${name}-${useId().replace(/[^a-zA-Z0-9_-]/g, '')
 
 /** Derrière la carte, sans inclinaison. */
 export function FxBehind({ fx, animated, arrival }) {
-  useFxCss();
   if (!fx || !animated) return null;
   if (fx.key === 'tots') {
     return (
@@ -417,6 +412,7 @@ export function FxBadge({ fx, p, interactive, onSurprise, active }) {
     return (
       <Tag
         {...props}
+        className="gfx-tr"
         style={{
           marginTop: 8, width: 46, height: 46, borderRadius: '50%', display: 'grid', placeItems: 'center', fontSize: 28, lineHeight: 1,
           background: 'rgba(0,0,0,.35)', boxShadow: `0 0 0 1.5px ${p.accent}${active && fx.key === 'halloween' ? ', 0 0 26px 8px rgba(255,120,20,.8)' : ''}`,
@@ -451,6 +447,7 @@ const glintStyle = (gold) => ({
 
 /** Dans le recto. `active` : surprise en cours ; `hit` : numéro de la surprise (remonte les éléments). */
 export function FxInner({ fx, animated, arrival, hit, active }) {
+  const wax = useSvgId('wax');
   if (!fx) return null;
   const k = fx.key;
   const year = (() => {
@@ -495,13 +492,13 @@ export function FxInner({ fx, animated, arrival, hit, active }) {
         <>
           <svg viewBox="0 0 300 70" style={{ ...abs, left: 0, top: 0, width: 300, height: 70, zIndex: 5 }}>
             <defs>
-              <linearGradient id="gfx-wax" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor="#ff9a2e" /><stop offset="1" stopColor="#d4520a" /></linearGradient>
+              <linearGradient id={wax} x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor="#ff9a2e" /><stop offset="1" stopColor="#d4520a" /></linearGradient>
             </defs>
-            <rect x="0" y="0" width="300" height="10" fill="url(#gfx-wax)" />
+            <rect x="0" y="0" width="300" height="10" fill={`url(#${wax})`} />
             {DRIPS.map((d) => (
               <g key={d.x} className="gfx-anim" style={{ transformBox: 'fill-box', transformOrigin: 'top', ...(animated ? anim(`gfx-drip 4s ease-in-out -${d.delay}s infinite`) : {}) }}>
-                <rect x={d.x - 4} y="0" width="8" height={d.h} rx="4" fill="url(#gfx-wax)" />
-                <circle cx={d.x} cy={d.h} r="5.5" fill="url(#gfx-wax)" />
+                <rect x={d.x - 4} y="0" width="8" height={d.h} rx="4" fill={`url(#${wax})`} />
+                <circle cx={d.x} cy={d.h} r="5.5" fill={`url(#${wax})`} />
               </g>
             ))}
           </svg>
@@ -524,7 +521,7 @@ export function FxInner({ fx, animated, arrival, hit, active }) {
             </svg>
           )}
           <div
-            className="font-fut"
+            className="font-fut gfx-tr"
             style={{
               ...abs, left: 96, top: 176, zIndex: 9, color: '#ff8a1f', fontFamily: "'Creepster', 'Barlow Condensed', sans-serif", fontSize: 28,
               textShadow: '0 0 12px #ff6a00', whiteSpace: 'nowrap', opacity: active ? 1 : 0, transform: active ? 'none' : 'translateY(6px)', transition: 'opacity .2s, transform .2s',
@@ -594,7 +591,6 @@ export function FxInner({ fx, animated, arrival, hit, active }) {
 
 /** Ornements posés sur la carte, inclinés avec elle. */
 export function FxFront({ fx, big, animated, arrival, hit, interactive, onSurprise }) {
-  useFxCss();
   const gold = useSvgId('gold');
   const rivet = useSvgId('rivet');
   const snow = useSvgId('snow');

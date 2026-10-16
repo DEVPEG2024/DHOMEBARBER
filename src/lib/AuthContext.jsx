@@ -49,6 +49,9 @@ export const AuthProvider = ({ children }) => {
       syncPushSubscription();
       return 'ok';
     } catch (err) {
+      // Jeton changé pendant la vérification (déconnexion, connexion à un autre compte) : la
+      // réponse concerne l'ancienne session, la nouvelle a déjà posé son propre état
+      if (err?.stale) return 'stale';
       // Ne jamais effacer le jeton sur une panne réseau : ouvrir l'app dans le métro ou
       // en avion déconnectait définitivement, il fallait retaper son mot de passe.
       // Seule une réponse d'authentification du serveur (401 / 403) invalide la session.
@@ -86,6 +89,8 @@ export const AuthProvider = ({ children }) => {
   // App restée ouverte en arrière-plan plusieurs jours (cas courant sur téléphone) : au retour
   // au premier plan, /me prolonge la session (nouveau jeton d'un an pour un client). Silencieux :
   // une panne réseau ne change rien, un vrai 401 passe par `dhb:unauthorized` comme ailleurs.
+  // Réponse arrivée après une déconnexion ou un changement de compte : `api.auth.me` la rejette
+  // (`stale`) sans ranger son jeton, l'ancien utilisateur ne revient donc pas.
   const lastSessionCheckRef = useRef(Date.now());
   useEffect(() => {
     if (!isAuthenticated) return undefined;
@@ -192,8 +197,15 @@ export const AuthProvider = ({ children }) => {
     if (loggingOutRef.current) return;
     loggingOutRef.current = true;
     if (options?.detachPush !== false) {
+      // Dans la limite de 2 s : détachement des notifications, PUIS coupure du jeton côté serveur
+      // (barber, admin ; sans effet pour un client) — dans cet ordre, le détachement a encore
+      // besoin d'un jeton valable. Jamais bloquant, jamais d'erreur affichée. Pas d'appel pour un
+      // compte supprimé (`detachPush: false`).
       await Promise.race([
-        detachPushFromAccount().catch(() => {}),
+        (async () => {
+          await detachPushFromAccount().catch(() => {});
+          await api.auth.logout().catch(() => {});
+        })(),
         new Promise((resolve) => setTimeout(resolve, LOGOUT_PUSH_TIMEOUT)),
       ]);
     }

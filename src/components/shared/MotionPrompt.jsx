@@ -24,6 +24,17 @@ const DAY = 24 * 60 * 60 * 1000;
 const MAX_SHOWS = 3;
 const GAP = 7 * DAY;
 const SHOW_DELAY = 1200;
+// Une fenêtre de la carte Gang est ouverte (révélation de niveau, story, écussons) : on réessaie
+const RETRY_DELAY = 2000;
+
+/** Révélation de niveau / story (`data-gang-overlay`) ou écussons (`data-gang-badge-overlay`) affichés */
+function gangOverlayOpen() {
+  try {
+    return !!document.querySelector('[data-gang-overlay], [data-gang-badge-overlay]');
+  } catch {
+    return false;
+  }
+}
 
 function readState() {
   try { return JSON.parse(localStorage.getItem(STORE_KEY)) || { count: 0, last: 0 }; } catch { return { count: 0, last: 0 }; }
@@ -45,13 +56,17 @@ export default function MotionPrompt() {
 
   useEffect(() => {
     if (!onCard || open || reduceMotion || !motionPermissionPending()) return undefined;
-    const timer = setTimeout(() => {
+    let timer;
+    const attempt = () => {
       if (!motionPermissionPending()) return;
       const state = readState();
       if (state.count >= MAX_SHOWS || Date.now() - state.last < GAP) return;
+      // Pas par-dessus une fenêtre de la carte Gang : on repasse plus tard, sans compter d'affichage
+      if (gangOverlayOpen()) { timer = setTimeout(attempt, RETRY_DELAY); return; }
       writeState({ count: state.count + 1, last: Date.now() });
       setOpen(true);
-    }, SHOW_DELAY);
+    };
+    timer = setTimeout(attempt, SHOW_DELAY);
     return () => clearTimeout(timer);
   }, [onCard, open, reduceMotion]);
 
@@ -68,7 +83,9 @@ export default function MotionPrompt() {
 
   return (
     <AnimatePresence>
-      {open && onBarberCard && (
+      {/* `onCard` (et plus seulement la carte du barber) : la fenêtre décidée sur /profile ou
+          /gang-card n'était jamais rendue alors que l'affichage était déjà compté */}
+      {open && onCard && (
         <>
           <motion.div
             key="motion-backdrop"

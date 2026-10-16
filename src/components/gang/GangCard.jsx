@@ -146,7 +146,7 @@ function Shell({ p, fx, animated, glareX, glareY, holoX, holoY, holoRotate, chil
       <div style={{ ...SHAPE, background: p.border }} />
       <FxRing fx={fx} animated={animated} />
       {/* Focus clavier : le liseré prend la couleur de l'encre (comme la maquette) */}
-      <div className="opacity-0 group-focus-visible:opacity-100" style={{ ...SHAPE, background: p.ink }} />
+      <div className="opacity-0 group-has-[.gang-flip:focus-visible]:opacity-100" style={{ ...SHAPE, background: p.ink }} />
       <div style={{ ...INNER, background: p.bg }}>
         <div style={{ position: 'absolute', inset: 0, backgroundImage: gangDecorCss(p) }} />
         <FxSurface fx={fx} />
@@ -535,7 +535,7 @@ export default function GangCard({
     const t = setTimeout(() => setShowArrival(false), gangFxArrivalMs(fx));
     return () => clearTimeout(t);
   }, [showArrival, fx]);
-  const arrivalDelay = showArrival ? fx.offset : 0;
+  const [arrivalDelay] = useState(() => (showArrival && fx ? fx.offset : 0));
   const fxCardRef = useRef(null);
   const surprise = useGangFxSurprise(fx, fxCardRef, { reduceMotion, shake: big && interactive && gyroGranted });
   const [ownFlipped, setOwnFlipped] = useState(false);
@@ -614,21 +614,17 @@ export default function GangCard({
     handlers.onClick = (e) => {
       const d = downAt.current;
       downAt.current = null;
-      if (d && Math.hypot(e.clientX - d.x, e.clientY - d.y) > TAP_SLOP) return;
+      // Sans appui enregistré, le geste a commencé ailleurs (bouton de surprise) : on ne retourne pas
+      if (!d || Math.hypot(e.clientX - d.x, e.clientY - d.y) > TAP_SLOP) return;
       toggle();
-    };
-    handlers.onKeyDown = (e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        toggle();
-      }
     };
   }
 
+  // La carte est un groupe (elle contient le bouton de la surprise : pas de bouton dans un bouton) ;
+  // le retournement au clavier et au lecteur d'écran passe par un bouton dédié, visible au focus
   const levelLabel = p.kind === 'edition' ? p.label : card?.tier_label || p.label;
-  const a11y = flippable
-    ? { role: 'button', tabIndex: 0, 'aria-label': `Carte ${levelLabel} de ${card?.name || 'client'} : retourner`, 'aria-pressed': isFlipped }
-    : { role: 'img', 'aria-label': `Carte ${levelLabel} de ${card?.name || 'client'}` };
+  const cardLabel = `Carte ${levelLabel} de ${card?.name || 'client'}`;
+  const a11y = flippable ? { role: 'group', 'aria-label': cardLabel } : { role: 'img', 'aria-label': cardLabel };
 
   return (
     <div
@@ -646,6 +642,17 @@ export default function GangCard({
         ...style,
       }}
     >
+      {flippable && (
+        <button
+          type="button"
+          className="gang-flip sr-only focus-visible:not-sr-only focus-visible:absolute focus-visible:left-1/2 focus-visible:-bottom-9 focus-visible:-translate-x-1/2 focus-visible:z-10 focus-visible:whitespace-nowrap focus-visible:rounded-full focus-visible:bg-background focus-visible:px-3 focus-visible:py-1 focus-visible:text-xs focus-visible:font-semibold focus-visible:text-foreground"
+          aria-pressed={isFlipped}
+          onClick={(e) => { e.stopPropagation(); toggle(); }}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          {isFlipped ? 'Remettre la carte à l’endroit' : 'Retourner la carte'}
+        </button>
+      )}
       <div style={{ position: 'absolute', left: 0, top: 0, width: W, height: H, transform: `scale(${size})`, transformOrigin: '0 0', perspective: 1100 }}>
         {big && <FxBehind fx={fx} animated={fxAnimated} arrival={showArrival} />}
         <div className={showArrival ? gangFxArrivalClass(fx) : undefined} style={{ position: 'absolute', inset: 0, transformStyle: 'preserve-3d' }}>

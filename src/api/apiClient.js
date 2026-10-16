@@ -10,6 +10,7 @@
  *   api.auth.me()
  *   api.auth.loginViaEmailPassword(email, password)
  *   api.auth.register(data)
+ *   api.auth.logout()
  *   api.auth.setToken(token)
  *   api.integrations.Core.UploadFile({ file })
  *   api.integrations.Core.SendEmail(data)
@@ -65,8 +66,10 @@ async function request(method, url, body) {
     // Jeton expiré ou révoqué en cours d'utilisation : AuthContext écoute cet événement
     // pour refermer la session et renvoyer vers la connexion, au lieu de laisser
     // l'interface afficher des listes vides en se croyant connectée.
-    // (les routes d'authentification sont exclues : un mot de passe erroné répond 401 aussi)
-    if (res.status === 401 && typeof window !== 'undefined' && !url.includes('/auth/')) {
+    // (les routes d'authentification sont exclues : un mot de passe erroné répond 401 aussi).
+    // Seulement si le jeton refusé est encore celui de la session : une requête partie avant une
+    // déconnexion ou une connexion à un autre compte ne doit pas fermer la nouvelle session.
+    if (res.status === 401 && typeof window !== 'undefined' && !url.includes('/auth/') && getToken() === token) {
       window.dispatchEvent(new CustomEvent('dhb:unauthorized'));
     }
     throw err;
@@ -151,9 +154,28 @@ const auth = {
    * GET /entities/User/me. Pour un client, le serveur renvoie aussi `access_token` quand le
    * jeton a plus de 12 h : la session est ainsi prolongée d'un an à chaque ouverture de l'app
    * (un client n'est jamais déconnecté). Le jeton est rangé ici et retiré de l'utilisateur.
+   *
+   * Course au renouvellement : si le jeton rangé a changé pendant la requête (déconnexion,
+   * connexion à un autre compte), la réponse concerne l'ancienne session. On ne range alors
+   * pas son `access_token` (il réécrirait l'ancien jeton par-dessus la nouvelle session) et on
+   * rejette avec `err.stale = true` : l'appelant ne doit pas non plus reprendre l'ancien compte.
    */
   async me() {
-    const data = await request('GET', `${API_BASE}/entities/User/me`);
+    const sentToken = getToken();
+    const staleError = () => {
+      const err = new Error('Session changée pendant la vérification');
+      err.stale = true;
+      return err;
+    };
+    let data;
+    try {
+      data = await request('GET', `${API_BASE}/entities/User/me`);
+    } catch (err) {
+      // Un 401 de l'ancien jeton ne dit rien de la nouvelle session
+      if (getToken() !== sentToken) throw staleError();
+      throw err;
+    }
+    if (getToken() !== sentToken) throw staleError();
     if (data && typeof data === 'object' && data.access_token) {
       saveToken(data.access_token);
       const { access_token: _renewed, ...user } = data;
@@ -169,6 +191,17 @@ const auth = {
       saveToken(data.access_token);
     }
     return data;
+  },
+
+  /**
+   * POST /auth/logout avec le jeton en cours : le serveur coupe le jeton d'un barber ou d'un
+   * admin (un client n'est jamais déconnecté, rien n'est fait pour lui). Le jeton local n'est
+   * pas effacé ici : c'est le rôle d'AuthContext.logout. Un 401 n'émet pas `dhb:unauthorized`
+   * (route `/auth/`).
+   */
+  async logout() {
+    if (!getToken()) return null;
+    return request('POST', `${API_BASE}/auth/logout`);
   },
 
   /** POST /auth/register */

@@ -31,6 +31,17 @@ const SHOW_DELAY = 2500;
 // ni sur le profil d'un barber, où s'ouvre la fenêtre du gyroscope (MotionPrompt)
 // Pages des cartes (barbers, carte Gang) : la fenêtre de l'effet 3D (MotionPrompt) y a la priorité
 const BLOCKED_PATHS = ['/booking', '/login', '/settings', '/barber/', '/gang-card', '/profile'];
+// Une fenêtre de la carte Gang est ouverte (révélation de niveau, story, écussons) : on réessaie
+const RETRY_DELAY = 2000;
+
+/** Révélation de niveau / story (`data-gang-overlay`) ou écussons (`data-gang-badge-overlay`) affichés */
+function gangOverlayOpen() {
+  try {
+    return !!document.querySelector('[data-gang-overlay], [data-gang-badge-overlay]');
+  } catch {
+    return false;
+  }
+}
 
 function readState() {
   try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; } catch { return {}; }
@@ -66,16 +77,20 @@ export default function NotificationPrompt() {
     if (!user || blocked || mode) return undefined;
     if (!isNative && !isStandaloneWeb()) return undefined;
     let cancelled = false;
-    const timer = setTimeout(async () => {
+    let timer;
+    const attempt = async () => {
       const status = await getPushPermission();
       const rule = RULES[status];
       if (cancelled || !rule) return;
       const state = readState();
       const entry = state[status] || { count: 0, last: 0 };
       if (entry.count >= rule.max || Date.now() - entry.last < rule.gap) return;
+      // Pas par-dessus une fenêtre de la carte Gang : on repasse plus tard, sans compter d'affichage
+      if (gangOverlayOpen()) { timer = setTimeout(attempt, RETRY_DELAY); return; }
       writeState({ ...state, [status]: { count: entry.count + 1, last: Date.now() } });
       setMode(status);
-    }, SHOW_DELAY);
+    };
+    timer = setTimeout(attempt, SHOW_DELAY);
     return () => { cancelled = true; clearTimeout(timer); };
   }, [user, blocked, mode]);
 

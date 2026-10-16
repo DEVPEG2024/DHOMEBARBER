@@ -85,11 +85,12 @@ export default function Profile() {
   };
 
   // Carte Gang : en tête du profil pour un client (le staff garde l'avatar). Rien de bloquant si
-  // la requête échoue : on retombe sur l'avatar.
+  // la requête échoue sans aucune donnée : on retombe sur l'avatar. Un rafraîchissement en
+  // arrière-plan qui échoue (`isError` avec la carte encore en cache) garde la carte affichée.
   const isClient = user?.role === 'user';
   const { data: gangData, isPending: gangPending, isError: gangError } = useGangCard({ enabled: !!user && isClient });
   const gangCard = gangData?.card || null;
-  const showGangHero = isClient && !gangError;
+  const showGangHero = isClient && !(gangError && !gangData);
   const cardSize = useProfileCardSize();
   const gangDesc = gangCard
     ? `${gangPalette(gangCard).label} · ${gangCard.visits} visite${Number(gangCard.visits) > 1 ? 's' : ''}`

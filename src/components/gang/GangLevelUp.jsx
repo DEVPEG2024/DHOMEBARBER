@@ -123,7 +123,8 @@ export function useGangStoryShare(card = null) {
     });
   }, []);
 
-  return { share, busy, dialog: <GangStoryFallback url={fallbackUrl} onClose={close} /> };
+  // `storyOpen` : la fenêtre de repli est affichée (elle passe alors avant l'écran appelant pour Échap)
+  return { share, busy, storyOpen: !!fallbackUrl, dialog: <GangStoryFallback url={fallbackUrl} onClose={close} /> };
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -166,7 +167,13 @@ function LevelUpReveal({ card, firstCard, onClose, onSeeCard, onAction }) {
   const reduceMotion = useReducedMotion();
   const closeRef = useRef(null);
   const [size] = useState(revealSize);
-  const { share, busy, dialog } = useGangStoryShare(card);
+  const { share, busy, storyOpen, dialog } = useGangStoryShare(card);
+  // Dernières valeurs lues par le clavier, sans réabonner l'écouteur à chaque rendu : `onClose`
+  // change quand la carte est rechargée (après « Partager », `markSeen` invalide la carte)
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const storyOpenRef = useRef(storyOpen);
+  storyOpenRef.current = storyOpen;
   const palette = gangPalette(card) || {};
   const tierLabel = card.tier_label || palette.label || 'Gang';
 
@@ -176,18 +183,24 @@ function LevelUpReveal({ card, firstCard, onClose, onSeeCard, onAction }) {
     return () => clearTimeout(timer);
   }, [reduceMotion]);
 
-  // Page figée derrière la révélation, focus sur la croix, Échap au clavier
+  // Page figée derrière la révélation, focus sur la croix, Échap au clavier. Une seule fois, à
+  // l'ouverture : dépendre de `onClose` ramenait le focus sur la croix à chaque rechargement de
+  // la carte. Échap ne ferme que la fenêtre du dessus : la story de repli si elle est affichée
+  // (elle a son propre écouteur), la révélation sinon.
   useEffect(() => {
     const previous = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     closeRef.current?.focus({ preventScroll: true });
-    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    const onKey = (e) => {
+      if (e.key !== 'Escape' || storyOpenRef.current) return;
+      onCloseRef.current();
+    };
     window.addEventListener('keydown', onKey);
     return () => {
       document.body.style.overflow = previous;
       window.removeEventListener('keydown', onKey);
     };
-  }, [onClose]);
+  }, []);
 
   // Avec la réduction des animations : tout est affiché d'emblée, sans mouvement
   const anim = (from, to, transition) => (reduceMotion

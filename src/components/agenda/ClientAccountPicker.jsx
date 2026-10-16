@@ -1,24 +1,13 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import React, { useEffect, useRef, useState } from 'react';
 import { Search, UserRound, UserX, Loader2, X, RefreshCw } from 'lucide-react';
-import { api } from '@/api/apiClient';
+import { apiRequest, apiUrl } from '@/api/apiClient';
 
-// Même clé de cache et même chargement que la recherche de la fiche RDV (last minute) :
-// les comptes ne sont téléchargés qu'une fois par session, par lots (OFFSET côté serveur).
-export const CLIENT_ACCOUNTS_QUERY_KEY = ['allUsersForSearch'];
-const USERS_PAGE_SIZE = 200;
-const USERS_MAX_PAGES = 25; // garde-fou : 5 000 comptes
-const MAX_RESULTS = 30;
-
-export async function fetchClientAccounts() {
-  const all = [];
-  for (let i = 0; i < USERS_MAX_PAGES; i++) {
-    const page = await api.entities.User.list('full_name', USERS_PAGE_SIZE, i * USERS_PAGE_SIZE);
-    all.push(...page);
-    if (page.length < USERS_PAGE_SIZE) break;
-  }
-  return all;
-}
+// Recherche côté serveur (`GET /clients/search?q=`, staff seulement) : 10 comptes clients au plus,
+// triés par pertinence. Avant, l'agenda téléchargeait jusqu'à 5 000 comptes (téléphone et date de
+// naissance compris) dès 2 lettres tapées, et la fiche « Modifier » le déclenchait à l'ouverture.
+const SEARCH_DELAY = 250; // ms sans frappe avant d'interroger le serveur
+const MAX_RESULTS = 10;
+const MAX_QUERY_LENGTH = 100;
 
 /** Minuscules sans accents : « Héloïse » et « heloise » se trouvent l'un l'autre. */
 export function foldText(value) {
@@ -26,57 +15,68 @@ export function foldText(value) {
 }
 
 const digitsOnly = (value) => String(value || '').replace(/\D/g, '');
+const lettersCount = (value) => (String(value || '').match(/\p{L}/gu) || []).length;
 
-/** Compte client (rôle `user`, ou sans rôle pour les très anciens comptes). */
+/** Même règle que le serveur : au moins 2 lettres (nom, email) ou 3 chiffres (téléphone), sinon 400. */
+export const isSearchableQuery = (value) => lettersCount(value) >= 2 || digitsOnly(value).length >= 3;
+
+/** Compte client (rôle `user`, ou sans rôle) : le serveur ne renvoie que ceux-là, on le revérifie. */
 const isClientAccount = (u) => !!u?.email && (!u.role || u.role === 'user');
 
-function matches(user, query) {
-  const q = foldText(query);
-  if (!q) return false;
-  const words = q.split(/\s+/).filter(Boolean);
-  const haystack = `${foldText(user.full_name)} ${foldText(user.email)}`;
-  if (words.every((w) => haystack.includes(w))) return true;
-  // Téléphone : « 06 12 34 », « 0612 », « +33 6 12 » → chiffres seulement (au moins 3)
-  const qDigits = digitsOnly(query);
-  if (qDigits.length >= 3) {
-    const phone = digitsOnly(user.phone);
-    if (phone.includes(qDigits)) return true;
-    // 06… saisi, +336… enregistré (ou l'inverse)
-    const local = (d) => (d.startsWith('33') ? `0${d.slice(2)}` : d);
-    if (local(phone).includes(local(qDigits))) return true;
-  }
-  return false;
+/** `[{ id, email, full_name, phone }]` (10 au plus). Rejette avec `err.status` (404 : route absente). */
+export async function searchClientAccounts(query) {
+  const q = String(query || '').trim().slice(0, MAX_QUERY_LENGTH);
+  const data = await apiRequest('GET', apiUrl(`/clients/search?q=${encodeURIComponent(q)}`));
+  const list = Array.isArray(data?.results) ? data.results : [];
+  return list.filter(isClientAccount).slice(0, MAX_RESULTS);
 }
 
 /**
- * Recherche d'un compte client par nom, email ou téléphone (insensible à la casse et aux accents).
- * `onSelect({ email, full_name, phone })` au choix d'un compte ; `onNoAccount()` (facultatif) affiche
- * le bouton « Aucun compte (nom libre) » ; `onClose()` (facultatif) ajoute une croix.
+ * Recherche d'un compte client par nom, email ou téléphone (insensible à la casse et aux accents,
+ * côté serveur). `onSelect({ email, full_name, phone })` au choix d'un compte ; `onNoAccount()`
+ * (facultatif) affiche le bouton « Aucun compte (nom libre) » ; `onClose()` (facultatif) ajoute
+ * une croix. `initialQuery` pré-remplit le champ sans lancer de recherche : elle ne part qu'à la
+ * première frappe ou au bouton « Rechercher ».
  */
 export default function ClientAccountPicker({ onSelect, onNoAccount, onClose, noAccountLabel = 'Aucun compte (nom libre)', autoFocus = true, initialQuery = '' }) {
   const [query, setQuery] = useState(initialQuery);
+  // Recherche armée par une frappe ou par le bouton : rien n'est envoyé à l'ouverture
+  const [armed, setArmed] = useState(false);
+  const [retryNonce, setRetryNonce] = useState(0);
+  // status : idle | loading | done | error | unavailable (route absente) | invalid (400)
+  const [search, setSearch] = useState({ status: 'idle', results: [] });
   const inputRef = useRef(null);
 
-  // Comptes chargés seulement quand une recherche commence (2 lettres ou 3 chiffres) : choisir
-  // « Aucun compte » ne télécharge rien
-  const searching = foldText(query).length >= 2 || digitsOnly(query).length >= 3;
-  const { data: users = [], isLoading, isError, refetch } = useQuery({
-    queryKey: CLIENT_ACCOUNTS_QUERY_KEY,
-    queryFn: fetchClientAccounts,
-    staleTime: 5 * 60 * 1000,
-    enabled: searching,
-  });
+  const trimmed = query.trim();
+  const searchable = isSearchableQuery(trimmed);
 
   useEffect(() => {
     // Sur téléphone, le clavier s'ouvre seulement après le tap qui a ouvert le panneau
     if (autoFocus) inputRef.current?.focus({ preventScroll: true });
   }, [autoFocus]);
 
-  const clients = useMemo(() => users.filter(isClientAccount), [users]);
-  const results = useMemo(() => {
-    if (foldText(query).length < 2 && digitsOnly(query).length < 3) return [];
-    return clients.filter((u) => matches(u, query)).slice(0, MAX_RESULTS);
-  }, [clients, query]);
+  useEffect(() => {
+    if (!armed || !searchable) {
+      setSearch({ status: 'idle', results: [] });
+      return undefined;
+    }
+    // Réponse d'une frappe précédente arrivée en retard : ignorée (`cancelled`)
+    let cancelled = false;
+    setSearch((prev) => ({ status: 'loading', results: prev.results }));
+    const timer = setTimeout(() => {
+      searchClientAccounts(trimmed)
+        .then((results) => { if (!cancelled) setSearch({ status: 'done', results }); })
+        .catch((err) => {
+          if (cancelled) return;
+          const status = err?.status === 404 ? 'unavailable' : err?.status === 400 ? 'invalid' : 'error';
+          setSearch({ status, results: [] });
+        });
+    }, SEARCH_DELAY);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [armed, searchable, trimmed, retryNonce]);
+
+  const { status, results } = search;
+  const loading = status === 'loading';
 
   return (
     <div className="rounded-xl border border-primary/25 bg-primary/5 p-3 space-y-2 min-w-0">
@@ -99,29 +99,41 @@ export default function ClientAccountPicker({ onSelect, onNoAccount, onClose, no
           autoComplete="off"
           placeholder="Nom, email ou téléphone"
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          maxLength={MAX_QUERY_LENGTH}
+          onChange={(e) => { setQuery(e.target.value); setArmed(true); }}
           className="w-full bg-white/5 border border-white/10 rounded-xl pl-9 pr-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-primary/50"
           aria-label="Rechercher un compte client"
         />
       </div>
 
-      {isLoading && (
-        <p className="text-[11px] text-muted-foreground flex items-center gap-1.5 py-1"><Loader2 className="w-3 h-3 animate-spin" /> Chargement des comptes…</p>
+      {/* Nom pré-rempli : la recherche ne part que sur demande */}
+      {!armed && searchable && (
+        <button type="button" onClick={() => setArmed(true)}
+          className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold bg-primary/15 text-primary hover:bg-primary/20 transition-colors min-w-0">
+          <Search className="w-3.5 h-3.5 shrink-0" /> <span className="truncate">Rechercher « {trimmed} »</span>
+        </button>
       )}
-      {isError && !users.length && (
+
+      {loading && (
+        <p className="text-[11px] text-muted-foreground flex items-center gap-1.5 py-1"><Loader2 className="w-3 h-3 animate-spin" /> Recherche…</p>
+      )}
+      {status === 'error' && (
         <div className="flex items-center justify-between gap-2 text-[11px] text-red-400 py-1">
-          <span>Impossible de charger les comptes (connexion ?).</span>
-          <button type="button" onClick={() => refetch()} className="font-semibold flex items-center gap-1 shrink-0">
+          <span>Recherche impossible (connexion ?).</span>
+          <button type="button" onClick={() => setRetryNonce((n) => n + 1)} className="font-semibold flex items-center gap-1 shrink-0">
             <RefreshCw className="w-3 h-3" /> Réessayer
           </button>
         </div>
       )}
-      {!isLoading && !searching && (
+      {status === 'unavailable' && (
+        <p className="text-[11px] text-amber-300 py-1">Recherche indisponible pour l’instant.</p>
+      )}
+      {(status === 'invalid' || !searchable) && (
         <p className="text-[11px] text-muted-foreground">Tapez au moins 2 lettres du nom ou de l’email, ou 3 chiffres du téléphone.</p>
       )}
 
-      {searching && results.length > 0 && (
-        <ul className="max-h-52 overflow-y-auto overscroll-contain rounded-lg border border-border bg-card divide-y divide-border/50">
+      {searchable && results.length > 0 && (
+        <ul className={`max-h-52 overflow-y-auto overscroll-contain rounded-lg border border-border bg-card divide-y divide-border/50 ${loading ? 'opacity-60' : ''}`}>
           {results.map((u) => (
             <li key={u.id || u.email}>
               <button
@@ -139,7 +151,7 @@ export default function ClientAccountPicker({ onSelect, onNoAccount, onClose, no
           ))}
         </ul>
       )}
-      {searching && !isLoading && results.length === 0 && users.length > 0 && (
+      {status === 'done' && results.length === 0 && (
         <p className="text-[11px] text-muted-foreground text-center py-1">Aucun compte client trouvé</p>
       )}
 

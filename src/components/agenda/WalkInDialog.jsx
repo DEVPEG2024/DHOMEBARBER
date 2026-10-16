@@ -6,7 +6,7 @@ import { api } from '@/api/apiClient';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import ClientAccountPicker, { foldText } from './ClientAccountPicker';
 import {
-  timeToMinutes, minutesToTime, addMinutesToTime, parseDateParam, slotIssues, appointmentEnd,
+  timeToMinutes, minutesToTime, addMinutesToTime, parseDateParam, slotIssues, appointmentEndParis,
   invalidateAppointmentQueries,
 } from './agendaUtils';
 
@@ -78,11 +78,13 @@ function WalkInForm({ employees, defaultEmployeeId, defaultDate, onCancel, onCre
   const totalPrice = selected.reduce((s, x) => s + (Number(x.price) || 0), 0);
   const endTime = validTime ? addMinutesToTime(startTime, effectiveDuration) : '';
 
-  // Fin déjà passée → « Prestation déjà terminée » cochée d'office (tant que le barber n'y a pas touché)
+  // Fin déjà passée → « Prestation déjà terminée » cochée d'office (tant que le barber n'y a pas touché).
+  // L'heure saisie est celle du salon (`nowRounded` part de l'heure de Paris) : la fin est donc
+  // calculée en instant réel à Paris, sinon la case se cochait à tort sur un appareil hors fuseau.
   const endPassed = useMemo(() => {
     if (!validDate || !validTime) return false;
-    const end = appointmentEnd({ date, start_time: startTime, end_time: endTime });
-    return !!end && end <= new Date();
+    const end = appointmentEndParis({ date, start_time: startTime, end_time: endTime });
+    return end != null && end <= Date.now();
   }, [validDate, validTime, date, startTime, endTime]);
   const done = doneChoice ?? endPassed;
 

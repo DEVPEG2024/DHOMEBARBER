@@ -4,6 +4,7 @@ import { AlertTriangle, Bell, Clock, Minus, Plus, X, Loader2, UserRound, Link2 }
 import { toast } from 'sonner';
 import { api } from '@/api/apiClient';
 import { getServiceColor } from '@/utils/serviceColors';
+import { useAppointmentOrders, orderItemsLabel } from '@/lib/appointmentProducts';
 import ClientAccountPicker from './ClientAccountPicker';
 import {
   timeToMinutes, addMinutesToTime, parseDateParam, slotIssues, isUpcomingSlot,
@@ -48,6 +49,11 @@ export default function AppointmentEditForm({ appointment, employees, onCancel, 
   const [clientEmail, setClientEmail] = useState(appointment.client_email || '');
   const [pickingAccount, setPickingAccount] = useState(false);
   const accountChanged = clientEmail !== (appointment.client_email || '');
+  // Produits commandés avec ce RDV (commandes `appointment_id`, encore à remettre) : ils restent
+  // sur le compte qui les a commandés, changer le compte du RDV ne les transfère pas
+  const { data: linkedOrdersMap } = useAppointmentOrders([appointment.id], { enabled: !!appointment.client_email });
+  const linkedOrders = linkedOrdersMap?.get(String(appointment.id)) || [];
+  const linkedProductsLabel = linkedOrders.map(orderItemsLabel).filter(Boolean).join(', ');
   // Le repère d'un last minute pris reste hors du champ (invisible, conservé à l'enregistrement)
   const hadLastMinuteMarker = String(appointment.internal_notes || '').includes(LAST_MINUTE_MARKER);
   const [internalNotes, setInternalNotes] = useState(stripLastMinuteMarker(appointment.internal_notes));
@@ -286,6 +292,16 @@ export default function AppointmentEditForm({ appointment, employees, onCancel, 
           {accountChanged && appointment.client_email && (
             <p className="text-[11px] text-amber-400">
               Ce rendez-vous quittera « Mes rendez-vous » de {appointment.client_email}{clientEmail ? `, et ses rappels iront à ${clientEmail}` : ''}.
+            </p>
+          )}
+          {accountChanged && appointment.client_email && linkedOrders.length > 0 && (
+            <p className="text-[11px] text-amber-400 flex items-start gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5 mt-px shrink-0" />
+              <span>
+                {linkedOrders.length > 1 ? `${linkedOrders.length} commandes de produits sont liées` : 'Une commande de produits est liée'} à ce rendez-vous
+                {linkedProductsLabel ? ` (${linkedProductsLabel})` : ''} : elle{linkedOrders.length > 1 ? 's restent' : ' reste'} sur
+                le compte de {appointment.client_email}{clientEmail ? `, rien n'est transféré à ${clientEmail}` : ''}.
+              </span>
             </p>
           )}
         </div>
