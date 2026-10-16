@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '@/api/apiClient';
 import { useQuery } from '@tanstack/react-query';
@@ -9,8 +9,8 @@ import { toast } from 'sonner';
 import ImageCropDialog, { unreadableImageMessage } from '@/components/shared/ImageCropDialog';
 import { parisInstant } from '@/lib/calendarLinks';
 import { formatPrice } from '@/components/services/serviceUtils';
-import { useGangCard } from '@/lib/gangCardApi';
-import GangCard from '@/components/gang/GangCard';
+import { useGangCard, useInvalidateGang } from '@/lib/gangCardApi';
+import GangCard, { GangCardPlaceholder } from '@/components/gang/GangCard';
 import { gangPalette } from '@/components/gang/gangTheme';
 
 // Fin d'un rendez-vous à l'heure de Paris (sans heure de fin : son début, sinon fin de journée)
@@ -18,6 +18,18 @@ const endsAt = (apt) => parisInstant(apt.date, apt.end_time || apt.start_time ||
 // Une visite = rendez-vous honoré : confirmé (le salon n'utilise pas « Valider la prestation »)
 // ou terminé, et dont l'heure de fin est passée
 const VISIT_STATUSES = ['confirmed', 'completed'];
+
+// Taille de la carte en tête du profil : la largeur de l'écran moins les marges, 0,9 au plus
+function useProfileCardSize() {
+  const compute = () => (typeof window === 'undefined' ? 0.8 : Math.max(0.62, Math.min(0.9, (Math.min(window.innerWidth, 512) - 56) / 300)));
+  const [size, setSize] = useState(compute);
+  useEffect(() => {
+    const onResize = () => setSize(compute());
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  return size;
+}
 
 const menuItems = [
   { icon: Calendar, label: 'Mes Rendez-vous', path: '/appointments', desc: 'Historique & prochains RDV' },
@@ -31,6 +43,7 @@ const menuItems = [
 ];
 
 export default function Profile() {
+  const invalidateGang = useInvalidateGang();
   const { user, logout, refreshUser } = useAuth();
   const fileInputRef = useRef(null);
   const [cropImage, setCropImage] = useState(null);
@@ -61,6 +74,8 @@ export default function Profile() {
       const { file_url } = await api.integrations.Core.UploadFile({ file: croppedFile });
       await api.entities.User.update(user.id, { photo_url: file_url });
       if (refreshUser) await refreshUser();
+      // La photo est aussi celle de la carte Gang
+      invalidateGang();
       toast.success('Photo de profil mise à jour');
     } catch (err) {
       toast.error(err?.message || 'Erreur lors de la mise à jour de la photo');
@@ -69,9 +84,13 @@ export default function Profile() {
     }
   };
 
-  // Carte Gang : mini-carte et niveau dans l'entrée du menu (rien de bloquant si la requête échoue)
-  const { data: gangData } = useGangCard({ enabled: !!user });
+  // Carte Gang : en tête du profil pour un client (le staff garde l'avatar). Rien de bloquant si
+  // la requête échoue : on retombe sur l'avatar.
+  const isClient = user?.role === 'user';
+  const { data: gangData, isPending: gangPending, isError: gangError } = useGangCard({ enabled: !!user && isClient });
   const gangCard = gangData?.card || null;
+  const showGangHero = isClient && !gangError;
+  const cardSize = useProfileCardSize();
   const gangDesc = gangCard
     ? `${gangPalette(gangCard).label} · ${gangCard.visits} visite${Number(gangCard.visits) > 1 ? 's' : ''}`
     : 'Ta carte de collection du Gang';
@@ -101,10 +120,28 @@ export default function Profile() {
       </div>
 
       <div className="relative max-w-lg mx-auto px-4 pt-8 pb-28">
-        {/* Hero Profile */}
+        {/* Hero Profile : la carte Gang en premier pour un client, sinon l'avatar */}
         <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="text-center mb-8">
-          {/* Avatar */}
-          <div className="relative inline-block mb-4">
+          {showGangHero && (
+            <div className="flex flex-col items-center mb-5">
+              {gangPending ? (
+                // Emplacement réservé pendant le chargement : la page ne saute pas
+                <div style={{ width: 300 * cardSize, height: 440 * cardSize }} aria-hidden="true" />
+              ) : gangCard ? (
+                <GangCard card={gangCard} size={cardSize} />
+              ) : (
+                <GangCardPlaceholder size={cardSize} />
+              )}
+              <Link to={gangCard ? '/gang-card' : '/booking'}
+                className="mt-4 inline-flex items-center gap-1.5 text-xs font-semibold text-primary">
+                {gangCard ? `${gangDesc} · voir ma carte et la collection` : 'Réserver ma première visite'}
+                <ChevronRight className="w-3.5 h-3.5" />
+              </Link>
+            </div>
+          )}
+
+          {/* Avatar (staff) ; pour un client, la photo est sur la carte : simple bouton pour la changer */}
+          <div className={`relative inline-block mb-4 ${showGangHero ? 'hidden' : ''}`}>
             <button
               onClick={() => fileInputRef.current?.click()}
               className="relative w-24 h-24 rounded-3xl overflow-hidden border border-primary/20 shadow-2xl shadow-primary/10 group"
@@ -142,6 +179,17 @@ export default function Profile() {
 
           <h1 className="font-display text-2xl font-bold text-foreground">{user?.full_name || 'Chargement...'}</h1>
           <p className="text-xs text-muted-foreground mt-1">{user?.email}</p>
+          {showGangHero && (
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-[11px] font-semibold text-muted-foreground hover:text-foreground transition-colors disabled:opacity-60"
+            >
+              <Camera className="w-3.5 h-3.5" />
+              {uploading ? 'Envoi…' : user?.photo_url ? 'Changer ma photo' : 'Ajouter ma photo sur la carte'}
+            </button>
+          )}
 
           {(user?.role === 'admin' || user?.role === 'manager') && (
             <Link to="/admin">
@@ -173,6 +221,7 @@ export default function Profile() {
         {/* Menu */}
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
           className="rounded-2xl overflow-hidden border border-white/8 bg-white/4 backdrop-blur-xl mb-5">
+          {isClient && !showGangHero && (
           <Link
             to="/gang-card"
             className="flex items-center justify-between px-4 py-3 hover:bg-white/5 transition-colors group border-b border-white/6"
@@ -195,6 +244,7 @@ export default function Profile() {
             </div>
             <ChevronRight className="w-4 h-4 text-muted-foreground/40 group-hover:text-muted-foreground transition-colors shrink-0" />
           </Link>
+          )}
           {menuItems.map((item, i) => (
             <Link
               key={item.path}
