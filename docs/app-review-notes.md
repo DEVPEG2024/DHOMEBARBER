@@ -18,9 +18,8 @@
 >   (3.1.3(e)).
 >
 > **À faire par la session du Mac, au prochain envoi (build 12)** : coller le bloc ci-dessous **en
-> tête** des notes de revue de la version. On peut aussi le poser tout de suite sur la 1.0.5 (build
-> 11) en examen, par l'API (`appStoreVersions/{id}` → `appStoreReviewDetail` → `notes`), sans
-> resoumettre. Garder sous ce bloc les paragraphes des versions précédentes.
+> tête** des notes de revue de la version (la 1.0.5, build 11, était déjà approuvée le 16 oct. 2026 :
+> rien à y changer). Garder sous ce bloc les paragraphes des versions précédentes.
 >
 > **Avant ce collage :**
 > - Déployer le filtre serveur de `docs/backend-content-filter.md`. Sinon, retirer « and on the
