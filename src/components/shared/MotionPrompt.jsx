@@ -5,6 +5,7 @@ import { Smartphone, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { hapticFeedback } from '@/lib/capacitor';
 import { motionPermissionPending, requestMotionPermission } from '@/lib/motion';
+import { useAuth } from '@/lib/AuthContext';
 
 /**
  * Fenêtre d'activation du gyroscope (effet 3D des cartes des barbers), même principe que
@@ -13,7 +14,8 @@ import { motionPermissionPending, requestMotionPermission } from '@/lib/motion';
  *
  * - Seulement sur iOS (seul système qui demande une autorisation) et tant que rien n'est décidé ;
  *   Android et ordinateurs ont l'effet d'emblée, sans fenêtre.
- * - Seulement sur `/barber/:id`, là où l'effet existe.
+ * - Seulement là où l'effet existe : `/barber/:id` (carte du barber), et pour un client `/profile`
+ *   et `/gang-card` (sa carte Gang, en tête du profil).
  * - « Plus tard » et croix : réaffichée au plus 3 fois, 7 jours d'écart.
  * - Pas d'affichage sous le système de réduction des animations (l'effet y est coupé).
  */
@@ -36,10 +38,13 @@ export default function MotionPrompt() {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
 
+  const { user } = useAuth();
   const onBarberCard = location.pathname.startsWith('/barber/');
+  const onGangCard = user?.role === 'user' && (location.pathname === '/profile' || location.pathname.startsWith('/gang-card'));
+  const onCard = onBarberCard || onGangCard;
 
   useEffect(() => {
-    if (!onBarberCard || open || reduceMotion || !motionPermissionPending()) return undefined;
+    if (!onCard || open || reduceMotion || !motionPermissionPending()) return undefined;
     const timer = setTimeout(() => {
       if (!motionPermissionPending()) return;
       const state = readState();
@@ -48,7 +53,7 @@ export default function MotionPrompt() {
       setOpen(true);
     }, SHOW_DELAY);
     return () => clearTimeout(timer);
-  }, [onBarberCard, open, reduceMotion]);
+  }, [onCard, open, reduceMotion]);
 
   const close = () => setOpen(false);
 
@@ -108,7 +113,7 @@ export default function MotionPrompt() {
               Fais bouger la carte
             </h2>
             <p className="text-center text-sm text-muted-foreground mt-2">
-              Active l’effet 3D : la carte du barber s’incline et brille quand tu bouges ton téléphone.
+              Active l’effet 3D : {onGangCard ? 'ta carte Gang' : 'la carte du barber'} s’incline et brille quand tu bouges ton téléphone.
               Rien n’est enregistré ni envoyé.
             </p>
 

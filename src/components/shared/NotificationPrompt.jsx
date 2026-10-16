@@ -29,7 +29,8 @@ const RULES = {
 const SHOW_DELAY = 2500;
 // Pas pendant un parcours : réservation, connexion, page de paramètres (interrupteur déjà là),
 // ni sur le profil d'un barber, où s'ouvre la fenêtre du gyroscope (MotionPrompt)
-const BLOCKED_PATHS = ['/booking', '/login', '/settings', '/barber/'];
+// Pages des cartes (barbers, carte Gang) : la fenêtre de l'effet 3D (MotionPrompt) y a la priorité
+const BLOCKED_PATHS = ['/booking', '/login', '/settings', '/barber/', '/gang-card', '/profile'];
 
 function readState() {
   try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; } catch { return {}; }
