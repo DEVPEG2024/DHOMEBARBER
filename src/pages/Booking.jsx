@@ -565,6 +565,14 @@ export default function Booking() {
   const preSelectedBarberId = urlParams.get('barber') || null;
   // « Déplacer » depuis Mes rendez-vous : l'ancien RDV n'est annulé qu'une fois le nouveau confirmé
   const rescheduleId = urlParams.get('reschedule') || null;
+  // Lien d'une notification Last Minute (`/booking?barber=…&date=AAAA-MM-JJ&time=HH:MM`) : avec un
+  // barber actif, la date puis l'heure annoncées sont déjà choisies quand le client arrive à l'étape
+  // Date & Heure (l'heure seulement si elle est encore libre pour ses prestations). Appliqué une fois.
+  const presetDateParam = urlParams.get('date') || '';
+  const presetDateKey = /^\d{4}-\d{2}-\d{2}$/.test(presetDateParam) ? presetDateParam : null;
+  const presetTimeMatch = /^(\d{1,2}):(\d{2})$/.exec(urlParams.get('time') || '');
+  const presetTime = presetTimeMatch ? `${presetTimeMatch[1].padStart(2, '0')}:${presetTimeMatch[2]}` : null;
+  const presetApplied = useRef({ date: false, time: false });
   const features = useCancelFeatures();
 
   // Mêmes clé et requête que Mes rendez-vous (cache partagé)
@@ -756,6 +764,15 @@ export default function Booking() {
     return d;
   }, [todayKey]);
 
+  // Lien Last Minute : date du lien sélectionnée si elle figure dans le bandeau (sinon rien)
+  useEffect(() => {
+    if (presetApplied.current.date || !presetDateKey || !preSelectedBarber) return;
+    presetApplied.current.date = true;
+    const match = selectedDate ? null : dates.find(d => format(d, 'yyyy-MM-dd') === presetDateKey);
+    if (match) setSelectedDate(match);
+    else presetApplied.current.time = true;
+  }, [preSelectedBarber, dates]);
+
   // Jour changé pendant la réservation : une date choisie désormais passée est retirée
   useEffect(() => {
     if (!selectedDate || format(selectedDate, 'yyyy-MM-dd') >= todayKey) return;
@@ -801,6 +818,18 @@ export default function Booking() {
       .map(([time, employee]) => ({ time, employee }));
     return { options, reason: options.length > 0 ? null : mergeDayReasons(reasons) };
   }, [anyBarber, selectedEmployee, selectedDate, slotsReady, appointments, timeOffs, totalDuration, shortestDuration, employees]);
+
+  // Lien Last Minute : à l'arrivée sur l'étape Date & Heure, l'heure du lien est choisie si elle
+  // figure parmi les créneaux calculés pour les prestations choisies (sinon rien, sans erreur)
+  useEffect(() => {
+    if (presetApplied.current.time || !presetTime || !presetApplied.current.date) return;
+    if (step !== 2 || !slotsReady || !selectedDate || !selectedEmployee || selectedServices.length === 0) return;
+    presetApplied.current.time = true;
+    if (anyBarber || selectedTime) return;
+    if (format(selectedDate, 'yyyy-MM-dd') !== presetDateKey) return;
+    if (String(selectedEmployee.id) !== String(preSelectedBarberId)) return;
+    if (slotOptions.some(o => o.time === presetTime)) setSelectedTime(presetTime);
+  }, [step, slotsReady, slotOptions, selectedDate, selectedEmployee]);
 
   /**
    * Repères du bandeau de dates (`yyyy-MM-dd` → `off` / `leave` / `closed`) : seulement ce qui est
