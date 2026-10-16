@@ -17,6 +17,7 @@ import MonthView from '@/components/agenda/MonthView';
 import BreakModal from '@/components/agenda/BreakModal';
 import AppointmentDetailModal from '@/components/agenda/AppointmentDetailModal';
 import MoveDialog, { buildMoveFields, saveMove } from '@/components/agenda/MoveDialog';
+import WalkInDialog from '@/components/agenda/WalkInDialog';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   BARBER_COLORS, timeToMinutes, toDateStr, parseDateParam, visibleRange, datesBetween,
@@ -90,6 +91,7 @@ export default function Agenda() {
   const [lastMinuteDialog, setLastMinuteDialog] = useState(false);
   const [lastMinuteForm, setLastMinuteForm] = useState({ date: '', start_time: '', end_time: '', employee_id: '' });
   const [sendingLastMinute, setSendingLastMinute] = useState(false);
+  const [walkInOpen, setWalkInOpen] = useState(false);
 
   // ─── Données : uniquement les jours affichés ───
   const dates = useMemo(() => {
@@ -283,6 +285,39 @@ export default function Agenda() {
     setSelected(null);
   };
 
+  // ─── Client venu sans rendez-vous (ou rendez-vous pris par téléphone) ───
+  // Jour proposé : aujourd'hui s'il est affiché (vue Semaine / Mois), sinon le jour courant de l'agenda.
+  // Barber proposé : celui affiché, sinon le barber connecté.
+  const todayKey = toDateStr(new Date());
+  const walkInDate = view !== 'day' && dateSet.has(todayKey) ? todayKey : dateKey;
+  const walkInEmployeeId = employeeFilter !== 'all'
+    ? String(employeeFilter)
+    : (user?.employee_id && employees.some((e) => String(e.id) === String(user.employee_id)) ? String(user.employee_id) : '');
+
+  const handleWalkInCreated = (apt, { done }) => {
+    setWalkInOpen(false);
+    refreshAll();
+    const newDate = apt?.date ? String(apt.date).slice(0, 10) : null;
+    const params = {};
+    if (newDate && !dateSet.has(newDate)) params.date = newDate;
+    // Agenda filtré sur un autre barber : on passe sur celui du client saisi, sinon il serait invisible
+    if (apt?.employee_id && employeeFilter !== 'all' && String(employeeFilter) !== String(apt.employee_id)) {
+      params.barber = String(apt.employee_id);
+    }
+    if (Object.keys(params).length) updateParams(params);
+    const who = apt?.client_name || 'Client';
+    // Prestation déjà terminée : la fiche s'ouvre pour « Valider la prestation » (encaissement) ; pas de
+    // notification par-dessus, elle cachait la croix de la fiche
+    if (done && apt?.id) {
+      setSelected(apt);
+      return;
+    }
+    toast.success(`${who} ajouté à ${String(apt?.start_time || '').slice(0, 5)}${apt?.employee_name ? ` avec ${apt.employee_name}` : ''}`, {
+      description: 'À la fin, ouvrez sa fiche et touchez « Valider la prestation ».',
+      action: apt?.id ? { label: 'Ouvrir', onClick: () => setSelected(apt) } : undefined,
+    });
+  };
+
   // ─── Pause ou créneau sans client : enregistré tout de suite, « Annuler » dans la notification ───
   const quickSave = (apt, fields, message) => {
     const before = Object.fromEntries(Object.keys(fields).map((k) => [k, apt[k] ?? null]));
@@ -435,7 +470,7 @@ export default function Agenda() {
   const onTouchEnd = (e) => {
     const s = swipe.current;
     swipe.current = null;
-    if (!s || selected || selectedBreak || pendingBreak || pendingMove) return;
+    if (!s || selected || selectedBreak || pendingBreak || pendingMove || walkInOpen) return;
     const t = e.changedTouches[0];
     const dx = t.clientX - s.x;
     const dy = t.clientY - s.y;
@@ -463,6 +498,7 @@ export default function Agenda() {
         onDateChange={setDate}
         onStep={step}
         onExport={handleExport}
+        onAddClient={() => setWalkInOpen(true)}
         loading={isFetching}
       />
 
@@ -577,6 +613,15 @@ export default function Agenda() {
         onClose={() => setSelected(null)}
         onChanged={handleChanged}
         onDeleted={handleDeleted}
+      />
+
+      <WalkInDialog
+        open={walkInOpen}
+        onClose={() => setWalkInOpen(false)}
+        employees={employees}
+        defaultEmployeeId={walkInEmployeeId}
+        defaultDate={walkInDate}
+        onCreated={handleWalkInCreated}
       />
 
       <MoveDialog

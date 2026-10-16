@@ -9,7 +9,10 @@ import GangCard, { GangCardPlaceholder } from '@/components/gang/GangCard';
 import { gangPalette } from '@/components/gang/gangTheme';
 import GangLeaderboard from '@/components/gang/GangLeaderboard';
 import { useGangStoryShare } from '@/components/gang/GangLevelUp';
-import { useGangCard, setGangLeaderboardOptIn, useInvalidateGang, GANG_TIER_ORDER } from '@/lib/gangCardApi';
+import { GangBadgeGrid } from '@/components/gang/GangBadges';
+import {
+  useGangCard, setGangLeaderboardOptIn, useInvalidateGang, GANG_TIER_ORDER, GANG_SEASONS, gangSeasonUntil,
+} from '@/lib/gangCardApi';
 import { hapticFeedback } from '@/lib/capacitor';
 
 /**
@@ -92,6 +95,12 @@ export default function GangCardPage() {
   const card = data?.card || null;
   const { share, busy: sharing, dialog: shareDialog } = useGangStoryShare(card);
   const palette = card ? gangPalette(card) || {} : {};
+  // Édition de saison (Halloween, Noël…) : libellé connu ici même si la palette n'existe pas encore
+  const season = card?.edition ? GANG_SEASONS[card.edition] || null : null;
+  const seasonUntil = season ? gangSeasonUntil(card.edition) : null;
+  const editionLabel = season?.label || palette.label;
+  const badges = Array.isArray(card?.badges) ? card.badges : [];
+  const unlockedBadges = badges.filter((b) => b?.unlocked).length;
 
   // Interrupteur du classement : affiché tout de suite, rétabli si le serveur refuse
   const [optIn, setOptIn] = useState(null);
@@ -174,8 +183,13 @@ export default function GangCardPage() {
                   border: `1px solid ${/^#[0-9a-f]{6}$/i.test(palette.accent || '') ? `${palette.accent}55` : 'rgba(255,255,255,0.1)'}`,
                 }}
               >
-                {card.edition ? `Édition limitée · ${palette.label}` : (palette.label || card.tier_label)}
+                {card.edition ? `Édition limitée · ${editionLabel}` : (palette.label || card.tier_label)}
               </span>
+              {season && seasonUntil && (
+                <p className="-mt-1 mb-3 text-[11px] font-semibold text-muted-foreground text-center">
+                  Édition {season.label} : jusqu’au {seasonUntil}
+                </p>
+              )}
               <GangCard card={card} size={size} flippable interactive />
               <p className="mt-3 text-xs text-muted-foreground">Touche ta carte pour la retourner</p>
 
@@ -283,6 +297,22 @@ export default function GangCardPage() {
                 })}
               </ul>
             </motion.section>
+
+            {/* Les écussons : liste complète du serveur, verrouillés compris */}
+            {badges.length > 0 && (
+              <motion.section {...fade(0.15)} aria-labelledby="gang-badges" className="mt-8">
+                <div className="flex items-baseline justify-between gap-3 mb-3">
+                  <h2 id="gang-badges" className="font-fut text-xl font-extrabold uppercase tracking-wide text-foreground leading-none">
+                    Tes écussons
+                  </h2>
+                  <p className="font-fut text-base font-bold tabular-nums shrink-0" style={{ color: palette.accent }}>
+                    {unlockedBadges} / {badges.length}
+                    <span className="sr-only"> écussons débloqués</span>
+                  </p>
+                </div>
+                <GangBadgeGrid badges={badges} accent={palette.accent} />
+              </motion.section>
+            )}
           </>
         )}
 

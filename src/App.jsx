@@ -71,6 +71,7 @@ const AdminSnap = React.lazy(() => import('@/pages/admin/AdminSnap'));
 const AdminPartners = React.lazy(() => import('@/pages/admin/AdminPartners'));
 const AdminFeedback = React.lazy(() => import('@/pages/admin/AdminFeedback'));
 const AdminActivity = React.lazy(() => import('@/pages/admin/AdminActivity'));
+const AdminGangCards = React.lazy(() => import('@/pages/admin/AdminGangCards'));
 
 const LazyFallback = () => (
   <div className="fixed inset-0 flex items-center justify-center bg-background">
@@ -273,6 +274,7 @@ const AppRoutes = () => {
           <Route path="/admin/partners" element={<Suspense fallback={<LazyFallback />}><AdminPartners /></Suspense>} />
           <Route path="/admin/feedback" element={<Suspense fallback={<LazyFallback />}><AdminFeedback /></Suspense>} />
           <Route path="/admin/activity" element={<Suspense fallback={<LazyFallback />}><AdminActivity /></Suspense>} />
+          <Route path="/admin/gang-cards" element={<Suspense fallback={<LazyFallback />}><AdminGangCards /></Suspense>} />
           <Route path="/admin/my-settings" element={<Suspense fallback={<LazyFallback />}><BarberSettings /></Suspense>} />
         </Route>
       </Route>

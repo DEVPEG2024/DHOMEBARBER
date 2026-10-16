@@ -28,6 +28,11 @@ import {
   gangNextLabel,
   gangNextProgress,
   gangSerialLabel,
+  GANG_SEASON_DECOR,
+  GANG_BAT_PATH,
+  GANG_STAR_PATH,
+  GANG_BAT_FILL,
+  GANG_BAT_STROKE,
 } from './gangTheme';
 
 /**
@@ -36,7 +41,10 @@ import {
  *
  * Recto : note, poste, pastille du niveau, logo, photo (ou silhouette), nom,
  * six stats (FRA en rouge sous 50), niveau. Verso : visites, barber, favori,
- * dernière visite, ancienneté, progression vers le niveau suivant, numéro.
+ * dernière visite, ancienneté, progression vers le niveau suivant, écussons
+ * débloqués (`card.badges`, 7 pastilles au plus), numéro.
+ * Éditions de saison (Halloween, Noël, Fête des pères, Été) : décor propre à la
+ * saison au recto (SeasonDecor), animé en grand, immobile sur une vignette.
  *
  * Animations (transform / opacity uniquement) : la carte s'incline et le reflet
  * suit le doigt ou la souris, retour au repos au relâchement ; tap / Entrée /
@@ -157,10 +165,139 @@ function Logo({ size, style }) {
   );
 }
 
+/* ── Décor de saison (Halloween, Noël, Fête des pères, Été) ────────────────
+ * Sous le texte, au-dessus du fond. Animé en CSS (transform / opacity seulement,
+ * rendu par le compositeur) sur une grande carte, immobile sur une vignette ou
+ * avec la réduction des animations. */
+
+const DECOR_KEYFRAMES = `
+@keyframes gang-fall{0%{transform:translate3d(0,-24px,0)}25%{transform:translate3d(6px,98px,0)}50%{transform:translate3d(0,220px,0)}75%{transform:translate3d(-6px,342px,0)}100%{transform:translate3d(0,464px,0)}}
+@keyframes gang-hover{0%,100%{transform:translate3d(0,0,0)}50%{transform:translate3d(9px,-11px,0)}}
+@keyframes gang-flap{0%,100%{transform:scaleY(1)}50%{transform:scaleY(.55)}}
+@keyframes gang-glow{0%,100%{opacity:.12;transform:translate3d(0,0,0)}50%{opacity:.95;transform:translate3d(4px,-9px,0)}}
+@keyframes gang-twinkle{0%,100%{opacity:.12;transform:scale(.55)}50%{opacity:.9;transform:scale(1)}}
+@keyframes gang-spin{to{transform:rotate(360deg)}}
+@keyframes gang-rise{0%{opacity:0;transform:translate3d(0,0,0)}25%{opacity:.85}100%{opacity:0;transform:translate3d(0,-70px,0)}}
+`;
+
+const abs = { position: 'absolute', pointerEvents: 'none' };
+const loop = (name, dur, delay, ease = 'ease-in-out') => `${name} ${dur}s ${ease} ${delay}s infinite`;
+
+function SnowDecor({ animated }) {
+  return GANG_SEASON_DECOR.snow.map((f, i) => {
+    const d = f.r * 2;
+    const dot = { width: d, height: d, borderRadius: '50%', background: `radial-gradient(circle, rgba(255,255,255,${f.o}) 40%, rgba(255,255,255,0) 100%)` };
+    if (!animated) return <i key={i} style={{ ...abs, ...dot, left: f.x - f.r, top: f.y - f.r }} />;
+    // Chute avec un léger balancement, commencée en cours de cycle (à la hauteur `y` du flocon)
+    const phase = -((f.y + 24) / 488) * f.dur;
+    return <i key={i} style={{ ...abs, ...dot, left: f.x - f.r, top: 0, animation: loop('gang-fall', f.dur, phase, 'linear') }} />;
+  });
+}
+
+function BatsDecor({ animated }) {
+  const { bats, fireflies } = GANG_SEASON_DECOR;
+  return (
+    <>
+      {fireflies.map((f, i) => {
+        const d = f.r * 4;
+        return (
+          <i
+            key={`f${i}`}
+            style={{
+              ...abs, left: f.x - d / 2, top: f.y - d / 2, width: d, height: d, borderRadius: '50%',
+              background: 'radial-gradient(circle, rgba(255,190,90,1) 0 22%, rgba(255,128,26,.45) 38%, rgba(255,128,26,0) 70%)',
+              opacity: animated ? undefined : 0.6,
+              animation: animated ? loop('gang-glow', f.dur, -i * 0.9) : undefined,
+            }}
+          />
+        );
+      })}
+      {bats.map((b, i) => (
+        <i
+          key={`b${i}`}
+          style={{
+            ...abs, left: b.x - 12 * b.s, top: b.y - 5 * b.s, width: 24 * b.s, height: 10 * b.s,
+            animation: animated ? loop('gang-hover', b.dur, -i * 1.3) : undefined,
+          }}
+        >
+          <svg
+            viewBox="0 0 24 10"
+            style={{ display: 'block', width: '100%', height: '100%', transformOrigin: '50% 45%', animation: animated ? loop('gang-flap', b.flap, -i * 0.11) : undefined }}
+          >
+            <path d={GANG_BAT_PATH} fill={GANG_BAT_FILL} stroke={GANG_BAT_STROKE} strokeWidth=".6" />
+          </svg>
+        </i>
+      ))}
+    </>
+  );
+}
+
+function StarsDecor({ animated, color }) {
+  return GANG_SEASON_DECOR.stars.map((s, i) => (
+    <svg
+      key={i}
+      viewBox="0 0 10 10"
+      style={{
+        ...abs, left: s.x - s.s / 2, top: s.y - s.s / 2, width: s.s, height: s.s,
+        opacity: animated ? undefined : 0.45,
+        animation: animated ? loop('gang-twinkle', s.dur, -i * 0.65) : undefined,
+      }}
+    >
+      <path d={GANG_STAR_PATH} fill={color} />
+    </svg>
+  ));
+}
+
+function SunDecor({ animated, color }) {
+  const { sun, sparkles } = GANG_SEASON_DECOR;
+  const R = sun.rayRadius;
+  const step = 360 / sun.rays;
+  const rays = `repeating-conic-gradient(from 0deg, rgba(255,226,120,${sun.rayAlpha}) 0deg ${step * 0.35}deg, transparent ${step * 0.35}deg ${step}deg)`;
+  const fade = 'radial-gradient(circle closest-side, #000 18%, rgba(0,0,0,.5) 55%, transparent 100%)';
+  return (
+    <>
+      {/* Rayons : grand disque à rayures coniques, fondu vers l'extérieur, qui tourne lentement */}
+      <i
+        style={{
+          ...abs, left: sun.cx - R, top: sun.cy - R, width: R * 2, height: R * 2, borderRadius: '50%',
+          background: rays, WebkitMaskImage: fade, maskImage: fade,
+          animation: animated ? `gang-spin ${sun.dur}s linear infinite` : undefined,
+        }}
+      />
+      {/* Halo du soleil (fixe) */}
+      <i style={{ ...abs, left: sun.cx - 70, top: sun.cy - 70, width: 140, height: 140, borderRadius: '50%', background: 'radial-gradient(circle, rgba(255,230,140,.55) 0%, rgba(255,190,80,.18) 45%, rgba(255,190,80,0) 70%)' }} />
+      {sparkles.map((s, i) => (
+        <i
+          key={i}
+          style={{
+            ...abs, left: s.x - s.r, top: s.y - s.r, width: s.r * 2, height: s.r * 2, borderRadius: '50%', background: color,
+            opacity: animated ? 0 : 0.5,
+            animation: animated ? loop('gang-rise', s.dur, -i * 1.1, 'ease-out') : undefined,
+          }}
+        />
+      ))}
+    </>
+  );
+}
+
+/** Décor de la saison de la palette (rien hors saison). */
+function SeasonDecor({ p, animated }) {
+  if (!p.decor) return null;
+  return (
+    <div aria-hidden="true" style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none', zIndex: 1 }}>
+      {animated && <style>{DECOR_KEYFRAMES}</style>}
+      {p.decor === 'snow' && <SnowDecor animated={animated} />}
+      {p.decor === 'bats' && <BatsDecor animated={animated} />}
+      {p.decor === 'stars' && <StarsDecor animated={animated} color={p.accent} />}
+      {p.decor === 'sun' && <SunDecor animated={animated} color={p.accent} />}
+    </div>
+  );
+}
+
 /** Taille du nom selon sa longueur (largeur utile 256 px). */
 const nameFontSize = (name) => (name.length <= 12 ? 40 : name.length <= 15 ? 34 : 30);
 
-function Front({ card, p, entrance }) {
+function Front({ card, p, entrance, decorAnimated }) {
   const [failedSrc, setFailedSrc] = useState(null);
   const photo = card?.photo_url && failedSrc !== card.photo_url ? card.photo_url : null;
   const score = gangScore(card);
@@ -180,6 +317,7 @@ function Front({ card, p, entrance }) {
 
   return (
     <div className="font-fut" style={{ position: 'absolute', inset: 0, color: p.ink }}>
+      <SeasonDecor p={p} animated={decorAnimated} />
       {/* Note, poste, niveau, logo */}
       <div style={{ position: 'absolute', left: 30, top: 40, width: 62, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, zIndex: 3 }}>
         <b style={{ fontSize: 58, fontWeight: 800, lineHeight: 0.8, fontVariantNumeric: 'tabular-nums' }}><CountUp value={score} delay={0.35} duration={1.3} run={entrance} /></b>
@@ -274,16 +412,20 @@ function Back({ card, p }) {
     ['Depuis', gangSinceLabel(card?.first_visit)],
   ];
   const ellipsis = { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 };
+  // Écussons débloqués (7 au plus, ordre du serveur), en petites pastilles sous la progression
+  const badges = (Array.isArray(card?.badges) ? card.badges : []).filter((b) => b?.unlocked && b.emoji).slice(0, 7);
+  const light = p.key === 'icone';
 
   return (
     <div
       className="font-fut"
       style={{
         position: 'absolute', inset: 0, color: p.ink, display: 'flex', flexDirection: 'column', alignItems: 'center',
-        padding: '30px 44px 0', gap: 7, zIndex: 3, textAlign: 'center',
+        // Avec des écussons, le verso se resserre pour garder la rangée au-dessus du numéro
+        padding: badges.length ? '22px 44px 0' : '30px 44px 0', gap: badges.length ? 5 : 7, zIndex: 3, textAlign: 'center',
       }}
     >
-      <Logo size={40} />
+      <Logo size={badges.length ? 36 : 40} />
       <div style={{ fontSize: 80, fontWeight: 800, lineHeight: 0.82, fontVariantNumeric: 'tabular-nums' }}>{visits}</div>
       <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: '.2em', textTransform: 'uppercase', color: p.accent }}>
         {visits > 1 ? 'Visites au salon' : 'Visite au salon'}
@@ -302,6 +444,27 @@ function Back({ card, p }) {
           <i style={{ display: 'block', height: '100%', width: `${gangNextProgress(card?.next)}%`, background: p.accent }} />
         </div>
       </div>
+      {badges.length > 0 && (
+        <div
+          role="img"
+          aria-label={`Écussons : ${badges.map((b) => b.label).join(', ')}`}
+          style={{ display: 'flex', justifyContent: 'center', gap: 5, marginTop: 9 }}
+        >
+          {badges.map((b) => (
+            <span
+              key={b.key}
+              style={{
+                width: 26, height: 26, borderRadius: '50%', display: 'grid', placeItems: 'center', fontSize: 14, lineHeight: 1,
+                background: light ? 'rgba(20,21,31,.07)' : 'rgba(255,255,255,.1)',
+                boxShadow: `0 0 0 1px ${p.accent}${/^#[0-9a-f]{6}$/i.test(p.accent) ? '66' : ''} inset`,
+                fontFamily: 'system-ui, "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif',
+              }}
+            >
+              {b.emoji}
+            </span>
+          ))}
+        </div>
+      )}
       {serial && (
         <div style={{ position: 'absolute', left: 0, right: 0, top: 394, fontSize: 12, fontWeight: 600, letterSpacing: '.18em', color: p.accent, opacity: 0.6 }}>
           {serial}
@@ -457,7 +620,7 @@ export default function GangCard({
           >
             <div style={{ ...SIDE, transform: 'rotateY(0deg)' }} aria-hidden={isFlipped || undefined}>
               <Shell p={p} glareX={glareXFront} glareY={glareY} holoX={holoXFront} holoY={holoY} holoRotate={holoRotate}>
-                <Front card={card} p={p} entrance={entrance} />
+                <Front card={card} p={p} entrance={entrance} decorAnimated={big && !reduceMotion && !isFlipped} />
               </Shell>
             </div>
             <div style={{ ...SIDE, transform: 'rotateY(180deg)' }} aria-hidden={!isFlipped || undefined}>

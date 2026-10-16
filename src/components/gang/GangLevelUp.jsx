@@ -6,10 +6,11 @@ import { X, Share2, IdCard, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/AuthContext';
 import { hapticFeedback, isNative } from '@/lib/capacitor';
-import { useGangCard, markGangTierSeen, useInvalidateGang } from '@/lib/gangCardApi';
+import { useGangCard, markGangSeen, markGangTierSeen, useInvalidateGang, GANG_BADGE_INFO } from '@/lib/gangCardApi';
 import { renderGangStory, shareGangStory } from '@/lib/gangStory';
 import GangCard from '@/components/gang/GangCard';
 import { gangPalette } from '@/components/gang/gangTheme';
+import { GangBadgeUnlock } from '@/components/gang/GangBadges';
 
 /* ────────────────────────────────────────────────────────────────────────────
  * Partage en story, commun à la révélation et à la page « Ta carte Gang ».
@@ -126,7 +127,10 @@ export function useGangStoryShare(card = null) {
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
- * Révélation d'un nouveau niveau, montée une fois dans ClientLayout.
+ * Révélation d'un nouveau niveau, montée une fois dans ClientLayout, puis des écussons
+ * nouvellement débloqués (`new_badges` du serveur, animation `GangBadgeUnlock`) : après la
+ * révélation du niveau si les deux arrivent ensemble, seuls sinon. Mêmes garde-fous : jamais
+ * sur /booking ni /login, après la fenêtre des notifications, une seule fois par session.
  * ──────────────────────────────────────────────────────────────────────────── */
 
 // Délai avant la révélation, et délai minimal depuis l'ouverture de l'app : la fenêtre des
@@ -157,6 +161,8 @@ function revealSize() {
 }
 
 function LevelUpReveal({ card, firstCard, onClose, onSeeCard, onAction }) {
+  // Copie floutée retirée une fois effacée (sinon le flou est recalculé à chaque image)
+  const [blurDone, setBlurDone] = useState(false);
   const reduceMotion = useReducedMotion();
   const closeRef = useRef(null);
   const [size] = useState(revealSize);
@@ -250,7 +256,7 @@ function LevelUpReveal({ card, firstCard, onClose, onSeeCard, onAction }) {
           style={{ width: w, height: h }}
           {...anim({ opacity: 0, y: 90, scale: 0.75 }, { opacity: 1, y: 0, scale: 1 }, { duration: 1.6, delay: 0.9, ease: RISE_EASE })}
         >
-          {!reduceMotion && (
+          {!reduceMotion && !blurDone && (
             <motion.div
               aria-hidden="true"
               className="absolute inset-0"
@@ -258,6 +264,7 @@ function LevelUpReveal({ card, firstCard, onClose, onSeeCard, onAction }) {
               initial={{ opacity: 1 }}
               animate={{ opacity: 0 }}
               transition={{ duration: 1.3, delay: 1.1, ease: 'easeOut' }}
+              onAnimationComplete={() => setBlurDone(true)}
             >
               <GangCard card={card} size={size} flippable={false} interactive={false} />
             </motion.div>
@@ -312,6 +319,19 @@ function LevelUpReveal({ card, firstCard, onClose, onSeeCard, onAction }) {
   );
 }
 
+/** Écussons à jouer : objets complets de la carte, repli sur les libellés connus. */
+function resolveBadges(card, keys) {
+  const list = Array.isArray(card?.badges) ? card.badges : [];
+  return keys
+    .map((key) => {
+      const found = list.find((b) => b?.key === key);
+      if (found) return { ...found, unlocked: true };
+      const info = GANG_BADGE_INFO[key];
+      return info ? { key, ...info, description: '', unlocked: true, progress: null } : null;
+    })
+    .filter(Boolean);
+}
+
 export default function GangLevelUp() {
   const { user } = useAuth();
   const location = useLocation();
@@ -320,32 +340,69 @@ export default function GangLevelUp() {
   const isClient = user?.role === 'user';
   const { data } = useGangCard({ enabled: isClient });
   const mountedAt = useRef(Date.now());
-  // Niveau déjà révélé pendant cette session (évite une seconde révélation avant le rechargement)
+  // Niveau et écussons déjà montrés pendant cette session (évite une seconde animation avant le rechargement)
   const handledTier = useRef(null);
-  const [shown, setShown] = useState(null); // { card, firstCard } pendant la révélation
+  const handledBadges = useRef(new Set());
+  // Autre compte connecté dans la même session : ses révélations ne sont pas encore jouées
+  const handledFor = useRef(null);
+  if (handledFor.current !== (user?.id ?? null)) {
+    handledFor.current = user?.id ?? null;
+    handledTier.current = null;
+    handledBadges.current = new Set();
+  }
+  // { kind: 'level', card, firstCard, badgeKeys } | { kind: 'badges', keys, badges }
+  const [shown, setShown] = useState(null);
 
   const card = data?.card || null;
   const blocked = BLOCKED_PATHS.some((p) => location.pathname.startsWith(p));
-  const pending = isClient && !!data?.level_up && !!card && handledTier.current !== card.tier;
+  const pendingLevel = isClient && !!data?.level_up && !!card && handledTier.current !== card.tier;
+  const newBadgeKeys = isClient && card && Array.isArray(data?.new_badges)
+    ? data.new_badges.map(String).filter((k) => !handledBadges.current.has(k))
+    : [];
+  const badgeSignature = newBadgeKeys.join(',');
+  const pendingBadges = newBadgeKeys.length > 0;
+
+  // Écussons notés comme vus (ils ne repasseront plus), puis la carte est rechargée
+  const finishBadges = useCallback((keys) => {
+    if (!keys?.length) return;
+    markGangSeen({ badges: keys })
+      .catch(() => { /* réessayé à la prochaine ouverture de l'app */ })
+      .finally(invalidateGang);
+  }, [invalidateGang]);
+
+  // Lance l'animation des écussons (ou les marque vus d'office s'il n'y a rien à montrer)
+  const startBadges = useCallback((keys) => {
+    keys.forEach((k) => handledBadges.current.add(k));
+    const badges = resolveBadges(card, keys);
+    if (!badges.length) { finishBadges(keys); setShown(null); return; }
+    setShown({ kind: 'badges', keys, badges });
+  }, [card, finishBadges]);
 
   useEffect(() => {
-    if (!pending || blocked || shown) return undefined;
+    if ((!pendingLevel && !pendingBadges) || blocked || shown) return undefined;
     let timer;
     const attempt = () => {
       if (otherDialogOpen()) { timer = setTimeout(attempt, RETRY_DELAY); return; }
-      handledTier.current = card.tier;
-      setShown({ card, firstCard: !data?.seen_tier });
+      if (pendingLevel) {
+        handledTier.current = card.tier;
+        // Les écussons arrivés en même temps passeront après la révélation du niveau
+        newBadgeKeys.forEach((k) => handledBadges.current.add(k));
+        setShown({ kind: 'level', card, firstCard: !data?.seen_tier, badgeKeys: newBadgeKeys });
+      } else {
+        startBadges(newBadgeKeys);
+      }
     };
     const wait = Math.max(SHOW_DELAY, MIN_SINCE_MOUNT - (Date.now() - mountedAt.current));
     timer = setTimeout(attempt, wait);
     return () => clearTimeout(timer);
-  }, [pending, blocked, shown, card, data?.seen_tier]);
+  // `badgeSignature` résume `newBadgeKeys` (nouveau tableau à chaque rendu)
+  }, [pendingLevel, pendingBadges, badgeSignature, blocked, shown, card, data?.seen_tier, startBadges]);
 
   // Le niveau est noté comme vu (la révélation ne repassera plus), puis la carte est rechargée.
   // Une seule fois par révélation, qu'on partage, qu'on ouvre la carte ou qu'on ferme.
   const seenSent = useRef(null);
   const markSeen = useCallback(() => {
-    if (!shown || seenSent.current === shown) return;
+    if (!shown || shown.kind !== 'level' || seenSent.current === shown) return;
     seenSent.current = shown;
     markGangTierSeen(shown.card.tier)
       .catch(() => { /* réessayé à la prochaine ouverture de l'app */ })
@@ -354,14 +411,22 @@ export default function GangLevelUp() {
 
   const close = useCallback(() => {
     markSeen();
-    setShown(null);
-  }, [markSeen]);
+    const next = shown?.kind === 'level' ? shown.badgeKeys : null;
+    if (next?.length) startBadges(next);
+    else setShown(null);
+  }, [markSeen, shown, startBadges]);
 
   const seeCard = useCallback(() => {
     close();
     if (location.pathname !== '/gang-card') navigate('/gang-card');
   }, [close, navigate, location.pathname]);
 
+  const badgesDone = useCallback(() => {
+    if (shown?.kind === 'badges') finishBadges(shown.keys);
+    setShown(null);
+  }, [shown, finishBadges]);
+
   if (!shown) return null;
+  if (shown.kind === 'badges') return <GangBadgeUnlock badges={shown.badges} accent={gangPalette(card)?.accent} onDone={badgesDone} />;
   return <LevelUpReveal card={shown.card} firstCard={shown.firstCard} onClose={close} onSeeCard={seeCard} onAction={markSeen} />;
 }

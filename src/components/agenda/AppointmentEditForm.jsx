@@ -1,9 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, Bell, Clock, Minus, Plus, X, Loader2 } from 'lucide-react';
+import { AlertTriangle, Bell, Clock, Minus, Plus, X, Loader2, UserRound, Link2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/api/apiClient';
 import { getServiceColor } from '@/utils/serviceColors';
+import ClientAccountPicker from './ClientAccountPicker';
 import {
   timeToMinutes, addMinutesToTime, parseDateParam, slotIssues, isUpcomingSlot,
   LAST_MINUTE_MARKER, withLastMinuteMarker, stripLastMinuteMarker,
@@ -43,6 +44,10 @@ export default function AppointmentEditForm({ appointment, employees, onCancel, 
   const [durationTouched, setDurationTouched] = useState(false);
   const [clientName, setClientName] = useState(appointment.client_name || '');
   const [clientPhone, setClientPhone] = useState(appointment.client_phone || '');
+  // Compte client rattaché (email) : la visite compte sur sa carte Gang
+  const [clientEmail, setClientEmail] = useState(appointment.client_email || '');
+  const [pickingAccount, setPickingAccount] = useState(false);
+  const accountChanged = clientEmail !== (appointment.client_email || '');
   // Le repère d'un last minute pris reste hors du champ (invisible, conservé à l'enregistrement)
   const hadLastMinuteMarker = String(appointment.internal_notes || '').includes(LAST_MINUTE_MARKER);
   const [internalNotes, setInternalNotes] = useState(stripLastMinuteMarker(appointment.internal_notes));
@@ -88,7 +93,8 @@ export default function AppointmentEditForm({ appointment, employees, onCancel, 
   const moved = date !== String(appointment.date || '').slice(0, 10)
     || startTime !== String(appointment.start_time || '').slice(0, 5)
     || employeeId !== String(appointment.employee_id || '');
-  const canNotify = moved && !!appointment.client_email
+  // Prévenir le client d'un déplacement : seulement le compte déjà rattaché (pas celui qu'on rattache)
+  const canNotify = moved && !!appointment.client_email && !accountChanged
     && ['confirmed', 'pending'].includes(appointment.status) && isUpcomingSlot(date, startTime);
 
   const handleSave = async () => {
@@ -108,9 +114,15 @@ export default function AppointmentEditForm({ appointment, employees, onCancel, 
       employee_name: employee?.name || appointment.employee_name || '',
       client_name: clientName.trim() || appointment.client_name,
       client_phone: clientPhone.trim(),
+      ...(accountChanged ? { client_email: clientEmail } : {}),
       internal_notes: hadLastMinuteMarker ? withLastMinuteMarker(internalNotes) : internalNotes.trim(),
       notify_client: canNotify ? notify : false,
     };
+    // Compte rattaché à un créneau last minute libre : il est pris (comme l'assignation de la fiche)
+    if (accountChanged && clientEmail && appointment.status === 'last_minute') {
+      payload.status = 'confirmed';
+      payload.internal_notes = withLastMinuteMarker(internalNotes);
+    }
     if (servicesChanged) {
       payload.services = services;
       payload.total_price = totalPrice;
@@ -124,7 +136,7 @@ export default function AppointmentEditForm({ appointment, employees, onCancel, 
       const updated = await api.entities.Appointment.update(appointment.id, payload);
       toast.success(moved
         ? (canNotify && notify ? 'Rendez-vous déplacé · client prévenu' : 'Rendez-vous déplacé')
-        : 'Rendez-vous modifié');
+        : (accountChanged && clientEmail ? 'Compte client rattaché au rendez-vous' : 'Rendez-vous modifié'));
       onSaved({ ...appointment, ...payload, ...(updated || {}) });
     } catch (e) {
       toast.error(e?.message || 'Erreur lors de l\'enregistrement');
@@ -231,15 +243,53 @@ export default function AppointmentEditForm({ appointment, employees, onCancel, 
 
       {/* Client */}
       <div className="grid grid-cols-2 gap-2">
-        <div>
+        <div className="min-w-0">
           <label className={labelCls} htmlFor="apt-client">Client</label>
           <input id="apt-client" type="text" value={clientName} maxLength={120} onChange={(e) => setClientName(e.target.value)} className={inputCls} />
         </div>
-        <div>
+        <div className="min-w-0">
           <label className={labelCls} htmlFor="apt-phone">Téléphone</label>
           <input id="apt-phone" type="tel" value={clientPhone} maxLength={30} onChange={(e) => setClientPhone(e.target.value)} className={inputCls} />
         </div>
       </div>
+
+      {/* Compte client rattaché */}
+      {pickingAccount ? (
+        <ClientAccountPicker
+          initialQuery={clientEmail ? '' : clientName.trim()}
+          onClose={() => setPickingAccount(false)}
+          onSelect={(acc) => {
+            setClientEmail(acc.email);
+            setClientName(acc.full_name || acc.email);
+            if (acc.phone) setClientPhone(acc.phone);
+            setPickingAccount(false);
+          }}
+          onNoAccount={clientEmail ? () => { setClientEmail(''); setPickingAccount(false); } : undefined}
+          noAccountLabel="Détacher le compte (nom libre)"
+        />
+      ) : (
+        <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5 space-y-1.5 min-w-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <UserRound className={`w-4 h-4 shrink-0 ${clientEmail ? 'text-primary' : 'text-muted-foreground'}`} />
+            <p className="text-xs min-w-0 flex-1 truncate">
+              {clientEmail
+                ? <><span className="text-muted-foreground">Compte : </span><span className="font-medium">{clientEmail}</span></>
+                : <span className="text-muted-foreground">Aucun compte client rattaché</span>}
+            </p>
+            {accountChanged && <span className="shrink-0 text-[10px] font-semibold text-primary">modifié</span>}
+          </div>
+          <button type="button" onClick={() => setPickingAccount(true)}
+            className="text-xs font-semibold text-primary flex items-center gap-1">
+            <Link2 className="w-3.5 h-3.5" /> {clientEmail ? 'Changer de compte' : 'Rattacher un compte client'}
+          </button>
+          <p className="text-[11px] text-muted-foreground">Avec un compte rattaché, la visite compte sur sa carte Gang.</p>
+          {accountChanged && appointment.client_email && (
+            <p className="text-[11px] text-amber-400">
+              Ce rendez-vous quittera « Mes rendez-vous » de {appointment.client_email}{clientEmail ? `, et ses rappels iront à ${clientEmail}` : ''}.
+            </p>
+          )}
+        </div>
+      )}
 
       <div>
         <label className={labelCls} htmlFor="apt-notes">Note interne (invisible pour le client)</label>

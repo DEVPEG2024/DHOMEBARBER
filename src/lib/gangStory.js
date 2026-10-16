@@ -24,6 +24,11 @@ import {
   gangStatValue,
   isGangStatLow,
   gangScore,
+  GANG_SEASON_DECOR,
+  GANG_BAT_PATH,
+  GANG_STAR_PATH,
+  GANG_BAT_FILL,
+  GANG_BAT_STROKE,
 } from '@/components/gang/gangTheme';
 
 export const GANG_STORY_WIDTH = 1080;
@@ -265,6 +270,95 @@ function drawPhoto(ctx, p, photo, px) {
   ctx.drawImage(off, GANG_PHOTO_BOX.left, GANG_PHOTO_BOX.top, bw, bh);
 }
 
+/** Disque flou (dégradé radial) de centre (x, y) et de rayon r. */
+function softDot(ctx, x, y, r, stops) {
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  stops.forEach(([at, c]) => g.addColorStop(at, c));
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+/**
+ * Décor de saison immobile (mêmes positions que la carte à l'écran, GANG_SEASON_DECOR) :
+ * flocons (Noël), chauves-souris et lucioles (Halloween), étoiles cuivre (Fête des pères),
+ * soleil et rayons (Été). Dessiné sous la photo et le texte, dans le fond intérieur.
+ */
+function drawSeasonDecor(ctx, p, px = 2) {
+  const d = GANG_SEASON_DECOR;
+  ctx.save();
+  if (p.decor === 'snow') {
+    d.snow.forEach((f) => softDot(ctx, f.x, f.y, f.r, [[0, `rgba(255,255,255,${f.o})`], [0.4, `rgba(255,255,255,${f.o})`], [1, 'rgba(255,255,255,0)']]));
+  } else if (p.decor === 'bats') {
+    d.fireflies.forEach((f) => {
+      ctx.globalAlpha = 0.6;
+      softDot(ctx, f.x, f.y, f.r * 2, [[0, 'rgba(255,190,90,1)'], [0.22, 'rgba(255,190,90,1)'], [0.38, 'rgba(255,128,26,.45)'], [0.7, 'rgba(255,128,26,0)'], [1, 'rgba(255,128,26,0)']]);
+    });
+    ctx.globalAlpha = 1;
+    const bat = new Path2D(GANG_BAT_PATH);
+    d.bats.forEach((b) => {
+      ctx.save();
+      ctx.translate(b.x - 12 * b.s, b.y - 5 * b.s);
+      ctx.scale(b.s, b.s);
+      ctx.fillStyle = GANG_BAT_FILL;
+      ctx.fill(bat);
+      ctx.strokeStyle = GANG_BAT_STROKE;
+      ctx.lineWidth = 0.6;
+      ctx.stroke(bat);
+      ctx.restore();
+    });
+  } else if (p.decor === 'stars') {
+    const star = new Path2D(GANG_STAR_PATH);
+    ctx.fillStyle = p.accent;
+    ctx.globalAlpha = 0.45;
+    d.stars.forEach((s) => {
+      ctx.save();
+      ctx.translate(s.x - s.s / 2, s.y - s.s / 2);
+      ctx.scale(s.s / 10, s.s / 10);
+      ctx.fill(star);
+      ctx.restore();
+    });
+  } else if (p.decor === 'sun') {
+    const { sun } = d;
+    // Rayons : secteurs alternés, fondus vers l'extérieur par un masque radial
+    const off = document.createElement('canvas');
+    off.width = Math.ceil(W * px);
+    off.height = Math.ceil(H * px);
+    const o = off.getContext('2d');
+    o.scale(px, px);
+    const step = (Math.PI * 2) / sun.rays;
+    o.fillStyle = `rgba(255,226,120,${sun.rayAlpha})`;
+    for (let i = 0; i < sun.rays; i += 1) {
+      // CSS : 0° en haut, sens horaire ; canvas : 0 rad à droite
+      const a0 = i * step - Math.PI / 2;
+      o.beginPath();
+      o.moveTo(sun.cx, sun.cy);
+      o.arc(sun.cx, sun.cy, sun.rayRadius, a0, a0 + step * 0.35);
+      o.closePath();
+      o.fill();
+    }
+    o.globalCompositeOperation = 'destination-in';
+    const fade = o.createRadialGradient(sun.cx, sun.cy, 0, sun.cx, sun.cy, sun.rayRadius);
+    fade.addColorStop(0, 'rgba(0,0,0,1)');
+    fade.addColorStop(0.18, 'rgba(0,0,0,1)');
+    fade.addColorStop(0.55, 'rgba(0,0,0,.5)');
+    fade.addColorStop(1, 'rgba(0,0,0,0)');
+    o.fillStyle = fade;
+    o.fillRect(0, 0, W, H);
+    ctx.drawImage(off, 0, 0, W, H);
+    softDot(ctx, sun.cx, sun.cy, 70, [[0, 'rgba(255,230,140,.55)'], [0.45, 'rgba(255,190,80,.18)'], [0.7, 'rgba(255,190,80,0)'], [1, 'rgba(255,190,80,0)']]);
+    ctx.fillStyle = p.accent;
+    ctx.globalAlpha = 0.5;
+    d.sparkles.forEach((s) => {
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  }
+  ctx.restore();
+}
+
 /**
  * Dessine la carte (recto) dans `ctx`, coin haut gauche en (x, y), à l'échelle
  * `scale` (1 = 300 × 440). `photo` et `logo` : images déjà chargées ou null.
@@ -339,6 +433,9 @@ export function drawGangCard(ctx, card, { x = 0, y = 0, scale = 1, photo = null,
     ctx.fillRect(0, 0, W, H);
     ctx.restore();
   }
+
+  // Décor de saison (immobile), sous la photo et le texte
+  if (p.decor) drawSeasonDecor(ctx, p, Math.max(1, scale * 1.5));
 
   // Photo ou silhouette
   drawPhoto(ctx, p, photo, Math.max(1, scale * 1.5));

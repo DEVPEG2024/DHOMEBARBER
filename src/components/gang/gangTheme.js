@@ -120,7 +120,41 @@ const EDITION_RAW = {
     band: 'rgba(255,255,255,.08)', band2: 'rgba(255,255,255,.05)', arc: 'rgba(255,255,255,.3)', arc2: 'rgba(255,255,255,.14)',
     ink: '#ffffff', accent: '#bdbdbd', gem: '#ffffff', gemInk: '#111111',
   },
+
+  // ── Éditions de saison (décidées par le serveur, date de Paris) ──
+  // `decor` : décor propre à la saison (GANG_SEASON_DECOR), animé sur une grande carte.
+  halloween: {
+    label: 'Halloween', code: 'HWN', decor: 'bats',
+    border: lin(160, ['#ffb054', '#ff7a1a', '#c2410c', '#7c3aed']),
+    bg: lin(165, [['#24140a', 0], ['#110a07', 0.55], ['#06040a', 1]]),
+    band: 'rgba(255,128,26,.15)', band2: 'rgba(139,92,246,.13)', arc: 'rgba(255,128,26,.42)', arc2: 'rgba(139,92,246,.3)',
+    ink: '#fff5ea', accent: '#ff8a1f', gem: lin(120, ['#ffa340', '#e2560f']), gemInk: '#1c0a02',
+  },
+  noel: {
+    label: 'Noël', code: 'XMAS', decor: 'snow',
+    border: lin(160, ['#f7dd8a', '#d6343c', '#8c1420', '#e8bf55']),
+    bg: lin(165, [['#6a1320', 0], ['#3c0c16', 0.48], ['#0f2a1d', 1]]),
+    band: 'rgba(38,140,88,.24)', band2: 'rgba(240,200,90,.12)', arc: 'rgba(240,200,90,.45)', arc2: 'rgba(255,255,255,.18)',
+    ink: '#fffaf0', accent: '#f0c85a', gem: lin(120, ['#f7dd8a', '#c8962c']), gemInk: '#3a0c14',
+  },
+  fete_peres: {
+    label: 'Fête des pères', code: 'PAPA', decor: 'stars',
+    border: lin(160, ['#f2b98e', '#b8693a', '#6b3518']),
+    bg: lin(165, [['#1e2d4f', 0], ['#121c34', 0.55], ['#080e1c', 1]]),
+    band: 'rgba(200,124,74,.16)', band2: 'rgba(122,70,38,.22)', arc: 'rgba(214,140,92,.42)', arc2: 'rgba(214,140,92,.2)',
+    ink: '#f8f2eb', accent: '#dd915f', gem: lin(120, ['#eaa676', '#9a5530']), gemInk: '#1b1208',
+  },
+  ete: {
+    label: 'Été', code: 'SUN', decor: 'sun',
+    border: lin(160, ['#ffd84a', '#ff7a3d', '#ff4f8b', '#8b5cf6']),
+    bg: lin(165, [['#c4532a', 0], ['#a52f5c', 0.4], ['#4e2079', 0.78], ['#200f3a', 1]]),
+    band: 'rgba(255,216,74,.16)', band2: 'rgba(255,255,255,.09)', arc: 'rgba(255,216,74,.5)', arc2: 'rgba(255,140,190,.32)',
+    ink: '#ffffff', accent: '#ffd84a', gem: lin(120, ['#ffe36b', '#ffa51f']), gemInk: '#3a1405', glare: 0.26,
+  },
 };
+
+/** Clés des éditions de saison (pour l'aperçu, l'admin…). */
+export const GANG_SEASON_EDITIONS = ['halloween', 'noel', 'fete_peres', 'ete'];
 
 /** Écusson gris du client sans visite (GangCardPlaceholder). */
 const PLACEHOLDER_RAW = {
@@ -144,6 +178,7 @@ function build(key, kind, raw) {
     holo: raw.holo || 0,
     glare: raw.glare ?? 0.22,
     scanlines: !!raw.scanlines,
+    decor: raw.decor || null,
     grad: { border: raw.border, bg: raw.bg, gem: raw.gem },
   };
 }
@@ -153,11 +188,12 @@ export const GANG_EDITION_PALETTES = Object.fromEntries(Object.entries(EDITION_R
 export const GANG_PLACEHOLDER_PALETTE = build('placeholder', 'placeholder', PLACEHOLDER_RAW);
 
 /**
- * Palette d'une carte : l'édition limitée (première coupe, anniversaire, drop)
- * prime sur le niveau ; niveau inconnu → bronze.
+ * Palette d'une carte : l'édition limitée (anniversaire, saison, première coupe,
+ * drop) prime sur le niveau ; niveau inconnu → bronze.
  * Champs : key, kind ('tier' | 'edition'), label, short, code (texte de la
- * pastille : BRZ, ARG, OR, HOLO, TOTS, ICON, 1RE, B-DAY, DROP), border, bg, band,
- * band2, arc, arc2, ink, accent, gem, gemInk, holo, glare, scanlines, grad.
+ * pastille : BRZ, ARG, OR, HOLO, TOTS, ICON, 1RE, B-DAY, DROP, HWN, XMAS, PAPA, SUN),
+ * border, bg, band, band2, arc, arc2, ink, accent, gem, gemInk, holo, glare,
+ * scanlines, decor ('snow' | 'bats' | 'stars' | 'sun' | null), grad.
  */
 export function gangPalette(card) {
   const edition = card?.edition && GANG_EDITION_PALETTES[card.edition];
@@ -175,6 +211,87 @@ export function gangDecorCss(p) {
     `radial-gradient(circle at 104% 30%, transparent 0 118px, ${p.arc} 119px 122px, transparent 124px 160px, ${p.arc2} 161px 162px, transparent 163px)`,
   ].join(', ');
 }
+
+// ── Décors de saison ────────────────────────────────────────────────────────
+// Positions fixes (tirées d'un générateur à graine) dans le repère 300 × 440 : la carte
+// les anime (GangCard.jsx, transform / opacity), l'image de story les dessine immobiles
+// à la position `y` (lib/gangStory.js). 10 à 16 éléments par saison.
+
+/** Générateur pseudo-aléatoire à graine (mulberry32) : même décor à chaque affichage. */
+function seeded(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const round1 = (v) => Math.round(v * 10) / 10;
+
+/** Chauve-souris (repère 24 × 10, symétrique autour de x = 12). */
+export const GANG_BAT_PATH =
+  'M12 4.2 L11.1 2.6 L11.4 4.4 C9 3.4 4.8 2.4 0 3.4 C2 4.2 3 5.6 3.2 7.2 C4.2 6.2 5.8 6.2 6.6 7.4 C7.4 6.4 9 6.4 9.8 7.6 C10.6 7.2 11.4 7.6 12 9 C12.6 7.6 13.4 7.2 14.2 7.6 C15 6.4 16.6 6.4 17.4 7.4 C18.2 6.2 19.8 6.2 20.8 7.2 C21 5.6 22 4.2 24 3.4 C19.2 2.4 15 3.4 12.6 4.4 L12.9 2.6 Z';
+/** Chauve-souris violette cerclée d'orange (visible sur le fond noir d'Halloween). */
+export const GANG_BAT_FILL = '#3a1a5c';
+export const GANG_BAT_STROKE = 'rgba(255,138,31,.85)';
+/** Étoile à quatre branches (repère 10 × 10). */
+export const GANG_STAR_PATH = 'M5 0 L6.1 3.9 L10 5 L6.1 6.1 L5 10 L3.9 6.1 L0 5 L3.9 3.9 Z';
+
+function makeSeasonDecor() {
+  // Noël : 14 flocons qui tombent (x, hauteur de départ, rayon, opacité, durée de chute)
+  const r1 = seeded(1225);
+  const snow = Array.from({ length: 14 }, (_, i) => ({
+    x: round1(12 + ((i + r1() * 0.8) / 14) * 276),
+    y: round1(20 + r1() * 400),
+    r: round1(1.3 + r1() * 2),
+    o: round1(0.5 + r1() * 0.45),
+    dur: round1(7 + r1() * 5),
+  }));
+  // Halloween : 5 chauves-souris, 6 lucioles orange
+  const r2 = seeded(3110);
+  const bats = [
+    { x: 196, y: 30, s: 1.45 }, { x: 254, y: 78, s: 1.1 }, { x: 110, y: 24, s: 1 },
+    { x: 34, y: 200, s: 1.15 }, { x: 266, y: 196, s: 0.95 },
+  ].map((b) => ({ ...b, dur: round1(5 + r2() * 3), flap: round1(0.32 + r2() * 0.16) }));
+  const fireflies = Array.from({ length: 6 }, (_, i) => ({
+    x: round1(22 + ((i + r2()) / 6) * 256),
+    y: round1(150 + r2() * 250),
+    r: round1(1.6 + r2() * 1.2),
+    dur: round1(3 + r2() * 2.4),
+  }));
+  // Fête des pères : 12 étoiles cuivre discrètes, sur les bords et le haut
+  const r3 = seeded(1906);
+  const stars = Array.from({ length: 12 }, (_, i) => {
+    const side = i % 3; // 0 : haut, 1 : bord gauche, 2 : bord droit
+    return {
+      x: round1(side === 0 ? 100 + r3() * 170 : side === 1 ? 14 + r3() * 26 : 258 + r3() * 26),
+      y: round1(side === 0 ? 16 + r3() * 60 : 120 + r3() * 230),
+      s: round1(6 + r3() * 7),
+      dur: round1(2.6 + r3() * 2.2),
+    };
+  });
+  // Été : soleil en haut à droite, rayons qui tournent lentement, 6 reflets qui montent
+  const r4 = seeded(2106);
+  const sparkles = Array.from({ length: 6 }, (_, i) => ({
+    x: round1(30 + ((i + r4()) / 6) * 240),
+    y: round1(250 + r4() * 140),
+    r: round1(1.4 + r4() * 1.2),
+    dur: round1(4.5 + r4() * 3),
+  }));
+  return {
+    snow,
+    bats,
+    fireflies,
+    stars,
+    sun: { cx: 250, cy: 58, rays: 24, rayAlpha: 0.13, rayRadius: 190, dur: 70 },
+    sparkles,
+  };
+}
+
+/** Géométrie des décors de saison (repère 300 × 440). */
+export const GANG_SEASON_DECOR = makeSeasonDecor();
 
 // ── Stats ───────────────────────────────────────────────────────────────────
 
