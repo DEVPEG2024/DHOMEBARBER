@@ -8,6 +8,10 @@ import {
   GANG_SHIELD_PATH,
   GANG_INNER_SCALE,
   GANG_BUST_PATHS,
+  GANG_PHOTO_BOX,
+  GANG_PHOTO_MASK,
+  gangPhotoVeil,
+  gangPhotoVeilStart,
   GANG_STAT_COLUMNS,
   GANG_LOW_COLOR,
   GANG_PLACEHOLDER_PALETTE,
@@ -48,7 +52,8 @@ const INNER = {
 };
 const SIDE = { position: 'absolute', inset: 0, backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' };
 const SHADOW = 'drop-shadow(0 18px 22px rgba(20,24,28,.28)) drop-shadow(0 4px 6px rgba(20,24,28,.18))';
-const FADE_MASK = 'linear-gradient(to bottom, #000 72%, transparent 100%)';
+const FADE_MASK = `radial-gradient(ellipse ${GANG_PHOTO_MASK.rx * 100}% ${GANG_PHOTO_MASK.ry * 100}% at ${GANG_PHOTO_MASK.cx * 100}% ${GANG_PHOTO_MASK.cy * 100}%, ${GANG_PHOTO_MASK.stops.map(([at, a]) => `rgba(0,0,0,${a}) ${at * 100}%`).join(', ')})`;
+const PHOTO_ZONE = { position: 'absolute', ...GANG_PHOTO_BOX, WebkitMaskImage: FADE_MASK, maskImage: FADE_MASK };
 const LOGO_SRC = '/icons/icon-128.png';
 
 const GLARE_R = 155;  // rayon du reflet blanc (≈ 42 % du rayon de la maquette)
@@ -159,18 +164,24 @@ function Front({ card, p }) {
         <Logo size={36} style={{ marginTop: 6, boxShadow: '0 0 0 1px rgba(255,255,255,.18)' }} />
       </div>
 
-      {/* Photo de profil fondue vers le bas, ou silhouette */}
-      <div style={{ position: 'absolute', right: 18, top: 24, width: 200, height: 206, zIndex: 2, WebkitMaskImage: FADE_MASK, maskImage: FADE_MASK }}>
+      {/* Photo de profil fondue dans la carte (ovale doux) et teintée aux couleurs du niveau, ou silhouette */}
+      <div style={{ ...PHOTO_ZONE, zIndex: 2 }}>
         {photo ? (
-          <img
-            src={photo}
-            alt=""
-            draggable={false}
-            onError={() => setFailedSrc(photo)}
-            style={{ width: '100%', height: '100%', display: 'block', objectFit: 'cover', objectPosition: '50% 25%' }}
-          />
+          <>
+            <img
+              src={photo}
+              alt=""
+              draggable={false}
+              onError={() => setFailedSrc(photo)}
+              style={{ width: '100%', height: '100%', display: 'block', objectFit: 'cover', objectPosition: '50% 22%', filter: 'saturate(.88) contrast(1.06)' }}
+            />
+            {/* Teinte du niveau (or, bronze, bleu…) : la photo prend la lumière de la carte */}
+            <div aria-hidden="true" style={{ position: 'absolute', inset: 0, background: p.accent, mixBlendMode: 'soft-light', opacity: 0.4 }} />
+            {/* Voile du pourtour dans la couleur de la carte : le fond de la photo disparaît, le visage reste */}
+            <div aria-hidden="true" style={{ position: 'absolute', inset: 0, background: `radial-gradient(ellipse 46% 52% at 54% 40%, transparent ${gangPhotoVeilStart(p) * 100}%, ${gangPhotoVeil(p)} 100%)` }} />
+          </>
         ) : (
-          <Bust ink={p.ink} accent={p.accent} />
+          <div style={{ position: 'absolute', left: 17, top: 16, width: 200, height: 206 }}><Bust ink={p.ink} accent={p.accent} /></div>
         )}
       </div>
 
@@ -396,8 +407,8 @@ export function GangCardPlaceholder({ size = 0.78, className, style, text = 'Ta 
               <b style={{ fontSize: 58, fontWeight: 800, lineHeight: 0.8 }}>?</b>
               <Logo size={36} style={{ marginTop: 14, filter: 'grayscale(1)' }} />
             </div>
-            <div style={{ position: 'absolute', right: 18, top: 24, width: 200, height: 206, opacity: 0.55, WebkitMaskImage: FADE_MASK, maskImage: FADE_MASK }}>
-              <Bust ink={p.ink} accent={p.accent} />
+            <div style={{ ...PHOTO_ZONE, opacity: 0.55 }}>
+              <div style={{ position: 'absolute', left: 17, top: 16, width: 200, height: 206 }}><Bust ink={p.ink} accent={p.accent} /></div>
             </div>
             <div
               style={{

@@ -12,6 +12,10 @@ import {
   GANG_SHIELD_PATH,
   GANG_INNER_SCALE,
   GANG_BUST_PATHS,
+  GANG_PHOTO_BOX,
+  GANG_PHOTO_MASK,
+  gangPhotoVeil,
+  gangPhotoVeilStart,
   GANG_STAT_COLUMNS,
   GANG_LOW_COLOR,
   gangPalette,
@@ -185,12 +189,13 @@ function drawLogo(ctx, logo, x, y, size, ring) {
 }
 
 /**
- * Zone photo (200 × 206) : photo en `cover` (cadrage 50 % 25 %) ou silhouette,
- * fondue vers le bas, dessinée hors écran à la résolution `px` puis posée.
+ * Zone photo (GANG_PHOTO_BOX, comme la carte) : photo en `cover` teintée aux couleurs du niveau,
+ * ou silhouette, fondue en ovale doux sur tous les bords (GANG_PHOTO_MASK), dessinée hors écran à
+ * la résolution `px` puis posée.
  */
 function drawPhoto(ctx, p, photo, px) {
-  const bw = 200;
-  const bh = 206;
+  const bw = GANG_PHOTO_BOX.width;
+  const bh = GANG_PHOTO_BOX.height;
   const off = document.createElement('canvas');
   off.width = Math.ceil(bw * px);
   off.height = Math.ceil(bh * px);
@@ -200,8 +205,28 @@ function drawPhoto(ctx, p, photo, px) {
     const r = Math.max(bw / photo.naturalWidth, bh / photo.naturalHeight);
     const dw = photo.naturalWidth * r;
     const dh = photo.naturalHeight * r;
-    o.drawImage(photo, (bw - dw) * 0.5, (bh - dh) * 0.25, dw, dh);
+    o.filter = 'saturate(.88) contrast(1.06)';
+    o.drawImage(photo, (bw - dw) * 0.5, (bh - dh) * 0.22, dw, dh);
+    o.filter = 'none';
+    // Teinte du niveau, comme sur la carte (soft-light, 40 %)
+    o.globalCompositeOperation = 'soft-light';
+    o.globalAlpha = 0.4;
+    o.fillStyle = p.accent;
+    o.fillRect(0, 0, bw, bh);
+    o.globalAlpha = 1;
+    o.globalCompositeOperation = 'source-over';
+    // Voile du pourtour dans la couleur de la carte (comme la carte à l'écran)
+    o.save();
+    o.translate(0.54 * bw, 0.4 * bh);
+    o.scale(1, (0.52 * bh) / (0.46 * bw));
+    const veil = o.createRadialGradient(0, 0, 0, 0, 0, 0.46 * bw);
+    veil.addColorStop(gangPhotoVeilStart(p), 'rgba(0,0,0,0)');
+    veil.addColorStop(1, gangPhotoVeil(p));
+    o.fillStyle = veil;
+    o.fillRect(-bw * 2, -bh * 2, bw * 4, bh * 4);
+    o.restore();
   } else {
+    o.translate(17, 16);
     // Silhouette : buste à l'encre, opacité 0,5 → 0,18 sur sa hauteur (34 → 206)
     const tmp = document.createElement('canvas');
     tmp.width = off.width;
@@ -224,16 +249,20 @@ function drawPhoto(ctx, p, photo, px) {
     o.fillStyle = p.accent;
     o.fill(new Path2D(GANG_BUST_PATHS.collar));
     o.globalAlpha = 1;
+    o.translate(-17, -16);
   }
-  // Fondu du bas (mask-image de la maquette : opaque jusqu'à 72 %)
+  // Fondu en ovale sur tous les bords (même masque que la carte)
+  const m = GANG_PHOTO_MASK;
   o.globalCompositeOperation = 'destination-in';
-  const mask = o.createLinearGradient(0, 0, 0, bh);
-  mask.addColorStop(0, '#000');
-  mask.addColorStop(0.72, '#000');
-  mask.addColorStop(1, 'rgba(0,0,0,0)');
+  o.save();
+  o.translate(m.cx * bw, m.cy * bh);
+  o.scale(1, (m.ry * bh) / (m.rx * bw));
+  const mask = o.createRadialGradient(0, 0, 0, 0, 0, m.rx * bw);
+  for (const [at, a] of m.stops) mask.addColorStop(at, `rgba(0,0,0,${a})`);
   o.fillStyle = mask;
-  o.fillRect(0, 0, bw, bh);
-  ctx.drawImage(off, W - 18 - bw, 24, bw, bh);
+  o.fillRect(-bw * 2, -bh * 2, bw * 4, bh * 4);
+  o.restore();
+  ctx.drawImage(off, GANG_PHOTO_BOX.left, GANG_PHOTO_BOX.top, bw, bh);
 }
 
 /**

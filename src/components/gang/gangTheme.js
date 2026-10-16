@@ -247,3 +247,15 @@ export function gangSerialLabel(serial) {
   const s = String(serial);
   return `N° ${/^\d+$/.test(s) ? s.padStart(4, '0') : s}`;
 }
+
+/**
+ * Photo fondue dans la carte : ovale doux sur tous les bords (comme les cartes des barbers),
+ * jamais de bord net. Zone dans le repère 300 × 440 ; le masque s'éteint avant les bords de la zone.
+ * Partagé par la carte (GangCard.jsx) et l'image de story (lib/gangStory.js).
+ */
+export const GANG_PHOTO_BOX = { left: 58, top: 10, width: 234, height: 238 };
+/** Voile du pourtour de la photo : efface le fond de la photo (mur, pièce) dans la couleur de la carte. */
+export const gangPhotoVeil = (p) => (p && p.key === 'icone' ? 'rgba(240,237,246,1)' : 'rgba(8,8,10,.45)');
+/** Début du voile (part du rayon restée nette autour du visage) : plus tôt sur la carte claire. */
+export const gangPhotoVeilStart = (p) => (p && p.key === 'icone' ? 0.28 : 0.38);
+export const GANG_PHOTO_MASK = { cx: 0.54, cy: 0.42, rx: 0.46, ry: 0.52, stops: [[0, 1], [0.42, 1], [0.66, 0.5], [0.86, 0.12], [1, 0]] };
