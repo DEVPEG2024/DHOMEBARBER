@@ -67,7 +67,7 @@ export const agendaQueryKey = (dates) => ['agendaAppointments', dates[0], dates[
 
 /** Toutes les listes de rendez-vous de l'app (agenda, planning, tableau de bord, stats, client). */
 export function invalidateAppointmentQueries(queryClient) {
-  for (const key of ['appointments', 'agendaAppointments', 'adminAppointments', 'allAppointments', 'planningAppointments']) {
+  for (const key of ['appointments', 'agendaAppointments', 'adminAppointments', 'allAppointments', 'planningAppointments', 'attendanceCheck']) {
     queryClient.invalidateQueries({ queryKey: [key] });
   }
 }

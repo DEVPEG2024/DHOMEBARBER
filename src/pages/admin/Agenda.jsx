@@ -18,6 +18,7 @@ import BreakModal from '@/components/agenda/BreakModal';
 import AppointmentDetailModal from '@/components/agenda/AppointmentDetailModal';
 import MoveDialog, { buildMoveFields, saveMove } from '@/components/agenda/MoveDialog';
 import WalkInDialog from '@/components/agenda/WalkInDialog';
+import AttendanceCheck from '@/components/agenda/AttendanceCheck';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   BARBER_COLORS, timeToMinutes, toDateStr, parseDateParam, visibleRange, datesBetween,
@@ -501,6 +502,9 @@ export default function Agenda() {
         onAddClient={() => setWalkInOpen(true)}
         loading={isFetching}
       />
+
+      {/* Rendez-vous passés à confirmer : venu ou absent (carte Gang des clients) */}
+      <AttendanceCheck user={user} onOpen={(apt) => setSelected(apt)} />
 
       {/* Barbers, annulés, Last Minute */}
       <div className="flex items-center gap-2 mb-3 overflow-x-auto scrollbar-hide -mx-1 px-1 pb-0.5">

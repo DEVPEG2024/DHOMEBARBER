@@ -105,6 +105,8 @@ export default function Profile() {
   const now = Date.now();
   const dated = (Array.isArray(appointments) ? appointments : []).filter(a => a?.date);
   const visits = dated.filter(a => VISIT_STATUSES.includes(a.status) && endsAt(a) <= now);
+  // Une visite par jour, comme la carte Gang (une famille qui réserve 3 RDV le même jour = 1 visite)
+  const visitDays = new Set(visits.map(a => String(a.date).slice(0, 10))).size;
   const upcomingCount = dated.filter(a => a.status === 'confirmed' && endsAt(a) > now).length;
   // Montant réglé (encaissement du salon, produits et pourboire compris) sinon prix des prestations
   const totalSpent = visits.reduce((sum, a) => sum + (Number(a.grand_total) || Number(a.total_price) || 0), 0);
@@ -207,7 +209,7 @@ export default function Profile() {
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
           className="grid grid-cols-3 gap-3 mb-8">
           {[
-            { value: statsReady ? visits.length : '–', label: 'Visites' },
+            { value: statsReady ? visitDays : '–', label: 'Visites' },
             { value: statsReady ? upcomingCount : '–', label: 'À venir' },
             { value: statsReady ? formatPrice(totalSpent) : '–', label: 'Total' },
           ].map(({ value, label }) => (
