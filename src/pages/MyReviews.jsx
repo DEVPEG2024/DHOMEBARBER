@@ -7,6 +7,7 @@ import { motion } from 'framer-motion';
 import { Star, MessageSquare, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
 import LoadError, { isNetworkError } from '@/components/shared/LoadError';
+import { contentFilterError } from '@/lib/contentFilter';
 
 const GOOGLE_PLACE_ID = 'ChIJm6cgTFprjEcRZsuEqhCEPXY';
 const GOOGLE_REVIEW_URL = `https://search.google.com/local/writereview?placeid=${GOOGLE_PLACE_ID}`;
@@ -150,6 +151,8 @@ export default function MyReviews() {
   const handleSubmit = () => {
     if (rating === 0) return toast.error('Veuillez donner une note');
     if (limitReached) return toast.error(`Vous avez déjà publié ${MAX_REVIEWS} avis`);
+    const filtered = contentFilterError(comment);
+    if (filtered) return toast.error(filtered);
     // Nom, email et visibilité sont fixés par le serveur depuis le jeton : on n'envoie que l'avis
     const barber = barberId ? barbers.find(b => String(b.id) === String(barberId)) : null;
     const data = { rating, comment: comment.trim().slice(0, MAX_COMMENT) };

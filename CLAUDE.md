@@ -62,6 +62,7 @@ src/
 │   ├── hairUltra.js           # Essayage couleur : appel du mode AI ULTRA (backend)
 │   ├── aiWriter.js            # Assistant IA des notifications : features.aiWriter, POST /ai/notification-draft, retouches proposées
 │   ├── textileApi.js          # Textile & drops : client des routes /textile (overview, vote, alerte, réservation, notify), constantes et helpers partagés
+│   ├── contentFilter.js       # Filtre des contenus choquants avant publication (App Store 1.2) : fil, commentaires, avis, nom affiché
 │   ├── favorites.js           # Favoris du client (prestations, produits) : useFavorites, rangés sur l'appareil par compte
 │   ├── slots.js               # Créneaux libres d'un barber (analyzeDay, parisDay…), partagés par la réservation et le déplacement
 │   ├── reschedule.js          # Déplacer un RDV : prochains créneaux libres (même barber, mêmes prestations), création puis annulation de l'ancien
@@ -254,6 +255,7 @@ Mapping entité → table dans `routes/entities.js`.
 - Congés : changement de statut réservé à l'admin (`routes/leave.js`)
 
 ### Modération du fil (exigence App Store 1.2)
+- **Directives Apple d'oct. 2026** (1.2 précisée, 2.5.19 et 2.3.14 nouvelles) : **filtre avant publication** `src/lib/contentFilter.js` (`hasObjectionableContent`, `contentFilterError`, insultes / haine / sexuel explicite / menaces, normalisation accents + leet + lettres doublées + lettres isolées ; jurons courants et mots ordinaires comme « retard », « con », « Niger » jamais bloqués) appliqué aux publications et commentaires du fil, aux avis, au nom à l'inscription et dans Paramètres ; **même règle à poser côté serveur** (`docs/backend-content-filter.md`). Paramètres → bloc « Nous contacter » (email + téléphone). CGU section 7 : paragraphe « Filtrage ». Notes de revue à coller : `docs/app-review-notes.md` (UGC, fonctions selon le rôle ou un réglage serveur, paiements). **Règle 2.5.19 : ne jamais allumer une fonction dormante (filtres Snap, AI ULTRA…) sans l'avoir décrite dans les notes de revue d'une version approuvée.** Creative assets de la fiche : ni prix, ni remise
 - **Signaler** : menu « ··· » d'une publication ou lien « Signaler » sous un commentaire → `PostReport.create` (motif + précisions). Le serveur copie le contenu et l'auteur, puis envoie push + email à tous les admins (`notifyAdminsOfReport` dans `routes/entities.js`, `sendContentReportAdmin` dans `lib/emailHelper.js`)
 - **Bloquer** : `UserBlock.create` ; les posts et commentaires de l'utilisateur bloqué sont filtrés côté serveur (`handleList`) et côté client. Déblocage dans Paramètres → « Utilisateurs bloqués »
 - **Admin** : sur `/admin/feed`, panneau « Signalements en attente » (supprimer le contenu ou ignorer, statut `handled` / `dismissed`)

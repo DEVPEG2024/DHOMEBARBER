@@ -8,6 +8,7 @@ import LegalLink from '@/components/shared/LegalLink';
 import { isPushSupported, subscribeToPush } from '@/lib/pushNotifications';
 import { isNative } from '@/lib/capacitor';
 import { apiRequest, apiUrl, getToken } from '@/api/apiClient';
+import { hasObjectionableContent } from '@/lib/contentFilter';
 
 const LOGO_URL = '/logo.png';
 // Délai avant de pouvoir redemander un code de réinitialisation
@@ -110,6 +111,11 @@ export default function Login() {
     e.preventDefault();
     if (!email || !password || !fullName) {
       toast.error('Remplissez les champs obligatoires');
+      return;
+    }
+    // Le nom est affiché aux autres clients (fil, avis) : même filtre que les publications
+    if (hasObjectionableContent(fullName)) {
+      toast.error('Ce nom contient un mot interdit par les règles de la communauté.');
       return;
     }
     if (password.length < 8) {
