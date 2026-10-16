@@ -71,3 +71,13 @@ L'interrupteur d'Admin → Filtres Snap permet d'allumer les filtres **sans nouv
 1. Avant d'allumer les filtres, envoyer une version dont les notes de revue décrivent la page Filtres
    Snap allumée : comment l'ouvrir, l'écran des CGU Camera Kit et la caméra.
 2. Allumer l'interrupteur seulement une fois cette version approuvée.
+
+## Carte cadeau dans Apple Wallet (à coller seulement une fois le Wallet configuré sur le serveur)
+
+Avant le collage : déployer `docs/backend-wallet.md`, et donner au compte client de démonstration une
+carte cadeau validée de 10 € (à supprimer après la revue, règle « Nettoyage » de CLAUDE.md).
+
+```
+[Gift cards in Apple Wallet]
+A client who has bought a gift card can add it to Apple Wallet: Home screen → "Carte Cadeau" block (page "Cartes Cadeau") → tap an active gift card (status "Validée", not expired, with a remaining balance) → "Ajouter à Apple Wallet". The button only appears for active cards, and only once the salon's server has a Wallet pass certificate (it is configured for this review). The app requests a link from our server; the server checks that the card belongs to the signed-in account and returns a short-lived (10 minutes) link to a signed .pkpass, which opens in Safari View Controller and shows the standard Wallet "Add" sheet. The pass is a store card showing the card code, the balance at the time it was added (the up-to-date balance stays in the app), the recipient, the expiry date and the same QR code as in the app; the salon scans it at the counter to deduct services. It contains no payment and no in-app purchase: gift cards are paid in person at the salon (3.1.3(e)). The pass uses the salon's address so Wallet can suggest it on the Lock Screen near the salon. On Android the same button adds the card to Google Wallet. The demo client account has an active 10 € gift card for testing.
+```
