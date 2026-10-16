@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import { hapticFeedback } from '@/lib/capacitor';
 import LoadError, { isNetworkError } from '@/components/shared/LoadError';
 import GangLeaderboard from '@/components/gang/GangLeaderboard';
+import { contentFilterError } from '@/lib/contentFilter';
 
 function timeAgo(dateStr) {
   const now = new Date();
@@ -693,6 +694,8 @@ export default function Feed() {
   // Renvoie `true` si la publication est partie (le composeur ne se ferme qu'à ce moment-là)
   const createPost = async () => {
     if ((!content.trim() && !imageUrl) || posting) return false;
+    const filtered = contentFilterError(content);
+    if (filtered) { toast.error(filtered); return false; }
     setPosting(true);
     try {
       await api.entities.Post.create({
@@ -758,6 +761,8 @@ export default function Feed() {
   };
 
   const handleComment = async (postId, text) => {
+    const filtered = contentFilterError(text);
+    if (filtered) { toast.error(filtered); return false; }
     try {
       await api.entities.PostComment.create({
         post_id: postId,

@@ -9,9 +9,13 @@ import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
 import { isNative, platform, openExternalUrl } from '@/lib/capacitor';
 import FeedbackSection from '@/components/feedback/FeedbackSection';
+import { hasObjectionableContent } from '@/lib/contentFilter';
 
 // Mêmes limites que l'inscription (routes/auth.js côté serveur)
 const NAME_MAX = 120;
+// Mêmes coordonnées que les CGU (section 14) et la politique de confidentialité
+const CONTACT_EMAIL = 'contact@dhomebarber.fr';
+const CONTACT_PHONE = '06 66 08 36 05';
 const PHONE_MAX = 30;
 
 const squash = (s) => String(s || '').trim().replace(/\s+/g, ' ');
@@ -19,6 +23,7 @@ const squash = (s) => String(s || '').trim().replace(/\s+/g, ' ');
 const validateName = (v) => {
   if (!v) return 'Le nom est obligatoire.';
   if (v.length > NAME_MAX) return `Le nom ne peut pas dépasser ${NAME_MAX} caractères.`;
+  if (hasObjectionableContent(v)) return 'Ce nom contient un mot interdit par les règles de la communauté.';
   return null;
 };
 
@@ -486,6 +491,25 @@ export default function Settings() {
               </div>
             </div>
           )}
+        </motion.div>
+
+        {/* Contact (directive App Store 1.2 : coordonnées publiées pour joindre le salon) */}
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.22 }}
+          className="rounded-2xl border border-white/8 bg-white/4 backdrop-blur-xl overflow-hidden mb-4">
+          <p className="px-4 pt-3 pb-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Nous contacter</p>
+          <a href={`mailto:${CONTACT_EMAIL}`} className="flex items-center gap-3 px-4 py-3 hover:bg-white/5 transition-colors border-b border-white/5">
+            <Mail className="w-4 h-4 text-primary shrink-0" aria-hidden="true" />
+            <span className="flex-1 min-w-0 text-sm text-foreground truncate">{CONTACT_EMAIL}</span>
+            <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
+          </a>
+          <a href={`tel:${CONTACT_PHONE.replace(/\s/g, '')}`} className="flex items-center gap-3 px-4 py-3 hover:bg-white/5 transition-colors">
+            <Phone className="w-4 h-4 text-primary shrink-0" aria-hidden="true" />
+            <span className="flex-1 min-w-0 text-sm text-foreground">{CONTACT_PHONE}</span>
+            <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
+          </a>
+          <p className="px-4 pb-3 text-[11px] text-muted-foreground">
+            Un contenu choquant dans le fil ? Signalez-le avec « ··· » : le salon le traite sous 24 h.
+          </p>
         </motion.div>
 
         {/* Legal links */}
