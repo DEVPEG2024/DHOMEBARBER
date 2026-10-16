@@ -11,6 +11,7 @@ import jsPDF from 'jspdf';
 import { isNative } from '@/lib/capacitor';
 import { formatPrice } from '@/components/services/serviceUtils';
 import LoadError, { isNetworkError } from '@/components/shared/LoadError';
+import WalletButtons from '@/components/giftcards/WalletButtons';
 
 const LOGO_URL = '/logo.png';
 
@@ -523,25 +524,30 @@ function GiftCardDetailModal({ card, onClose }) {
 
         {/* Actions : seulement pour une carte active */}
         {canShare ? (
-          <div className="grid grid-cols-2 gap-2 mt-5">
-            <motion.button
-              whileTap={{ scale: 0.97 }}
-              onClick={handleDownloadPDF}
-              disabled={downloading}
-              className="flex items-center justify-center gap-2 py-3 rounded-2xl bg-white/10 text-sm font-semibold text-foreground hover:bg-white/15 transition-colors disabled:opacity-50"
-            >
-              <Download className="w-4 h-4" />
-              {downloading ? 'PDF...' : 'Télécharger'}
-            </motion.button>
-            <motion.button
-              whileTap={{ scale: 0.97 }}
-              onClick={handleShare}
-              className="flex items-center justify-center gap-2 py-3 rounded-2xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"
-            >
-              <Share2 className="w-4 h-4" />
-              Partager
-            </motion.button>
-          </div>
+          <>
+            <div className="grid grid-cols-2 gap-2 mt-5">
+              <motion.button
+                whileTap={{ scale: 0.97 }}
+                onClick={handleDownloadPDF}
+                disabled={downloading}
+                className="flex items-center justify-center gap-2 py-3 rounded-2xl bg-white/10 text-sm font-semibold text-foreground hover:bg-white/15 transition-colors disabled:opacity-50"
+              >
+                <Download className="w-4 h-4" />
+                {downloading ? 'PDF...' : 'Télécharger'}
+              </motion.button>
+              <motion.button
+                whileTap={{ scale: 0.97 }}
+                onClick={handleShare}
+                className="flex items-center justify-center gap-2 py-3 rounded-2xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"
+              >
+                <Share2 className="w-4 h-4" />
+                Partager
+              </motion.button>
+            </div>
+            {/* Wallet : même règle que Partager / Télécharger, plus un solde à présenter au comptoir.
+                Rien n'apparaît tant que le serveur n'annonce pas features.appleWallet / googleWallet. */}
+            {balance > 0 && <WalletButtons card={card} className="mt-2" />}
+          </>
         ) : (
           <p className={`mt-5 text-center text-xs rounded-xl px-4 py-3 border ${statusConf.bg} ${statusConf.color}`}>
             {status === 'pending'
