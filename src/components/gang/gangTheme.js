@@ -55,42 +55,42 @@ const SCANLINES_CSS = 'repeating-linear-gradient(0deg, rgba(255,255,255,.03) 0 1
 
 const TIER_RAW = {
   bronze: {
-    label: 'Bronze', code: 'BRZ',
+    label: 'Bronze', code: 'BRZ', fx: 'bronze', stars: 1,
     border: lin(160, ['#e7a46d', '#8c4f27']),
     bg: lin(165, [['#3a2418', 0], ['#1f130c', 0.55], ['#120a06', 1]]),
     band: 'rgba(214,138,84,.16)', band2: 'rgba(214,138,84,.1)', arc: 'rgba(224,154,98,.35)', arc2: 'rgba(224,154,98,.2)',
     ink: '#fbeee2', accent: '#e39b62', gem: '#b06a38', gemInk: '#fff1e4',
   },
   argent: {
-    label: 'Argent', code: 'ARG',
+    label: 'Argent', code: 'ARG', fx: 'argent', stars: 2,
     border: lin(160, ['#ffffff', '#9aa4ae']),
     bg: lin(165, [['#3a4148', 0], ['#20252a', 0.55], ['#121518', 1]]),
     band: 'rgba(220,228,236,.13)', band2: 'rgba(220,228,236,.08)', arc: 'rgba(220,228,236,.35)', arc2: 'rgba(220,228,236,.18)',
     ink: '#ffffff', accent: '#c7d2dc', gem: '#c7d2dc', gemInk: '#1b2025',
   },
   or: {
-    label: 'Or', code: 'OR',
+    label: 'Or', code: 'OR', fx: 'or', stars: 3,
     border: lin(160, ['#fff0b0', '#c7962c', '#8a6418']),
     bg: lin(165, [['#2e2614', 0], ['#18140a', 0.55], ['#0c0a05', 1]]),
     band: 'rgba(231,196,99,.16)', band2: 'rgba(231,196,99,.1)', arc: 'rgba(231,196,99,.45)', arc2: 'rgba(231,196,99,.22)',
     ink: '#ffffff', accent: '#e8c463', gem: '#e8c463', gemInk: '#2a1f05',
   },
   orrare: {
-    label: 'Or holo', code: 'HOLO',
+    label: 'Or holo', code: 'HOLO', fx: 'orrare', stars: 4,
     border: conic(210, ['#ffe9a6', '#ff9ad8', '#9af0ff', '#ffe9a6', '#c7962c', '#ffe9a6']),
     bg: lin(165, [['#3a2e10', 0], ['#1d170a', 0.55], ['#0d0a04', 1]]),
     band: 'rgba(255,216,107,.18)', band2: 'rgba(255,216,107,.1)', arc: 'rgba(255,216,107,.5)', arc2: 'rgba(255,154,216,.28)',
     ink: '#ffffff', accent: '#ffd86b', gem: lin(120, ['#ffd86b', '#ff9ad8', '#9af0ff']), gemInk: '#20170a', holo: 0.14, glare: 0.3,
   },
   tots: {
-    label: 'Team of the Season', short: 'TOTS', code: 'TOTS',
+    label: 'Team of the Season', short: 'TOTS', code: 'TOTS', fx: 'tots', stars: 5,
     border: lin(160, ['#ff5a6a', '#c3182d']),
     bg: lin(165, [['#2448c4', 0], ['#16308f', 0.5], ['#0b1a55', 1]]),
     band: 'rgba(120,180,255,.16)', band2: 'rgba(120,180,255,.1)', arc: 'rgba(130,200,255,.45)', arc2: 'rgba(130,200,255,.25)',
     ink: '#ffffff', accent: '#7fd0ff', gem: '#e43a4f', gemInk: '#ffffff', glare: 0.28,
   },
   icone: {
-    label: 'Icône', code: 'ICON',
+    label: 'Icône', code: 'ICON', fx: 'icone', stars: 6,
     border: conic(0, ['#ffffff', '#d9c8ff', '#c9f3ff', '#fff1c9', '#ffffff']),
     bg: lin(165, [['#f6f3ee', 0], ['#e7e4f0', 0.55], ['#d6d3e3', 1]]),
     band: 'rgba(140,110,255,.1)', band2: 'rgba(120,200,220,.12)', arc: 'rgba(140,110,255,.35)', arc2: 'rgba(120,200,220,.3)',
@@ -107,11 +107,11 @@ const EDITION_RAW = {
     ink: '#ffffff', accent: '#4fdc9b', gem: '#3fcf8e', gemInk: '#06261a',
   },
   anniv: {
-    label: 'Anniversaire', code: 'B-DAY',
-    border: lin(160, ['#ffb36b', '#ff4fa3', '#8a5cff']),
-    bg: lin(165, [['#5a1a5e', 0], ['#331044', 0.55], ['#1a0827', 1]]),
-    band: 'rgba(255,140,198,.18)', band2: 'rgba(255,179,107,.14)', arc: 'rgba(255,140,198,.5)', arc2: 'rgba(255,179,107,.3)',
-    ink: '#ffffff', accent: '#ff9ccf', gem: lin(120, ['#ffb36b', '#ff4fa3']), gemInk: '#2a0820', holo: 0.15,
+    label: 'Anniversaire', code: 'B-DAY', fx: 'anniv',
+    border: lin(170, [['#9dffe0', 0], ['#2ee6b0', 0.4], ['#0e6b52', 0.8], ['#2ee6b0', 1]]),
+    bg: lin(170, ['#0d1512', '#050606']),
+    band: 'rgba(46,230,176,.08)', band2: 'rgba(225,38,44,.1)', arc: 'rgba(46,230,176,.3)', arc2: 'rgba(225,38,44,.22)',
+    ink: '#ffffff', accent: '#2ee6b0', gem: lin(120, ['#2ee6b0', '#0e6b52']), gemInk: '#04140f',
   },
   drop: {
     label: 'Édition Drop', code: 'DROP',
@@ -124,18 +124,25 @@ const EDITION_RAW = {
   // ── Éditions de saison (décidées par le serveur, date de Paris) ──
   // `decor` : décor propre à la saison (GANG_SEASON_DECOR), animé sur une grande carte.
   halloween: {
-    label: 'Halloween', code: 'HWN', decor: 'bats',
-    border: lin(160, ['#ffb054', '#ff7a1a', '#c2410c', '#7c3aed']),
-    bg: lin(165, [['#24140a', 0], ['#110a07', 0.55], ['#06040a', 1]]),
+    label: 'Halloween', code: 'HWN', decor: 'bats', fx: 'halloween',
+    border: lin(170, ['#ff8a1f', '#7b2fd6']),
+    bg: lin(170, ['#1d1020', '#0a0508']),
     band: 'rgba(255,128,26,.15)', band2: 'rgba(139,92,246,.13)', arc: 'rgba(255,128,26,.42)', arc2: 'rgba(139,92,246,.3)',
-    ink: '#fff5ea', accent: '#ff8a1f', gem: lin(120, ['#ffa340', '#e2560f']), gemInk: '#1c0a02',
+    ink: '#fff3e6', accent: '#ff8a1f', gem: lin(120, ['#ffa340', '#e2560f']), gemInk: '#1c0a02',
   },
   noel: {
-    label: 'Noël', code: 'XMAS', decor: 'snow',
-    border: lin(160, ['#f7dd8a', '#d6343c', '#8c1420', '#e8bf55']),
-    bg: lin(165, [['#6a1320', 0], ['#3c0c16', 0.48], ['#0f2a1d', 1]]),
-    band: 'rgba(38,140,88,.24)', band2: 'rgba(240,200,90,.12)', arc: 'rgba(240,200,90,.45)', arc2: 'rgba(255,255,255,.18)',
-    ink: '#fffaf0', accent: '#f0c85a', gem: lin(120, ['#f7dd8a', '#c8962c']), gemInk: '#3a0c14',
+    label: 'Noël', code: 'XMAS', decor: 'snow', fx: 'noel',
+    border: lin(170, ['#f2d27a', '#b8141e', '#f2d27a']),
+    bg: lin(170, ['#6e0f17', '#2b0508']),
+    band: 'rgba(38,140,88,.2)', band2: 'rgba(240,200,90,.12)', arc: 'rgba(240,200,90,.4)', arc2: 'rgba(255,255,255,.16)',
+    ink: '#fff8ec', accent: '#f2d27a', gem: lin(120, ['#f7dd8a', '#c8962c']), gemInk: '#3a0c14',
+  },
+  nouvel_an: {
+    label: 'Nouvel An', code: 'NY', decor: 'stars', fx: 'nouvel_an',
+    border: lin(170, [['#fff3c4', 0], ['#c9a227', 0.35], ['#fff3c4', 0.6], ['#9c7a12', 1]]),
+    bg: lin(170, ['#12152a', '#05060c']),
+    band: 'rgba(242,201,76,.12)', band2: 'rgba(232,226,255,.08)', arc: 'rgba(242,201,76,.4)', arc2: 'rgba(242,201,76,.18)',
+    ink: '#fffaf0', accent: '#f2c94c', gem: lin(120, ['#fff3c4', '#c9a227']), gemInk: '#1a1405', glare: 0.28,
   },
   fete_peres: {
     label: 'Fête des pères', code: 'PAPA', decor: 'stars',
@@ -154,7 +161,7 @@ const EDITION_RAW = {
 };
 
 /** Clés des éditions de saison (pour l'aperçu, l'admin…). */
-export const GANG_SEASON_EDITIONS = ['halloween', 'noel', 'fete_peres', 'ete'];
+export const GANG_SEASON_EDITIONS = ['halloween', 'noel', 'nouvel_an', 'fete_peres', 'ete'];
 
 /** Écusson gris du client sans visite (GangCardPlaceholder). */
 const PLACEHOLDER_RAW = {
@@ -179,6 +186,8 @@ function build(key, kind, raw) {
     glare: raw.glare ?? 0.22,
     scanlines: !!raw.scanlines,
     decor: raw.decor || null,
+    fx: raw.fx || null,
+    stars: raw.stars || 0,
     grad: { border: raw.border, bg: raw.bg, gem: raw.gem },
   };
 }
@@ -193,7 +202,9 @@ export const GANG_PLACEHOLDER_PALETTE = build('placeholder', 'placeholder', PLAC
  * Champs : key, kind ('tier' | 'edition'), label, short, code (texte de la
  * pastille : BRZ, ARG, OR, HOLO, TOTS, ICON, 1RE, B-DAY, DROP, HWN, XMAS, PAPA, SUN),
  * border, bg, band, band2, arc, arc2, ink, accent, gem, gemInk, holo, glare,
- * scanlines, decor ('snow' | 'bats' | 'stars' | 'sun' | null), grad.
+ * scanlines, decor ('snow' | 'bats' | 'stars' | 'sun' | null : décor immobile de la story, et de la carte
+ * quand la palette n'a pas d'effets), fx (effets animés de GangFx.jsx : un par niveau, plus Halloween,
+ * Noël, Nouvel An, anniversaire), stars (1 à 6 étoiles sous la note, niveaux seulement), grad.
  */
 export function gangPalette(card) {
   const edition = card?.edition && GANG_EDITION_PALETTES[card.edition];
@@ -203,6 +214,16 @@ export function gangPalette(card) {
 
 /** Libellé du bas de la carte (« TOTS » plutôt que « Team of the Season »). */
 export const gangTierLabel = (palette) => palette.short || palette.label;
+
+/**
+ * Libellé du bas de la carte d'un client : le niveau, suivi de « ÉDITION LIMITÉE » pendant une
+ * édition à effets (le niveau reste lisible pendant Halloween, Noël…).
+ */
+export function gangCardFootLabel(card, palette) {
+  if (palette.kind !== 'edition' || !palette.fx) return gangTierLabel(palette);
+  const tier = GANG_TIER_PALETTES[card?.tier] || GANG_TIER_PALETTES.bronze;
+  return `${gangTierLabel(tier)} · Édition limitée`;
+}
 
 /** Décor du fond intérieur : bandes diagonales puis arcs (CSS de `.inner::before` de la maquette). */
 export function gangDecorCss(p) {

@@ -17,7 +17,7 @@ import {
   GANG_LOW_COLOR,
   GANG_PLACEHOLDER_PALETTE,
   gangPalette,
-  gangTierLabel,
+  gangCardFootLabel,
   gangDecorCss,
   gangStatAbbr,
   gangStatValue,
@@ -34,6 +34,22 @@ import {
   GANG_BAT_FILL,
   GANG_BAT_STROKE,
 } from './gangTheme';
+import {
+  gangFx,
+  gangFxOverhangTop,
+  gangFxArrivalClass,
+  gangFxArrivalMs,
+  claimShowArrival,
+  useGangFxSurprise,
+  FxBehind,
+  FxBack,
+  FxSurface,
+  FxRing,
+  FxBadge,
+  FxInner,
+  FxFront,
+  FxOver,
+} from './GangFx';
 
 /**
  * Carte Gang d'un client : écusson style carte de foot, repris de la maquette
@@ -43,8 +59,11 @@ import {
  * six stats (FRA en rouge sous 50), niveau. Verso : visites, barber, favori,
  * dernière visite, ancienneté, progression vers le niveau suivant, écussons
  * débloqués (`card.badges`, 7 pastilles au plus), numéro.
- * Éditions de saison (Halloween, Noël, Fête des pères, Été) : décor propre à la
- * saison au recto (SeasonDecor), animé en grand, immobile sur une vignette.
+ * Effets (GangFx.jsx, maquette validée le 16 oct. 2026) : chaque niveau et chaque fête
+ * (Halloween, Noël, Nouvel An, anniversaire) a ses ornements, son animation au repos, son
+ * arrivée (spectaculaire la première fois de la session, simple ensuite) et une surprise
+ * (les étoiles sous la note, ou l'emblème de la fête). Les autres éditions (fête des pères,
+ * été, première coupe, drop) gardent leur décor (SeasonDecor), animé en grand.
  *
  * Animations (transform / opacity uniquement) : la carte s'incline et le reflet
  * suit le doigt ou la souris, retour au repos au relâchement ; tap / Entrée /
@@ -121,14 +140,16 @@ function Bust({ ink, accent }) {
 }
 
 /** Liseré + fond intérieur (bandes, arcs, reflets) d'une face ; `children` = contenu. */
-function Shell({ p, glareX, glareY, holoX, holoY, holoRotate, children }) {
+function Shell({ p, fx, animated, glareX, glareY, holoX, holoY, holoRotate, children }) {
   return (
     <>
       <div style={{ ...SHAPE, background: p.border }} />
+      <FxRing fx={fx} animated={animated} />
       {/* Focus clavier : le liseré prend la couleur de l'encre (comme la maquette) */}
       <div className="opacity-0 group-focus-visible:opacity-100" style={{ ...SHAPE, background: p.ink }} />
       <div style={{ ...INNER, background: p.bg }}>
         <div style={{ position: 'absolute', inset: 0, backgroundImage: gangDecorCss(p) }} />
+        <FxSurface fx={fx} />
         <motion.div
           aria-hidden="true"
           style={{
@@ -297,18 +318,19 @@ function SeasonDecor({ p, animated }) {
 /** Taille du nom selon sa longueur (largeur utile 256 px). */
 const nameFontSize = (name) => (name.length <= 12 ? 40 : name.length <= 15 ? 34 : 30);
 
-function Front({ card, p, entrance, decorAnimated }) {
+function Front({ card, p, entrance, decorAnimated, fx, fxAnimated, arrival, delay = 0, surprise, interactive }) {
   const [failedSrc, setFailedSrc] = useState(null);
   const photo = card?.photo_url && failedSrc !== card.photo_url ? card.photo_url : null;
   const score = gangScore(card);
   const name = String(card?.name || 'Client').toUpperCase();
+  const footLabel = gangCardFootLabel(card, p);
 
   const stat = (key, i) => {
     const v = gangStatValue(card, key);
     return (
       <div key={key} style={{ display: 'flex', alignItems: 'baseline', gap: 10, fontSize: 25, lineHeight: 1.12 }}>
         <b style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums', minWidth: '1.35em', color: isGangStatLow(key, v) ? GANG_LOW_COLOR : undefined }}>
-          <CountUp value={v} delay={0.45 + i * 0.08} run={entrance} />
+          <CountUp value={v} delay={delay + 0.45 + i * 0.08} run={entrance} />
         </b>
         <span style={{ fontSize: 20, fontWeight: 600, color: p.accent, letterSpacing: '.02em' }}>{gangStatAbbr(key)}</span>
       </div>
@@ -317,11 +339,15 @@ function Front({ card, p, entrance, decorAnimated }) {
 
   return (
     <div className="font-fut" style={{ position: 'absolute', inset: 0, color: p.ink }}>
-      <SeasonDecor p={p} animated={decorAnimated} />
+      {!fx && <SeasonDecor p={p} animated={decorAnimated} />}
+      <FxInner fx={fx} animated={fxAnimated} arrival={arrival} hit={surprise.hit} active={surprise.active} />
       {/* Note, poste, niveau, logo */}
       <div style={{ position: 'absolute', left: 30, top: 40, width: 62, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, zIndex: 3 }}>
-        <b style={{ fontSize: 58, fontWeight: 800, lineHeight: 0.8, fontVariantNumeric: 'tabular-nums' }}><CountUp value={score} delay={0.35} duration={1.3} run={entrance} /></b>
+        <b style={{ fontSize: 58, fontWeight: 800, lineHeight: 0.8, fontVariantNumeric: 'tabular-nums' }}><CountUp value={score} delay={delay + 0.35} duration={1.3} run={entrance} /></b>
         <span style={{ fontSize: 21, fontWeight: 700, letterSpacing: '.03em', lineHeight: 1 }}>{card?.pos || ''}</span>
+        {fx ? (
+          <FxBadge fx={fx} p={p} interactive={interactive} onSurprise={surprise.fire} active={surprise.active} />
+        ) : (
         <div
           style={{
             minWidth: 34, height: 22, padding: '0 4px', borderRadius: 3, marginTop: 6, background: p.gem, color: p.gemInk,
@@ -331,6 +357,7 @@ function Front({ card, p, entrance, decorAnimated }) {
         >
           {p.code}
         </div>
+        )}
         <Logo size={36} style={{ marginTop: 6, boxShadow: '0 0 0 1px rgba(255,255,255,.18)' }} />
       </div>
 
@@ -377,11 +404,12 @@ function Front({ card, p, entrance, decorAnimated }) {
 
       <div
         style={{
-          position: 'absolute', left: 0, right: 0, top: 392, textAlign: 'center', fontSize: 13, fontWeight: 700,
-          letterSpacing: '.22em', textTransform: 'uppercase', color: p.accent, opacity: 0.85, zIndex: 3,
+          // Libellé long (« OR · ÉDITION LIMITÉE ») : plus petit, la pointe de l'écusson est étroite
+          position: 'absolute', left: 0, right: 0, top: footLabel.length > 12 ? 394 : 392, textAlign: 'center', fontSize: footLabel.length > 12 ? 11 : 13, fontWeight: 700,
+          letterSpacing: footLabel.length > 12 ? '.1em' : '.22em', textTransform: 'uppercase', color: p.accent, opacity: 0.85, zIndex: 3, whiteSpace: 'nowrap',
         }}
       >
-        {gangTierLabel(p)}
+        {footLabel}
       </div>
 
       {/* Reflet holographique qui balaie la carte à l'arrivée (comme la carte des barbers) */}
@@ -390,7 +418,7 @@ function Front({ card, p, entrance, decorAnimated }) {
           aria-hidden="true"
           initial={{ x: '-140%' }}
           animate={{ x: '340%' }}
-          transition={{ delay: 0.55, duration: 1.15, ease: [0.4, 0, 0.2, 1] }}
+          transition={{ delay: delay + 0.55, duration: 1.15, ease: [0.4, 0, 0.2, 1] }}
           style={{
             position: 'absolute', top: '-20%', bottom: '-20%', left: 0, width: '34%', skewX: -18, zIndex: 4, pointerEvents: 'none',
             background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.06) 25%, rgba(255,255,255,0.42) 50%, rgba(255,255,255,0.18) 60%, transparent 100%)',
@@ -483,6 +511,7 @@ export default function GangCard({
   onFlip,
   gyro,
   entrance: entranceProp,
+  arrival: arrivalProp,
   className,
   style,
 }) {
@@ -497,6 +526,18 @@ export default function GangCard({
   const [gyroGranted, setGyroGranted] = useState(() => motionPermissionState() === 'granted');
   useEffect(() => onMotionPermission((state) => setGyroGranted(state === 'granted')), []);
   const p = gangPalette(card);
+  // Effets : ornements qui dépassent et animations seulement en grand
+  const fx = gangFx(p);
+  const fxAnimated = big && !reduceMotion;
+  const [showArrival, setShowArrival] = useState(() => !!(entrance && fx && arrivalProp !== false && claimShowArrival(fx.key)));
+  useEffect(() => {
+    if (!showArrival) return undefined;
+    const t = setTimeout(() => setShowArrival(false), gangFxArrivalMs(fx));
+    return () => clearTimeout(t);
+  }, [showArrival, fx]);
+  const arrivalDelay = showArrival ? fx.offset : 0;
+  const fxCardRef = useRef(null);
+  const surprise = useGangFxSurprise(fx, fxCardRef, { reduceMotion, shake: big && interactive && gyroGranted });
   const [ownFlipped, setOwnFlipped] = useState(false);
   const isFlipped = flipped ?? ownFlipped;
   const downAt = useRef(null);
@@ -597,6 +638,7 @@ export default function GangCard({
       style={{
         width: W * size,
         height: H * size,
+        marginTop: big ? gangFxOverhangTop(p) * size : undefined,
         filter: SHADOW,
         cursor: flippable ? 'pointer' : undefined,
         touchAction: tilt ? 'pan-y' : 'manipulation',
@@ -605,13 +647,17 @@ export default function GangCard({
       }}
     >
       <div style={{ position: 'absolute', left: 0, top: 0, width: W, height: H, transform: `scale(${size})`, transformOrigin: '0 0', perspective: 1100 }}>
+        {big && <FxBehind fx={fx} animated={fxAnimated} arrival={showArrival} />}
+        <div className={showArrival ? gangFxArrivalClass(fx) : undefined} style={{ position: 'absolute', inset: 0, transformStyle: 'preserve-3d' }}>
         <motion.div
-          initial={entrance ? { opacity: 0, y: 28, rotateY: -14, scale: 0.96 } : false}
+          initial={entrance && !showArrival ? { opacity: 0, y: 28, rotateY: -14, scale: 0.96 } : false}
           animate={{ opacity: 1, y: 0, rotateY: 0, scale: 1 }}
           transition={{ type: 'spring', stiffness: 120, damping: 16 }}
           style={{ position: 'absolute', inset: 0, transformStyle: 'preserve-3d' }}
         >
         <motion.div style={{ position: 'absolute', inset: 0, rotateX, rotateY, transformStyle: 'preserve-3d' }}>
+          <div ref={fxCardRef} style={{ position: 'absolute', inset: 0, transformStyle: 'preserve-3d' }}>
+          {big && <FxBack fx={fx} arrival={showArrival} />}
           <motion.div
             initial={false}
             animate={{ rotateY: isFlipped ? 180 : 0 }}
@@ -619,18 +665,41 @@ export default function GangCard({
             style={{ position: 'absolute', inset: 0, transformStyle: 'preserve-3d' }}
           >
             <div style={{ ...SIDE, transform: 'rotateY(0deg)' }} aria-hidden={isFlipped || undefined}>
-              <Shell p={p} glareX={glareXFront} glareY={glareY} holoX={holoXFront} holoY={holoY} holoRotate={holoRotate}>
-                <Front card={card} p={p} entrance={entrance} decorAnimated={big && !reduceMotion && !isFlipped} />
+              <Shell p={p} fx={fx} animated={fxAnimated} glareX={glareXFront} glareY={glareY} holoX={holoXFront} holoY={holoY} holoRotate={holoRotate}>
+                <Front
+                  card={card}
+                  p={p}
+                  entrance={entrance}
+                  decorAnimated={big && !reduceMotion && !isFlipped}
+                  fx={fx}
+                  fxAnimated={fxAnimated && !isFlipped}
+                  arrival={showArrival}
+                  delay={arrivalDelay}
+                  surprise={surprise}
+                  interactive={interactive && big && !isFlipped}
+                />
               </Shell>
             </div>
             <div style={{ ...SIDE, transform: 'rotateY(180deg)' }} aria-hidden={!isFlipped || undefined}>
-              <Shell p={p} glareX={glareXBack} glareY={glareY} holoX={holoXBack} holoY={holoY} holoRotate={holoRotate}>
+              <Shell p={p} fx={fx} animated={fxAnimated} glareX={glareXBack} glareY={glareY} holoX={holoXBack} holoY={holoY} holoRotate={holoRotate}>
                 <Back card={card} p={p} />
               </Shell>
             </div>
           </motion.div>
+          <FxFront
+            fx={fx}
+            big={big}
+            animated={fxAnimated}
+            arrival={showArrival}
+            hit={surprise.hit}
+            interactive={interactive && big && !isFlipped}
+            onSurprise={surprise.fire}
+          />
+          </div>
         </motion.div>
         </motion.div>
+        </div>
+        {big && <FxOver fx={fx} arrival={showArrival} hit={surprise.hit} />}
       </div>
     </div>
   );

@@ -7,7 +7,7 @@
  *
  * Forme d'une carte (`card`, null tant que le client n'a aucune visite) :
  * { tier: 'bronze'|'argent'|'or'|'orrare'|'tots'|'icone', tier_label,
- *   edition: null|'anniv'|'halloween'|'noel'|'fete_peres'|'ete'|'first'|'drop'
+ *   edition: null|'anniv'|'halloween'|'noel'|'nouvel_an'|'fete_peres'|'ete'|'first'|'drop'
  *            (priorité anniv > saison > first > drop, décidée par le serveur à la date de Paris),
  *   name: 'Yanis K.', photo_url, serial (numéro de collection ou null), pos: 'DÉG'|'BRB'|'RAS'|'CLA'|'COL'|'JR',
  *   score, stats: { FID, REG, PON, STY, GNG, FRA }, visits, first_visit, last_visit (AAAA-MM-JJ),
@@ -95,6 +95,7 @@ export const GANG_BADGE_INFO = {
 export const GANG_SEASONS = {
   halloween: { label: 'Halloween', code: 'HWN' },
   noel: { label: 'Noël', code: 'XMAS' },
+  nouvel_an: { label: 'Nouvel An', code: 'NY' },
   fete_peres: { label: 'Fête des pères', code: 'PAPA' },
   ete: { label: 'Été', code: 'SUN' },
 };
@@ -108,6 +109,7 @@ export function gangSeasonUntil(edition, now = new Date()) {
   if (!isGangSeason(edition)) return null;
   if (edition === 'halloween') return dayLabel(1, 11);
   if (edition === 'noel') return dayLabel(31, 12);
+  if (edition === 'nouvel_an') return dayLabel(7, 1);
   if (edition === 'ete') return dayLabel(30, 6);
   // Fête des pères : 3e dimanche de juin (le dimanche clôt l'édition)
   let year = now.getFullYear();

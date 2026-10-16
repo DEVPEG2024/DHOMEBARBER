@@ -21,7 +21,7 @@ const VISIT_STATUSES = ['confirmed', 'completed'];
 
 // Taille de la carte en tête du profil : la largeur de l'écran moins les marges, 0,9 au plus
 function useProfileCardSize() {
-  const compute = () => (typeof window === 'undefined' ? 0.8 : Math.max(0.62, Math.min(0.9, (Math.min(window.innerWidth, 512) - 56) / 300)));
+  const compute = () => (typeof window === 'undefined' ? 0.8 : Math.max(0.62, Math.min(0.9, (Math.min(window.innerWidth, 512) - 76) / 300)));
   const [size, setSize] = useState(compute);
   useEffect(() => {
     const onResize = () => setSize(compute());

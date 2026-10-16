@@ -7,6 +7,7 @@ import { Switch } from '@/components/ui/switch';
 import LoadError from '@/components/shared/LoadError';
 import GangCard, { GangCardPlaceholder } from '@/components/gang/GangCard';
 import { gangPalette } from '@/components/gang/gangTheme';
+import { gangFxHint } from '@/components/gang/GangFx';
 import GangLeaderboard from '@/components/gang/GangLeaderboard';
 import { useGangStoryShare } from '@/components/gang/GangLevelUp';
 import { GangBadgeGrid } from '@/components/gang/GangBadges';
@@ -71,7 +72,7 @@ function monthsToIcon(card) {
 function useCardSize() {
   const compute = () => {
     if (typeof window === 'undefined') return 0.9;
-    return Math.max(0.6, Math.min(1, (Math.min(window.innerWidth, 512) - 48) / 300));
+    return Math.max(0.6, Math.min(1, (Math.min(window.innerWidth, 512) - 80) / 300));
   };
   const [size, setSize] = useState(compute);
   useEffect(() => {
@@ -191,7 +192,7 @@ export default function GangCardPage() {
                 </p>
               )}
               <GangCard card={card} size={size} flippable interactive />
-              <p className="mt-3 text-xs text-muted-foreground">Touche ta carte pour la retourner</p>
+              <p className="mt-3 text-xs text-muted-foreground text-center max-w-xs">{gangFxHint(palette)}</p>
 
               <motion.button
                 type="button"

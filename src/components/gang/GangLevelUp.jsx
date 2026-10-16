@@ -266,14 +266,14 @@ function LevelUpReveal({ card, firstCard, onClose, onSeeCard, onAction }) {
               transition={{ duration: 1.3, delay: 1.1, ease: 'easeOut' }}
               onAnimationComplete={() => setBlurDone(true)}
             >
-              <GangCard card={card} size={size} flippable={false} interactive={false} />
+              <GangCard card={card} size={size} flippable={false} interactive={false} arrival={false} />
             </motion.div>
           )}
           <motion.div
             className="absolute inset-0"
             {...anim({ opacity: 0 }, { opacity: 1 }, { duration: 1.1, delay: 1.2, ease: 'easeOut' })}
           >
-            <GangCard card={card} size={size} flippable={false} interactive={false} />
+            <GangCard card={card} size={size} flippable={false} interactive={false} arrival={false} />
           </motion.div>
         </motion.div>
 
