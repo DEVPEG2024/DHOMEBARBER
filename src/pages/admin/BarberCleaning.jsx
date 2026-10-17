@@ -7,6 +7,8 @@ import { Sparkles, Check, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { format, startOfWeek, addDays } from 'date-fns';
 import { fr } from 'date-fns/locale';
+import { toast } from 'sonner';
+import LoadError, { isNetworkError } from '@/components/shared/LoadError';
 
 
 const DAY_LABELS = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
@@ -23,10 +25,12 @@ export default function BarberCleaning() {
   const weekStart = format(mondayDate, 'yyyy-MM-dd');
   const today = format(new Date(), 'yyyy-MM-dd');
 
-  const { data: allSchedule = [] } = useQuery({
+  const scheduleQuery = useQuery({
     queryKey: ['cleaningSchedule', weekStart],
     queryFn: () => api.entities.CleaningSchedule.filter({ week_start: weekStart }, 'date', 500),
   });
+  const allSchedule = scheduleQuery.data ?? [];
+  const scheduleFailed = scheduleQuery.isError && !scheduleQuery.data;
 
   // Filter only this barber's tasks
   const mySchedule = useMemo(() => {
@@ -37,6 +41,9 @@ export default function BarberCleaning() {
   const toggleDone = useMutation({
     mutationFn: ({ id, status }) => apiRequest('PATCH', apiUrl(`/cleaning/schedule/${id}/toggle`), { status }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['cleaningSchedule'] }),
+    onError: (e) => toast.error(isNetworkError(e)
+      ? 'Pas de connexion internet'
+      : (e?.data?.error || (e?.message && !/^HTTP \d+$/.test(e.message) ? e.message : '') || 'Erreur, réessayez')),
   });
 
   // Group by date
@@ -156,7 +163,11 @@ export default function BarberCleaning() {
           );
         })}
 
-        {mySchedule.length === 0 && (
+        {scheduleFailed && (
+          <LoadError what="vos tâches" error={scheduleQuery.error} onRetry={scheduleQuery.refetch} retrying={scheduleQuery.isFetching} />
+        )}
+
+        {!scheduleFailed && mySchedule.length === 0 && (
           <div className="text-center py-16">
             <Sparkles className="w-10 h-10 text-muted-foreground/20 mx-auto mb-3" />
             <p className="text-sm text-muted-foreground">Aucune tâche cette semaine</p>

@@ -12,21 +12,23 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import LoadError from '@/components/shared/LoadError';
 
+// Seulement les permissions qui servent vraiment à un barber : Prestations, Équipe, Notifications,
+// Paramètres (écritures réservées à l'admin par le serveur) et Congés (sans effet) ont été retirées.
+// Une ancienne clé encore en base est simplement ignorée.
 const ALL_PERMISSIONS = [
   { key: 'dashboard', label: 'Dashboard' },
   { key: 'agenda', label: 'Agenda' },
-  { key: 'services', label: 'Prestations' },
-  { key: 'team', label: 'Équipe' },
   { key: 'clients', label: 'Clients' },
-  { key: 'products', label: 'Produits' },
+  { key: 'products', label: 'Textile (réservations)' },
   { key: 'orders', label: 'Commandes' },
   { key: 'reviews', label: 'Avis' },
   { key: 'stats', label: 'Statistiques' },
-  { key: 'notifications', label: 'Notifications' },
-  { key: 'conges', label: 'Congés' },
-  { key: 'settings', label: 'Paramètres' },
 ];
+const KNOWN_PERMISSIONS = new Set(ALL_PERMISSIONS.map(p => p.key));
+const PASSWORD_MIN = 8;
+const PASSWORD_MESSAGE = `Le mot de passe doit contenir au moins ${PASSWORD_MIN} caractères`;
 
 function apiCall(method, path, body) {
   return apiRequest(method, `${API_BASE}${path}`, body);
@@ -44,10 +46,17 @@ export default function BarberAccounts() {
   const [editPassword, setEditPassword] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
 
-  const { data: accounts = [], isLoading } = useQuery({
+  const {
+    data: accountsData, isLoading, isError, error, refetch, isFetching, isPending, fetchStatus,
+  } = useQuery({
     queryKey: ['barberAccounts'],
     queryFn: () => apiCall('GET', '/barber-accounts'),
   });
+  const accounts = Array.isArray(accountsData) ? accountsData : [];
+  // Liste non chargée : ni « Aucun compte », ni création (on recréerait un compte existant → 409)
+  // (hors ligne la requête reste en pause : même traitement qu'un échec)
+  const accountsFailed = (isError && !accountsData) || (isPending && fetchStatus === 'paused');
+  const accountsReady = Array.isArray(accountsData);
 
   const { data: employees = [] } = useQuery({
     queryKey: ['employees'],
@@ -56,12 +65,16 @@ export default function BarberAccounts() {
 
   // Employees without an account yet
   const availableEmployees = employees.filter(
-    emp => !accounts.some(acc => acc.employee_id === emp.id)
+    emp => !accounts.some(acc => String(acc.employee_id) === String(emp.id))
   );
 
   const handleCreate = async () => {
     if (!form.email || !form.password || !form.employee_id) {
       toast.error('Remplissez tous les champs obligatoires');
+      return;
+    }
+    if (form.password.length < PASSWORD_MIN) {
+      toast.error(PASSWORD_MESSAGE);
       return;
     }
     setSaving(true);
@@ -100,14 +113,19 @@ export default function BarberAccounts() {
   };
 
   const handleSaveEdit = async (acc) => {
+    // Le serveur exige 8 caractères : jamais d'envoi silencieusement ignoré
+    if (editPassword && editPassword.length < PASSWORD_MIN) {
+      toast.error(PASSWORD_MESSAGE);
+      return;
+    }
     setSavingEdit(true);
     try {
       await apiCall('PUT', `/barber-accounts/${acc.id}`, {
         permissions: editPerms,
-        ...(editPassword.length >= 6 ? { password: editPassword } : {}),
+        ...(editPassword ? { password: editPassword } : {}),
       });
       queryClient.invalidateQueries({ queryKey: ['barberAccounts'] });
-      toast.success('Permissions mises à jour');
+      toast.success(editPassword ? 'Mot de passe et permissions mis à jour' : 'Permissions mises à jour');
       setEditingId(null);
     } catch (err) {
       toast.error(err.message);
@@ -126,9 +144,9 @@ export default function BarberAccounts() {
         <div className="shrink-0">
           <p className="text-[11px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Gestion</p>
           <h1 className="font-display text-2xl font-bold">Comptes Barbers</h1>
-          <p className="text-xs text-muted-foreground mt-1">{accounts.length} compte(s) barber</p>
+          {accountsReady && <p className="text-xs text-muted-foreground mt-1">{accounts.length} compte(s) barber</p>}
         </div>
-        <Button size="sm" className="gap-1.5" onClick={() => setShowCreate(true)}>
+        <Button size="sm" className="gap-1.5" disabled={!accountsReady} onClick={() => setShowCreate(true)}>
           <Plus className="w-3.5 h-3.5" /> Créer un compte
         </Button>
       </div>
@@ -220,6 +238,8 @@ export default function BarberAccounts() {
       {/* Accounts list */}
       {isLoading ? (
         <div className="text-center py-16 text-muted-foreground text-sm">Chargement...</div>
+      ) : accountsFailed ? (
+        <LoadError what="les comptes barbers" error={error} onRetry={refetch} retrying={isFetching} />
       ) : accounts.length === 0 ? (
         <div className="text-center py-16 text-muted-foreground text-sm">
           Aucun compte barber. Créez-en un pour donner accès au back-office à vos barbers.
@@ -263,10 +283,10 @@ export default function BarberAccounts() {
                 {/* Permissions display */}
                 {!isEditing && (
                   <div className="flex flex-wrap gap-1.5 mt-3">
-                    {perms.length === 0 ? (
+                    {perms.filter(p => KNOWN_PERMISSIONS.has(p)).length === 0 ? (
                       <span className="text-[10px] text-muted-foreground">Aucune permission</span>
                     ) : (
-                      perms.map(p => (
+                      perms.filter(p => KNOWN_PERMISSIONS.has(p)).map(p => (
                         <Badge key={p} variant="outline" className="text-[10px] bg-primary/5 border-primary/20 text-primary">
                           {ALL_PERMISSIONS.find(ap => ap.key === p)?.label || p}
                         </Badge>
@@ -296,7 +316,7 @@ export default function BarberAccounts() {
                     <div className="flex items-end gap-3">
                       <div className="space-y-1 flex-1 max-w-xs">
                         <Label className="text-xs">Nouveau mot de passe (optionnel)</Label>
-                        <Input type="password" placeholder="Laisser vide pour ne pas changer" value={editPassword}
+                        <Input type="password" placeholder="8 caractères minimum, vide = inchangé" value={editPassword}
                           onChange={e => setEditPassword(e.target.value)} className="bg-background border-border" />
                       </div>
                       <div className="flex gap-2">

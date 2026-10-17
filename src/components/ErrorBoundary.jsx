@@ -1,16 +1,31 @@
 import React from 'react';
+import { isReloadPending, isStaleChunkError, reloadOnceForStaleChunk } from '@/lib/chunkReload';
 
 export default class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
-    this.state = { hasError: false };
+    this.state = { hasError: false, reloading: false };
   }
 
   static getDerivedStateFromError() {
     return { hasError: true };
   }
 
+  componentDidCatch(error) {
+    // Fichier de page périmé après un déploiement : rechargement unique, écran neutre en attendant.
+    // Rechargement déjà lancé par `vite:preloadError` (l'import a résolu `undefined`, React.lazy
+    // lève alors une TypeError) : même écran neutre. Hors ligne ou rechargement déjà tenté
+    // depuis moins de 15 s : l'écran d'erreur reste, avec son bouton
+    if (isReloadPending() || (isStaleChunkError(error) && reloadOnceForStaleChunk())) {
+      this.setState({ reloading: true });
+    }
+  }
+
   render() {
+    if (this.state.reloading) {
+      return <div className="fixed inset-0 bg-background" aria-busy="true" />;
+    }
+
     if (this.state.hasError) {
       return (
         <div className="fixed inset-0 flex items-center justify-center bg-background px-5">

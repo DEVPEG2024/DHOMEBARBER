@@ -117,7 +117,11 @@ export default function WeekView({ currentDate, appointments, employees, employe
             const isToday = isSameDay(day, new Date());
             const dayApts = appointments.filter((a) => a.date === dateStr);
             const bookings = dayApts.filter((a) => !isBreak(a) && !isLastMinuteSlot(a));
-            const meta = layoutOverlaps(bookings, MIN_CARD_MINUTES);
+            // Les Last Minute partagent la mise en page des RDV : en vue « Tous », celui d'un
+            // barber se place à côté du client d'un autre barber à la même heure au lieu de le
+            // recouvrir sur toute la largeur (le compteur d'en-tête, lui, ne les compte pas)
+            const lastMinutes = dayApts.filter(isLastMinuteSlot);
+            const meta = layoutOverlaps([...bookings, ...lastMinutes], MIN_CARD_MINUTES);
             const onLeaveEmps = employees.filter((emp) => isOnLeave(timeOffs, emp.id, dateStr));
             const singleOnLeave = single && onLeaveEmps.some((e) => String(e.id) === String(single.id));
             const preview = drag.previewFor(dateStr);
@@ -159,10 +163,19 @@ export default function WeekView({ currentDate, appointments, employees, employe
                     style={{ ...verticalPlacement(apt.start_time, apt.end_time, HOUR_HEIGHT, 18), left: 1, right: 1 }} />
                 ))}
 
-                {dayApts.filter(isLastMinuteSlot).map((apt) => (
-                  <LastMinuteCard key={apt.id} apt={apt} onSelect={selectCard} dragProps={dragProps(apt)} ghosted={moving?.apt.id === apt.id}
-                    style={{ ...verticalPlacement(apt.start_time, apt.end_time, HOUR_HEIGHT, 20), left: 1, right: 1 }} />
-                ))}
+                {lastMinutes.map((apt) => {
+                  const { col, cols } = meta[apt.id] || { col: 0, cols: 1 };
+                  const width = 100 / cols;
+                  return (
+                    <LastMinuteCard key={apt.id} apt={apt} onSelect={selectCard} dragProps={dragProps(apt)} ghosted={moving?.apt.id === apt.id}
+                      style={{
+                        // Hauteur minimale MIN_CARD : cohérente avec MIN_CARD_MINUTES de layoutOverlaps
+                        ...verticalPlacement(apt.start_time, apt.end_time, HOUR_HEIGHT, MIN_CARD),
+                        left: `calc(${col * width}% + 1px)`,
+                        width: `calc(${width}% - 2px)`,
+                      }} />
+                  );
+                })}
 
                 {bookings.map((apt) => {
                   const { col, cols } = meta[apt.id] || { col: 0, cols: 1 };

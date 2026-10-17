@@ -30,6 +30,7 @@ import {
   GANG_BAT_FILL,
   GANG_BAT_STROKE,
 } from '@/components/gang/gangTheme';
+import { isNative } from '@/lib/capacitor';
 
 export const GANG_STORY_WIDTH = 1080;
 export const GANG_STORY_HEIGHT = 1920;
@@ -619,6 +620,30 @@ export async function renderGangStory(card) {
 export async function shareGangStory(card, { blob } = {}) {
   const image = blob || (await renderGangStory(card));
   const fallback = () => ({ fallback: true, url: URL.createObjectURL(image) });
+
+  // Apps iOS / Android : la WebView Android n'a pas navigator.share, et l'appui long sur une
+  // image blob: n'y ouvre aucun menu. On écrit le PNG dans le cache de l'app puis on ouvre la
+  // feuille de partage du système (plugins chargés à la demande : le bundle web n'en hérite pas).
+  if (isNative) {
+    try {
+      const { Filesystem, Directory } = await import('@capacitor/filesystem');
+      const { Share } = await import('@capacitor/share');
+      const data = await blobToBase64(image);
+      const { uri } = await Filesystem.writeFile({ path: 'carte-gang-dhomebarber.png', data, directory: Directory.Cache });
+      await Share.share({
+        title: 'Ma carte Gang',
+        text: "Ma carte Gang D'Home Barber · 3 Rue du Bois Arquet, Douvaine",
+        files: [uri],
+        dialogTitle: 'Partager ma carte',
+      });
+      return { shared: true };
+    } catch (err) {
+      // Feuille de partage refermée par le client : « Share canceled »
+      if (/cancel/i.test(String(err?.message || err))) return { cancelled: true };
+      return fallback();
+    }
+  }
+
   if (typeof navigator === 'undefined' || typeof navigator.share !== 'function' || typeof File === 'undefined') return fallback();
 
   const file = new File([image], 'carte-gang.png', { type: 'image/png' });
@@ -643,4 +668,18 @@ export async function shareGangStory(card, { blob } = {}) {
     // NotAllowedError (geste trop ancien), échec de l'appli cible… : image à enregistrer
     return fallback();
   }
+}
+
+/** Contenu base64 d'un blob, sans le préfixe `data:…;base64,` (format attendu par Filesystem). */
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || '');
+      const comma = result.indexOf(',');
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.onerror = () => reject(reader.error || new Error('Lecture de l’image impossible'));
+    reader.readAsDataURL(blob);
+  });
 }

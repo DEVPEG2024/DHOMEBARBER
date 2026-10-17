@@ -11,6 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
 import { hapticFeedback } from '@/lib/capacitor';
+import { useAndroidBack } from '@/lib/useAndroidBack';
 import LoadError, { isNetworkError } from '@/components/shared/LoadError';
 import GangLeaderboard from '@/components/gang/GangLeaderboard';
 import { contentFilterError } from '@/lib/contentFilter';
@@ -91,7 +92,7 @@ function CommentItem({ comment, currentUser, onDelete, onOpenMenu }) {
               </span>
             )}
           </div>
-          <p className="text-xs text-foreground/80 mt-0.5 whitespace-pre-wrap">{comment.content}</p>
+          <p className="text-xs text-foreground/80 mt-0.5 whitespace-pre-wrap break-words">{comment.content}</p>
         </div>
         <div className="flex items-center gap-3 mt-1 px-1">
           <span className="text-[10px] text-muted-foreground">{timeAgo(comment.created_at)}</span>
@@ -204,7 +205,10 @@ function EmojiBurst({ emoji, onDone }) {
   );
 }
 
-function PostCard({ post, currentUser, onLike, onDelete, likes, comments, onComment, onDeleteComment, getAuthorPhoto, onOpenMenu }) {
+function PostCard({
+  post, currentUser, onLike, onDelete, likes, comments, onComment, onDeleteComment, getAuthorPhoto, onOpenMenu,
+  likesFailed = false, commentsFailed = false, onRetryLikes, onRetryComments, likesRetrying = false, commentsRetrying = false,
+}) {
   const [showComments, setShowComments] = useState(false);
   const [showReactions, setShowReactions] = useState(false);
   const [commentText, setCommentText] = useState('');
@@ -254,6 +258,8 @@ function PostCard({ post, currentUser, onLike, onDelete, likes, comments, onComm
 
   const handleImageDoubleTap = () => {
     if (!currentUser) return;
+    // Réactions non chargées : on ne sait pas si j'ai déjà réagi, on recharge au lieu d'envoyer
+    if (likesFailed) { onRetryLikes?.(); return; }
     setHeartPop(Date.now());
     hapticFeedback();
     if (!userLike) sendReaction('❤️');
@@ -270,6 +276,7 @@ function PostCard({ post, currentUser, onLike, onDelete, likes, comments, onComm
   };
   useEffect(() => () => clearTimeout(pressTimer.current), []);
   const onLikePointerDown = (e) => {
+    if (likesFailed) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     longPressed.current = false;
     pressStart.current = { x: e.clientX, y: e.clientY };
@@ -290,11 +297,14 @@ function PostCard({ post, currentUser, onLike, onDelete, likes, comments, onComm
   // Clic droit / menu contextuel du système (appui long sur Android) : le sélecteur à la place
   const onLikeContextMenu = (e) => {
     e.preventDefault();
+    if (likesFailed) return;
     cancelPress();
     longPressed.current = true;
     setShowReactions(true);
   };
   const onLikeClick = () => {
+    // Réactions non chargées : le tap relance leur chargement, il n'envoie rien
+    if (likesFailed) { setShowReactions(false); onRetryLikes?.(); return; }
     // Le clic qui suit un appui long ne doit ni retirer la réaction ni refermer le sélecteur
     if (longPressed.current) { longPressed.current = false; return; }
     // Sélecteur ouvert : le tap le referme sans rien changer
@@ -392,7 +402,7 @@ function PostCard({ post, currentUser, onLike, onDelete, likes, comments, onComm
 
       {/* Content */}
       {post.content && (
-        <p className="px-4 pb-3 text-sm text-foreground leading-relaxed whitespace-pre-wrap">{post.content}</p>
+        <p className="px-4 pb-3 text-sm text-foreground leading-relaxed whitespace-pre-wrap break-words">{post.content}</p>
       )}
 
       {/* Image - 4:5 vertical format (1080x1350) */}
@@ -420,8 +430,21 @@ function PostCard({ post, currentUser, onLike, onDelete, likes, comments, onComm
         </div>
       )}
 
-      {/* Reaction summary */}
-      {likeCount > 0 && (
+      {/* Reaction summary (en échec : jamais « aucune réaction », on propose de recharger) */}
+      {likesFailed ? (
+        <div className="flex flex-wrap items-center gap-x-1.5 px-4 py-1.5 text-xs text-muted-foreground">
+          <span>Réactions indisponibles</span>
+          <span aria-hidden="true">·</span>
+          <button
+            type="button"
+            onClick={() => onRetryLikes?.()}
+            disabled={likesRetrying}
+            className="font-semibold text-primary disabled:opacity-60"
+          >
+            {likesRetrying ? 'Chargement…' : 'Réessayer'}
+          </button>
+        </div>
+      ) : likeCount > 0 && (
         <div className="flex items-center gap-1 px-4 py-1.5">
           <div className="flex -space-x-1">
             {Object.entries(reactionCounts).slice(0, 3).map(([emoji]) => (
@@ -476,7 +499,7 @@ function PostCard({ post, currentUser, onLike, onDelete, likes, comments, onComm
           onPointerLeave={cancelPress}
           onPointerCancel={cancelPress}
           onContextMenu={onLikeContextMenu}
-          aria-label={userLike ? 'Retirer ma réaction (appui long pour la changer)' : 'Réagir'}
+          aria-label={likesFailed ? 'Recharger les réactions' : userLike ? 'Retirer ma réaction (appui long pour la changer)' : 'Réagir'}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-full hover:bg-secondary transition-colors select-none [-webkit-touch-callout:none]"
         >
           {userLike ? (
@@ -503,7 +526,7 @@ function PostCard({ post, currentUser, onLike, onDelete, likes, comments, onComm
         >
           <MessageCircle className="w-5 h-5" />
           <span className="text-xs font-medium">
-            {commentCount > 0 ? `${commentCount}` : 'Commenter'}
+            {commentsFailed ? 'Commentaires' : commentCount > 0 ? `${commentCount}` : 'Commenter'}
           </span>
         </button>
       </div>
@@ -528,7 +551,9 @@ function PostCard({ post, currentUser, onLike, onDelete, likes, comments, onComm
                   onOpenMenu={onOpenMenu}
                 />
               ))}
-              {postComments.length === 0 && (
+              {commentsFailed ? (
+                <LoadError compact what="les commentaires" onRetry={onRetryComments} retrying={commentsRetrying} />
+              ) : postComments.length === 0 && (
                 <p className="text-xs text-muted-foreground text-center py-2">Aucun commentaire</p>
               )}
             </div>
@@ -586,6 +611,12 @@ export default function Feed() {
   const [blocking, setBlocking] = useState(false);
   const [handlingReport, setHandlingReport] = useState(null);
 
+  // Android : le bouton retour ferme la fenêtre du dessus (comme sa croix), sans quitter le fil
+  useAndroidBack(showComposer, () => setShowComposer(false));
+  useAndroidBack(!!menuTarget, () => setMenuTarget(null));
+  useAndroidBack(!!reportTarget, () => { if (!reportSending) setReportTarget(null); });
+  useAndroidBack(!!blockTarget, () => { if (!blocking) setBlockTarget(null); });
+
   // Défilement infini : 20 publications par page (`skip` = OFFSET côté serveur).
   // À la création ou à la suppression d'une publication les offsets bougent :
   // invalider ['posts'] recharge toutes les pages déjà affichées, donc le fil reste cohérent.
@@ -603,30 +634,53 @@ export default function Feed() {
     queryKey: ['posts'],
     initialPageParam: 0,
     queryFn: ({ pageParam }) => api.entities.Post.list('-created_at', POSTS_PAGE_SIZE, pageParam),
+    // On ne s'arrête que sur une page vide : le serveur retire les auteurs bloqués APRÈS l'OFFSET,
+    // une page de 19 n'est donc pas forcément la dernière (l'offset reste celui du serveur)
     getNextPageParam: (lastPage, allPages) =>
-      (lastPage?.length || 0) < POSTS_PAGE_SIZE ? undefined : allPages.length * POSTS_PAGE_SIZE,
+      (lastPage?.length ? allPages.length * POSTS_PAGE_SIZE : undefined),
   });
 
-  const posts = useMemo(() => postsPages?.pages.flat() ?? [], [postsPages]);
+  // Une publication arrivée pendant le défilement décale l'OFFSET : la page suivante renvoie
+  // alors la dernière de la précédente. On garde la première occurrence de chaque id.
+  const posts = useMemo(() => {
+    const seen = new Set();
+    const out = [];
+    for (const p of postsPages?.pages.flat() ?? []) {
+      const k = String(p.id);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(p);
+    }
+    return out;
+  }, [postsPages]);
 
   // Réactions et commentaires : uniquement ceux des publications affichées (post_id IN (...)),
   // au lieu des 500 derniers du salon. La clé contient les ids pour que le cache suive les pages.
   const postIds = useMemo(() => posts.map(p => p.id), [posts]);
   const postIdsKey = postIds.join(',');
 
-  const { data: likes = [] } = useQuery({
+  const {
+    data: likesData, isError: likesError, refetch: refetchLikes, isFetching: likesFetching,
+  } = useQuery({
     queryKey: ['postLikes', postIdsKey],
     queryFn: () => fetchForPosts(api.entities.PostLike, postIds, '-created_at', 30),
     enabled: postIds.length > 0,
     placeholderData: (prev) => prev,
   });
+  const likes = likesData ?? [];
+  // En échec sans donnée : jamais « aucune réaction » (un tap créerait un doublon refusé)
+  const likesFailed = likesError && !likesData;
 
-  const { data: comments = [] } = useQuery({
+  const {
+    data: commentsData, isError: commentsError, refetch: refetchComments, isFetching: commentsFetching,
+  } = useQuery({
     queryKey: ['postComments', postIdsKey],
     queryFn: () => fetchForPosts(api.entities.PostComment, postIds, 'created_at', 25),
     enabled: postIds.length > 0,
     placeholderData: (prev) => prev,
   });
+  const comments = commentsData ?? [];
+  const commentsFailed = commentsError && !commentsData;
 
   const { data: employees = [] } = useQuery({
     queryKey: ['employees'],
@@ -635,11 +689,15 @@ export default function Feed() {
   });
 
   // Utilisateurs que j'ai bloqués : leurs contenus sont masqués (le serveur filtre aussi)
-  const { data: blocks = [] } = useQuery({
+  // Défense en profondeur : seulement MES blocages (le serveur filtre déjà par blocker_email,
+  // admin compris ; un admin ne doit jamais voir masqué ce qu'un client a bloqué)
+  const { data: blocksData } = useQuery({
     queryKey: ['userBlocks'],
     queryFn: () => api.entities.UserBlock.list('-created_at', 200),
     enabled: !!user,
   });
+  const myEmail = String(user?.email || '').toLowerCase();
+  const blocks = (blocksData ?? []).filter(b => String(b.blocker_email || '').toLowerCase() === myEmail);
 
   // Admin : signalements en attente
   const { data: reports = [] } = useQuery({
@@ -740,6 +798,8 @@ export default function Feed() {
   // Réaction : pas encore de réaction → création ; même emoji que la mienne → retrait ;
   // autre emoji → changement (PostLike.update, `UNIQUE(post_id, user_email)` interdit une seconde ligne)
   const handleLike = async (postId, reaction = '❤️') => {
+    // Réactions non chargées : impossible de savoir si j'ai déjà réagi, on recharge d'abord
+    if (likesFailed) { refetchLikes(); return false; }
     const mine = likes.find(l => String(l.post_id) === String(postId) && isMine(l, user, 'user_key', 'user_email'));
     try {
       if (mine && (mine.reaction || '❤️') === reaction) {
@@ -751,7 +811,10 @@ export default function Feed() {
       }
       return true;
     } catch (err) {
-      toast.error(errorText(err, "Impossible d'enregistrer votre réaction"));
+      // Ma réaction existait déjà (liste pas à jour) : pas de « Cet élément existe déjà »,
+      // le rechargement du `finally` affiche l'état réel
+      if (err?.status === 409 && !mine) toast('Votre réaction était déjà enregistrée');
+      else toast.error(errorText(err, "Impossible d'enregistrer votre réaction"));
       return false;
     } finally {
       // Succès comme échec (doublon, réaction déjà retirée ailleurs) : on resynchronise, et on
@@ -784,8 +847,8 @@ export default function Feed() {
     try {
       await api.entities.PostComment.delete(commentId);
       queryClient.invalidateQueries({ queryKey: ['postComments'] });
-    } catch {
-      toast.error('Erreur lors de la suppression');
+    } catch (err) {
+      toast.error(errorText(err, 'Erreur lors de la suppression'));
     }
   };
 
@@ -796,8 +859,8 @@ export default function Feed() {
       queryClient.invalidateQueries({ queryKey: ['posts'] });
       toast.success('Publication supprimée');
       return true;
-    } catch {
-      toast.error('Erreur lors de la suppression');
+    } catch (err) {
+      toast.error(errorText(err, 'Erreur lors de la suppression'));
       return false;
     }
   };
@@ -825,7 +888,7 @@ export default function Feed() {
       setReportTarget(null);
       toast.success('Signalement envoyé. Notre équipe le traite sous 24 h.');
     } catch (err) {
-      toast.error(err?.message || "Erreur lors de l'envoi du signalement");
+      toast.error(errorText(err, "Erreur lors de l'envoi du signalement"));
     } finally {
       setReportSending(false);
     }
@@ -854,35 +917,48 @@ export default function Feed() {
       toast.success(`${blockTarget.name || 'Utilisateur'} bloqué. Vous ne verrez plus ses publications.`);
       setBlockTarget(null);
     } catch (err) {
-      toast.error(err?.message || 'Erreur lors du blocage');
+      toast.error(errorText(err, 'Erreur lors du blocage'));
     } finally {
       setBlocking(false);
     }
   };
 
   // Admin : traiter un signalement (supprimer le contenu ou l'ignorer)
+  // Ordre : d'abord le contenu, ensuite seulement le signalement. Si la suppression échoue, le
+  // signalement reste en attente (et donc sous les yeux de l'admin).
   const handleReport = async (report, action) => {
     setHandlingReport(report.id);
     try {
-      await api.entities.PostReport.update(report.id, {
-        status: action === 'delete' ? 'handled' : 'dismissed',
-        handled_by: user.email,
-        handled_at: new Date().toISOString(),
-      });
+      let deleted = false;
       if (action === 'delete') {
         try {
-          if (report.comment_id) await api.entities.PostComment.delete(report.comment_id);
-          else if (report.post_id) await api.entities.Post.delete(report.post_id);
+          if (report.comment_id) { await api.entities.PostComment.delete(report.comment_id); deleted = true; }
+          else if (report.post_id) { await api.entities.Post.delete(report.post_id); deleted = true; }
         } catch (err) {
           if (err?.status !== 404) throw err; // déjà supprimé : rien à faire
         }
       }
+      try {
+        await api.entities.PostReport.update(report.id, {
+          status: action === 'dismiss' ? 'dismissed' : 'handled',
+          handled_by: user.email,
+          handled_at: new Date().toISOString(),
+        });
+      } catch (err) {
+        // Le serveur a pu clore ce signalement en même temps que la suppression du contenu
+        if (!(deleted && err?.status === 404)) throw err;
+      }
       queryClient.invalidateQueries({ queryKey: ['postReports'] });
       queryClient.invalidateQueries({ queryKey: ['posts'] });
       queryClient.invalidateQueries({ queryKey: ['postComments'] });
-      toast.success(action === 'delete' ? 'Contenu supprimé' : 'Signalement ignoré');
+      toast.success(action === 'dismiss'
+        ? 'Signalement ignoré'
+        : action === 'close' ? 'Signalement clos'
+          : deleted ? 'Contenu supprimé' : 'Signalement traité (contenu déjà supprimé)');
     } catch (err) {
-      toast.error(err?.message || 'Erreur lors du traitement');
+      toast.error(errorText(err, 'Erreur lors du traitement'));
+      // La liste doit refléter l'état réel (une étape a pu passer)
+      queryClient.invalidateQueries({ queryKey: ['postReports'] });
     } finally {
       setHandlingReport(null);
     }
@@ -1015,19 +1091,32 @@ export default function Feed() {
             <p className="text-sm font-semibold text-foreground">Signalements en attente ({reports.length})</p>
           </div>
           <div className="divide-y divide-border">
-            {reports.map(r => (
+            {reports.map(r => {
+              // Contenu déjà supprimé (post_id / comment_id passés à NULL) : il ne reste qu'à clore
+              const gone = !r.post_id && !r.comment_id;
+              return (
               <div key={r.id} className="px-4 py-3 space-y-2">
-                <p className="text-xs text-muted-foreground">
+                <p className="text-xs text-muted-foreground break-words">
                   <span className="font-semibold text-foreground">{r.reporter_name || r.reporter_email}</span>
-                  {' '}a signalé {r.comment_id ? 'un commentaire' : 'une publication'} de{' '}
+                  {' '}a signalé {gone ? 'un contenu déjà supprimé' : r.comment_id ? 'un commentaire' : 'une publication'} de{' '}
                   <span className="font-semibold text-foreground">{r.reported_name || r.reported_email || 'inconnu'}</span>
                   {' '}· {timeAgo(r.created_at)}
                 </p>
                 <p className="text-xs font-semibold text-amber-400">{r.reason}{r.details ? ` — ${r.details}` : ''}</p>
                 {r.content_snapshot && (
-                  <p className="text-xs text-foreground/80 bg-secondary/50 rounded-lg px-3 py-2 whitespace-pre-wrap line-clamp-4">{r.content_snapshot}</p>
+                  <p className="text-xs text-foreground/80 bg-secondary/50 rounded-lg px-3 py-2 whitespace-pre-wrap break-words line-clamp-4">{r.content_snapshot}</p>
                 )}
-                <div className="flex gap-2 pt-1">
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {gone ? (
+                    <button
+                      onClick={() => handleReport(r, 'close')}
+                      disabled={handlingReport === r.id}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-secondary text-muted-foreground text-xs font-semibold hover:text-foreground transition-colors disabled:opacity-50"
+                    >
+                      <Check className="w-3.5 h-3.5" /> Clore
+                    </button>
+                  ) : (
+                  <>
                   <button
                     onClick={() => handleReport(r, 'delete')}
                     disabled={handlingReport === r.id}
@@ -1042,9 +1131,12 @@ export default function Feed() {
                   >
                     <Check className="w-3.5 h-3.5" /> Ignorer
                   </button>
+                  </>
+                  )}
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
@@ -1128,7 +1220,7 @@ export default function Feed() {
                 Pourquoi signalez-vous {reportTarget.type === 'comment' ? 'ce commentaire' : 'cette publication'} ? Notre équipe examine chaque signalement sous 24 h.
               </p>
               {reportTarget.content && (
-                <p className="text-xs text-foreground/70 bg-secondary/50 rounded-lg px-3 py-2 mb-3 line-clamp-3 whitespace-pre-wrap">{reportTarget.content}</p>
+                <p className="text-xs text-foreground/70 bg-secondary/50 rounded-lg px-3 py-2 mb-3 line-clamp-3 whitespace-pre-wrap break-words">{reportTarget.content}</p>
               )}
               <div className="space-y-2">
                 {REPORT_REASONS.map(reason => (
@@ -1240,6 +1332,12 @@ export default function Feed() {
                   onDeleteComment={handleDeleteComment}
                   getAuthorPhoto={getAuthorPhoto}
                   onOpenMenu={setMenuTarget}
+                  likesFailed={likesFailed}
+                  commentsFailed={commentsFailed}
+                  onRetryLikes={refetchLikes}
+                  onRetryComments={refetchComments}
+                  likesRetrying={likesFetching}
+                  commentsRetrying={commentsFetching}
                 />
               </GlassCard>
             ))}

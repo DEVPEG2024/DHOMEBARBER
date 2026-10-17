@@ -18,6 +18,21 @@ export const productCategoryLabel = (value) => PRODUCT_CATEGORY_LABELS[value] ||
 /** Quantité maximale ajoutable en une fois depuis la fiche. */
 export const MAX_QUANTITY = 10;
 
+/**
+ * Quantité maximale d'un même produit par commande : même valeur que MAX_QUANTITY de
+ * lib/orders.js côté serveur (au-delà, il refuse la commande).
+ */
+export const MAX_PER_PRODUCT = 20;
+
+/** Message du plafond par produit (le salon prend les grosses quantités au téléphone). */
+export const PER_PRODUCT_LIMIT_MESSAGE = `${MAX_PER_PRODUCT} maximum par produit : pour plus, appelez le salon au 06 66 08 36 05`;
+
+/**
+ * Produit en vente dans la Boutique : les consommables du salon (onglet « Prestations » du stock,
+ * `stock_type` 'prestation' ou 'salon') ne le sont jamais. Une ligne sans type est boutique.
+ */
+export const isShopProduct = (p) => (p?.stock_type || 'boutique') === 'boutique';
+
 /** En dessous de ce stock (inclus), la fiche affiche « Plus que N ». */
 export const LOW_STOCK_THRESHOLD = 5;
 

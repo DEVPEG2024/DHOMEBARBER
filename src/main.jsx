@@ -4,6 +4,14 @@ import App from '@/App.jsx'
 import '@/index.css'
 import { initCapacitor, isNative } from '@/lib/capacitor'
 import { initNativePush, addNotification, getBadgeCount, syncServiceWorkerNotifications } from '@/lib/pushNotifications'
+import { reloadOnceForStaleChunk } from '@/lib/chunkReload'
+
+// Après un déploiement, un onglet resté ouvert demande d'anciens fichiers de page qui n'existent
+// plus : Vite émet `vite:preloadError`, on recharge une fois pour prendre la nouvelle version
+// (au lieu de « Une erreur est survenue »). Hors ligne ou déjà tenté : l'ErrorBoundary prend le relais
+window.addEventListener('vite:preloadError', (event) => {
+  if (reloadOnceForStaleChunk()) event.preventDefault();
+});
 
 // Pastille de l'icône (web installé) : non lues du compte connecté sur l'appareil, plus les
 // notifications reçues app fermée que le service worker garde en attente

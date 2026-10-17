@@ -64,7 +64,7 @@ export default function WalletButtons({ card, className = '' }) {
     setBusy(kind);
     hapticFeedback();
     try {
-      const links = await fetchWalletLinks(card.id);
+      const links = await fetchWalletLinks(card.id, kind);
       const url = kind === 'apple' ? links.apple_url : links.google_url;
       if (!url) {
         toast.error(WALLETS[kind].missing, { description: 'Présentez le QR code de la carte au salon.' });

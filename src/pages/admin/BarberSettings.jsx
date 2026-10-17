@@ -20,6 +20,15 @@ const defaultHours = DAYS.reduce((acc, d) => ({
   [d]: d === 'sunday' ? { start: '09:00', end: '19:00', closed: true } : { start: '09:00', end: '19:00', closed: false }
 }), {});
 
+// Mêmes horaires jour par jour (le JSONB de PostgreSQL ne garde pas l'ordre des clés)
+function sameHours(a, b) {
+  if (!a || typeof a !== 'object') return false;
+  return DAYS.every((d) => {
+    const x = a[d] || {}, y = b[d] || {};
+    return Boolean(x.closed) === Boolean(y.closed) && (x.start || '') === (y.start || '') && (x.end || '') === (y.end || '');
+  });
+}
+
 function SkillSlider({ category, value, onChange }) {
   const level = value || 0;
   const labels = ['Non évalué', 'Débutant', 'Intermédiaire', 'Avancé', 'Expert', 'Maître'];
@@ -214,6 +223,9 @@ export default function BarberSettings() {
   });
 
   const employee = findEmployee(employees, user);
+  // Horaires : le serveur ne les accepte que de l'admin (ils fixent les créneaux réservables,
+  // l'admin les gère dans Équipe) ; un barber les voit ici en lecture seule.
+  const canEditHours = user?.role === 'admin';
 
   // Init from employee data
   useEffect(() => {
@@ -273,6 +285,7 @@ export default function BarberSettings() {
   };
 
   const updateHours = (day, field, value) => {
+    if (!canEditHours) return;
     setDirty(true);
     setWorkingHours(prev => ({
       ...prev,
@@ -298,20 +311,28 @@ export default function BarberSettings() {
       return;
     }
     setSaveStatus('Sauvegarde en cours...');
-    const hours = { ...(employee.working_hours || defaultHours), ...(workingHours || {}) };
-    // Clean any old _video_url from working_hours
-    delete hours._video_url;
-    setWorkingHours(hours);
     // Pack video URL into bio
     const fullBio = packBioWithVideo(bio, videoUrl);
+    const payload = { skills, bio: fullBio, experience_level: computedExperience };
+    let hours = null;
+    if (canEditHours) {
+      hours = { ...(employee.working_hours || defaultHours), ...(workingHours || {}) };
+      // Clean any old _video_url from working_hours
+      delete hours._video_url;
+      setWorkingHours(hours);
+      payload.working_hours = hours;
+    }
 
     try {
-      await api.entities.Employee.update(employee.id, {
-        skills,
-        bio: fullBio,
-        experience_level: computedExperience,
-        working_hours: hours,
-      });
+      const saved = await api.entities.Employee.update(employee.id, payload);
+      // Le serveur écarte en silence les champs qu'il refuse : on vérifie que les horaires
+      // envoyés sont bien ceux de la ligne renvoyée avant d'annoncer la sauvegarde.
+      if (hours && saved && typeof saved === 'object' && !sameHours(saved.working_hours, hours)) {
+        toast.error("Les horaires n'ont pas été enregistrés par le serveur. Réessayez ou modifiez-les dans Équipe.");
+        setSaveStatus('Horaires non enregistrés');
+        queryClient.invalidateQueries({ queryKey: ['employees'] });
+        return;
+      }
       toast.success('Profil sauvegardé !');
       setSaveStatus('Sauvegardé !');
       setDirty(false);
@@ -434,7 +455,7 @@ export default function BarberSettings() {
             placeholder="https://youtube.com/watch?v=... ou lien .mp4"
             className="bg-secondary border-border text-sm"
           />
-          {videoUrl.trim() && videoUrl.trim() !== (employee?.working_hours?._video_url || '') && (
+          {videoUrl.trim() && videoUrl.trim() !== (extractVideoFromBio(employee?.bio).video || '') && (
             <p className="text-[11px] text-primary mt-2">Cliquez "Sauvegarder" en haut pour enregistrer la vidéo</p>
           )}
           {extractVideoFromBio(employee?.bio).video && (() => {
@@ -489,10 +510,16 @@ export default function BarberSettings() {
           <h3 className="text-sm font-semibold mb-1 flex items-center gap-2">
             <Clock className="w-4 h-4" /> Mes horaires
           </h3>
-          <p className="text-[11px] text-muted-foreground mb-4">Définissez vos jours et heures de travail</p>
+          <p className="text-[11px] text-muted-foreground mb-4">
+            {canEditHours
+              ? 'Définissez vos jours et heures de travail'
+              : "Vos horaires sont gérés par l'admin du salon (Équipe). Demandez-lui pour les modifier."}
+          </p>
           <div className="space-y-2">
             {DAYS.map(day => {
-              const dayData = workingHours?.[day] || defaultHours[day];
+              // Barber : toujours les horaires enregistrés, relus à chaque rechargement
+              const shownHours = canEditHours ? workingHours : (employee?.working_hours || workingHours);
+              const dayData = shownHours?.[day] || defaultHours[day];
               const isOpen = !dayData?.closed;
               return (
                 <div
@@ -503,6 +530,7 @@ export default function BarberSettings() {
                     <div className="flex items-center gap-3">
                       <Switch
                         checked={isOpen}
+                        disabled={!canEditHours}
                         onCheckedChange={v => updateHours(day, 'closed', !v)}
                       />
                       <span className={`text-sm font-medium ${isOpen ? 'text-foreground' : 'text-muted-foreground'}`}>
@@ -518,6 +546,7 @@ export default function BarberSettings() {
                       <Input
                         type="time"
                         value={dayData?.start || '09:00'}
+                        disabled={!canEditHours}
                         onChange={e => updateHours(day, 'start', e.target.value)}
                         className="flex-1 h-9 text-sm text-center bg-background border-border font-medium"
                       />
@@ -525,6 +554,7 @@ export default function BarberSettings() {
                       <Input
                         type="time"
                         value={dayData?.end || '19:00'}
+                        disabled={!canEditHours}
                         onChange={e => updateHours(day, 'end', e.target.value)}
                         className="flex-1 h-9 text-sm text-center bg-background border-border font-medium"
                       />

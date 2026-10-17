@@ -7,7 +7,7 @@ import { toast } from 'sonner';
 import { api } from '@/api/apiClient';
 import { hapticFeedback } from '@/lib/capacitor';
 import { parisDay } from '@/lib/slots';
-import { appointmentEndParis, invalidateAppointmentQueries } from './agendaUtils';
+import { appointmentEndParis, invalidateAppointmentQueries, agendaErrorMessage } from './agendaUtils';
 
 /**
  * « Client venu ? » (16 oct. 2026, choix du salon) : les rendez-vous des 7 derniers jours dont
@@ -92,7 +92,8 @@ export default function AttendanceCheck({ user, onOpen }) {
       }
       refresh();
     } catch (e) {
-      toast.error(e?.data?.error || e?.message || 'Modification impossible');
+      // « Pas de connexion internet » plutôt que « Load failed » / « Failed to fetch »
+      toast.error(agendaErrorMessage(e, 'Modification impossible'));
     } finally {
       setBusy((b) => { const next = { ...b }; delete next[apt.id]; return next; });
     }

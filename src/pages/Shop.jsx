@@ -1,4 +1,4 @@
-import React, { useState, useRef, useLayoutEffect, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useLayoutEffect, useEffect, useCallback, useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '@/api/apiClient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -13,26 +13,35 @@ import { toast } from 'sonner';
 import ProductSheet from '@/components/shop/ProductSheet';
 import FavoriteButton from '@/components/shared/FavoriteButton';
 import { useFavorites } from '@/lib/favorites';
-import { formatPrice, productCategoryLabel, productImages, stockInfo } from '@/components/shop/productUtils';
+import { formatPrice, productCategoryLabel, productImages, stockInfo, isShopProduct, MAX_PER_PRODUCT, PER_PRODUCT_LIMIT_MESSAGE } from '@/components/shop/productUtils';
 import LoadError from '@/components/shared/LoadError';
+import { useAndroidBack } from '@/lib/useAndroidBack';
 
 /** Vol de la vignette produit vers le panier : taille du disque (px) et durée (s). */
 const FLY_SIZE = 56;
 const FLY_DURATION = 0.7;
 
 /**
- * Quantité maximale d'un produit dans le panier : son stock s'il est suivi (`stockInfo`),
- * sans limite sinon (`stock` absent = non suivi). Le serveur refuse aussi une commande au-delà.
+ * Quantité maximale d'un produit dans le panier : son stock s'il est suivi (`stockInfo`), et
+ * jamais plus de MAX_PER_PRODUCT (plafond du serveur par commande). Au-delà, le serveur refuse.
  */
 const cartLimit = (product) => {
   const stock = stockInfo(product);
-  return stock.tracked ? Math.max(0, stock.stock) : Infinity;
+  return Math.min(MAX_PER_PRODUCT, stock.tracked ? Math.max(0, stock.stock) : Infinity);
 };
 
-/** Message affiché quand on essaie d'ajouter au-delà du stock. */
-const stockLimitMessage = (limit) => (limit <= 0
+/** La limite vient-elle du plafond par produit (et non du stock) ? */
+const limitedByCap = (product) => {
+  const stock = stockInfo(product);
+  return !stock.tracked || stock.stock > MAX_PER_PRODUCT;
+};
+
+/** Message affiché quand on essaie d'ajouter au-delà de la limite (stock ou plafond par produit). */
+const stockLimitMessage = (limit, product) => (limit <= 0
   ? 'Ce produit est en rupture de stock'
-  : `Plus que ${limit} en stock : tout est déjà dans votre panier`);
+  : product && limitedByCap(product)
+    ? PER_PRODUCT_LIMIT_MESSAGE
+    : `Plus que ${limit} en stock : tout est déjà dans votre panier`);
 
 /** Montant arrondi au centime (évite « 29,999… » sur les sommes de prix décimaux). */
 const roundCents = (value) => Math.round((Number(value) || 0) * 100) / 100;
@@ -162,7 +171,9 @@ export default function Shop() {
     staleTime: 5 * 60 * 1000, // catalogue : change rarement
     queryFn: () => api.entities.Product.filter({ is_active: true }, 'name', 100),
   });
-  const { data: products = [], isSuccess: productsLoaded } = productsQuery;
+  const { isSuccess: productsLoaded } = productsQuery;
+  // Consommables du salon (onglet « Prestations » du stock) : jamais en vente
+  const products = useMemo(() => (productsQuery.data || []).filter(isShopProduct), [productsQuery.data]);
   // Catalogue disponible (y compris en cache quand un rechargement échoue)
   const productsReady = productsQuery.data !== undefined;
   const productsFailed = productsQuery.isError && !productsReady;
@@ -236,7 +247,7 @@ export default function Shop() {
     const limit = cartLimit(product);
     const qty = Math.min(quantity, limit - (cart[product.id] || 0));
     if (qty <= 0) {
-      toast.error(stockLimitMessage(limit));
+      toast.error(stockLimitMessage(limit, product));
       return;
     }
     updateCart(product.id, qty, limit);
@@ -359,6 +370,9 @@ export default function Shop() {
     setShowCart(false);
     setOrderSuccess(false);
   };
+  // Bouton retour Android : ferme le panier ou la fiche produit (comme leur croix), sans quitter la page
+  useAndroidBack(showCart, closeCart);
+  useAndroidBack(!!openProductId, () => setOpenProductId(null));
 
   return (
     <div className="max-w-lg mx-auto px-4 py-6 pb-32">
@@ -482,10 +496,10 @@ export default function Shop() {
                       <p className="text-[11px] text-muted-foreground line-clamp-2 mt-0.5">{product.description}</p>
                     )}
                   </button>
-                  <div className="flex items-center justify-between mt-2">
-                    <span className="text-sm font-bold text-primary">{formatPrice(product.price)}</span>
+                  <div className="flex flex-wrap items-center justify-between gap-x-1 gap-y-1.5 mt-2">
+                    <span className="text-sm font-bold text-primary whitespace-nowrap">{formatPrice(product.price)}</span>
                     {cart[product.id] ? (
-                      <div className="flex items-center gap-2.5">
+                      <div className="flex items-center gap-2.5 ml-auto">
                         <button onClick={() => updateCart(product.id, -1)} aria-label="Retirer une unité" className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center active:scale-95">
                           <Minus className="w-3.5 h-3.5" />
                         </button>
@@ -678,7 +692,7 @@ export default function Shop() {
                               </button>
                               <span className="text-sm font-bold w-5 text-center">{qty}</span>
                               <button
-                                onClick={() => (atLimit ? toast.error(stockLimitMessage(limit)) : updateCart(id, 1, limit))}
+                                onClick={() => (atLimit ? toast.error(stockLimitMessage(limit, product)) : updateCart(id, 1, limit))}
                                 aria-disabled={atLimit}
                                 aria-label={atLimit ? 'Stock maximum atteint' : 'Ajouter une unité'}
                                 className={`w-9 h-9 rounded-full bg-primary flex items-center justify-center active:scale-95 ${atLimit ? 'opacity-40' : ''}`}
@@ -689,10 +703,16 @@ export default function Shop() {
                           </div>
                           {over ? (
                             <p className="text-[11px] text-red-400 mt-2">
-                              {limit <= 0 ? 'Rupture de stock : retirez ce produit' : `Plus que ${limit} en stock : réduisez la quantité`}
+                              {limit <= 0
+                                ? 'Rupture de stock : retirez ce produit'
+                                : limitedByCap(product)
+                                  ? `${MAX_PER_PRODUCT} maximum par produit : réduisez la quantité`
+                                  : `Plus que ${limit} en stock : réduisez la quantité`}
                             </p>
                           ) : atLimit && (
-                            <p className="text-[11px] text-amber-400 mt-2">Stock maximum atteint ({limit})</p>
+                            <p className="text-[11px] text-amber-400 mt-2">
+                              {limitedByCap(product) ? `${MAX_PER_PRODUCT} maximum par produit` : `Stock maximum atteint (${limit})`}
+                            </p>
                           )}
                         </div>
                       );
@@ -733,7 +753,7 @@ export default function Shop() {
                       </div>
                       {cartOverStock && (
                         <p className="text-[11px] text-red-400">
-                          Certains produits n'ont plus assez de stock : ajustez les quantités pour commander.
+                          Certaines quantités dépassent le stock ou le maximum de {MAX_PER_PRODUCT} par produit : ajustez-les pour commander.
                         </p>
                       )}
                       <Button

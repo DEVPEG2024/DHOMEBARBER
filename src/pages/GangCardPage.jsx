@@ -26,7 +26,7 @@ import { hapticFeedback } from '@/lib/capacitor';
 const STATS = [
   { key: 'FID', abbr: 'FID', name: 'Fidélité', text: 'Ton nombre de visites et ton ancienneté au salon.' },
   { key: 'REG', abbr: 'RÉG', name: 'Régularité', text: 'Tu reviens à un rythme régulier ?' },
-  { key: 'PON', abbr: 'PON', name: 'Ponctualité', text: 'Ni absence ni annulation de dernière minute.' },
+  { key: 'PON', abbr: 'PON', name: 'Ponctualité', text: 'Ni absence ni annulation de ta part (un rendez-vous déplacé ne compte pas).' },
   { key: 'STY', abbr: 'STY', name: 'Style', text: 'Variété et prestations soignées : barbe, rasoir, serviette chaude.' },
   { key: 'GNG', abbr: 'GNG', name: 'Gang', text: 'Avis, publications dans le fil, événements du salon.' },
   { key: 'FRA', abbr: 'FRA', name: 'Fraîcheur', text: 'Baisse chaque jour depuis ta dernière coupe : elle passe en rouge quand il est temps de revenir.' },
@@ -375,7 +375,7 @@ export default function GangCardPage() {
                   Apparaître dans la Team of the Season
                 </label>
                 <p className="text-[11px] leading-snug text-muted-foreground mt-1">
-                  Les 5 clients les plus réguliers des 90 derniers jours sont affichés dans le fil. Seuls ceux qui l’acceptent y figurent.
+                  Les 5 clients les plus réguliers des 90 derniers jours (au moins 2 visites) sont affichés dans le fil. Seuls ceux qui l’acceptent y figurent.
                 </p>
               </div>
               <Switch
@@ -386,7 +386,7 @@ export default function GangCardPage() {
                 className="mt-0.5"
               />
             </div>
-            <GangLeaderboard variant="page" />
+            <GangLeaderboard variant="page" optedIn={optInValue} />
           </motion.section>
         )}
       </div>

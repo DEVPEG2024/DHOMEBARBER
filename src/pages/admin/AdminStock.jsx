@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
-import { api } from '@/api/apiClient';
+import { api, apiRequest, apiUrl } from '@/api/apiClient';
+import { useAuth } from '@/lib/AuthContext';
+import LoadError from '@/components/shared/LoadError';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Package, AlertTriangle, Save, Search, Plus, Trash2, ShoppingBag, Scissors, Upload, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -37,11 +39,15 @@ export default function AdminStock() {
   const [productToDelete, setProductToDelete] = useState(null);
   const [uploading, setUploading] = useState(false);
   const queryClient = useQueryClient();
+  const { user } = useAuth();
 
-  const { data: products = [] } = useQuery({
+  const productsQuery = useQuery({
     queryKey: ['products', 'all'], // liste complète (inactifs inclus) : clé distincte de la boutique
     queryFn: () => api.entities.Product.list('name', 200),
   });
+  const products = productsQuery.data ?? [];
+  // Liste impossible à charger : jamais « Aucun produit… Ajouter » (doublons créés à la reprise)
+  const productsFailed = productsQuery.isError && !productsQuery.data;
 
   const activeProducts = products.filter(p => p.is_active);
   const tabProducts = activeProducts.filter(p => (p.stock_type || 'boutique') === tab);
@@ -98,32 +104,32 @@ export default function AdminStock() {
       setEdits({});
       toast.success(`${entries.length} produit(s) mis à jour`);
 
-      // Check for critical stock
-      const updatedProducts = activeProducts.map(p => {
-        const e = edits[p.id];
-        return e ? { ...p, ...e } : p;
-      });
-      const criticals = updatedProducts.filter(p => {
-        const stock = p.stock ?? 0;
-        const threshold = p.critical_stock ?? 3;
-        return stock <= threshold;
-      });
-      if (criticals.length > 0) {
-        const names = criticals.slice(0, 5).map(p => p.name).join(', ');
-        const serverUrl = import.meta.env.PROD ? 'https://dhomebarber-api-3aabb8313cb6.herokuapp.com' : '';
-        const appId = 'prod';
-        const token = localStorage.getItem('base44_access_token') || localStorage.getItem('token');
-        try {
-          await fetch(`${serverUrl}/api/apps/${appId}/push/send`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-            body: JSON.stringify({
-              title: 'Stock critique',
-              body: `${criticals.length} produit(s) en stock critique : ${names}${criticals.length > 5 ? '...' : ''}`,
-              target_email: null,
-            }),
-          });
-        } catch {}
+      // Alerte « Stock critique » aux admins seulement (jamais aux clients : `audience: 'staff'`),
+      // et seulement pour les produits modifiés qui viennent de passer sous leur seuil
+      if (user?.role === 'admin') {
+        const original = new Map(activeProducts.map(p => [String(p.id), p]));
+        const level = (p, e = {}) => ({
+          stock: e.stock !== undefined ? (parseInt(e.stock, 10) || 0) : (p.stock ?? 0),
+          threshold: e.critical_stock !== undefined ? (parseInt(e.critical_stock, 10) || 0) : (p.critical_stock ?? 3),
+        });
+        const newlyCritical = entries
+          .map(([id, e]) => {
+            const p = original.get(String(id));
+            if (!p) return null;
+            const before = level(p);
+            const after = level(p, e);
+            return after.stock <= after.threshold && !(before.stock <= before.threshold) ? p : null;
+          })
+          .filter(Boolean);
+        if (newlyCritical.length > 0) {
+          const names = newlyCritical.slice(0, 5).map(p => p.name).join(', ');
+          // Jamais bloquant : l'enregistrement a réussi
+          apiRequest('POST', apiUrl('/push/send'), {
+            title: 'Stock critique',
+            body: `${newlyCritical.length} produit(s) en stock critique : ${names}${newlyCritical.length > 5 ? '...' : ''}`,
+            audience: 'staff',
+          }).catch(() => {});
+        }
       }
     } catch {
       toast.error('Erreur lors de la sauvegarde');
@@ -195,7 +201,7 @@ export default function AdminStock() {
               {saving ? 'Sauvegarde...' : `Sauvegarder (${Object.keys(edits).length})`}
             </Button>
           )}
-          <Button onClick={() => setShowAddDialog(true)} className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg">
+          <Button onClick={() => setShowAddDialog(true)} disabled={productsFailed} className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg">
             <Plus className="w-4 h-4 mr-1.5" /> Ajouter
           </Button>
         </div>
@@ -346,7 +352,13 @@ export default function AdminStock() {
         })}
       </div>
 
-      {filtered.length === 0 && (
+      {productsFailed ? (
+        <LoadError what="les produits" error={productsQuery.error} onRetry={productsQuery.refetch} retrying={productsQuery.isFetching} />
+      ) : productsQuery.isPending ? (
+        <div className="space-y-2" aria-busy="true">
+          {[0, 1, 2].map(i => <div key={i} className="h-16 rounded-xl bg-card border border-border animate-pulse" />)}
+        </div>
+      ) : filtered.length === 0 && (
         <div className="text-center py-16 text-muted-foreground text-sm">
           {search || filter !== 'all'
             ? 'Aucun produit trouvé.'

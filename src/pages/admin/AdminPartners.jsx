@@ -23,6 +23,7 @@ import {
   fetchAllPartners, partnerCategory, partnerOffers, bestPercent, isExpired, formatValidUntil,
 } from '@/lib/partnersApi';
 import PartnerLogo from '@/components/partners/PartnerLogo';
+import LoadError from '@/components/shared/LoadError';
 import PercentBadge from '@/components/partners/PercentBadge';
 
 const newOffer = () => ({ id: `o${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, title: '', percent: '', details: '' });
@@ -179,6 +180,8 @@ export default function AdminPartners() {
     [partnersQ.data],
   );
   const backendMissing = partnersQ.isError && (partnersQ.error?.status === 400 || partnersQ.error?.status === 404);
+  // Liste en échec : LoadError, et pas d'« Ajouter » (sort_order calculé sur une liste vide = doublon)
+  const loadFailed = partnersQ.isError && !backendMissing && !partnersQ.data;
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: PARTNERS_QUERY_KEY });
 
@@ -240,7 +243,7 @@ export default function AdminPartners() {
           <p className="text-[11px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Partenaires</p>
           <h1 className="font-display text-2xl font-bold">Bons plans du Gang</h1>
         </div>
-        <Button onClick={openNew} disabled={backendMissing} className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg">
+        <Button onClick={openNew} disabled={backendMissing || partnersQ.isLoading || loadFailed} className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg">
           <Plus className="w-4 h-4 mr-1.5" /> Ajouter
         </Button>
       </div>
@@ -259,6 +262,9 @@ export default function AdminPartners() {
       )}
 
       {partnersQ.isLoading && <div className="h-24 rounded-xl bg-card border border-border animate-pulse" />}
+      {loadFailed && (
+        <LoadError what="les partenaires" error={partnersQ.error} onRetry={partnersQ.refetch} retrying={partnersQ.isFetching} />
+      )}
 
       <div className="space-y-2">
         {partners.map((p, i) => {
@@ -313,7 +319,7 @@ export default function AdminPartners() {
         })}
       </div>
 
-      {!partnersQ.isLoading && !backendMissing && partners.length === 0 && (
+      {!partnersQ.isLoading && !backendMissing && !loadFailed && partners.length === 0 && (
         <div className="text-center py-16 text-muted-foreground text-sm">
           <Handshake className="w-8 h-8 mx-auto mb-2 opacity-40" />
           Aucun partenaire. Cliquez sur « Ajouter » pour présenter le premier.

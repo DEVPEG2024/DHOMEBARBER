@@ -12,8 +12,10 @@ import GiftCardDebitPanel from '@/components/giftcards-admin/GiftCardDebitPanel'
 import GiftCardHistory from '@/components/giftcards-admin/GiftCardHistory';
 import {
   giftCardState, giftCardBalance, formatEuro, formatDay, invalidateGiftCardQueries, fetchGiftCardByCode, friendlyGiftCardError,
-  patchGiftCardCache,
+  patchGiftCardCache, fetchGiftCard, round2, parisToday,
 } from '@/lib/giftCardDebit';
+
+const PAYMENT_LABELS = { cb: 'CB', especes: 'Espèces' };
 import LoadError from '@/components/shared/LoadError';
 
 const STATUS_CONFIG = {
@@ -52,6 +54,29 @@ function ValidateModal({ card, onClose, onCardChange }) {
   const state = giftCardState(card);
   const showDebit = state === 'debitable' || debitResultShown;
 
+  /**
+   * Relit la carte avant de la valider ou de la rejeter : la liste n'est pas rechargée toute seule
+   * (iPad du comptoir), une carte déjà validée ou débitée ailleurs ne doit jamais repartir de son
+   * montant initial. Résout la carte à jour si elle est encore en attente, sinon `null` (message
+   * affiché, fiche mise à jour).
+   */
+  const freshPendingCard = async () => {
+    const fresh = await fetchGiftCard(card.id);
+    if (!fresh) {
+      toast.error('Carte introuvable');
+      invalidateGiftCardQueries(queryClient, card.id);
+      onClose();
+      return null;
+    }
+    if (fresh.status !== 'pending') {
+      toast.error(fresh.status === 'expired' ? 'Cette carte a déjà été annulée' : 'Cette carte a déjà été validée');
+      onCardChange?.(fresh);
+      invalidateGiftCardQueries(queryClient, card.id);
+      return null;
+    }
+    return fresh;
+  };
+
   const handleValidate = async () => {
     if (!paymentMethod) {
       toast.error('Sélectionnez un mode de paiement');
@@ -59,17 +84,25 @@ function ValidateModal({ card, onClose, onCardChange }) {
     }
     setLoading(true);
     try {
-      const updates = {
-        status: 'validated',
-        validated_at: new Date().toISOString(),
-        validated_by: user?.full_name || user?.email || 'admin',
-        remaining_balance: card.amount,
-      };
-      await api.entities.GiftCard.update(card.id, updates);
+      const fresh = await freshPendingCard();
+      if (!fresh) return;
+      // Le serveur pose lui-même le solde (= montant), la date et l'auteur de la validation
+      const updates = { status: 'validated', payment_method: paymentMethod };
+      let saved;
+      try {
+        saved = await api.entities.GiftCard.update(card.id, updates);
+      } catch (err) {
+        // Serveur pas encore à jour (colonne payment_method inconnue) : validation sans le moyen de paiement
+        if (err?.status === 400 && /payment_method|requête invalide/i.test(String(err?.data?.error || err?.message || ''))) {
+          saved = await api.entities.GiftCard.update(card.id, { status: 'validated', validated_at: new Date().toISOString(), validated_by: user?.full_name || user?.email || 'admin' });
+        } else throw err;
+      }
       toast.success('Carte validée !', { description: `${formatEuro(card.amount)} - ${card.recipient_name}` });
       invalidateGiftCardQueries(queryClient, card.id);
       // La fiche reste ouverte : la carte, désormais payée, peut être débitée tout de suite
-      onCardChange?.({ ...card, ...updates });
+      onCardChange?.(saved && typeof saved === 'object' && saved.id
+        ? saved
+        : { ...fresh, status: 'validated', remaining_balance: fresh.amount, payment_method: paymentMethod });
     } catch (err) {
       toast.error('Erreur', { description: friendlyGiftCardError(err) });
     } finally {
@@ -80,6 +113,9 @@ function ValidateModal({ card, onClose, onCardChange }) {
   const handleReject = async () => {
     setLoading(true);
     try {
+      // Rejeter une carte déjà payée (validée ailleurs) l'annulerait : refusé
+      const fresh = await freshPendingCard();
+      if (!fresh) return;
       await api.entities.GiftCard.update(card.id, { status: 'expired' });
       toast.success('Carte rejetée');
       invalidateGiftCardQueries(queryClient, card.id);
@@ -170,8 +206,8 @@ function ValidateModal({ card, onClose, onCardChange }) {
           />
         )}
 
-        {/* Historique des mouvements (si le serveur le fournit) */}
-        {card.status !== 'pending' && <GiftCardHistory cardId={card.id} />}
+        {/* Historique des mouvements (si le serveur le fournit) : un débit erroné s'y annule (24 h) */}
+        {card.status !== 'pending' && <GiftCardHistory cardId={card.id} card={card} onCardChange={onCardChange} />}
 
         {/* Status + détails */}
         <div className="mt-4">
@@ -205,6 +241,9 @@ function ValidateModal({ card, onClose, onCardChange }) {
               )}
               {card.validated_by && (
                 <div className="flex justify-between gap-3"><span className="text-muted-foreground shrink-0">Validée par</span><span className="text-green-400 font-medium text-right truncate">{card.validated_by}</span></div>
+              )}
+              {PAYMENT_LABELS[card.payment_method] && (
+                <div className="flex justify-between gap-3"><span className="text-muted-foreground shrink-0">Payée en</span><span className="font-medium text-right">{PAYMENT_LABELS[card.payment_method]}</span></div>
               )}
             </div>
           )}
@@ -540,26 +579,29 @@ export default function AdminGiftCards() {
     setSelectedCard(prev => (prev && String(prev.id) === String(fresh.id) ? { ...prev, ...fresh } : prev));
   }, [queryClient]);
 
-  // Code scanné ou saisi : d'abord dans la liste chargée, sinon recherche directe par code
+  // Code scanné ou saisi : toujours relu sur le serveur (la liste en cache peut dater : carte
+  // validée ou débitée sur un autre appareil). En cas d'échec réseau seulement, la copie connue.
   const openByCode = useCallback(async (raw) => {
     const code = String(raw || '').trim().toUpperCase();
     if (!code) return;
     const known = giftCardsRef.current.find(c => String(c.code || '').toUpperCase() === code);
-    if (known) {
-      setSelectedCard(known);
-      return;
-    }
     setPendingScanCode(code);
     try {
       const found = await fetchGiftCardByCode(code);
       if (found) {
+        patchGiftCardCache(queryClient, found);
         setSelectedCard(found);
         queryClient.invalidateQueries({ queryKey: ['adminGiftCards'] });
       } else {
         toast.error('Carte introuvable', { description: `Aucune carte avec le code ${code}` });
       }
     } catch (err) {
-      toast.error('Carte introuvable', { description: friendlyGiftCardError(err, `Aucune carte avec le code ${code}`) });
+      if (known) {
+        setSelectedCard(known);
+        toast.warning('Carte affichée sans être relue (réseau) : vérifiez son solde avant tout débit.');
+      } else {
+        toast.error('Carte introuvable', { description: friendlyGiftCardError(err, `Aucune carte avec le code ${code}`) });
+      }
     } finally {
       setPendingScanCode(null);
     }
@@ -577,8 +619,19 @@ export default function AdminGiftCards() {
     openByCode(scanParam);
   }, [scanParam, isLoading, openByCode, setSearchParams]);
 
+  // État réel de chaque carte au jour de Paris : une carte validée dont la validité est passée
+  // n'est plus « active » (sa fiche dit qu'aucun débit n'est possible)
+  const today = parisToday();
+  const matchesFilter = (c, key) => {
+    const state = giftCardState(c, today);
+    if (key === 'validated') return state === 'debitable';
+    if (key === 'expired') return state === 'expired' || state === 'outdated';
+    if (key === 'used') return state === 'used';
+    if (key === 'pending') return state === 'pending';
+    return true;
+  };
   const filtered = giftCards.filter(c => {
-    if (filter !== 'all' && c.status !== filter) return false;
+    if (filter !== 'all' && !matchesFilter(c, filter)) return false;
     if (search) {
       const s = search.toLowerCase();
       return (
@@ -592,10 +645,11 @@ export default function AdminGiftCards() {
   });
 
   const stats = {
-    pending: giftCards.filter(c => c.status === 'pending').length,
-    validated: giftCards.filter(c => c.status === 'validated').length,
-    used: giftCards.filter(c => c.status === 'used').length,
-    total: giftCards.reduce((sum, c) => c.status === 'validated' || c.status === 'used' ? sum + (c.amount || 0) : sum, 0),
+    pending: giftCards.filter(c => matchesFilter(c, 'pending')).length,
+    validated: giftCards.filter(c => matchesFilter(c, 'validated')).length,
+    used: giftCards.filter(c => matchesFilter(c, 'used')).length,
+    expired: giftCards.filter(c => matchesFilter(c, 'expired')).length,
+    total: giftCards.reduce((sum, c) => c.status === 'validated' || c.status === 'used' ? sum + (Number(c.amount) || 0) : sum, 0),
   };
 
   const filters = [
@@ -603,7 +657,7 @@ export default function AdminGiftCards() {
     { key: 'pending', label: `En attente (${stats.pending})` },
     { key: 'validated', label: `Actives (${stats.validated})` },
     { key: 'used', label: `Utilisées (${stats.used})` },
-    { key: 'expired', label: 'Expirées' },
+    { key: 'expired', label: `Expirées${stats.expired ? ` (${stats.expired})` : ''}` },
   ];
 
   return (
@@ -643,7 +697,7 @@ export default function AdminGiftCards() {
         </div>
         <div className="bg-card rounded-2xl border border-border p-4">
           <p className="text-xs text-primary font-medium">CA Cartes</p>
-          <p className="text-2xl font-bold text-primary mt-1">{stats.total}€</p>
+          <p className="text-2xl font-bold text-primary mt-1">{formatEuro(stats.total)}</p>
         </div>
       </div>
 
@@ -709,18 +763,19 @@ export default function AdminGiftCards() {
                         <span className="text-[10px] font-mono text-muted-foreground shrink-0">{card.code}</span>
                       </div>
                       <p className="text-xs text-muted-foreground truncate">
-                        De {card.sender_name} · {card.created_at ? new Date(card.created_at).toLocaleDateString('fr-FR') : ''}
+                        De {card.sender_name} · {formatDay(card.created_at)}
                       </p>
                     </div>
                   </div>
                   <div className="text-right shrink-0 ml-2">
-                    <p className="text-lg font-bold text-foreground">{card.amount}€</p>
-                    {card.status === 'validated' && card.remaining_balance != null && card.remaining_balance < card.amount && (
-                      <p className="text-[10px] font-bold text-primary">Solde: {card.remaining_balance}€</p>
-                    )}
-                    {(card.status !== 'validated' || card.remaining_balance == null || card.remaining_balance >= card.amount) && (
-                      <p className={`text-[10px] font-semibold ${conf.color}`}>{conf.label}</p>
-                    )}
+                    <p className="text-lg font-bold text-foreground whitespace-nowrap">{formatEuro(card.amount)}</p>
+                    {(() => {
+                      const partly = card.status === 'validated' && card.remaining_balance != null && giftCardBalance(card) < round2(card.amount);
+                      if (giftCardState(card, today) === 'outdated') return <p className="text-[10px] font-semibold text-red-400">Validité dépassée</p>;
+                      return partly
+                        ? <p className="text-[10px] font-bold text-primary whitespace-nowrap">Solde : {formatEuro(giftCardBalance(card))}</p>
+                        : <p className={`text-[10px] font-semibold ${conf.color}`}>{conf.label}</p>;
+                    })()}
                   </div>
                 </div>
               </motion.div>

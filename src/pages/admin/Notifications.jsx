@@ -1,13 +1,27 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { api, apiRequest, apiUrl } from '@/api/apiClient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Send, Users, User, Bell, CheckCircle, Smartphone, Mail } from 'lucide-react';
+import { Send, Users, User, CheckCircle, Smartphone, Mail } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import AiWriterPanel from '@/components/notifications/AiWriterPanel';
+import LoadError, { isNetworkError } from '@/components/shared/LoadError';
+
+// Bornes de la route d'envoi groupé (routes/push.js) : vérifiées AVANT le push, sinon le push
+// partirait puis les emails seraient refusés
+const BROADCAST_SUBJECT_MAX = 120;
+const BROADCAST_MESSAGE_MAX = 2000;
+
+/** Message d'erreur lisible : réseau traduit, message du serveur, sinon le repli. */
+function errorText(err, fallback) {
+  if (isNetworkError(err)) return 'pas de connexion internet';
+  return err?.message && !/^HTTP \d+$/.test(err.message) ? err.message : fallback;
+}
+
+const plural = (n, word) => `${n} ${word}${n > 1 ? 's' : ''}`;
 
 // La liste des destinataires n'est chargée que lorsqu'on en a besoin (choix d'un client ou
 // envoi), et par lots : le serveur renvoie chaque photo de profil dans la liste des comptes.
@@ -51,8 +65,11 @@ export default function Notifications() {
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState([]);
-  const [pushSubCount, setPushSubCount] = useState(0);
+  // null = pas encore chargé ; subsError = échec (jamais « 0 abonné » ni « Aucun abonné push »)
+  const [pushSubCount, setPushSubCount] = useState(null);
   const [pushSubscribers, setPushSubscribers] = useState([]);
+  const [subsError, setSubsError] = useState(false);
+  const [subsLoading, setSubsLoading] = useState(false);
   const [clientSearch, setClientSearch] = useState('');
 
   const queryClient = useQueryClient();
@@ -98,14 +115,20 @@ export default function Notifications() {
     return c.name?.toLowerCase().includes(s) || c.email?.toLowerCase().includes(s);
   });
 
-  useEffect(() => {
-    apiRequest('GET', apiUrl('/push/subscribers'))
+  const loadSubscribers = useCallback(() => {
+    setSubsLoading(true);
+    return apiRequest('GET', apiUrl('/push/subscribers'))
       .then(data => {
-        setPushSubCount(data.count || 0);
-        setPushSubscribers(data.subscribers || []);
+        setPushSubCount(data?.count || 0);
+        setPushSubscribers(data?.subscribers || []);
+        setSubsError(false);
       })
-      .catch(() => {});
-  }, [sent]);
+      .catch(() => setSubsError(true))
+      .finally(() => setSubsLoading(false));
+  }, []);
+
+  useEffect(() => { loadSubscribers(); }, [sent, loadSubscribers]);
+  const subsUnknown = subsError || pushSubCount === null;
 
   const templates = [
     { label: 'Rappel RDV', subject: 'Rappel de votre rendez-vous demain', body: "Nous vous rappelons votre rendez-vous demain. À très bientôt chez D'Home Barber !" },
@@ -113,6 +136,35 @@ export default function Notifications() {
     { label: 'Fermeture', subject: 'Fermeture exceptionnelle', body: 'Le salon sera fermé exceptionnellement. Nous vous remercions de votre compréhension.' },
     { label: 'Nouveauté', subject: 'Nouvelles prestations', body: 'Nous avons le plaisir de vous présenter nos nouvelles prestations. Venez les découvrir !' },
   ];
+
+  /**
+   * Ancien serveur sans la route d'envoi groupé : un SendEmail par client. On compte les échecs et
+   * on s'arrête au premier 429 (les suivants seraient refusés aussi).
+   */
+  const sendEmailsOneByOne = async (targets) => {
+    let sentCount = 0;
+    let failed = 0;
+    let lastError = null;
+    for (let i = 0; i < targets.length; i++) {
+      const client = targets[i];
+      try {
+        await api.integrations.Core.SendEmail({
+          to: client.email,
+          subject,
+          body: `Bonjour ${client.name || ''},\n\n${message}\n\n— L'équipe D'Home Barber`,
+        });
+        sentCount++;
+      } catch (err) {
+        failed++;
+        if (err?.status === 429) {
+          const left = targets.length - i;
+          return { sent: sentCount, failed: failed + (left - 1), error: `Limite d'envoi atteinte : ${plural(left, 'email')} non envoyé${left > 1 ? 's' : ''}` };
+        }
+        lastError = errorText(err, "échec de l'envoi");
+      }
+    }
+    return { sent: sentCount, failed, error: lastError };
+  };
 
   const handleSend = async () => {
     if (!subject || !message) {
@@ -123,46 +175,105 @@ export default function Notifications() {
       toast.error('Sélectionnez un client');
       return;
     }
+    if (target === 'all' && (subject.length > BROADCAST_SUBJECT_MAX || message.length > BROADCAST_MESSAGE_MAX)) {
+      toast.error(`Titre limité à ${BROADCAST_SUBJECT_MAX} caractères et message à ${BROADCAST_MESSAGE_MAX} pour un envoi à tous`);
+      return;
+    }
     setSending(true);
     try {
-      // Send push notification
-      const pushResult = await apiRequest('POST', apiUrl('/push/send'), {
-        title: subject,
-        body: message,
-        target_email: target === 'one' ? clientEmail : undefined,
-      });
+      // 1) Destinataires d'abord : tant que rien n'est parti, un nouvel essai ne crée aucun doublon
+      let allClients;
+      try {
+        allClients = await ensureClients();
+      } catch (err) {
+        toast.error(err?.message && !isNetworkError(err)
+          ? `Destinataires non chargés : ${err.message}. Rien n'a été envoyé.`
+          : "Impossible de charger les destinataires, rien n'a été envoyé");
+        return;
+      }
+      const targets = target === 'all'
+        ? allClients
+        : allClients.filter(c => c.email.toLowerCase() === clientEmail.toLowerCase());
 
-      // Send emails (la liste complète est chargée ici si elle ne l'était pas encore)
-      const allClients = await ensureClients();
-      const targets = target === 'all' ? allClients : allClients.filter(c => c.email === clientEmail);
-      let emailCount = 0;
-      for (const client of targets) {
-        try {
-          await api.integrations.Core.SendEmail({
-            to: client.email,
-            subject,
-            body: `Bonjour ${client.name || ''},\n\n${message}\n\n— L'équipe D'Home Barber`,
-          });
-          emailCount++;
-        } catch {
-          // continue
-        }
+      // 2) Push, dans son propre essai : les emails partent même s'il échoue
+      let pushResult = null;
+      let pushError = null;
+      try {
+        pushResult = await apiRequest('POST', apiUrl('/push/send'), {
+          title: subject,
+          body: message,
+          target_email: target === 'one' ? clientEmail : undefined,
+        });
+      } catch (err) {
+        pushError = errorText(err, 'échec du push');
       }
 
-      setSent(prev => [...prev, {
-        subject,
-        target: target === 'all' ? `Tous (${targets.length})` : clientEmail,
-        pushSent: pushResult.sent || 0,
-        emailSent: emailCount,
-        date: new Date().toLocaleTimeString('fr-FR'),
-      }]);
-      toast.success(`Push: ${pushResult.sent || 0} appareil(s) · Email: ${emailCount} client(s)`);
-      setSubject('');
-      setMessage('');
-    } catch {
-      toast.error("Erreur lors de l'envoi");
+      // 3) Emails
+      let email = { sent: 0, failed: 0, error: null, total: targets.length };
+      if (target === 'all') {
+        try {
+          // Envoi groupé côté serveur : destinataires calculés par le serveur, pas de quota par email
+          const r = await apiRequest('POST', apiUrl('/notifications/broadcast-email'), { subject, message });
+          if (r?.queued) {
+            // 202 : le serveur répond tout de suite et envoie en arrière-plan (délai de 30 s
+            // d'Heroku) ; le récapitulatif arrive ensuite en push à l'admin
+            email = { sent: 0, failed: 0, error: null, total: Number(r?.total) || 0, queued: true };
+          } else {
+            email = { sent: Number(r?.sent) || 0, failed: Number(r?.failed) || 0, error: null, total: Number(r?.total) || 0 };
+            if (email.failed > 0) email.error = `${plural(email.failed, 'email')} refusé${email.failed > 1 ? 's' : ''} par le serveur d'envoi`;
+          }
+        } catch (err) {
+          if (err?.status === 404) {
+            email = { ...(await sendEmailsOneByOne(targets)), total: targets.length };
+          } else if (isNetworkError(err) || err?.timeout || err?.status === 504 || (err?.status === 503 && !/SMTP/i.test(String(err?.message || '')))) {
+            // Réponse perdue ou coupée par le routeur : l'envoi a pu partir, ne pas inciter à relancer
+            email = { sent: 0, failed: 0, total: targets.length, uncertain: true, error: null };
+          } else {
+            email = { sent: 0, failed: targets.length, total: targets.length, error: errorText(err, "échec de l'envoi des emails") };
+          }
+        }
+      } else if (targets.length > 0) {
+        email = { ...(await sendEmailsOneByOne(targets)), total: targets.length };
+      } else {
+        email = { sent: 0, failed: 0, total: 0, error: "ce client n'a pas d'email connu" };
+      }
+
+      // 4) Compte rendu par canal
+      const pushSent = Number(pushResult?.sent) || 0;
+      const pushPart = pushError ? `Push non envoyé : ${pushError}` : `Push : ${plural(pushSent, 'appareil')}`;
+      const emailPart = email.queued
+        ? `Envoi de ${plural(email.total, 'email')} en cours`
+        : email.uncertain
+          ? 'Emails : envoi peut-être en cours, vérifiez avant de relancer'
+          : email.failed > 0 || email.error
+            ? `Emails : ${email.sent} envoyé${email.sent > 1 ? 's' : ''}, ${email.failed} non envoyé${email.failed > 1 ? 's' : ''}${email.error ? ` (${email.error})` : ''}`
+            : `Emails : ${email.sent} envoyé${email.sent > 1 ? 's' : ''}`;
+      // Envoi en cours ou incertain : compté comme parti (saisie vidée), pour éviter un doublon
+      const anyOk = !!pushResult || email.sent > 0 || !!email.queued || !!email.uncertain;
+      const allOk = !pushError && !email.error && email.failed === 0 && !email.uncertain;
+      if (allOk) toast.success(`${pushPart} · ${emailPart}`);
+      else if (anyOk) toast.warning(`${pushPart} · ${emailPart}`, { duration: 10000 });
+      else toast.error(`${pushPart} · ${emailPart}`, { duration: 10000 });
+
+      if (anyOk) {
+        setSent(prev => [...prev, {
+          subject,
+          target: target === 'all' ? `Tous (${email.total || targets.length})` : clientEmail,
+          pushSent,
+          pushError,
+          emailSent: email.sent,
+          emailFailed: email.failed,
+          emailQueued: !!email.queued,
+          emailUncertain: !!email.uncertain,
+          date: new Date().toLocaleTimeString('fr-FR', { timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit' }),
+        }]);
+        // Un second appui ne doit jamais renvoyer le même push
+        setSubject('');
+        setMessage('');
+      }
+    } finally {
+      setSending(false);
     }
-    setSending(false);
   };
 
   return (
@@ -178,8 +289,10 @@ export default function Notifications() {
           <div className="flex items-center justify-center gap-2 mb-1">
             <Smartphone className="w-4 h-4 text-primary" />
           </div>
-          <p className="text-2xl font-bold text-primary font-display">{pushSubCount}</p>
-          <p className="text-[10px] uppercase tracking-widest text-muted-foreground mt-0.5">Push abonnés</p>
+          <p className="text-2xl font-bold text-primary font-display">{subsUnknown ? '—' : pushSubCount}</p>
+          <p className="text-[10px] uppercase tracking-widest text-muted-foreground mt-0.5">
+            {subsError ? 'Abonnés indisponibles' : 'Push abonnés'}
+          </p>
         </div>
         <button
           type="button"
@@ -309,7 +422,9 @@ export default function Notifications() {
 
               <div className="bg-secondary/50 rounded-lg p-3 text-xs text-muted-foreground">
                 <p className="font-medium text-foreground mb-1">Canaux d'envoi :</p>
-                <p>• <strong>Push</strong> — notification sur le téléphone ({pushSubCount} abonné{pushSubCount > 1 ? 's' : ''})</p>
+                <p>• <strong>Push</strong> — notification sur le téléphone ({subsError
+                  ? 'abonnés indisponibles'
+                  : pushSubCount === null ? '…' : `${pushSubCount} abonné${pushSubCount > 1 ? 's' : ''}`})</p>
                 <p>• <strong>Email</strong> — envoi par email ({target === 'all'
                   ? (clientsLoaded ? `${clients.length} destinataire${clients.length > 1 ? 's' : ''}` : 'tous les clients')
                   : `${clientEmail ? 1 : 0} destinataire`})</p>
@@ -331,7 +446,11 @@ export default function Notifications() {
             <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
               <Smartphone className="w-4 h-4 text-primary" /> Abonnés Push
             </h3>
-            {pushSubscribers.length > 0 ? (
+            {subsError ? (
+              <LoadError compact what="les abonnés push" onRetry={loadSubscribers} retrying={subsLoading} />
+            ) : pushSubCount === null ? (
+              <p className="text-xs text-muted-foreground">Chargement…</p>
+            ) : pushSubscribers.length > 0 ? (
               <div className="space-y-1.5">
                 {pushSubscribers.map(s => (
                   <div key={s.user_email} className="flex items-center justify-between text-xs bg-secondary/50 rounded-lg px-3 py-2">
@@ -358,9 +477,10 @@ export default function Notifications() {
                   <div key={i} className="text-xs border border-border rounded-lg p-2.5 bg-secondary/30">
                     <p className="font-medium truncate text-foreground">{s.subject}</p>
                     <p className="text-muted-foreground mt-0.5">{s.target}</p>
-                    <div className="flex items-center gap-3 mt-1">
-                      <span className="text-primary">Push: {s.pushSent}</span>
-                      <span className="text-primary">Email: {s.emailSent}</span>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1">
+                      <span className={s.pushError ? 'text-amber-400' : 'text-primary'}>Push : {s.pushError ? 'non envoyé' : s.pushSent}</span>
+                      <span className="text-primary">Email : {s.emailQueued ? 'en cours' : s.emailUncertain ? 'à vérifier' : s.emailSent}</span>
+                      {s.emailFailed > 0 && <span className="text-amber-400">{s.emailFailed} non envoyé{s.emailFailed > 1 ? 's' : ''}</span>}
                       <span className="text-muted-foreground/60 ml-auto">{s.date}</span>
                     </div>
                   </div>

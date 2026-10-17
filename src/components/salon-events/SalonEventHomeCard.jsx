@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { ArrowRight, PartyPopper, Check } from 'lucide-react';
 import { SALON_EVENTS_QUERY_KEY, fetchMySalonEvents, formatEventDate, formatPrice } from '@/lib/salonEventsApi';
-import { eventImages, myResponse, splitSalonEvents } from './salonEventUtils';
+import { eventImages, hasStarted, myResponse, splitSalonEvents } from './salonEventUtils';
 
 /**
  * Carte autonome pour l'accueil (insérée par Home.jsx) : prochain événement du salon à venir
@@ -21,13 +21,18 @@ export default function SalonEventHomeCard() {
   const response = myResponse(next);
   const cover = eventImages(next)[0] || null;
   const isToday = next.phase === 'today';
-  const needsAnswer = response === 'invited' || response === 'open';
+  // Commencé : les réponses sont closes (règle du serveur), on n'invite plus à répondre
+  const started = hasStarted(next);
+  const needsAnswer = !started && (response === 'invited' || response === 'open');
 
   let eyebrow;
   let cta;
   if (response === 'accepted') {
     eyebrow = isToday ? "C'est aujourd'hui" : 'Tu es inscrit';
     cta = <><Check className="w-3 h-3" /> Tu viens ✓</>;
+  } else if (started) {
+    eyebrow = "C'est en cours";
+    cta = "Voir l'événement";
   } else if (response === 'open') {
     eyebrow = isToday ? "C'est aujourd'hui" : 'Événement du salon';
     cta = 'Ouvert à tous';

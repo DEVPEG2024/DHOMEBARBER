@@ -11,11 +11,12 @@ import SalonEventSheet from './SalonEventSheet';
  * « Vos invitations » en tête de la page Événements : cartes des événements du salon à venir
  * (invitation nominative ou ouvert à tous), fiche en bottom sheet avec RSVP, et événements passés
  * / annulés repliés. Rend `null` sans aucun événement, pendant le chargement, ou si la route
- * `/salon-events/mine` échoue : la page des privatisations reste utilisable quoi qu'il arrive.
+ * `/salon-events/mine` échoue sans rien avoir chargé : la page des privatisations reste utilisable
+ * quoi qu'il arrive. Un rechargement raté après coup ne masque pas les données déjà affichées.
  */
 export default function SalonEventsSection() {
   const reduceMotion = useReducedMotion();
-  const { data, isError } = useMySalonEvents();
+  const { data } = useMySalonEvents();
   const nowMs = useNow(60_000);
   const view = useMemo(() => splitSalonEvents(data, nowMs), [data, nowMs]);
   const { rsvp, pendingEventId } = useSalonEventRsvp();
@@ -32,7 +33,8 @@ export default function SalonEventsSection() {
     if (selectedId != null && !selected) setSelectedId(null);
   }, [selectedId, selected]);
 
-  if (!data || isError || view.isEmpty) return null;
+  // Un rechargement en échec garde la section (et la fiche ouverte) tant que le cache a des données
+  if (!data || view.isEmpty) return null;
 
   const open = (event) => {
     hapticFeedback();

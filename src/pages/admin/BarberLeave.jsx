@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
+import LoadError from '@/components/shared/LoadError';
 
 const LEAVE_TYPES = [
   { value: 'vacation', label: 'Vacances' },
@@ -42,10 +43,11 @@ export default function BarberLeave() {
   const myEmployee = employees.find(e => e.id === employeeId);
 
   // Fetch my leave requests
-  const { data: allTimeOffs = [] } = useQuery({
+  const timeOffsQuery = useQuery({
     queryKey: ['timeOffs'],
     queryFn: () => api.entities.TimeOff.list('-start_date', 200),
   });
+  const allTimeOffs = timeOffsQuery.data ?? [];
 
   const myLeaves = allTimeOffs.filter(t => t.employee_id === employeeId);
 
@@ -155,7 +157,11 @@ export default function BarberLeave() {
       )}
 
       {/* Leave list */}
-      {myLeaves.length === 0 ? (
+      {timeOffsQuery.isLoading ? (
+        <div className="text-center py-16 text-muted-foreground text-sm">Chargement...</div>
+      ) : timeOffsQuery.isError && !timeOffsQuery.data ? (
+        <LoadError what="vos demandes de congé" error={timeOffsQuery.error} onRetry={timeOffsQuery.refetch} retrying={timeOffsQuery.isFetching} />
+      ) : myLeaves.length === 0 ? (
         <div className="text-center py-16 text-muted-foreground text-sm">
           Aucune demande de congé
         </div>

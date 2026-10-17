@@ -89,8 +89,10 @@ export default function AdminTextile() {
   const errorForTab = {
     drops: dropsQ.error && overviewQ.error ? (dropsQ.error.message || overviewQ.error.message) : null,
     concepts: conceptsQ.error && overviewQ.error ? (conceptsQ.error.message || overviewQ.error.message) : null,
-    reservations: reservationsQ.error?.message || null,
+    // Sans donnée en cache, LoadError (dans l'onglet) remplace le bandeau : pas de doublon
+    reservations: reservationsQ.error && reservationsQ.data ? reservationsQ.error.message : null,
   }[tab];
+  const reservationsLoadError = reservationsQ.isError && !reservationsQ.data ? reservationsQ.error : null;
 
   return (
     <div>
@@ -148,7 +150,13 @@ export default function AdminTextile() {
         <ConceptsTab concepts={concepts} drops={drops} isAdmin={isAdmin} isLoading={loadingByTab.concepts} />
       )}
       {tab === 'reservations' && (
-        <ReservationsTab reservations={reservations} isLoading={loadingByTab.reservations} />
+        <ReservationsTab
+          reservations={reservations}
+          isLoading={loadingByTab.reservations}
+          error={reservationsLoadError}
+          onRetry={reservationsQ.refetch}
+          retrying={reservationsQ.isFetching}
+        />
       )}
     </div>
   );

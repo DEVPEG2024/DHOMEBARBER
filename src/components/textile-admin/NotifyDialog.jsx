@@ -20,6 +20,23 @@ import { invalidateTextile, INPUT_CLASS } from './shared';
 
 const MESSAGE_MAX = 200;
 const OPEN_BODY = "Réserve ta pièce avant qu'il ne soit trop tard";
+// Drop pas encore ouvert : on ne peut pas encore réserver (même texte que le serveur, lib/textileNotify.js)
+const TEASING_BODY = "Bientôt disponible : active l'alerte pour être prévenu";
+const PARIS_WHEN_FMT = new Intl.DateTimeFormat('fr-FR', {
+  timeZone: 'Europe/Paris', weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+});
+
+/** Corps par défaut du push selon l'état du drop, identique à `defaultBody` du serveur. */
+function announceBody(drop) {
+  if (drop?.status === 'live') return OPEN_BODY;
+  const start = drop?.starts_at ? new Date(drop.starts_at) : null;
+  if (start && !Number.isNaN(start.getTime())) {
+    const parts = PARIS_WHEN_FMT.formatToParts(start);
+    const get = (type) => (parts.find((x) => x.type === type) || {}).value || '';
+    return `Ouverture le ${get('weekday')} ${get('day')} ${get('month')} à ${get('hour')}:${get('minute')} : active l'alerte pour être prévenu`;
+  }
+  return TEASING_BODY;
+}
 const READY_BODY = 'Passe au salon récupérer ta pièce';
 // Statuts qui valent « a payé sa précommande » (les pièces déjà prêtes reçoivent le rappel aussi)
 const PAID_STATUSES = ['paid', 'ready'];
@@ -81,7 +98,9 @@ export default function NotifyDialog({ drop, reservations = [], onClose }) {
   const title = isPaid
     ? `✨ Ta commande ${drop.name} est prête !`
     : drop.status === 'live' ? `🔥 Drop ${drop.name} ouvert !` : `📣 ${drop.name}`;
-  const defaultBody = isPaid ? READY_BODY : OPEN_BODY;
+  const defaultBody = isPaid ? READY_BODY : announceBody(drop);
+  // Avant l'ouverture, un envoi aux abonnés / à tous est une relance : le push d'ouverture partira quand même
+  const isReminder = !isPaid && (drop.status === 'teasing' || drop.status === 'draft');
 
   const AUDIENCES = [
     {
@@ -154,8 +173,13 @@ export default function NotifyDialog({ drop, reservations = [], onClose }) {
           <div className="rounded-xl border border-border bg-secondary/50 p-3">
             <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Aperçu de la notification</p>
             <p className="text-sm font-semibold text-foreground">{title}</p>
-            <p className="text-xs text-muted-foreground mt-0.5">{message.trim() || defaultBody}</p>
+            <p className="text-xs text-muted-foreground mt-0.5 break-words">{message.trim() || defaultBody}</p>
           </div>
+          {isReminder && (
+            <p className="text-[11px] text-muted-foreground -mt-2">
+              Relance : le push d'ouverture partira quand même aux abonnés à l'ouverture du drop.
+            </p>
+          )}
 
           <div>
             <div className="flex items-center justify-between">

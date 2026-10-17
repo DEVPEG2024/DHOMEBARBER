@@ -35,8 +35,16 @@ export default function AiWriterPanel({ subject, message, audience, onApply }) {
 
   useEffect(() => {
     let alive = true;
-    aiWriterAvailable().then(ok => { if (alive) setAvailable(ok); });
-    return () => { alive = false; };
+    const check = () => {
+      aiWriterAvailable().then(ok => { if (alive) setAvailable(ok); });
+    };
+    check();
+    // Page ouverte hors connexion : on revérifie au retour du réseau, sans recharger l'app
+    window.addEventListener('online', check);
+    return () => {
+      alive = false;
+      window.removeEventListener('online', check);
+    };
   }, []);
 
   const changeAddress = (value) => {

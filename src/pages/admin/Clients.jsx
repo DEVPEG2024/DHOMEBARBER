@@ -8,6 +8,7 @@ import { exportToCSV } from '@/utils/exportCSV';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
+import LoadError from '@/components/shared/LoadError';
 import { useAuth } from '@/lib/AuthContext';
 import { parisInstant } from '@/lib/calendarLinks';
 import { invalidateAppointmentQueries } from '@/components/agenda/agendaUtils';
@@ -145,10 +146,11 @@ export default function Clients() {
   // Suppressions réservées à l'admin (un barber voit la liste, sans corbeille)
   const isAdmin = user?.role === 'admin';
 
-  const { data: appointments = [] } = useQuery({
+  const appointmentsQ = useQuery({
     queryKey: APPOINTMENTS_QUERY_KEY,
     queryFn: () => api.entities.Appointment.list('-date', APPOINTMENTS_LIMIT),
   });
+  const appointments = appointmentsQ.data ?? [];
   const appointmentsCapped = appointments.length >= APPOINTMENTS_LIMIT;
 
   const { data: employees = [] } = useQuery({
@@ -162,6 +164,10 @@ export default function Clients() {
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
+    isError: usersError,
+    error: usersErr,
+    refetch: refetchUsers,
+    isFetching: usersFetching,
   } = useInfiniteQuery({
     queryKey: USERS_QUERY_KEY,
     initialPageParam: 0,
@@ -173,6 +179,16 @@ export default function Clients() {
   });
 
   const registeredUsers = useMemo(() => usersPages?.pages.flat() ?? [], [usersPages]);
+
+  // Comptes ou rendez-vous non chargés : LoadError, jamais « Aucun client » ni des clients à
+  // 0 visite / 0 € (leurs rendez-vous manquent)
+  const usersFailed = usersError && !usersPages;
+  const appointmentsFailed = appointmentsQ.isError && !appointmentsQ.data;
+  const listFailed = usersFailed || appointmentsFailed;
+  const retryList = () => Promise.all([
+    usersFailed ? refetchUsers() : null,
+    appointmentsFailed ? appointmentsQ.refetch() : null,
+  ]);
 
   /**
    * Complète le chargement des comptes puis renvoie la liste entière.
@@ -536,6 +552,16 @@ export default function Clients() {
         </p>
       )}
 
+      {listFailed && (
+        <LoadError
+          what="la liste des clients"
+          error={usersFailed ? usersErr : appointmentsQ.error}
+          onRetry={retryList}
+          retrying={usersFetching || appointmentsQ.isFetching}
+        />
+      )}
+
+      {!listFailed && (
       <div className="space-y-2">
         {visibleClients.map((client, i) => (
           <motion.div
@@ -589,9 +615,10 @@ export default function Clients() {
           </motion.div>
         ))}
       </div>
+      )}
 
       {/* Affichage progressif : d'abord les fiches déjà chargées, puis le lot de comptes suivant */}
-      {filtered.length > 0 && (canShowMore || hasNextPage) && (
+      {!listFailed && filtered.length > 0 && (canShowMore || hasNextPage) && (
         <div className="flex justify-center py-5">
           <Button
             variant="outline"
@@ -605,7 +632,7 @@ export default function Clients() {
         </div>
       )}
 
-      {filtered.length === 0 && (
+      {!listFailed && filtered.length === 0 && (
         <div className="text-center py-16 text-muted-foreground text-sm">
           {search.trim() && hasNextPage ? 'Recherche dans tous les comptes...' : 'Aucun client trouvé'}
         </div>

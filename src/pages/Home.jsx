@@ -3,7 +3,11 @@ import { Link } from 'react-router-dom';
 import { api } from '@/api/apiClient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { MapPin, Clock, Phone, Star, ArrowRight, Scissors, ShoppingBag, Newspaper, Sparkles, Gift, GripVertical, Pencil, Check, X, Volume2, VolumeX, Shirt, Handshake } from 'lucide-react';
-import { motion, useMotionValue, useSpring, useTransform, Reorder } from 'framer-motion';
+import { motion, useMotionValue, useSpring, useTransform, Reorder, useReducedMotion } from 'framer-motion';
+import { toast } from 'sonner';
+import LoadError from '@/components/shared/LoadError';
+import { isShopProduct } from '@/components/shop/productUtils';
+import { useAndroidBack } from '@/lib/useAndroidBack';
 import SectionHeader from '@/components/shared/SectionHeader';
 import StarRating from '@/components/shared/StarRating';
 import { useAuth } from '@/lib/AuthContext';
@@ -72,7 +76,15 @@ const itemVariants = {
 const GREEN_PERIOD = 440;
 const BLUE_PERIOD = 340;
 
+/** Vitesse du défilement automatique du carrousel (px/s) : l'allure d'avant, 1 px toutes les 20 ms. */
+const MARQUEE_SPEED = 50;
+
 function BarberMarquee({ employees }) {
+  const reduceMotion = useReducedMotion();
+  // Défilement automatique seulement à l'écran, page visible, sans mouvement réduit ni doigt posé :
+  // hors écran il recomposait deux couches floutées 50 fois par seconde (saccades, batterie)
+  const visibleRef = useRef(false);
+  const pageVisibleRef = useRef(typeof document === 'undefined' || document.visibilityState === 'visible');
   const scrollRef = useRef(null);
   const wrapperRef = useRef(null);
   const autoScrollRef = useRef(null);
@@ -147,34 +159,70 @@ function BarberMarquee({ employees }) {
     };
   }, [pageOffset]);
 
-  const startAutoScroll = useCallback(() => {
-    if (autoScrollRef.current) return;
-    autoScrollRef.current = setInterval(() => {
-      const el = scrollRef.current;
-      if (!el || touchActiveRef.current) return;
-      el.scrollLeft += 1;
-      // Rebouclage sans couture : on recule d'une série complète de cartes
-      const period = getPeriod(el);
-      if (period > 0 && el.scrollLeft >= period) {
-        el.scrollLeft -= period;
-      }
-    }, 20);
-  }, []);
+  const canRun = useCallback(
+    () => !reduceMotion && visibleRef.current && pageVisibleRef.current && !touchActiveRef.current,
+    [reduceMotion],
+  );
 
   const stopAutoScroll = useCallback(() => {
     if (autoScrollRef.current) {
-      clearInterval(autoScrollRef.current);
+      cancelAnimationFrame(autoScrollRef.current);
       autoScrollRef.current = null;
     }
   }, []);
 
+  // Boucle requestAnimationFrame à vitesse constante (px/s) : reste fractionnaire gardé d'une
+  // image à l'autre, pas de rattrapage brutal au retour d'une pause (dt borné à 100 ms)
+  const startAutoScroll = useCallback(() => {
+    if (autoScrollRef.current || !canRun()) return;
+    let last = performance.now();
+    let acc = 0;
+    const step = (now) => {
+      if (!canRun()) { autoScrollRef.current = null; return; }
+      const dt = Math.min(100, now - last);
+      last = now;
+      acc += (MARQUEE_SPEED * dt) / 1000;
+      const px = Math.floor(acc);
+      const el = scrollRef.current;
+      if (el && px > 0) {
+        acc -= px;
+        el.scrollLeft += px;
+        // Rebouclage sans couture : on recule d'une série complète de cartes
+        const period = getPeriod(el);
+        if (period > 0 && el.scrollLeft >= period) {
+          el.scrollLeft -= period;
+        }
+      }
+      autoScrollRef.current = requestAnimationFrame(step);
+    };
+    autoScrollRef.current = requestAnimationFrame(step);
+  }, [canRun]);
+
   useEffect(() => {
-    startAutoScroll();
+    const wrapper = wrapperRef.current;
+    let observer = null;
+    if (typeof IntersectionObserver === 'undefined' || !wrapper) {
+      visibleRef.current = true; // vieux navigateur : comportement d'avant
+      startAutoScroll();
+    } else {
+      observer = new IntersectionObserver(([entry]) => {
+        visibleRef.current = !!entry?.isIntersecting;
+        if (visibleRef.current) startAutoScroll(); else stopAutoScroll();
+      }, { rootMargin: '100px' });
+      observer.observe(wrapper);
+    }
+    const onVisibility = () => {
+      pageVisibleRef.current = document.visibilityState === 'visible';
+      if (pageVisibleRef.current) startAutoScroll(); else stopAutoScroll();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
     return () => {
+      if (observer) observer.disconnect();
+      document.removeEventListener('visibilitychange', onVisibility);
       stopAutoScroll();
       if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current);
     };
-  }, [startAutoScroll, stopAutoScroll]);
+  }, [startAutoScroll, stopAutoScroll, reduceMotion]);
 
   const handleTouchStart = () => {
     touchActiveRef.current = true;
@@ -184,6 +232,8 @@ function BarberMarquee({ employees }) {
 
   const handleTouchEnd = () => {
     touchActiveRef.current = false;
+    if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current);
+    // startAutoScroll vérifie lui-même canRun() : pas de reprise hors écran ni en mouvement réduit
     resumeTimerRef.current = setTimeout(() => {
       startAutoScroll();
     }, 2000);
@@ -312,6 +362,27 @@ const SECTION_LABELS = {
   'cta': 'Réservation',
 };
 
+/**
+ * Ordre des sections : l'ordre sauvegardé fait foi ; une section inconnue de cet ordre (ajoutée
+ * depuis) est insérée juste après son voisin précédent de l'ordre par défaut, pas en fin de page
+ * (« Comme la dernière fois » doit rester en haut tant que l'admin ne l'a pas déplacée).
+ * Ordre vide ou absent : l'ordre par défaut.
+ */
+function mergeSectionOrder(saved) {
+  if (!Array.isArray(saved) || saved.length === 0) return [...DEFAULT_SECTION_ORDER];
+  const merged = saved.filter(id => DEFAULT_SECTION_ORDER.includes(id));
+  DEFAULT_SECTION_ORDER.forEach((id, idx) => {
+    if (merged.includes(id)) return;
+    let insertAt = 0;
+    for (let i = idx - 1; i >= 0; i--) {
+      const pos = merged.indexOf(DEFAULT_SECTION_ORDER[i]);
+      if (pos >= 0) { insertAt = pos + 1; break; }
+    }
+    merged.splice(insertAt, 0, id);
+  });
+  return merged;
+}
+
 /** Avis chargés pour la note du hero (limite par défaut du serveur) ; au-delà, « N+ ». */
 const REVIEWS_STATS_LIMIT = 500;
 
@@ -336,17 +407,19 @@ export default function Home() {
   const tilt = useParallaxTilt();
   const isAdmin = user?.role === 'admin';
 
-  const { data: services = [] } = useQuery({
+  const servicesQuery = useQuery({
     queryKey: ['services'],
     staleTime: 5 * 60 * 1000, // catalogue : change rarement
     queryFn: () => api.entities.Service.filter({ is_active: true }, 'sort_order', 50),
   });
+  const services = servicesQuery.data ?? [];
 
-  const { data: employees = [] } = useQuery({
+  const employeesQuery = useQuery({
     queryKey: ['employees'],
     staleTime: 5 * 60 * 1000, // catalogue : change rarement
     queryFn: () => api.entities.Employee.filter({ is_active: true }, 'sort_order', 50),
   });
+  const employees = employeesQuery.data ?? [];
 
   // Tous les avis visibles, pas seulement les 5 affichés dans la section : la note du hero est la
   // vraie moyenne sur le vrai nombre d'avis (lignes légères : nom, note, commentaire)
@@ -355,11 +428,13 @@ export default function Home() {
     queryFn: () => api.entities.Review.filter({ is_visible: true }, '-created_date', REVIEWS_STATS_LIMIT),
   });
 
-  const { data: products = [] } = useQuery({
+  const { data: productsData } = useQuery({
     queryKey: ['products'],
     staleTime: 5 * 60 * 1000, // catalogue : change rarement
     queryFn: () => api.entities.Product.filter({ is_active: true }, 'name', 50),
   });
+  // Consommables du salon (onglet « Prestations » du stock) : jamais en vitrine
+  const products = useMemo(() => (productsData || []).filter(isShopProduct), [productsData]);
 
   const { data: posts = [] } = useQuery({
     queryKey: ['latestPost'],
@@ -398,21 +473,8 @@ export default function Home() {
 
   // Load saved section order from settings
   useEffect(() => {
-    if (settings?.homepage_order && Array.isArray(settings.homepage_order) && settings.homepage_order.length > 0) {
-      // Fusion : l'ordre sauvegardé fait foi ; une section inconnue de cet ordre (ajoutée depuis)
-      // est insérée juste après son voisin précédent de l'ordre par défaut, pas en fin de page
-      // (« Comme la dernière fois » doit rester en haut tant que l'admin ne l'a pas déplacée).
-      const merged = settings.homepage_order.filter(id => DEFAULT_SECTION_ORDER.includes(id));
-      DEFAULT_SECTION_ORDER.forEach((id, idx) => {
-        if (merged.includes(id)) return;
-        let insertAt = 0;
-        for (let i = idx - 1; i >= 0; i--) {
-          const pos = merged.indexOf(DEFAULT_SECTION_ORDER[i]);
-          if (pos >= 0) { insertAt = pos + 1; break; }
-        }
-        merged.splice(insertAt, 0, id);
-      });
-      setSectionOrder(merged);
+    if (Array.isArray(settings?.homepage_order) && settings.homepage_order.length > 0) {
+      setSectionOrder(mergeSectionOrder(settings.homepage_order));
     }
   }, [settings]);
 
@@ -448,19 +510,35 @@ export default function Home() {
     return `Du ${open[0].day} au ${open[open.length - 1].day}`;
   }, [openingHours]);
 
-  // Save section order to salon_settings
+  // Save section order to salon_settings : vrai si c'est enregistré (sinon le mode édition reste
+  // ouvert avec l'ordre choisi, l'admin peut réessayer)
   const saveOrder = useCallback(async (newOrder) => {
-    if (!settings?.id) return;
+    if (!settings?.id) {
+      toast.error("Paramètres du salon introuvables : impossible d'enregistrer l'accueil.");
+      return false;
+    }
     setSaving(true);
     try {
       await api.entities.SalonSettings.update(settings.id, { homepage_order: newOrder });
       queryClient.invalidateQueries({ queryKey: ['salonSettings'] });
+      toast.success('Accueil enregistré');
+      return true;
     } catch (err) {
       console.error('Save order error:', err);
+      // Session expirée : déjà gérée par AuthContext (retour à la connexion)
+      if (err?.status !== 401) {
+        toast.error(err?.message && !/^HTTP \d+$/.test(err.message)
+          ? `Accueil non enregistré : ${err.message}`
+          : 'Accueil non enregistré. Vérifie ta connexion et réessaie.');
+      }
+      return false;
     } finally {
       setSaving(false);
     }
   }, [settings, queryClient]);
+
+  // Bouton retour Android : ferme la fenêtre des horaires (comme sa croix) sans quitter l'app
+  useAndroidBack(showHours, () => setShowHours(false));
 
   // Section renderers
   const renderSection = (id) => {
@@ -497,7 +575,11 @@ export default function Home() {
         return (
           <div>
             <SectionHeader title="Le Gang" subtitle="Les Barbers" />
-            {employees.length > 0 && <BarberMarquee employees={employees} />}
+            {employees.length > 0 ? (
+              <BarberMarquee employees={employees} />
+            ) : employeesQuery.isError && !employeesQuery.data ? (
+              <LoadError compact what="les barbers" error={employeesQuery.error} onRetry={employeesQuery.refetch} retrying={employeesQuery.isFetching} />
+            ) : null}
           </div>
         );
 
@@ -581,6 +663,9 @@ export default function Home() {
         return (
           <div>
             <SectionHeader title="Nos Prestations" subtitle="Services" linkTo="/services" />
+            {servicesQuery.isError && !servicesQuery.data ? (
+              <LoadError compact what="les prestations" error={servicesQuery.error} onRetry={servicesQuery.refetch} retrying={servicesQuery.isFetching} />
+            ) : (
             <div className="grid grid-cols-2 gap-2.5">
               {services.slice(0, 4).map((service, i) => (
                 <Link key={service.id} to={`/booking?services=${encodeURIComponent(service.id)}`}>
@@ -597,6 +682,7 @@ export default function Home() {
                 </Link>
               ))}
             </div>
+            )}
           </div>
         );
 
@@ -721,7 +807,7 @@ export default function Home() {
                       {new Date(review.created_date).toLocaleDateString('fr-FR')}
                     </span>
                   </div>
-                  {review.comment && <p className="text-xs text-muted-foreground leading-relaxed line-clamp-3">{review.comment}</p>}
+                  {review.comment && <p className="text-xs text-muted-foreground leading-relaxed line-clamp-3 break-words">{review.comment}</p>}
                 </motion.div>
               ))}
             </div>
@@ -878,12 +964,8 @@ export default function Home() {
                   animate={{ opacity: 1, scale: 1 }}
                   whileTap={{ scale: 0.95 }}
                   onClick={() => {
-                    // Reset to saved order
-                    if (settings?.homepage_order?.length > 0) {
-                      setSectionOrder([...settings.homepage_order]);
-                    } else {
-                      setSectionOrder([...DEFAULT_SECTION_ORDER]);
-                    }
+                    // Retour à l'ordre enregistré (fusionné avec les sections ajoutées depuis)
+                    setSectionOrder(mergeSectionOrder(settings?.homepage_order));
                     setEditMode(false);
                   }}
                   className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl glass text-xs font-semibold text-muted-foreground shadow-lg"
@@ -894,9 +976,10 @@ export default function Home() {
                   initial={{ opacity: 0, scale: 0.9 }}
                   animate={{ opacity: 1, scale: 1 }}
                   whileTap={{ scale: 0.95 }}
-                  onClick={() => {
-                    saveOrder(sectionOrder);
-                    setEditMode(false);
+                  onClick={async () => {
+                    if (saving) return;
+                    const ok = await saveOrder(sectionOrder);
+                    if (ok) setEditMode(false);
                   }}
                   disabled={saving}
                   className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-primary text-primary-foreground text-xs font-bold shadow-lg shadow-primary/30 disabled:opacity-50"

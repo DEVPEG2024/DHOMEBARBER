@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import { api } from '@/api/apiClient';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import LoadError, { isNetworkError } from '@/components/shared/LoadError';
 import {
   FEEDBACK_QUERY_KEY, FEEDBACK_ADMIN_QUERY_KEY, FEEDBACK_TYPES, FEEDBACK_STATUSES,
   fetchAllFeedback, areaLabel, formatFeedbackDate, isBackendMissing,
@@ -17,6 +18,11 @@ import {
 
 const TYPE_FILTERS = [{ value: 'all', label: 'Tout' }, ...Object.entries(FEEDBACK_TYPES).map(([value, t]) => ({ value, label: `${t.emoji} ${t.label}s` }))];
 const STATUS_FILTERS = [{ value: 'open', label: 'À traiter' }, ...Object.entries(FEEDBACK_STATUSES).map(([value, s]) => ({ value, label: s.label })), { value: 'all', label: 'Tous' }];
+
+/** Erreur d'API lisible : réseau traduit (« Load failed » d'iOS…), message du serveur, sinon le repli. */
+const errText = (err, fb) => (isNetworkError(err)
+  ? 'Pas de connexion internet. Réessayez dans un instant.'
+  : (err?.message && !/^HTTP \d+$/.test(err.message) ? err.message : fb));
 
 const isOpen = (f) => f.status === 'new' || f.status === 'in_progress' || !f.status;
 
@@ -134,6 +140,8 @@ export default function AdminFeedback() {
   const feedbackQ = useQuery({ queryKey: FEEDBACK_ADMIN_QUERY_KEY, queryFn: fetchAllFeedback, retry: false });
   const all = useMemo(() => (Array.isArray(feedbackQ.data) ? feedbackQ.data : []), [feedbackQ.data]);
   const backendMissing = feedbackQ.isError && isBackendMissing(feedbackQ.error);
+  // Liste en échec (hors serveur trop ancien) : LoadError, jamais « Aucun message »
+  const loadFailed = feedbackQ.isError && !backendMissing && !Array.isArray(feedbackQ.data);
 
   const items = useMemo(() => all.filter(f => {
     if (typeFilter !== 'all' && f.type !== typeFilter) return false;
@@ -152,7 +160,7 @@ export default function AdminFeedback() {
       invalidate();
       if (patch.admin_reply) toast.success('Réponse envoyée au client');
     },
-    onError: (err) => toast.error(err?.message || 'Erreur lors de la mise à jour'),
+    onError: (err) => toast.error(errText(err, 'Erreur lors de la mise à jour')),
     onSettled: () => setBusyId(null),
   });
 
@@ -160,7 +168,7 @@ export default function AdminFeedback() {
     mutationFn: (id) => api.entities.Feedback.delete(id),
     onMutate: (id) => setBusyId(id),
     onSuccess: () => { invalidate(); toast.success('Message supprimé'); },
-    onError: (err) => toast.error(err?.message || 'Erreur lors de la suppression'),
+    onError: (err) => toast.error(errText(err, 'Erreur lors de la suppression')),
     onSettled: () => setBusyId(null),
   });
 
@@ -169,7 +177,7 @@ export default function AdminFeedback() {
       <div className="mb-6">
         <p className="text-[11px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Clients</p>
         <h1 className="font-display text-2xl font-bold">Bugs et suggestions</h1>
-        {!backendMissing && (
+        {!backendMissing && !loadFailed && !feedbackQ.isLoading && (
           <p className="text-sm text-muted-foreground mt-1">
             {openCount === 0 ? 'Rien à traiter.' : `${openCount} message${openCount > 1 ? 's' : ''} à traiter.`}
           </p>
@@ -189,7 +197,7 @@ export default function AdminFeedback() {
         </div>
       )}
 
-      {!backendMissing && (
+      {!backendMissing && !loadFailed && (
         <div className="space-y-2 mb-4">
           <div className="flex gap-2 overflow-x-auto pb-1">
             {TYPE_FILTERS.map(f => <Chip key={f.value} active={typeFilter === f.value} onClick={() => setTypeFilter(f.value)}>{f.label}</Chip>)}
@@ -201,11 +209,11 @@ export default function AdminFeedback() {
       )}
 
       {feedbackQ.isLoading && <p className="text-sm text-muted-foreground">Chargement…</p>}
-      {feedbackQ.isError && !backendMissing && (
-        <p className="text-sm text-red-400">{feedbackQ.error?.message || 'Erreur de chargement'}</p>
+      {loadFailed && (
+        <LoadError what="les messages des clients" error={feedbackQ.error} onRetry={feedbackQ.refetch} retrying={feedbackQ.isFetching} />
       )}
 
-      {!feedbackQ.isLoading && !backendMissing && items.length === 0 && (
+      {!feedbackQ.isLoading && !backendMissing && !loadFailed && items.length === 0 && (
         <div className="rounded-2xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
           <MessageSquareText className="w-8 h-8 mx-auto mb-2 opacity-50" />
           {all.length === 0

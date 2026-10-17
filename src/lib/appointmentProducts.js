@@ -11,7 +11,7 @@
  */
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/api/apiClient';
-import { stockInfo } from '@/components/shop/productUtils';
+import { stockInfo, isShopProduct } from '@/components/shop/productUtils';
 
 /** Commandes encore à remettre (ni retirées ni annulées). */
 export const OPEN_LINKED_ORDER_STATUSES = ['pending', 'confirmed', 'ready'];
@@ -23,7 +23,8 @@ export const MAX_ADDON_QUANTITY = 5;
 /** Produit proposable à l'ajout : actif, vendu en boutique (pas un consommable du salon), en stock. */
 export function isAddonEligible(product) {
   if (!product || product.is_active === false) return false;
-  if ((product.stock_type || 'boutique') === 'salon') return false;
+  // Consommables du salon (onglet « Prestations » du stock) : jamais proposés
+  if (!isShopProduct(product)) return false;
   return !stockInfo(product).soldOut;
 }
 

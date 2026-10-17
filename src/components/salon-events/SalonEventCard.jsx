@@ -2,7 +2,7 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { Calendar, MapPin, Shirt, Users, PartyPopper } from 'lucide-react';
 import { formatEventDate, formatPrice } from '@/lib/salonEventsApi';
-import { EASE, RESPONSE_STYLE, capacityInfo, eventImages, formatEventEnd, myResponse, phaseLabel, responseLabel } from './salonEventUtils';
+import { EASE, RESPONSE_STYLE, capacityInfo, eventImages, formatEventEnd, hasStarted, myResponse, phaseLabel, responseLabel } from './salonEventUtils';
 
 function Badge({ tone = 'muted', children }) {
   const tones = {
@@ -58,9 +58,13 @@ export default function SalonEventCard({ event, onOpen, index = 0, reduceMotion 
   const inactive = isCancelled || phase === 'past';
   const isToday = phase === 'today';
   const full = cap.full && response !== 'accepted';
-  const style = RESPONSE_STYLE[response];
   const end = formatEventEnd(event);
-  const needsAnswer = !inactive && !full && (response === 'invited' || response === 'open');
+  // Réponses closes dès le début de l'événement (règle du serveur) : plus de « Répondre »
+  const started = hasStarted(event);
+  const unanswered = response === 'invited' || response === 'open';
+  const closed = started && unanswered;
+  const style = closed ? RESPONSE_STYLE.declined : RESPONSE_STYLE[response];
+  const needsAnswer = !inactive && !full && !started && unanswered;
 
   const onKeyDown = (e) => {
     if (e.key === 'Enter' || e.key === ' ') {
@@ -108,7 +112,7 @@ export default function SalonEventCard({ event, onOpen, index = 0, reduceMotion 
         {!inactive && (
           <span className={`absolute top-3 right-3 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[10px] font-bold uppercase tracking-wider backdrop-blur-sm ${style.bg} ${style.text}`}>
             <span className={`w-1.5 h-1.5 rounded-full ${style.dot}`} />
-            {responseLabel(event)}
+            {closed ? 'En cours' : responseLabel(event)}
           </span>
         )}
 

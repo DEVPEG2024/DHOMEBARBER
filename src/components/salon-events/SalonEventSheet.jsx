@@ -11,7 +11,7 @@ import { hapticFeedback } from '@/lib/capacitor';
 import { CapacityGauge } from './SalonEventCard';
 import {
   ACTIVE_PHASES, CALENDAR_TARGETS, EASE, RESPONSE_STYLE, buildSalonCalendarEvent, capacityInfo,
-  eventImages, formatEventEnd, maxGuestsFor, myResponse, phaseLabel,
+  eventImages, formatEventEnd, hasStarted, maxGuestsFor, myResponse, phaseLabel, useNow,
 } from './salonEventUtils';
 
 const SWIPE_OFFSET = 50;
@@ -229,8 +229,8 @@ function InfoRow({ icon: Icon, children, tone = '' }) {
 /**
  * Fiche d'un événement du salon en bottom sheet : galerie, titre, prix, infos (date, fin, lieu,
  * prix, tenue, jauge), description complète, ma réponse, « Ajouter au calendrier » si j'ai
- * accepté, et RSVP tant que l'événement n'est pas terminé (le serveur accepte une réponse
- * sur tout événement publié, même commencé) : « Je viens » avec sélecteur de places
+ * accepté, et RSVP jusqu'au début de l'événement (le serveur clôt les réponses dès que
+ * `starts_at` est passé) : « Je viens » avec sélecteur de places
  * (1..MAX_GUESTS, borné par le restant) / « Je ne peux pas ». Fermeture par la croix (ou Échap) :
  * jamais au tap sur le fond.
  */
@@ -241,7 +241,10 @@ export default function SalonEventSheet({ event, onClose, onRsvp, pending = fals
   const accepted = response === 'accepted';
   const declined = response === 'declined';
   const cap = capacityInfo(event);
-  const canRespond = ACTIVE_PHASES.includes(phase) && event.status === 'published';
+  // Horloge : la fiche peut rester ouverte au moment où l'événement commence
+  const now = useNow(30_000);
+  const started = hasStarted(event, now);
+  const canRespond = ACTIVE_PHASES.includes(phase) && event.status === 'published' && !started;
   const maxGuests = maxGuestsFor(event);
   const myGuests = accepted ? Math.max(1, Number(event.my_invite?.guests) || 1) : 1;
   const full = cap.full && !accepted;
@@ -419,14 +422,19 @@ export default function SalonEventSheet({ event, onClose, onRsvp, pending = fals
             ) : declined ? (
               <div className="rounded-2xl bg-card border border-border p-3 flex items-center gap-3 text-xs text-muted-foreground">
                 <span className={`w-2 h-2 rounded-full shrink-0 ${style.dot}`} />
-                {phase === 'past'
+                {phase === 'past' || started
                   ? "Tu avais répondu que tu ne pouvais pas venir."
-                  : "Tu as répondu que tu ne pouvais pas venir. Tu peux changer d'avis tant que l'événement n'est pas terminé."}
+                  : "Tu as répondu que tu ne pouvais pas venir. Tu peux changer d'avis jusqu'au début de l'événement."}
               </div>
             ) : phase === 'past' ? (
               <div className="rounded-2xl bg-card border border-border p-3 flex items-center gap-3 text-xs text-muted-foreground">
                 <Clock className="w-4 h-4 shrink-0" />
                 Cet événement est terminé.
+              </div>
+            ) : started ? (
+              <div className="rounded-2xl bg-card border border-border p-3 flex items-center gap-3 text-xs text-muted-foreground">
+                <Clock className="w-4 h-4 shrink-0" />
+                C'est en cours : les réponses sont closes.
               </div>
             ) : (
               <div className="rounded-2xl bg-amber-500/10 border border-amber-500/20 p-3 flex items-center gap-3 text-xs text-amber-200/90">

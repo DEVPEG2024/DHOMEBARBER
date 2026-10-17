@@ -9,10 +9,12 @@
  * Le serveur verrouille la carte (`SELECT … FOR UPDATE`) : deux débits simultanés ne peuvent pas
  * dépasser le solde.
  *
- * Tant que ces routes n'existent pas (404 / 405 sans code d'erreur métier, « Cannot POST »), repli
- * sur l'entité générique `GiftCard.update` comme avant, mais en relisant la carte juste avant pour
- * partir du solde réel. Le repli n'a pas d'historique : la section « Historique » n'apparaît pas.
+ * Les routes sont en production : plus de repli sur l'entité générique `GiftCard.update` (le
+ * serveur refuse désormais d'y modifier le solde, qui ne bouge que par un débit verrouillé et
+ * historisé). Un débit porte une référence (`client_ref`) : rejoué après une réponse perdue, il
+ * n'est pas refait.
  */
+import { toast } from 'sonner';
 import { api, apiRequest, apiUrl } from '@/api/apiClient';
 import { isNetworkError } from '@/components/shared/LoadError';
 import { invalidateAppointmentQueries } from '@/components/agenda/agendaUtils';
@@ -39,13 +41,21 @@ export function parisToday(now = new Date()) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
 }
 
-/** « 17 oct. 2026 » pour une date `YYYY-MM-DD` (ou un horodatage), lue comme un jour du calendrier. */
+/**
+ * « 17 oct. 2026 ». Une date `YYYY-MM-DD` (validité) est lue comme un jour du calendrier ; un
+ * horodatage (`created_at`, `used_at`) est ramené au jour de Paris (une carte achetée le 17 à
+ * 1 h 30 n'affiche plus « 16 oct. »). `''` si la valeur est illisible.
+ */
 export function formatDay(value) {
   if (!value) return '';
-  const day = String(value).slice(0, 10);
-  const [y, m, d] = day.split('-').map(Number);
-  if (!y || !m || !d) return '';
-  return new Date(y, m - 1, d, 12).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
+  const raw = String(value);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const [y, m, d] = raw.split('-').map(Number);
+    return new Date(y, m - 1, d, 12).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleDateString('fr-FR', { timeZone: TZ, day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 /** « 17 oct., 14:32 » à l'heure de Paris pour un horodatage. */
@@ -105,7 +115,18 @@ export function friendlyGiftCardError(err, fallback = 'Opération impossible pou
   return serverMsg || fallback;
 }
 
-/** Erreur « métier » produite côté client (repli), message prêt à afficher. */
+/** Pas de réponse du serveur pendant un débit : il est peut-être passé (jamais « réessayez »). */
+export const DEBIT_NETWORK_MESSAGE = 'Pas de réponse du serveur : le débit est peut-être passé. Vérifiez le solde et l\'historique avant de réessayer.';
+
+/** Référence d'un débit (`client_ref`) : la même tant que l'admin retente le même débit. */
+export function newClientRef() {
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  } catch { /* repli ci-dessous */ }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+/** Erreur « métier » produite côté client, message prêt à afficher. */
 function localError(message) {
   const err = new Error(message);
   err.local = true;
@@ -133,91 +154,54 @@ export async function fetchGiftCardByCode(code) {
  *    à repasser tel quel à `undoGiftCardDebit`.
  * Les erreurs sont lancées telles quelles (`friendlyGiftCardError` pour le message).
  */
-export async function debitGiftCard(card, { amount, appointmentId = null, services = [], note = '' } = {}) {
+export async function debitGiftCard(card, { amount, appointmentId = null, services = [], note = '', clientRef = null } = {}) {
   const value = round2(amount);
   if (!(value > 0)) throw localError('Montant invalide.');
   const body = { amount: value };
   if (appointmentId) body.appointment_id = appointmentId;
   if (services.length) body.services = services;
   if (note) body.note = String(note).slice(0, 300);
+  // Même référence pour un nouvel essai du même débit : le serveur renvoie le débit déjà fait
+  if (clientRef) body.client_ref = clientRef;
 
-  try {
-    const data = await apiRequest('POST', apiUrl(`/gift-cards/${encodeURIComponent(card.id)}/debit`), body);
-    const fresh = data?.card || null;
-    const tx = data?.transaction || {};
-    const balanceAfter = tx.balance_after != null ? round2(tx.balance_after) : giftCardBalance(fresh);
-    return {
-      card: fresh || { ...card, remaining_balance: balanceAfter, status: balanceAfter <= 0 ? 'used' : card.status },
-      transaction: {
-        ...tx,
-        amount: tx.amount != null ? round2(tx.amount) : value,
-        balance_after: balanceAfter,
-        previous_balance: round2(balanceAfter + value),
-        previous_status: 'validated',
-      },
-      viaServer: true,
-    };
-  } catch (err) {
-    if (!isMissingRoute(err)) throw err;
-  }
-
-  // Repli sans route serveur : solde relu juste avant, puis mise à jour de l'entité.
-  const current = await fetchGiftCard(card.id);
-  if (!current) throw localError('Carte introuvable : elle a peut-être été supprimée.');
-  const state = giftCardState(current);
-  if (state === 'pending') throw localError('Cette carte doit d’abord être validée (paiement reçu).');
-  if (state === 'used') throw localError('Cette carte est déjà entièrement utilisée.');
-  if (state === 'expired') throw localError('Cette carte est annulée ou expirée.');
-  if (state === 'outdated') throw localError('La date de validité de cette carte est dépassée.');
-  if (state !== 'debitable') throw localError('Cette carte ne peut pas être débitée.');
-  const balance = giftCardBalance(current);
-  if (value > balance) throw localError(`Solde insuffisant : il reste ${formatEuro(balance)} sur la carte.`);
-
-  const newBalance = round2(balance - value);
-  const updates = { remaining_balance: newBalance };
-  if (newBalance <= 0) {
-    updates.status = 'used';
-    updates.used_at = new Date().toISOString();
-  }
-  const saved = await api.entities.GiftCard.update(current.id, updates);
+  const data = await apiRequest('POST', apiUrl(`/gift-cards/${encodeURIComponent(card.id)}/debit`), body);
+  const fresh = data?.card || null;
+  const tx = data?.transaction || {};
+  const balanceAfter = tx.balance_after != null ? round2(tx.balance_after) : giftCardBalance(fresh);
   return {
-    card: { ...current, ...(saved && typeof saved === 'object' ? saved : {}), ...updates },
+    card: fresh || { ...card, remaining_balance: balanceAfter, status: balanceAfter <= 0 ? 'used' : card.status },
     transaction: {
-      id: `local-${Date.now()}`,
-      local: true,
-      kind: 'debit',
-      amount: value,
-      balance_after: newBalance,
-      previous_balance: balance,
-      previous_status: current.status,
+      ...tx,
+      amount: tx.amount != null ? round2(tx.amount) : value,
+      balance_after: balanceAfter,
+      previous_balance: round2(balanceAfter + value),
+      previous_status: 'validated',
     },
-    viaServer: false,
+    replayed: !!data?.replayed,
+    viaServer: true,
   };
 }
 
-/**
- * Annule un débit : route serveur, sinon remise du montant sur le solde relu (plafonné au montant
- * initial), statut `validated`, `used_at` à zéro. Résout la carte à jour.
- */
+/** Annule un débit (route serveur, 24 h au plus). Résout la carte à jour. */
 export async function undoGiftCardDebit(card, transaction) {
-  if (transaction && !transaction.local && transaction.id) {
-    try {
-      const data = await apiRequest(
-        'POST',
-        apiUrl(`/gift-cards/${encodeURIComponent(card.id)}/debit/${encodeURIComponent(transaction.id)}/undo`),
-        {},
-      );
-      return data?.card || null;
-    } catch (err) {
-      if (!isMissingRoute(err)) throw err;
-    }
-  }
-  const current = await fetchGiftCard(card.id);
-  if (!current) throw localError('Carte introuvable : elle a peut-être été supprimée.');
-  const restored = round2(Math.min(giftCardBalance(current) + round2(transaction?.amount), Number(current.amount) || Infinity));
-  const updates = { remaining_balance: restored, status: 'validated', used_at: null };
-  const saved = await api.entities.GiftCard.update(current.id, updates);
-  return { ...current, ...(saved && typeof saved === 'object' ? saved : {}), ...updates };
+  if (!transaction || transaction.local || !transaction.id) throw localError('Ce débit ne peut pas être annulé ici.');
+  const data = await apiRequest(
+    'POST',
+    apiUrl(`/gift-cards/${encodeURIComponent(card.id)}/debit/${encodeURIComponent(transaction.id)}/undo`),
+    {},
+  );
+  return data?.card || null;
+}
+
+/** Délai pendant lequel le serveur accepte l'annulation d'un débit. */
+export const UNDO_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/** Ce débit de l'historique peut-il encore être annulé (moins de 24 h, pas déjà annulé, carte non annulée) ? */
+export function canUndoTransaction(tx, card, now = Date.now()) {
+  if (!tx || tx.kind !== 'debit' || tx.undone_at || !tx.id || tx.local) return false;
+  if (card?.status === 'expired') return false;
+  const created = Date.parse(tx.created_at);
+  return Number.isFinite(created) && now - created < UNDO_WINDOW_MS;
 }
 
 /**
@@ -353,4 +337,63 @@ export async function reopenAppointment(previous, queryClient) {
   const { id, ...fields } = previous;
   await api.entities.Appointment.update(id, fields);
   if (queryClient) invalidateAppointmentQueries(queryClient);
+}
+
+/**
+ * Annulation d'un débit depuis l'historique (état d'avant inconnu) : le RDV n'est rouvert que s'il
+ * a bien été clôturé par ce débit (payé par carte cadeau, repère exact de la carte et du montant
+ * dans la note interne). Résout vrai si le RDV a été rouvert.
+ */
+export async function reopenAppointmentAfterUndo(appointmentId, card, amount, queryClient) {
+  const rows = await api.entities.Appointment.filter({ id: appointmentId }, null, 1);
+  const apt = (Array.isArray(rows) ? rows : []).find((a) => String(a.id) === String(appointmentId));
+  if (!apt) return false;
+  const tag = giftCardNoteTag(card.code, amount);
+  const notes = String(apt.internal_notes || '');
+  if (apt.payment_method !== 'carte_cadeau' || !notes.includes(tag)) return false;
+  await api.entities.Appointment.update(apt.id, {
+    status: 'confirmed',
+    payment_method: null,
+    payment_status: null,
+    grand_total: null,
+    internal_notes: notes.replace(tag, '').replace(/\s{2,}/g, ' ').trim(),
+  });
+  if (queryClient) invalidateAppointmentQueries(queryClient);
+  return true;
+}
+
+/**
+ * Annule un débit et remet tout d'aplomb : solde (serveur), RDV clôturé par ce débit rouvert,
+ * listes et historique rechargés, toasts. Partagé par l'écran de succès et l'historique.
+ * `previousApt` : état exact du RDV avant clôture (écran de succès), sinon `null`.
+ * Résout vrai si l'annulation a réussi.
+ */
+export async function runGiftCardUndo({ card, transaction, previousApt = null, queryClient, onCardChange }) {
+  try {
+    const fresh = await undoGiftCardDebit(card, transaction);
+    let reopenFailed = false;
+    try {
+      if (previousApt) await reopenAppointment(previousApt, queryClient);
+      else if (transaction?.appointment_id) {
+        const reopened = await reopenAppointmentAfterUndo(transaction.appointment_id, card, transaction.amount, queryClient);
+        if (!reopened) reopenFailed = 'skip';
+      }
+    } catch {
+      reopenFailed = true;
+    }
+    if (fresh) {
+      patchGiftCardCache(queryClient, fresh);
+      onCardChange?.(fresh);
+    }
+    invalidateGiftCardQueries(queryClient, card.id);
+    queryClient.invalidateQueries({ queryKey: giftCardTodayAppointmentsKey(parisToday()) });
+    toast.success('Débit annulé', { description: fresh ? `Solde remis à ${formatEuro(giftCardBalance(fresh))}` : undefined });
+    if (reopenFailed === true) {
+      toast.warning('Solde remis, mais le RDV n\'a pas pu être rouvert : corrigez son encaissement dans l\'agenda (« Corriger l\'encaissement »).', { duration: 10000 });
+    }
+    return true;
+  } catch (err) {
+    toast.error("Impossible d'annuler le débit", { description: friendlyGiftCardError(err) });
+    return false;
+  }
 }

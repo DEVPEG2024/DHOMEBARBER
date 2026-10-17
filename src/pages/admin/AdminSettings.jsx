@@ -10,6 +10,14 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
+import LoadError from '@/components/shared/LoadError';
+
+// Champs que cette page modifie : la sauvegarde n'envoie qu'eux (l'ordre de l'accueil, les réglages
+// d'alertes, la relance… modifiés ailleurs entre-temps ne sont jamais écrasés)
+const PAGE_FIELDS = [
+  'salon_name', 'tagline', 'description', 'address', 'city', 'phone', 'email', 'opening_hours',
+  'cancellation_hours', 'require_deposit', 'deposit_percentage', 'social_instagram', 'social_facebook', 'social_tiktok',
+];
 
 const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 const DAY_LABELS = { monday: 'Lundi', tuesday: 'Mardi', wednesday: 'Mercredi', thursday: 'Jeudi', friday: 'Vendredi', saturday: 'Samedi', sunday: 'Dimanche' };
@@ -22,10 +30,21 @@ export default function AdminSettings() {
   const [newSkill, setNewSkill] = useState({ name: '', emoji: '✂️', color: '#3fcf8e' });
   const queryClient = useQueryClient();
 
-  const { data: allSettings = [] } = useQuery({
+  const {
+    data: allSettings = [], isPending: settingsPending, isError: settingsError, isSuccess: settingsReady,
+    error: settingsErr, refetch: refetchSettings, isFetching: settingsFetching, fetchStatus: settingsFetchStatus,
+  } = useQuery({
     queryKey: ['salonSettings'],
     queryFn: () => api.entities.SalonSettings.list('-created_date', 1),
   });
+
+  // Suppression d'une compétence en deux taps (le bouton retombe seul après 3 s)
+  const [confirmDeleteSkill, setConfirmDeleteSkill] = useState(null);
+  useEffect(() => {
+    if (!confirmDeleteSkill) return undefined;
+    const t = setTimeout(() => setConfirmDeleteSkill(null), 3000);
+    return () => clearTimeout(t);
+  }, [confirmDeleteSkill]);
 
   const { data: skillCategories = [] } = useQuery({
     queryKey: ['skillCategories'],
@@ -41,6 +60,7 @@ export default function AdminSettings() {
       setNewSkill({ name: '', emoji: '✂️', color: '#3fcf8e' });
       toast.success('Compétence ajoutée');
     },
+    onError: (err) => toast.error(err?.message || "Impossible d'ajouter la compétence"),
   });
 
   const updateSkillMutation = useMutation({
@@ -50,14 +70,17 @@ export default function AdminSettings() {
       setEditingSkill(null);
       toast.success('Compétence modifiée');
     },
+    onError: (err) => toast.error(err?.message || 'Impossible de modifier la compétence'),
   });
 
   const deleteSkillMutation = useMutation({
     mutationFn: (id) => api.entities.SkillCategory.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['skillCategories'] });
-      toast.success('Compétence supprimée');
+      toast.success('Compétence supprimée', { description: 'Les niveaux notés sur les barbers pour cette compétence ne s’affichent plus.' });
     },
+    onError: (err) => toast.error(err?.message || 'Impossible de supprimer la compétence'),
+    onSettled: () => setConfirmDeleteSkill(null),
   });
 
   const handleSkillDragEnd = async (result) => {
@@ -96,17 +119,26 @@ export default function AdminSettings() {
   const saveMutation = useMutation({
     mutationFn: (data) => {
       if (data.id) {
-        const { id, ...rest } = data;
-        return api.entities.SalonSettings.update(id, rest);
+        const patch = Object.fromEntries(PAGE_FIELDS.filter(k => data[k] !== undefined).map(k => [k, data[k]]));
+        return api.entities.SalonSettings.update(data.id, patch);
+      }
+      // Jamais une seconde ligne : elle deviendrait « le salon » pour l'app, sans horaires
+      if (allSettings.length > 0) {
+        const err = new Error('Les paramètres du salon existent déjà : ils ont été rechargés.');
+        err.reload = true;
+        throw err;
       }
       return api.entities.SalonSettings.create(data);
     },
-    onSuccess: () => {
+    onSuccess: (row) => {
+      if (row?.id) setSettings(row);
       queryClient.invalidateQueries({ queryKey: ['salonSettings'] });
       toast.success('Paramètres sauvegardés ✓');
     },
-    onError: () => {
-      toast.error('Erreur lors de la sauvegarde');
+    onError: (err) => {
+      if (err?.reload && allSettings[0]) setSettings(allSettings[0]);
+      if (err?.status === 409) refetchSettings().then(r => { if (r.data?.[0]) setSettings(r.data[0]); });
+      toast.error(err?.message && !/^HTTP \d+$/.test(err.message) ? err.message : 'Erreur lors de la sauvegarde');
     },
   });
 
@@ -119,6 +151,33 @@ export default function AdminSettings() {
       }
     }));
   };
+
+  // Hors ligne, la requête est en pause (ni chargement ni erreur) : on le dit plutôt qu'un squelette sans fin
+  if (!settings && settingsPending && settingsFetchStatus === 'paused') {
+    return <LoadError what="les paramètres du salon" onRetry={refetchSettings} retrying={settingsFetching} />;
+  }
+
+  if (!settings && settingsPending) {
+    return (
+      <div className="space-y-4" aria-hidden="true">
+        <div className="h-8 w-40 rounded-lg bg-secondary animate-pulse" />
+        <div className="h-48 rounded-xl bg-secondary animate-pulse" />
+        <div className="h-64 rounded-xl bg-secondary animate-pulse" />
+      </div>
+    );
+  }
+
+  if (!settings && settingsError && allSettings.length === 0) {
+    return (
+      <LoadError what="les paramètres du salon" error={settingsErr} onRetry={refetchSettings} retrying={settingsFetching} />
+    );
+  }
+
+  // « Initialiser » seulement quand la base n'a vraiment aucune ligne (jamais pendant un
+  // chargement ni après une erreur : on créerait un second salon vide)
+  if (!settings && !(settingsReady && allSettings.length === 0)) {
+    return null;
+  }
 
   if (!settings) {
     return (
@@ -226,8 +285,12 @@ export default function AdminSettings() {
           <div className="space-y-4">
             <div>
               <Label className="text-xs">Délai d'annulation gratuite (heures)</Label>
-              <Input type="number" value={settings.cancellation_hours || 24}
-                onChange={e => setSettings({ ...settings, cancellation_hours: parseInt(e.target.value) || 24 })}
+              <Input type="number" min={0} value={settings.cancellation_hours ?? 24}
+                onChange={e => {
+                  // 0 = annulation possible jusqu'au dernier moment (le serveur le gère)
+                  const n = parseInt(e.target.value, 10);
+                  setSettings({ ...settings, cancellation_hours: Number.isFinite(n) && n >= 0 ? n : 0 });
+                }}
                 className="bg-secondary border-border mt-1 w-32" />
             </div>
             <div className="flex items-center justify-between">
@@ -237,7 +300,7 @@ export default function AdminSettings() {
             {settings.require_deposit && (
               <div>
                 <Label className="text-xs">Pourcentage d'acompte</Label>
-                <Input type="number" value={settings.deposit_percentage || 30}
+                <Input type="number" value={settings.deposit_percentage ?? 30}
                   onChange={e => setSettings({ ...settings, deposit_percentage: parseInt(e.target.value) || 30 })}
                   className="bg-secondary border-border mt-1 w-32" />
               </div>
@@ -362,20 +425,36 @@ export default function AdminSettings() {
                               <GripVertical className="w-4 h-4" />
                             </div>
                             <span className="text-lg">{cat.emoji}</span>
-                            <span className="text-sm font-medium flex-1">{cat.name}</span>
+                            <span className="text-sm font-medium flex-1 min-w-0 truncate">{cat.name}</span>
                             <div className="w-3 h-3 rounded-full" style={{ backgroundColor: cat.color }} />
                             <button
-                              onClick={() => setEditingSkill({ id: cat.id, name: cat.name, emoji: cat.emoji, color: cat.color })}
-                              className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-primary"
+                              type="button"
+                              aria-label="Modifier la compétence"
+                              onClick={() => { setConfirmDeleteSkill(null); setEditingSkill({ id: cat.id, name: cat.name, emoji: cat.emoji, color: cat.color }); }}
+                              className="opacity-100 lg:opacity-0 lg:group-hover:opacity-100 focus-visible:opacity-100 transition-opacity p-1.5 -m-1 rounded-md text-muted-foreground hover:text-primary"
                             >
                               <Pencil className="w-3.5 h-3.5" />
                             </button>
-                            <button
-                              onClick={() => deleteSkillMutation.mutate(cat.id)}
-                              className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-red-400"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                            {confirmDeleteSkill === cat.id ? (
+                              <button
+                                type="button"
+                                aria-label="Confirmer la suppression de la compétence"
+                                onClick={() => deleteSkillMutation.mutate(cat.id)}
+                                disabled={deleteSkillMutation.isPending}
+                                className="opacity-100 px-2 py-1 -my-1 rounded-md text-xs font-semibold text-red-400 bg-red-500/10 disabled:opacity-60"
+                              >
+                                {deleteSkillMutation.isPending ? '…' : 'Supprimer ?'}
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                aria-label="Supprimer la compétence"
+                                onClick={() => setConfirmDeleteSkill(cat.id)}
+                                className="opacity-100 lg:opacity-0 lg:group-hover:opacity-100 focus-visible:opacity-100 transition-opacity p-1.5 -m-1 rounded-md text-muted-foreground hover:text-red-400"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
                           </div>
                         )}
                       </Draggable>

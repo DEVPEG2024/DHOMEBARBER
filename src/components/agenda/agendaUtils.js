@@ -3,6 +3,8 @@ import { fr } from 'date-fns/locale';
 import { api } from '@/api/apiClient';
 import { LAST_MINUTE_EXPIRED_REASON } from '@/lib/cancellation';
 import { parisInstant } from '@/lib/calendarLinks';
+import { isNetworkError } from '@/components/shared/LoadError';
+import { parisDay } from '@/lib/slots';
 
 // Grille commune aux vues Jour et Semaine
 export const START_HOUR = 7;
@@ -110,14 +112,6 @@ export function isUnclaimedLastMinute(apt) {
     || (!apt.client_email && apt.client_name === 'Last Minute');
 }
 
-/** Instant de fin d'un rendez-vous (heure de l'appareil, comme le reste de l'agenda). */
-export function appointmentEnd(apt) {
-  const d = parseDateParam(String(apt.date || '').slice(0, 10));
-  if (!d) return null;
-  const end = timeToMinutes(apt.end_time || apt.start_time);
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), Math.floor(end / 60), end % 60);
-}
-
 /**
  * Instant réel (ms) de la fin d'un rendez-vous, l'heure saisie étant celle du salon (Paris),
  * quel que soit le fuseau de l'appareil. À comparer à `Date.now()` ; `null` si la date est invalide.
@@ -130,14 +124,15 @@ export function appointmentEndParis(apt) {
 }
 
 /**
- * Prestation terminée mais pas encaissée. Seulement une fois l'heure de fin passée :
+ * Prestation terminée mais pas encaissée. Seulement une fois l'heure de fin passée, à l'heure de
+ * Paris (un appareil réglé sur un autre fuseau allumait la pastille au mauvais moment) :
  * avant, tous les rendez-vous à venir clignotaient puisqu'aucun n'a encore de moyen de paiement.
  */
 export function needsClosing(apt, now = new Date()) {
   if (apt.payment_method) return false;
   if (apt.status !== 'confirmed' && apt.status !== 'completed') return false;
-  const end = appointmentEnd(apt);
-  return !!end && end < now;
+  const end = appointmentEndParis(apt);
+  return end != null && end < (now instanceof Date ? now.getTime() : Number(now));
 }
 
 /**
@@ -221,12 +216,55 @@ export function shortDayLabel(dateStr) {
   return d ? format(d, 'EEE d MMM', { locale: fr }) : String(dateStr || '');
 }
 
-/** Rendez-vous à venir (heure de l'appareil) : seul cas où l'on propose de prévenir le client. */
+/**
+ * Rendez-vous à venir, heure de Paris, comme isUpcomingBooking côté serveur : seul cas où l'on
+ * propose de prévenir le client.
+ */
 export function isUpcomingSlot(dateStr, time) {
   const d = parseDateParam(String(dateStr || '').slice(0, 10));
   if (!d || !/^\d{2}:\d{2}$/.test(String(time || '').slice(0, 5))) return false;
-  const m = timeToMinutes(time);
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), Math.floor(m / 60), m % 60) > new Date();
+  return parisInstant(String(dateStr).slice(0, 10), minutesToTime(timeToMinutes(time))) > Date.now();
+}
+
+/**
+ * Message d'erreur de l'agenda : « Pas de connexion internet » plutôt que « Load failed » /
+ * « Failed to fetch » (Safari, Chrome), sinon le message du serveur, sinon `fallback`.
+ * Vouvoiement, comme le reste de l'agenda (le tutoiement ne vaut que pour les pushs).
+ */
+export function agendaErrorMessage(err, fallback) {
+  if (isNetworkError(err)) return 'Pas de connexion internet : réessayez dans un instant.';
+  const server = typeof err?.data?.error === 'string' ? err.data.error.trim() : '';
+  if (server && !/^HTTP \d+$/.test(server)) return server;
+  const msg = typeof err?.message === 'string' ? err.message.trim() : '';
+  if (err?.status && msg && !/^HTTP/.test(msg)) return msg;
+  return fallback;
+}
+
+/**
+ * Rendez-vous de clients encore actifs d'un barber sur une période (congé à approuver ou à
+ * poser) : confirmés ou en attente, ni pause, ni last minute sans client, à partir d'aujourd'hui
+ * (jour de Paris). Triés par date puis heure. Lève l'erreur de chargement : l'appelant ne doit
+ * jamais en conclure qu'il n'y a aucun rendez-vous.
+ */
+export async function fetchLeaveConflicts(employeeId, startDate, endDate) {
+  const start = parseDateParam(String(startDate || '').slice(0, 10));
+  const end = parseDateParam(String(endDate || '').slice(0, 10));
+  if (!employeeId || !start || !end || end < start) return [];
+  const today = parisDay(0).key;
+  const rows = [];
+  // datesBetween s'arrête à 62 jours : tranches successives pour un long congé
+  for (let from = start; from <= end; from = addDays(from, 62)) {
+    const chunkEnd = addDays(from, 61) < end ? addDays(from, 61) : end;
+    const days = datesBetween(from, chunkEnd).filter((d) => d >= today);
+    if (days.length === 0) continue;
+    const part = await api.entities.Appointment.filter({ date: days, employee_id: employeeId }, 'start_time', 2000);
+    rows.push(...(part || []));
+  }
+  return rows
+    .filter((a) => (a.status === 'confirmed' || a.status === 'pending')
+      && !isBreak(a) && !isLastMinuteSlot(a) && !a.payment_method
+      && String(a.date || '').slice(0, 10) >= today)
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)) || timeToMinutes(a.start_time) - timeToMinutes(b.start_time));
 }
 
 /**

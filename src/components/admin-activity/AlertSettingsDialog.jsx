@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { ACTIVITY_TYPES } from '@/lib/adminActivity';
 import { ALERT_GROUPS, useAdminAlertPrefs } from '@/lib/adminAlerts';
+import LoadError from '@/components/shared/LoadError';
 
 /**
  * Réglages des alertes de l'admin : pour chaque type d'action client, « Notifier » (push sur le
@@ -13,7 +14,7 @@ import { ALERT_GROUPS, useAdminAlertPrefs } from '@/lib/adminAlerts';
  * dans Activité clients quel que soit le réglage. Fermeture par la croix ou « Annuler ».
  */
 export default function AlertSettingsDialog({ open, onOpenChange }) {
-  const { prefs, isLoading, settings, save, saving } = useAdminAlertPrefs();
+  const { prefs, isLoading, isError, error, refetch, isFetching, settings, save, saving } = useAdminAlertPrefs();
   const [draft, setDraft] = useState({});
 
   // Copie de travail remise à jour à chaque ouverture
@@ -57,6 +58,8 @@ export default function AlertSettingsDialog({ open, onOpenChange }) {
           <div className="space-y-2" aria-busy="true">
             {[0, 1, 2, 3].map(i => <div key={i} className="h-12 rounded-xl bg-secondary animate-pulse" />)}
           </div>
+        ) : isError ? (
+          <LoadError compact what="les réglages des alertes" error={error} onRetry={refetch} retrying={isFetching} />
         ) : !settings ? (
           <p className="text-sm text-muted-foreground">Paramètres du salon introuvables : enregistrez d’abord la page Paramètres.</p>
         ) : (
@@ -107,7 +110,7 @@ export default function AlertSettingsDialog({ open, onOpenChange }) {
 
         <div className="flex gap-2 justify-end pt-1">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>Annuler</Button>
-          <Button onClick={submit} disabled={saving || isLoading || !settings}>
+          <Button onClick={submit} disabled={saving || isLoading || isError || !settings}>
             {saving ? 'Enregistrement…' : 'Enregistrer'}
           </Button>
         </div>

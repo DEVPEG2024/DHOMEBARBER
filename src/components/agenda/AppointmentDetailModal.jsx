@@ -1,4 +1,5 @@
 import React, { useReducer } from 'react';
+import { Link } from 'react-router-dom';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Clock, User, Phone, Mail, Scissors, CreditCard, FileText, Calendar, Banknote, CheckCircle, Heart, ShoppingBag, ChevronDown, Check, BadgeCheck, X, AlertTriangle, Trash2, UserX, Gift, Pencil, RotateCcw, Undo2 } from 'lucide-react';
 import { getServiceColor } from '@/utils/serviceColors';
@@ -6,7 +7,9 @@ import { api } from '@/api/apiClient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import AppointmentEditForm from './AppointmentEditForm';
-import { STATUS_META, invalidateAppointmentQueries, withLastMinuteMarker, stripLastMinuteMarker, isConvertedLastMinute } from './agendaUtils';
+import { STATUS_META, invalidateAppointmentQueries, withLastMinuteMarker, stripLastMinuteMarker, isConvertedLastMinute, agendaErrorMessage } from './agendaUtils';
+import { useAuth } from '@/lib/AuthContext';
+import { parisInstant } from '@/lib/calendarLinks';
 import { formatStaffReason, cancellationActor, cancelledByLabel, cleanReason, LAST_MINUTE_EXPIRED_REASON, ORDER_STATUSES, normalizeOrderStatus, invalidateOrderQueries } from '@/lib/cancellation';
 import { orderItemsLabel } from '@/lib/appointmentProducts';
 import { formatPrice } from '@/components/shop/productUtils';
@@ -31,14 +34,28 @@ function GangClientBadge({ email }) {
   );
 }
 
-/** Message d'erreur lisible : celui du serveur, sinon celui de l'erreur sauf « HTTP 403 », sinon le repli. */
+/**
+ * Message d'erreur lisible : « Pas de connexion internet » pour une coupure (jamais « Load failed »),
+ * celui du serveur, sinon celui de l'erreur sauf « HTTP 403 », sinon le repli.
+ */
 function errorMessage(err, fallback) {
-  const server = typeof err?.data?.error === 'string' ? err.data.error.trim() : '';
-  if (server && !/^HTTP \d+$/.test(server)) return server;
+  const shown = agendaErrorMessage(err, '');
+  if (shown) return shown;
   const msg = typeof err?.message === 'string' ? err.message.trim() : '';
   if (msg && !/^HTTP/.test(msg)) return msg;
   return fallback;
 }
+
+/**
+ * Montant saisi au clavier français : « 2,50 » → 2.5, vide → 0, au centime. NaN si la saisie n'est
+ * pas un nombre (« 2,5abc », « 2,5,0 ») : refusé plutôt que tronqué en silence (parseFloat donnait 2).
+ */
+const parseAmount = (v) => {
+  const s = String(v ?? '').trim().replace(/\s/g, '').replace(',', '.');
+  if (!s) return 0;
+  const n = Number(s);
+  return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : NaN;
+};
 
 const STAFF_CANCEL_REASON_MAX = 200;
 
@@ -94,6 +111,8 @@ const deliverOrder = (order) => api.entities.Order.update(order.id, { status: 'd
 
 function ModalInner({ appointment, linkedOrders = [], onUpdate, onDelete, onEdit }) {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const [state, dispatch] = useReducer(reducer, appointment, initialState);
   // Produits réservés avec le RDV (commandes ouvertes). Jamais recopiés dans product_sold / product_price :
   // ils sont encaissés via leur commande, sinon le tableau de bord les compterait deux fois.
@@ -126,6 +145,8 @@ function ModalInner({ appointment, linkedOrders = [], onUpdate, onDelete, onEdit
   // Annulation en deux temps : le premier tap ouvre le panneau de confirmation dans la fiche
   const [confirmingCancel, setConfirmingCancel] = React.useState(false);
   const [cancelReason, setCancelReason] = React.useState('');
+  // Case « Prévenir le client » de l'annulation (cochée par défaut)
+  const [notifyOnCancel, setNotifyOnCancel] = React.useState(true);
   // Suppression en deux temps, sur le même modèle (plus de window.confirm)
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
   // Parcours last minute : créneau encore libre, ou pris par un client mais pas encore encaissé (la fiche
@@ -166,12 +187,22 @@ function ModalInner({ appointment, linkedOrders = [], onUpdate, onDelete, onEdit
     : [];
 
   const status = STATUS_META[appointment.status] || STATUS_META.confirmed;
-  const tipValue = locked ? (appointment.tip || 0) : (parseFloat(state.tip) || 0);
-  const prodValue = locked ? (appointment.product_price || 0) : (parseFloat(state.productPrice) || 0);
+  const tipParsed = locked ? (appointment.tip || 0) : parseAmount(state.tip);
+  const tipInvalid = Number.isNaN(tipParsed);
+  const tipValue = tipInvalid ? 0 : tipParsed;
+  const prodValue = locked ? (appointment.product_price || 0) : (parseAmount(state.productPrice) || 0);
   const manualServiceTotal = selectedServices.reduce((sum, s) => sum + (s.price || 0), 0);
   const serviceTotal = appointment.total_price || manualServiceTotal || 0;
   const grandTotal = locked ? (appointment.grand_total || serviceTotal + tipValue + prodValue) : (serviceTotal + tipValue + prodValue);
-  const canValidate = !locked && state.paymentMethod && (tipValue === 0 || state.tipMethod);
+  // « Carte cadeau » ne débite pas la carte : le débit se fait depuis Cartes cadeau (qui clôture
+  // le RDV), jamais par ce bouton (le solde restait entier et la carte resservait). Un RDV déjà
+  // clôturé par le débit reste corrigeable sans nouveau débit.
+  const giftCardNeedsDebit = state.paymentMethod === 'carte_cadeau' && appointment.payment_method !== 'carte_cadeau';
+  const canValidate = !locked && !tipInvalid && state.paymentMethod && (tipValue === 0 || state.tipMethod) && !giftCardNeedsDebit;
+  // « Prévenir le client » : RDV d'un client, encore à venir (heure de Paris) ; sur un RDV passé,
+  // aucun email ne part de toute façon
+  const canNotifyCancel = !!appointment.client_email && ['confirmed', 'pending'].includes(appointment.status)
+    && parisInstant(String(appointment.date || '').slice(0, 10), String(appointment.start_time || '00:00').slice(0, 5)) > Date.now();
 
   // Motif d'annulation affiché sur un RDV annulé / absent
   const cancelActor = isClosedOut ? cancellationActor(appointment) : null;
@@ -186,10 +217,14 @@ function ModalInner({ appointment, linkedOrders = [], onUpdate, onDelete, onEdit
       await api.entities.Appointment.update(appointment.id, {
         status: 'cancelled',
         cancellation_reason: formatStaffReason(cancelReason),
+        ...(canNotifyCancel && !notifyOnCancel ? { notify_client: false } : {}),
       });
       toast.success('Rendez-vous annulé');
       setConfirmingCancel(false);
       setCancelReason('');
+      setNotifyOnCancel(true);
+      // Le serveur annule aussi les produits réservés avec ce RDV (sauf ceux déjà prêts)
+      invalidateLinkedOrders(queryClient);
       onUpdate?.();
     } catch (e) {
       toast.error(errorMessage(e, 'Annulation impossible'));
@@ -204,6 +239,7 @@ function ModalInner({ appointment, linkedOrders = [], onUpdate, onDelete, onEdit
       await api.entities.Appointment.delete(appointment.id);
       toast.success('Rendez-vous supprimé');
       setConfirmingDelete(false);
+      invalidateLinkedOrders(queryClient);
       onDelete?.();
     } catch (e) {
       toast.error(errorMessage(e, 'Suppression impossible'));
@@ -213,6 +249,7 @@ function ModalInner({ appointment, linkedOrders = [], onUpdate, onDelete, onEdit
   };
 
   const handleValidate = async () => {
+    if (giftCardNeedsDebit || tipInvalid) return;
     dispatch({ type: 'SAVING', value: true });
     try {
       const updateData = {
@@ -617,8 +654,9 @@ function ModalInner({ appointment, linkedOrders = [], onUpdate, onDelete, onEdit
                   inputMode="decimal"
                   placeholder="0"
                   value={state.tip}
-                  onChange={(e) => dispatch({ type: 'SET', field: 'tip', value: e.target.value })}
-                  className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-primary/40"
+                  onChange={(e) => dispatch({ type: 'SET', field: 'tip', value: e.target.value.replace(/[^0-9.,]/g, '') })}
+                  aria-invalid={tipInvalid}
+                  className={`w-full bg-white/5 border rounded-xl px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-primary/40 ${tipInvalid ? 'border-red-500/60' : 'border-white/10'}`}
                 />
                 <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">€</span>
               </div>
@@ -645,6 +683,7 @@ function ModalInner({ appointment, linkedOrders = [], onUpdate, onDelete, onEdit
                 Espèces
               </button>
             </div>
+            {tipInvalid && <p className="text-[11px] text-red-400">Montant invalide (ex. 2,50)</p>}
           </div>
 
           {/* Product */}
@@ -762,6 +801,20 @@ function ModalInner({ appointment, linkedOrders = [], onUpdate, onDelete, onEdit
                   </button>
                 ))}
               </div>
+              {giftCardNeedsDebit && (
+                <div role="status" className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs leading-relaxed text-amber-200 break-words min-w-0">
+                  {isAdmin ? (
+                    <>
+                      La carte cadeau se débite depuis Cartes cadeau : scanne le QR ou saisis le code, puis choisis ce rendez-vous. Il sera clôturé automatiquement.{' '}
+                      <Link to="/admin/gift-cards" className="font-semibold text-primary underline underline-offset-2 whitespace-nowrap">
+                        Débiter la carte
+                      </Link>
+                    </>
+                  ) : (
+                    <>Le débit de la carte cadeau se fait au comptoir par l'admin (Cartes cadeau). Laisse ce rendez-vous « À encaisser ».</>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
@@ -803,10 +856,26 @@ function ModalInner({ appointment, linkedOrders = [], onUpdate, onDelete, onEdit
                 aria-label="Motif de l'annulation (facultatif)"
                 className="w-full min-w-0 bg-white/5 border border-white/10 rounded-lg px-2.5 py-2 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-red-500/40"
               />
+              {openOrders.length > 0 && (
+                <p className="text-[11px] text-muted-foreground break-words">
+                  Les produits commandés avec ce rendez-vous seront annulés (sauf ceux déjà prêts).
+                </p>
+              )}
+              {canNotifyCancel && (
+                <label className="flex items-start gap-2 text-xs text-foreground cursor-pointer min-w-0">
+                  <input
+                    type="checkbox"
+                    checked={notifyOnCancel}
+                    onChange={(e) => setNotifyOnCancel(e.target.checked)}
+                    className="mt-0.5 w-4 h-4 shrink-0 accent-red-500"
+                  />
+                  <span className="min-w-0 break-words">Prévenir le client (email d'annulation)</span>
+                </label>
+              )}
               <div className="flex gap-2">
                 <button
                   type="button"
-                  onClick={() => { setConfirmingCancel(false); setCancelReason(''); }}
+                  onClick={() => { setConfirmingCancel(false); setCancelReason(''); setNotifyOnCancel(true); }}
                   disabled={state.saving}
                   className="flex-1 py-2.5 rounded-xl text-xs font-medium bg-white/5 border border-white/10 hover:bg-white/10 transition-all disabled:opacity-60"
                 >

@@ -1,7 +1,7 @@
 import React, { createContext, useState, useContext, useEffect, useCallback, useRef } from 'react';
 import { api } from '@/api/apiClient';
 import { queryClientInstance } from '@/lib/query-client';
-import { syncPushSubscription, detachPushFromAccount, setNotificationsOwner } from '@/lib/pushNotifications';
+import { syncPushSubscription, detachPushFromAccount, setNotificationsOwner, syncServiceWorkerNotifications } from '@/lib/pushNotifications';
 
 // Délai maximal accordé à la désinscription push avant de déconnecter quand même
 const LOGOUT_PUSH_TIMEOUT = 2000;
@@ -119,15 +119,21 @@ export const AuthProvider = ({ children }) => {
     if (user?.id != null) setNotificationsOwner(user.id);
   }, [user?.id]);
 
-  // Efface la session : jeton, utilisateur et cache (les réponses dépendent du rôle)
+  // Efface la session : jeton, utilisateur et cache (les réponses dépendent du rôle).
+  // Web : les notifications reçues app fermée (file du service worker) sont d'abord rattachées
+  // au compte qui s'en va, sinon le compte suivant sur ce navigateur les récupérait. Le
+  // propriétaire est lu tout de suite (avant tout await) : la fusion va bien à ce compte même
+  // s'il est remis à null juste après. Renvoie la promesse de cette fusion (0 sur le natif).
   const clearSession = useCallback(() => {
     localStorage.removeItem('base44_access_token');
     localStorage.removeItem('token');
     queryClientInstance.clear();
+    const swSync = syncServiceWorkerNotifications().catch(() => 0);
     setNotificationsOwner(null);
     setUser(null);
     setIsAuthenticated(false);
     setWelcomePending(false);
+    return swSync;
   }, []);
 
   // Le jeton vit 24 h et la session n'était vérifiée qu'au démarrage : passé ce délai, toutes
@@ -138,11 +144,15 @@ export const AuthProvider = ({ children }) => {
     const onUnauthorized = () => {
       if (loggingOutRef.current) return;
       if (!localStorage.getItem('base44_access_token') && !localStorage.getItem('token')) return;
-      clearSession();
-      if (window.location.pathname !== '/login') {
-        const back = window.location.pathname + window.location.search;
-        window.location.assign(`/login?redirect=${encodeURIComponent(back)}&expired=1`);
-      }
+      // On attend la fusion des notifications (2 s au plus) avant de rediriger : le
+      // déchargement de la page interromprait la transaction IndexedDB en cours
+      const done = clearSession();
+      Promise.race([done, new Promise((resolve) => setTimeout(resolve, 2000))]).then(() => {
+        if (window.location.pathname !== '/login') {
+          const back = window.location.pathname + window.location.search;
+          window.location.assign(`/login?redirect=${encodeURIComponent(back)}&expired=1`);
+        }
+      });
     };
     window.addEventListener('dhb:unauthorized', onUnauthorized);
     return () => window.removeEventListener('dhb:unauthorized', onUnauthorized);
@@ -211,6 +221,12 @@ export const AuthProvider = ({ children }) => {
     }
     localStorage.removeItem('base44_access_token');
     localStorage.removeItem('token');
+    // Web : notifications reçues app fermée rattachées au compte qui s'en va (propriétaire
+    // encore en place), sinon le compte suivant sur ce navigateur les voyait. 2 s au plus.
+    await Promise.race([
+      syncServiceWorkerNotifications().catch(() => 0),
+      new Promise((resolve) => setTimeout(resolve, LOGOUT_PUSH_TIMEOUT)),
+    ]);
     setNotificationsOwner(null);
     setUser(null);
     setIsAuthenticated(false);

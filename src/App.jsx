@@ -82,7 +82,9 @@ const LazyFallback = () => (
 // Page d'arrivée d'un barber : la première section à laquelle il a droit
 function barberHomePath(user) {
   const perms = user?.permissions || [];
-  const permToPath = { agenda: '/admin/agenda', dashboard: '/admin', services: '/admin/services', clients: '/admin/clients' };
+  // Pas de /admin/services : la page est réservée à l'admin (une ancienne permission
+  // « services » en base mène donc à l'entretien plutôt qu'à une page refusée)
+  const permToPath = { agenda: '/admin/agenda', dashboard: '/admin', clients: '/admin/clients' };
   return permToPath[perms[0]] || '/admin/my-cleaning';
 }
 

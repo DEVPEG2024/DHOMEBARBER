@@ -1,5 +1,5 @@
 /**
- * Carte cadeau dans le Wallet : Apple Wallet (iPhone, Safari macOS) et Google Wallet (Android).
+ * Carte cadeau dans le Wallet : Apple Wallet (iPhone, iPad, Mac) et Google Wallet (Android).
  *
  * Le serveur (Heroku, hors de ce dépôt) annonce ce qu'il sait faire dans ses paramètres publics
  * (`GET /api/apps/public/prod/public-settings/by-id/prod`), comme `features.orderCancel` :
@@ -45,7 +45,7 @@ export function useWalletFeatures() {
   return data ?? DEFAULT_WALLET_FEATURES;
 }
 
-/** Environnement de l'appareil : `ios`, `android`, `mac-safari` ou `desktop`. */
+/** Environnement de l'appareil : `ios`, `android`, `mac` ou `desktop`. */
 export function walletDevice() {
   if (isNative) return platform === 'ios' ? 'ios' : platform === 'android' ? 'android' : 'desktop';
   if (typeof navigator === 'undefined') return 'desktop';
@@ -53,26 +53,31 @@ export function walletDevice() {
   // iPadOS se présente comme un Mac : on le reconnaît à l'écran tactile
   if (/iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && (navigator.maxTouchPoints || 0) > 1)) return 'ios';
   if (/Android/i.test(ua)) return 'android';
-  // Safari macOS sait ajouter un pass (synchronisé ensuite sur l'iPhone) ; Chrome / Firefox / Edge sur Mac non
-  if (/Macintosh/i.test(ua) && /Safari\//.test(ua) && !/Chrome|Chromium|CriOS|Edg|Firefox|FxiOS|OPR/i.test(ua)) return 'mac-safari';
+  // macOS ouvre un .pkpass avec Pass Viewer, quel que soit le navigateur, puis le synchronise sur l'iPhone
+  if (/Macintosh/i.test(ua)) return 'mac';
   return 'desktop';
 }
 
 /**
  * Wallets à proposer sur cet appareil, parmi ceux que le serveur sait servir :
- * iPhone / iPad / Safari macOS → Apple ; Android → Google ; autre ordinateur → les deux.
+ * iPhone / iPad / Mac → Apple ; Android et autres ordinateurs → Google.
  */
 export function walletsForDevice(features, device = walletDevice()) {
   const apple = !!features?.appleWallet;
   const google = !!features?.googleWallet;
-  if (device === 'ios' || device === 'mac-safari') return apple ? ['apple'] : [];
+  if (device === 'ios' || device === 'mac') return apple ? ['apple'] : [];
   if (device === 'android') return google ? ['google'] : [];
-  return [apple && 'apple', google && 'google'].filter(Boolean);
+  return google ? ['google'] : []; // Windows / Linux : aucun système ne sait ouvrir un .pkpass
 }
 
-/** `POST /gift-cards/:id/wallet-links` → `{ apple_url, google_url }` (erreurs telles quelles). */
-export async function fetchWalletLinks(cardId) {
-  const data = await apiRequest('POST', apiUrl(`/gift-cards/${encodeURIComponent(cardId)}/wallet-links`), {});
+/**
+ * `POST /gift-cards/:id/wallet-links`, corps `{ wallet: 'apple' | 'google' }` → `{ apple_url, google_url }`
+ * (erreurs telles quelles). Seul le Wallet demandé est préparé : l'autre clé revient à `null`. Sans `kind`
+ * valable, le corps est vide et le serveur prépare les deux.
+ */
+export async function fetchWalletLinks(cardId, kind) {
+  const body = kind === 'apple' || kind === 'google' ? { wallet: kind } : {};
+  const data = await apiRequest('POST', apiUrl(`/gift-cards/${encodeURIComponent(cardId)}/wallet-links`), body);
   const safe = (u) => (typeof u === 'string' && /^https:\/\//i.test(u) ? u : null);
   return { apple_url: safe(data?.apple_url), google_url: safe(data?.google_url) };
 }

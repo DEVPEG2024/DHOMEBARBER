@@ -324,7 +324,7 @@ export const GANG_STAT_COLUMNS = [GANG_STAT_KEYS.slice(0, 3), GANG_STAT_KEYS.sli
 export const GANG_STAT_LABELS = {
   FID: { abbr: 'FID', name: 'Fidélité', description: 'Nombre de visites et ancienneté au salon.' },
   REG: { abbr: 'RÉG', name: 'Régularité', description: 'Revient-il à un rythme régulier ?' },
-  PON: { abbr: 'PON', name: 'Ponctualité', description: 'Ni absence ni annulation de dernière minute.' },
+  PON: { abbr: 'PON', name: 'Ponctualité', description: 'Ni absence ni annulation de ta part (un rendez-vous déplacé ne compte pas).' },
   STY: { abbr: 'STY', name: 'Style', description: 'Variété et prestations soignées : barbe, rasoir, serviette chaude.' },
   GNG: { abbr: 'GNG', name: 'Gang', description: 'Avis, publications dans le fil, événements du salon.' },
   FRA: { abbr: 'FRA', name: 'Fraîcheur', description: 'Baisse chaque jour depuis la dernière coupe, passe en rouge quand il est temps de revenir.' },

@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, apiRequest, apiUrl } from '@/api/apiClient';
 import { motion } from 'framer-motion';
@@ -13,6 +14,8 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import LoadError from '@/components/shared/LoadError';
+import { fetchLeaveConflicts, agendaErrorMessage } from '@/components/agenda/agendaUtils';
 
 const STATUS_CONFIG = {
   pending: { label: 'En attente', color: 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20', icon: Clock },
@@ -31,11 +34,16 @@ export default function AdminLeave() {
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState('all'); // all, pending, approved, declined
   const [leaveToDelete, setLeaveToDelete] = useState(null);
+  // Approbation d'un congé qui tombe sur des RDV clients : { leave, conflicts, failed } ; `checkingId` pendant la vérification
+  const [approval, setApproval] = useState(null);
+  const [checkingId, setCheckingId] = useState(null);
 
-  const { data: timeOffs = [], isLoading } = useQuery({
+  const timeOffsQuery = useQuery({
     queryKey: ['timeOffs'],
     queryFn: () => api.entities.TimeOff.list('-start_date', 200),
   });
+  const timeOffs = timeOffsQuery.data ?? [];
+  const isLoading = timeOffsQuery.isLoading;
 
   const filtered = useMemo(() => {
     if (filter === 'all') return timeOffs;
@@ -44,17 +52,34 @@ export default function AdminLeave() {
 
   const pendingCount = timeOffs.filter(t => t.status === 'pending').length;
 
-  const handleUpdateStatus = async (leave, newStatus) => {
+  const handleUpdateStatus = async (leave, newStatus, remaining = 0) => {
     try {
       await apiRequest('PATCH', apiUrl(`/leave/${leave.id}/status`), { status: newStatus });
       queryClient.invalidateQueries({ queryKey: ['timeOffs'] });
       toast.success(
         newStatus === 'approved'
-          ? `Congé de ${leave.employee_name} approuvé - notification envoyée`
-          : `Congé de ${leave.employee_name} refusé - notification envoyée`
+          ? `Congé de ${leave.employee_name} approuvé - notification envoyée${remaining > 0 ? ` · ${remaining} rendez-vous client${remaining > 1 ? 's' : ''} à déplacer ou annuler` : ''}`
+          : `Congé de ${leave.employee_name} refusé - notification envoyée`,
+        remaining > 0 ? { duration: 8000 } : undefined,
       );
     } catch (err) {
-      toast.error('Erreur lors de la mise à jour');
+      toast.error(agendaErrorMessage(err, 'Erreur lors de la mise à jour'));
+    }
+  };
+
+  // « Valider » : d'abord les RDV clients encore actifs sur ces jours. S'il y en a (ou si la
+  // vérification échoue : on ne conclut jamais qu'il n'y en a pas), la fenêtre les liste.
+  const handleApprove = async (leave) => {
+    if (checkingId) return;
+    setCheckingId(leave.id);
+    try {
+      const conflicts = await fetchLeaveConflicts(leave.employee_id, leave.start_date, leave.end_date);
+      if (conflicts.length === 0) await handleUpdateStatus(leave, 'approved');
+      else setApproval({ leave, conflicts, failed: false });
+    } catch {
+      setApproval({ leave, conflicts: [], failed: true });
+    } finally {
+      setCheckingId(null);
     }
   };
 
@@ -118,6 +143,8 @@ export default function AdminLeave() {
       {/* Leave requests list */}
       {isLoading ? (
         <div className="text-center py-16 text-muted-foreground text-sm">Chargement...</div>
+      ) : timeOffsQuery.isError && !timeOffsQuery.data ? (
+        <LoadError what="les demandes de congé" error={timeOffsQuery.error} onRetry={timeOffsQuery.refetch} retrying={timeOffsQuery.isFetching} />
       ) : filtered.length === 0 ? (
         <div className="text-center py-16 text-muted-foreground text-sm">
           Aucune demande de congé {filter !== 'all' ? 'dans cette catégorie' : ''}
@@ -163,8 +190,9 @@ export default function AdminLeave() {
                     {isPending && (
                       <>
                         <Button size="sm" className="gap-1 text-xs bg-green-600 hover:bg-green-700"
-                          onClick={() => handleUpdateStatus(leave, 'approved')}>
-                          <CheckCircle className="w-3 h-3" /> Valider
+                          disabled={!!checkingId}
+                          onClick={() => handleApprove(leave)}>
+                          <CheckCircle className="w-3 h-3" /> {checkingId === leave.id ? 'Vérification…' : 'Valider'}
                         </Button>
                         <Button size="sm" variant="outline" className="gap-1 text-xs text-red-500 border-red-500/30 hover:bg-red-500/10"
                           onClick={() => handleUpdateStatus(leave, 'declined')}>
@@ -185,6 +213,55 @@ export default function AdminLeave() {
           })}
         </div>
       )}
+
+      {/* Congé sur des RDV clients : à déplacer ou annuler depuis l'agenda (le client est alors prévenu) */}
+      <AlertDialog open={!!approval}>
+        <AlertDialogContent className="max-h-[85dvh] overflow-y-auto">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {approval?.failed
+                ? 'Impossible de vérifier les rendez-vous de ces jours'
+                : `${approval?.conflicts.length} rendez-vous client${approval?.conflicts.length > 1 ? 's' : ''} sur ce congé`}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {approval?.failed
+                ? `Des clients ont peut-être rendez-vous avec ${approval?.leave.employee_name || 'ce barber'} pendant ce congé : vérifiez l'agenda avant ou après l'approbation.`
+                : 'Déplacez-les ou annulez-les depuis l\'agenda pour que les clients soient prévenus ; sinon ils recevront leur rappel.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {approval && !approval.failed && (
+            <ul className="space-y-1.5">
+              {approval.conflicts.map((a) => (
+                <li key={a.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-lg bg-secondary/60 px-3 py-2 text-xs min-w-0">
+                  <span className="min-w-0 break-words">
+                    <strong>{a.client_name || 'Client'}</strong>
+                    {' · '}{format(new Date(`${String(a.date).slice(0, 10)}T12:00:00`), 'EEE d MMM', { locale: fr })} à {String(a.start_time || '').slice(0, 5)}
+                  </span>
+                  <Link
+                    to={`/admin/agenda?view=day&date=${String(a.date).slice(0, 10)}&barber=${approval.leave.employee_id}`}
+                    className="font-semibold text-primary underline underline-offset-2 whitespace-nowrap"
+                  >
+                    Ouvrir l'agenda
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setApproval(null)}>Annuler</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const { leave, conflicts } = approval;
+                setApproval(null);
+                handleUpdateStatus(leave, 'approved', conflicts.length);
+              }}
+              className="bg-green-600 hover:bg-green-700"
+            >
+              Approuver quand même
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Delete confirmation */}
       <AlertDialog open={!!leaveToDelete} onOpenChange={(open) => !open && setLeaveToDelete(null)}>

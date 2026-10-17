@@ -8,6 +8,7 @@ import { useFavorites } from '@/lib/favorites';
 import FavoriteButton from '@/components/shared/FavoriteButton';
 import { formatDuration, formatPrice } from '@/components/services/serviceUtils';
 import LoadError from '@/components/shared/LoadError';
+import { isShopProduct } from '@/components/shop/productUtils';
 
 /**
  * « Mes favoris » (/favorites) : les prestations et produits marqués d'un cœur. Une prestation
@@ -29,7 +30,8 @@ export default function Favorites() {
     queryFn: () => api.entities.Product.filter({ is_active: true }, 'name', 100),
   });
   const { data: services = [] } = servicesQuery;
-  const { data: products = [] } = productsQuery;
+  // Consommables du salon (onglet « Prestations » du stock) : jamais en vente, donc jamais en favori
+  const products = (productsQuery.data || []).filter(isShopProduct);
 
   const byService = new Map(services.map(s => [String(s.id), s]));
   const byProduct = new Map(products.map(p => [String(p.id), p]));

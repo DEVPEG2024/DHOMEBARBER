@@ -14,6 +14,15 @@ export const EASE = [0.16, 1, 0.3, 1];
 /** Phases pendant lesquelles on peut encore répondre. */
 export const ACTIVE_PHASES = ['upcoming', 'today'];
 
+/**
+ * L'événement a-t-il commencé ? Les réponses sont closes dès le début (règle du serveur,
+ * `POST /salon-events/:id/rsvp`). Instants réels des deux côtés : aucun calcul de fuseau.
+ */
+export function hasStarted(event, nowMs = Date.now()) {
+  const start = event?.starts_at ? new Date(event.starts_at).getTime() : NaN;
+  return Number.isFinite(start) && start <= nowMs;
+}
+
 /** Durée par défaut d'un événement sans `ends_at` (même valeur que `eventPhase`). */
 export const DEFAULT_DURATION_MS = 3 * 3600 * 1000;
 

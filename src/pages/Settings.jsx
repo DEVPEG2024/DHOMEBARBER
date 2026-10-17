@@ -10,6 +10,8 @@ import { Link } from 'react-router-dom';
 import { isNative, platform, openExternalUrl } from '@/lib/capacitor';
 import FeedbackSection from '@/components/feedback/FeedbackSection';
 import { hasObjectionableContent } from '@/lib/contentFilter';
+import LoadError from '@/components/shared/LoadError';
+import { parisDay } from '@/lib/slots';
 
 // Mêmes limites que l'inscription (routes/auth.js côté serveur)
 const NAME_MAX = 120;
@@ -124,11 +126,17 @@ export default function Settings() {
   const [unblocking, setUnblocking] = useState(null);
 
   // Utilisateurs bloqués depuis le fil
-  const { data: blocks = [] } = useQuery({
+  const {
+    data: blocksData, isError: blocksError, error: blocksErr, refetch: refetchBlocks,
+    isFetching: blocksFetching, isLoading: blocksLoading,
+  } = useQuery({
     queryKey: ['userBlocks'],
     queryFn: () => api.entities.UserBlock.list('-created_at', 200),
     enabled: !!user,
   });
+  // Seulement MES blocages (le serveur filtre déjà, admin compris) : jamais « Débloquer » pour autrui
+  const myEmail = String(user?.email || '').toLowerCase();
+  const blocks = (blocksData ?? []).filter(b => String(b.blocker_email || '').toLowerCase() === myEmail);
 
   // Un blocage porte sur la clé publique du membre : l'email n'est plus renvoyé aux clients.
   // On affiche donc le nom, et l'email seulement quand il est présent (staff, anciens blocages).
@@ -136,7 +144,7 @@ export default function Settings() {
   const blockedSubLabel = (b) => {
     if (b.blocked_email) return b.blocked_email;
     if (!b.created_at) return 'Membre bloqué';
-    return `Bloqué le ${new Date(b.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })}`;
+    return `Bloqué le ${new Date(b.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Europe/Paris' })}`;
   };
 
   const unblock = async (b) => {
@@ -302,7 +310,8 @@ export default function Settings() {
                   type="date"
                   value={birthDate}
                   onChange={e => setBirthDate(e.target.value)}
-                  max={new Date().toISOString().split('T')[0]}
+                  min="1900-01-01"
+                  max={parisDay()}
                   className="flex-1 bg-transparent text-sm font-semibold text-foreground focus:outline-none"
                 />
                 {birthDate !== userBirthDate && (
@@ -312,6 +321,11 @@ export default function Settings() {
                       setSavingBirth(true);
                       try {
                         const value = birthDate && birthDate.length === 10 ? birthDate : null;
+                        // L'attribut max n'empêche pas une saisie au clavier (an 0026, date future)
+                        if (value && (value < '1900-01-01' || value > parisDay())) {
+                          toast.error('Date de naissance invalide');
+                          return;
+                        }
                         await api.entities.User.update(user.id, { birth_date: value });
                         if (refreshUser) await refreshUser();
                         toast.success(value ? 'Date de naissance enregistrée' : 'Date de naissance supprimée');
@@ -393,7 +407,13 @@ export default function Settings() {
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }}
           className="rounded-2xl border border-white/8 bg-white/4 backdrop-blur-xl overflow-hidden mb-4">
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 pt-4 pb-2">Utilisateurs bloqués</p>
-          {blocks.length === 0 ? (
+          {blocksError && !blocksData ? (
+            <div className="px-4 pb-4">
+              <LoadError compact what="vos utilisateurs bloqués" error={blocksErr} onRetry={refetchBlocks} retrying={blocksFetching} />
+            </div>
+          ) : blocksLoading ? (
+            <p className="px-4 pb-4 text-[11px] text-muted-foreground">Chargement…</p>
+          ) : blocks.length === 0 ? (
             <p className="px-4 pb-4 text-[11px] text-muted-foreground">
               Aucun utilisateur bloqué. Vous pouvez bloquer un membre depuis le fil « Ca dit quoi le Gang ? » (menu ··· d'une publication).
             </p>
@@ -458,7 +478,7 @@ export default function Settings() {
             </button>
           ) : (
             <div className="px-4 py-4 space-y-3">
-              <p className="text-sm text-red-300">Êtes-vous sûr de vouloir supprimer votre compte ? Toutes vos données seront définitivement supprimées.</p>
+              <p className="text-sm text-red-300">Êtes-vous sûr de vouloir supprimer votre compte ? Vos rendez-vous à venir et vos commandes en cours seront annulés, et toutes vos données personnelles définitivement supprimées.</p>
               <div className="flex gap-2">
                 <button
                   onClick={() => setShowDeleteConfirm(false)}

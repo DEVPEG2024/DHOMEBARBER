@@ -12,6 +12,7 @@ import { isNative } from '@/lib/capacitor';
 import { formatPrice } from '@/components/services/serviceUtils';
 import LoadError, { isNetworkError } from '@/components/shared/LoadError';
 import WalletButtons from '@/components/giftcards/WalletButtons';
+import { useAndroidBack } from '@/lib/useAndroidBack';
 
 const LOGO_URL = '/logo.png';
 
@@ -114,7 +115,7 @@ function GiftCardVisual({ card, cardRef, compact = false }) {
       {/* Watermark for pending/expired cards */}
       {(status === 'pending' || status === 'expired') && (
         <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
-          <p className="text-5xl font-black text-red-500/30 -rotate-12 tracking-widest select-none">
+          <p className="whitespace-nowrap text-3xl sm:text-5xl font-black text-red-500/30 -rotate-12 tracking-widest select-none">
             {status === 'pending' ? 'EN ATTENTE' : 'EXPIRÉE'}
           </p>
         </div>
@@ -122,7 +123,7 @@ function GiftCardVisual({ card, cardRef, compact = false }) {
       {/* ÉPUISÉE watermark for used cards */}
       {status === 'used' && (
         <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
-          <p className="text-5xl font-black text-blue-500/25 -rotate-12 tracking-widest select-none">ÉPUISÉE</p>
+          <p className="whitespace-nowrap text-3xl sm:text-5xl font-black text-blue-500/25 -rotate-12 tracking-widest select-none">ÉPUISÉE</p>
         </div>
       )}
 
@@ -185,18 +186,25 @@ function GiftCardBack({ card, backRef }) {
     >
       <div className="absolute inset-0 bg-gradient-to-br from-[#111] to-[#0a0a0a]" />
       <div className="absolute inset-[1px] rounded-3xl border border-white/10" />
-      <div className="relative h-full flex flex-col items-center justify-center p-5">
-        <div className="bg-white rounded-2xl p-3 mb-3">
-          <QRCodeSVG value={qrUrl} size={120} level="M" includeMargin />
+      {/* QR à gauche, textes à droite : empilé, le contenu (≈ 230 px) débordait du ratio 1,6 sur un
+          téléphone (170 px de haut à 320 px) et le QR était coupé, y compris dans le PDF */}
+      <div className="relative h-full flex items-center gap-4 p-4">
+        <div className="bg-white rounded-xl p-1.5 shrink-0">
+          <QRCodeSVG value={qrUrl} size={112} level="M" includeMargin />
         </div>
-        <p className="text-[10px] text-white/40 uppercase tracking-[0.2em] mb-1">À présenter au salon</p>
-        <p className="text-xs text-white/60 font-mono">{card.code}</p>
-        {(status === 'validated' || status === 'used') && (
-          <p className={`text-sm font-bold mt-2 ${balance > 0 ? 'text-primary' : 'text-muted-foreground'}`}>Solde : {formatPrice(balance)}</p>
-        )}
-        {card.recipient_message && (
-          <p className="text-[10px] text-white/30 mt-2 text-center italic line-clamp-2 max-w-[200px]">"{card.recipient_message}"</p>
-        )}
+        <div className="min-w-0 flex-1 flex flex-col justify-center text-left">
+          <p className="text-[10px] leading-tight text-white/40 uppercase tracking-[0.15em]">À présenter au salon</p>
+          <p className="text-xs text-white/60 font-mono break-all mt-1">{card.code}</p>
+          {(status === 'validated' || status === 'used') && (
+            <div className="mt-2">
+              <p className="text-[10px] uppercase text-white/40">Solde</p>
+              <p className={`text-sm font-bold ${balance > 0 ? 'text-primary' : 'text-muted-foreground'}`}>{formatPrice(balance)}</p>
+            </div>
+          )}
+          {card.recipient_message && (
+            <p className="text-[10px] leading-tight text-white/30 mt-2 italic line-clamp-2 break-words">"{card.recipient_message}"</p>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -585,6 +593,9 @@ export default function GiftCards() {
   // Id de la carte ouverte, résolue dans la liste à chaque rendu : la fiche suit les mises à jour
   // (carte validée par le salon pendant qu'elle est ouverte)
   const [selectedId, setSelectedId] = useState(null);
+  // Bouton retour Android : ferme la fenêtre ouverte (achat ou carte) comme sa croix, sans quitter la page
+  useAndroidBack(showCreate, () => setShowCreate(false));
+  useAndroidBack(!!selectedId, () => setSelectedId(null));
 
   const cardsQuery = useQuery({
     queryKey: ['giftCards', user?.email],

@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import { formatPrice } from '@/components/shop/productUtils';
+import LoadError from '@/components/shared/LoadError';
 import {
   CANCEL_REASON_MAX,
   ORDER_STATUSES,
@@ -159,10 +160,11 @@ export default function AdminOrders() {
   const queryClient = useQueryClient();
   const features = useCancelFeatures();
 
-  const { data: orders = [] } = useQuery({
+  const ordersQuery = useQuery({
     queryKey: ['adminOrders'],
     queryFn: () => api.entities.Order.list('-created_date', 200),
   });
+  const orders = ordersQuery.data ?? [];
 
   const updateMutation = useMutation({
     mutationFn: ({ id, data }) => api.entities.Order.update(id, data),
@@ -402,7 +404,13 @@ export default function AdminOrders() {
         })}
       </div>
 
-      {filtered.length === 0 && (
+      {ordersQuery.isError && !ordersQuery.data ? (
+        <LoadError what="les commandes" error={ordersQuery.error} onRetry={ordersQuery.refetch} retrying={ordersQuery.isFetching} />
+      ) : ordersQuery.isPending ? (
+        <div className="space-y-2" aria-busy="true">
+          {[0, 1, 2].map(i => <div key={i} className="h-24 rounded-xl bg-card border border-border animate-pulse" />)}
+        </div>
+      ) : filtered.length === 0 && (
         <div className="text-center py-16">
           <ShoppingBag className="w-12 h-12 text-muted-foreground/20 mx-auto mb-3" />
           <p className="text-sm text-muted-foreground">Aucune commande {filter !== 'all' ? 'dans cette catégorie' : ''}</p>

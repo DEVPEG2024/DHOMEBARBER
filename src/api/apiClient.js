@@ -39,7 +39,11 @@ function removeToken() {
 }
 
 // ── HTTP helpers ─────────────────────────────────────────────────────
-async function request(method, url, body) {
+// `timeoutMs` (facultatif) : abandon de la requête passé ce délai, avec une erreur sans `status`
+// (`err.timeout = true`), traitée comme une panne réseau. Réservé aux lectures dont l'attente
+// bloque l'écran (/me au lancement) : jamais sur une écriture, que le serveur pourrait terminer
+// après l'abandon (doublon au nouvel essai). Sans `timeoutMs`, rien ne change.
+async function request(method, url, body, { timeoutMs } = {}) {
   const headers = { Accept: 'application/json' };
   const token = getToken();
   if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -56,8 +60,34 @@ async function request(method, url, body) {
     }
   }
 
-  const res = await fetch(url, opts);
-  const data = await res.json().catch(() => null);
+  let timer = null;
+  if (timeoutMs) {
+    const ctrl = new AbortController();
+    timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    opts.signal = ctrl.signal;
+  }
+
+  let res;
+  let data;
+  try {
+    res = await fetch(url, opts);
+    data = await res.json().catch((err) => {
+      // Corps interrompu par le minuteur : c'est un délai dépassé, pas une réponse vide
+      if (err?.name === 'AbortError') throw err;
+      return null;
+    });
+  } catch (err) {
+    // Réseau présent mais inutilisable (métro, sous-sol) : sans délai, WKWebView attend
+    // jusqu'à 60 s et Chrome Android davantage, l'écran de chargement restait bloqué
+    if (err?.name === 'AbortError') {
+      const e = new Error('Délai dépassé');
+      e.timeout = true;
+      throw e;
+    }
+    throw err;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 
   if (!res.ok) {
     const err = new Error(data?.error || data?.message || `HTTP ${res.status}`);
@@ -169,7 +199,8 @@ const auth = {
     };
     let data;
     try {
-      data = await request('GET', `${API_BASE}/entities/User/me`);
+      // 15 s au plus : au-delà, l'écran « Pas de connexion internet » propose de réessayer
+      data = await request('GET', `${API_BASE}/entities/User/me`, undefined, { timeoutMs: 15000 });
     } catch (err) {
       // Un 401 de l'ancien jeton ne dit rien de la nouvelle session
       if (getToken() !== sentToken) throw staleError();

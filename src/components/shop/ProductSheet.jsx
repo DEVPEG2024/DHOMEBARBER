@@ -4,7 +4,7 @@ import { useFavorites } from '@/lib/favorites';
 import { AnimatePresence, motion } from 'framer-motion';
 import { X, ChevronLeft, ChevronRight, ShoppingBag, ShoppingCart, Minus, Plus, Store, PackageX, AlertTriangle } from 'lucide-react';
 import { hapticFeedback } from '@/lib/capacitor';
-import { MAX_QUANTITY, formatPrice, productCategoryLabel, productImages, stockInfo } from './productUtils';
+import { MAX_QUANTITY, MAX_PER_PRODUCT, formatPrice, productCategoryLabel, productImages, stockInfo } from './productUtils';
 
 const SWIPE_OFFSET = 50;
 const SWIPE_VELOCITY = 400;
@@ -108,10 +108,13 @@ export default function ProductSheet({ product, cartQty = 0, onClose, onAdd, red
   const buttonRef = useRef(null);
 
   // Quantité ajoutable : plafond de la fiche, moins ce qui est déjà dans le panier si le stock est suivi
-  const maxQty = stock.tracked ? Math.max(0, Math.min(MAX_QUANTITY, stock.stock - cartQty)) : MAX_QUANTITY;
+  // Plafond : le stock suivi, et jamais plus de MAX_PER_PRODUCT d'un même produit par commande
+  const cap = Math.min(MAX_PER_PRODUCT, stock.tracked ? stock.stock : Infinity);
+  const capByLimit = cap === MAX_PER_PRODUCT && (!stock.tracked || stock.stock > MAX_PER_PRODUCT);
+  const maxQty = Math.max(0, Math.min(MAX_QUANTITY, cap - cartQty));
   useEffect(() => { setQuantity(q => Math.min(Math.max(1, q), Math.max(1, maxQty))); }, [maxQty]);
 
-  const stockExhausted = stock.tracked && !stock.soldOut && maxQty === 0;
+  const stockExhausted = !stock.soldOut && maxQty === 0;
   const canAdd = !stock.soldOut && !stockExhausted && maxQty >= 1;
   const price = Number(product?.price) || 0;
   const total = price * quantity;
@@ -250,7 +253,7 @@ export default function ProductSheet({ product, cartQty = 0, onClose, onAdd, red
             {stock.soldOut
               ? 'Rupture de stock'
               : stockExhausted
-                ? 'Tout le stock est dans ton panier'
+                ? (capByLimit ? `${MAX_PER_PRODUCT} maximum par produit` : 'Tout le stock est dans ton panier')
                 : <><ShoppingCart className="w-4 h-4" /> Ajouter au panier · <span className="font-fut text-lg">{formatPrice(total)}</span></>}
           </motion.button>
         </div>

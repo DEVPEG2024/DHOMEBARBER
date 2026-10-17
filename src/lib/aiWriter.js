@@ -18,13 +18,23 @@ export const AI_REWRITES = [
 
 let availablePromise = null;
 
-/** L'assistant est-il activé sur le serveur ? (mémorisé pour la session) */
+/**
+ * L'assistant est-il activé sur le serveur ? Seule une réponse du serveur est mémorisée pour
+ * la session (un `false` sans clé Anthropic compris) : hors connexion ou en erreur HTTP, la
+ * promesse est oubliée et la prochaine vérification (retour du réseau) interroge de nouveau.
+ */
 export function aiWriterAvailable() {
   if (!availablePromise) {
     availablePromise = fetch(`${API_SERVER_URL}/api/apps/public/prod/public-settings/by-id/${resolvedAppId}`)
-      .then((r) => (r.ok ? r.json() : null))
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
       .then((data) => !!data?.features?.aiWriter)
-      .catch(() => false);
+      .catch(() => {
+        availablePromise = null;
+        return false;
+      });
   }
   return availablePromise;
 }

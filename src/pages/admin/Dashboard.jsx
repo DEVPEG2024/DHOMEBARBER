@@ -22,20 +22,8 @@ import LoadError from '@/components/shared/LoadError';
 // Plafond de `fetchAppointmentsForDates` : au-delà, les chiffres de la période seraient incomplets
 const APPOINTMENTS_LIMIT = 2000;
 
-/**
- * CA d'un rendez-vous encaissé, **hors pourboire** : prestations + produit vendu. `grand_total`
- * contient le pourboire, il ne sert plus que de repli (ancienne ligne sans `total_price`).
- */
-function revenueOf(a) {
-  const product = Number(a.product_price) || 0;
-  const services = Number(a.total_price) || 0;
-  if (services > 0) return services + product;
-  const grand = Number(a.grand_total) || 0;
-  return grand > 0 ? Math.max(0, Math.round((grand - (Number(a.tip) || 0)) * 100) / 100) : product;
-}
-
-/** Somme en euros arrondie au centime (12.9 + 0.1 ne s'affiche pas « 13.000000000000002 € »). */
-const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+// CA d'un RDV (hors pourboire), part payée par carte cadeau, arrondi : partagés avec Statistiques
+import { revenueOf, round2, giftPartOf } from '@/lib/revenue';
 
 const PAYMENT_LABELS = { cb: 'CB', especes: 'Espèces', carte_cadeau: 'Carte cadeau' };
 
@@ -171,7 +159,7 @@ export default function AdminDashboard() {
   const todayUnpaid = unpaidToday.reduce((sum, a) => sum + (a.total_price || 0), 0);
 
   // Tips & products today
-  const todayTips = paidToday.reduce((sum, a) => sum + (a.tip || 0), 0);
+  const todayTips = round2(paidToday.reduce((sum, a) => sum + (a.tip || 0), 0));
   const todayProducts = paidToday.reduce((sum, a) => sum + (a.product_price || 0), 0);
 
   // YESTERDAY (for trend)
@@ -183,8 +171,8 @@ export default function AdminDashboard() {
   const thisMonth = realAppts.filter(a => a.date?.startsWith(monthPrefix));
   const monthPaid = thisMonth.filter(isPaid);
   const monthRevenue = round2(monthPaid.reduce((sum, a) => sum + getTotal(a), 0));
-  const monthTips = monthPaid.reduce((sum, a) => sum + (a.tip || 0), 0);
-  const monthProducts = monthPaid.reduce((sum, a) => sum + (a.product_price || 0), 0);
+  const monthTips = round2(monthPaid.reduce((sum, a) => sum + (a.tip || 0), 0));
+  const monthProducts = round2(monthPaid.reduce((sum, a) => sum + (a.product_price || 0), 0));
   // À encaisser (tableau de bord) = deux parts affichées séparément puis additionnées :
   //  - RDV du mois **terminés** (heure de fin passée, heure de Paris) et pas encore clôturés
   //    (« Valider la prestation »), même règle que la pastille € de l'agenda (`needsClosing`) ;
@@ -196,24 +184,29 @@ export default function AdminDashboard() {
   const noShowsMonth = thisMonth.filter(a => a.status === 'no_show').length;
   const cancelledMonth = thisMonth.filter(a => a.status === 'cancelled').length;
 
-  // Prestations CB vs Espèces vs Carte cadeau (sans pourboire)
-  const getPayTotal = revenueOf;
-  const todayCB = paidToday.filter(a => a.payment_method === 'cb').reduce((s, a) => s + getPayTotal(a), 0);
-  const todayCash = paidToday.filter(a => a.payment_method === 'especes').reduce((s, a) => s + getPayTotal(a), 0);
-  const todayGift = round2(paidToday.filter(a => a.payment_method === 'carte_cadeau').reduce((s, a) => s + getPayTotal(a), 0));
-  const todayNoMethod = paidToday.filter(a => !a.payment_method).reduce((s, a) => s + getPayTotal(a), 0);
+  // Prestations CB vs Espèces vs Carte cadeau (sans pourboire). La part payée par carte cadeau
+  // (débit au comptoir, même partiel) n'est jamais comptée en CB / espèces : seul le reste l'est.
+  // Un RDV « Carte cadeau » dont la carte n'a couvert qu'une partie : le reste en « non renseigné ».
+  const outsideGift = (a) => revenueOf(a) - giftPartOf(a);
+  const sumBy = (list, method) => round2(list
+    .filter(a => (method === null ? (!a.payment_method || a.payment_method === 'carte_cadeau') : a.payment_method === method))
+    .reduce((s, a) => s + outsideGift(a), 0));
+  const todayCB = sumBy(paidToday, 'cb');
+  const todayCash = sumBy(paidToday, 'especes');
+  const todayGift = round2(paidToday.reduce((s, a) => s + giftPartOf(a), 0));
+  const todayNoMethod = sumBy(paidToday, null);
 
   // Month CB vs Espèces vs Carte cadeau (sans pourboire)
-  const monthCB = monthPaid.filter(a => a.payment_method === 'cb').reduce((s, a) => s + getPayTotal(a), 0);
-  const monthCash = monthPaid.filter(a => a.payment_method === 'especes').reduce((s, a) => s + getPayTotal(a), 0);
-  const monthGift = round2(monthPaid.filter(a => a.payment_method === 'carte_cadeau').reduce((s, a) => s + getPayTotal(a), 0));
-  const monthNoMethod = monthPaid.filter(a => !a.payment_method).reduce((s, a) => s + getPayTotal(a), 0);
+  const monthCB = sumBy(monthPaid, 'cb');
+  const monthCash = sumBy(monthPaid, 'especes');
+  const monthGift = round2(monthPaid.reduce((s, a) => s + giftPartOf(a), 0));
+  const monthNoMethod = sumBy(monthPaid, null);
 
   // Pourboires CB vs Espèces
-  const todayTipsCB = paidToday.filter(a => a.tip_method === 'cb').reduce((s, a) => s + (a.tip || 0), 0);
-  const todayTipsCash = paidToday.filter(a => a.tip_method === 'especes').reduce((s, a) => s + (a.tip || 0), 0);
-  const monthTipsCB = monthPaid.filter(a => a.tip_method === 'cb').reduce((s, a) => s + (a.tip || 0), 0);
-  const monthTipsCash = monthPaid.filter(a => a.tip_method === 'especes').reduce((s, a) => s + (a.tip || 0), 0);
+  const todayTipsCB = round2(paidToday.filter(a => a.tip_method === 'cb').reduce((s, a) => s + (a.tip || 0), 0));
+  const todayTipsCash = round2(paidToday.filter(a => a.tip_method === 'especes').reduce((s, a) => s + (a.tip || 0), 0));
+  const monthTipsCB = round2(monthPaid.filter(a => a.tip_method === 'cb').reduce((s, a) => s + (a.tip || 0), 0));
+  const monthTipsCash = round2(monthPaid.filter(a => a.tip_method === 'especes').reduce((s, a) => s + (a.tip || 0), 0));
 
   // Average ticket
   const avgTicketToday = paidToday.length > 0 ? Math.round(todayRevenue / paidToday.length) : 0;
@@ -242,17 +235,18 @@ export default function AdminDashboard() {
       const d = subDays(new Date(), i);
       const dateStr = format(d, 'yyyy-MM-dd');
       const dayPaid = realAppts.filter(a => a.date === dateStr && isPaid(a));
-      const dayCB = dayPaid.filter(a => a.payment_method === 'cb').reduce((sum, a) => sum + getTotal(a), 0);
-      const dayCash = dayPaid.filter(a => a.payment_method === 'especes').reduce((sum, a) => sum + getTotal(a), 0);
-      const dayGift = dayPaid.filter(a => a.payment_method === 'carte_cadeau').reduce((sum, a) => sum + getTotal(a), 0);
-      const dayOther = dayPaid.filter(a => !a.payment_method).reduce((sum, a) => sum + getTotal(a), 0);
+      const outside = (a) => getTotal(a) - giftPartOf(a);
+      const dayCB = round2(dayPaid.filter(a => a.payment_method === 'cb').reduce((sum, a) => sum + outside(a), 0));
+      const dayCash = round2(dayPaid.filter(a => a.payment_method === 'especes').reduce((sum, a) => sum + outside(a), 0));
+      const dayGift = round2(dayPaid.reduce((sum, a) => sum + giftPartOf(a), 0));
+      const dayOther = round2(dayPaid.filter(a => !a.payment_method || a.payment_method === 'carte_cadeau').reduce((sum, a) => sum + outside(a), 0));
       data.push({
         day: format(d, 'EEE', { locale: fr }),
         cb: dayCB,
         especes: dayCash,
         carte_cadeau: dayGift,
         autre: dayOther,
-        revenue: dayCB + dayCash + dayGift + dayOther,
+        revenue: round2(dayCB + dayCash + dayGift + dayOther),
         count: dayPaid.length,
       });
     }
@@ -480,17 +474,18 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* Prestations à clôturer (confirmés non payés + completed sans méthode) */}
+      {/* Prestations à clôturer (confirmés terminés non payés + completed sans méthode) : seulement
+          une fois l'heure de fin passée (même règle que la pastille € de l'agenda), sans clignoter */}
       {(() => {
         const toClose = todayAppts.filter(a =>
-          (a.status === 'confirmed' && !isPaid(a)) ||
+          (a.status === 'confirmed' && !isPaid(a) && needsClosing(a)) ||
           (a.status === 'completed' && !a.payment_method)
         );
         if (toClose.length === 0) return null;
         const totalToClose = toClose.reduce((s, a) => s + (a.total_price || 0), 0);
         return (
           <div onClick={() => navigate('/admin/agenda')}
-            className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl px-4 py-3 mb-4 flex items-center gap-3 cursor-pointer hover:bg-yellow-500/15 active:scale-[0.99] transition-all animate-pulse">
+            className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl px-4 py-3 mb-4 flex items-center gap-3 cursor-pointer hover:bg-yellow-500/15 active:scale-[0.99] transition-all">
             <AlertTriangle className="w-4 h-4 text-yellow-400 shrink-0" />
             <p className="text-xs text-yellow-300">
               <strong>{toClose.length} prestation{toClose.length > 1 ? 's' : ''}</strong> à clôturer ({totalToClose}€) — appuyez pour ouvrir l'agenda

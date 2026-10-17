@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '@/api/apiClient';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
@@ -13,8 +13,9 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
 import {
-  toDateStr, parseDateParam, datesBetween, fetchAppointmentsForDates, isOnLeave,
+  toDateStr, parseDateParam, datesBetween, fetchAppointmentsForDates, isOnLeave, fetchLeaveConflicts, agendaErrorMessage,
 } from '@/components/agenda/agendaUtils';
+import LoadError from '@/components/shared/LoadError';
 
 const DAY_NAMES_FR = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
 const EMPTY_TIME_OFF = { employee_id: '', start_date: '', end_date: '', reason: '', type: 'vacation' };
@@ -62,14 +63,16 @@ export default function SmartAgenda() {
     queryFn: () => api.entities.Employee.filter({ is_active: true }),
   });
 
-  const { data: timeOffs = [] } = useQuery({
+  const timeOffsQuery = useQuery({
     queryKey: ['timeOffs'],
     queryFn: () => api.entities.TimeOff.list('-start_date', 200),
   });
+  const timeOffs = timeOffsQuery.data ?? [];
   const approvedTimeOffs = useMemo(() => timeOffs.filter((t) => t.status === 'approved' || !t.status), [timeOffs]);
 
   const saveTimeOff = useMutation({
-    mutationFn: ({ id, ...data }) => {
+    // `_orig` / `status` ne sont que des repères de la fenêtre : jamais envoyés
+    mutationFn: ({ id, _orig, status, ...data }) => {
       const emp = employees.find((e) => String(e.id) === String(data.employee_id));
       const payload = { ...data, employee_name: emp?.name };
       return id
@@ -81,7 +84,7 @@ export default function SmartAgenda() {
       setTimeOffDialog(null);
       toast.success(vars.id ? 'Congé modifié' : 'Congé enregistré');
     },
-    onError: (e) => toast.error(e?.message || 'Erreur lors de l\'enregistrement'),
+    onError: (e) => toast.error(agendaErrorMessage(e, 'Erreur lors de l\'enregistrement')),
   });
 
   const deleteTimeOff = useMutation({
@@ -90,7 +93,7 @@ export default function SmartAgenda() {
       queryClient.invalidateQueries({ queryKey: ['timeOffs'] });
       toast.success('Congé supprimé');
     },
-    onError: (e) => toast.error(e?.message || 'Erreur lors de la suppression'),
+    onError: (e) => toast.error(agendaErrorMessage(e, 'Erreur lors de la suppression')),
   });
 
   const weekStats = useMemo(() => weekDates.map((dayStr, i) => {
@@ -197,8 +200,40 @@ export default function SmartAgenda() {
       end_date: String(t.end_date || '').slice(0, 10),
       reason: t.reason || '',
       type: t.type || 'vacation',
+      status: t.status || 'approved',
+      _orig: { employee_id: String(t.employee_id || ''), start_date: String(t.start_date || '').slice(0, 10), end_date: String(t.end_date || '').slice(0, 10) },
     }
     : { ...EMPTY_TIME_OFF });
+
+  // RDV clients encore actifs sur le congé saisi : { conflicts, failed } (null = pas encore vérifié)
+  const [leaveCheck, setLeaveCheck] = useState(null);
+  const [checkingLeave, setCheckingLeave] = useState(false);
+  useEffect(() => { setLeaveCheck(null); }, [timeOffDialog?.employee_id, timeOffDialog?.start_date, timeOffDialog?.end_date, !!timeOffDialog]);
+
+  // Enregistrer : un congé créé (directement approuvé), ou un congé approuvé dont le barber ou les
+  // dates changent, est d'abord confronté aux RDV clients de ces jours. S'il y en a (ou si la
+  // vérification échoue), la liste s'affiche dans la fenêtre avec « Enregistrer quand même ».
+  const handleSaveTimeOff = async () => {
+    const f = timeOffDialog;
+    if (!f || saveTimeOff.isPending || checkingLeave) return;
+    const o = f._orig;
+    const needsCheck = !f.id || (f.status === 'approved' && o
+      && (o.employee_id !== f.employee_id || o.start_date !== f.start_date || o.end_date !== f.end_date));
+    if (!needsCheck || leaveCheck) {
+      saveTimeOff.mutate(f);
+      return;
+    }
+    setCheckingLeave(true);
+    try {
+      const conflicts = await fetchLeaveConflicts(f.employee_id, f.start_date, f.end_date);
+      if (conflicts.length === 0) saveTimeOff.mutate(f);
+      else setLeaveCheck({ conflicts, failed: false });
+    } catch {
+      setLeaveCheck({ conflicts: [], failed: true });
+    } finally {
+      setCheckingLeave(false);
+    }
+  };
 
   const openPicker = () => {
     const input = pickerRef.current;
@@ -358,7 +393,9 @@ export default function SmartAgenda() {
         <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
           <Coffee className="w-4 h-4 text-primary" /> Congés à venir
         </h2>
-        {upcomingTimeOffs.length === 0 ? (
+        {timeOffsQuery.isError && !timeOffsQuery.data ? (
+          <LoadError compact what="les congés" error={timeOffsQuery.error} onRetry={timeOffsQuery.refetch} retrying={timeOffsQuery.isFetching} />
+        ) : upcomingTimeOffs.length === 0 ? (
           <p className="text-xs text-muted-foreground">Aucun congé planifié</p>
         ) : (
           <div className="space-y-2">
@@ -439,10 +476,36 @@ export default function SmartAgenda() {
                 <Input value={form.reason} onChange={(e) => setTimeOffDialog({ ...form, reason: e.target.value })}
                   placeholder="Congés d'été..." className="bg-secondary border-border mt-1" />
               </div>
+              {leaveCheck && (
+                <div role="status" className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 space-y-2 text-xs min-w-0">
+                  <p className="font-semibold text-amber-300">
+                    {leaveCheck.failed
+                      ? 'Impossible de vérifier les rendez-vous de ces jours'
+                      : `${leaveCheck.conflicts.length} rendez-vous client${leaveCheck.conflicts.length > 1 ? 's' : ''} sur ce congé`}
+                  </p>
+                  {!leaveCheck.failed && (
+                    <ul className="space-y-1">
+                      {leaveCheck.conflicts.map((a) => (
+                        <li key={a.id} className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 min-w-0">
+                          <span className="min-w-0 break-words">
+                            <strong>{a.client_name || 'Client'}</strong> · {format(parseISO(String(a.date).slice(0, 10)), 'EEE d MMM', { locale: fr })} à {String(a.start_time || '').slice(0, 5)}
+                          </span>
+                          <Link to={agendaLink(String(a.date).slice(0, 10), form.employee_id)} className="font-semibold text-primary underline underline-offset-2 whitespace-nowrap">
+                            Agenda
+                          </Link>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <p className="text-muted-foreground">
+                    Déplacez-les ou annulez-les depuis l'agenda pour que les clients soient prévenus ; sinon ils recevront leur rappel.
+                  </p>
+                </div>
+              )}
               <Button className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
-                disabled={formInvalid || saveTimeOff.isPending}
-                onClick={() => saveTimeOff.mutate(form)}>
-                {saveTimeOff.isPending ? 'Enregistrement…' : 'Enregistrer'}
+                disabled={formInvalid || saveTimeOff.isPending || checkingLeave}
+                onClick={handleSaveTimeOff}>
+                {saveTimeOff.isPending ? 'Enregistrement…' : checkingLeave ? 'Vérification…' : leaveCheck ? 'Enregistrer quand même' : 'Enregistrer'}
               </Button>
             </div>
           )}

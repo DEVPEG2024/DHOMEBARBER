@@ -3,6 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Coffee, Trash2, Repeat, Calendar, Clock, Check } from 'lucide-react';
 import { format, addDays, startOfWeek, addWeeks } from 'date-fns';
 import { fr } from 'date-fns/locale';
+import { workingWindow } from '@/components/agenda/agendaUtils';
 
 const DAYS_OF_WEEK = [
   { key: 1, label: 'Lun' },
@@ -77,11 +78,18 @@ export default function BreakModal({ breakItem, employees, onClose, onDelete, on
       }
     }
 
+    // Tous les jours / jours choisis : pas de pause un jour de repos du barber (horaires connus
+    // seulement ; des horaires inconnus gardent la date). Chaque semaine : même jour que l'original.
+    const emp = employees?.find(e => String(e.id) === String(breakItem.employee_id));
+    const kept = recurrenceMode === 'weekly' ? dates : dates.filter(d => workingWindow(emp, d) !== null);
+
+    // Toujours les horaires enregistrés de la pause (des horaires modifiés mais pas enregistrés
+    // sont refusés plus bas : la pause d'origine les aurait gardés anciens)
     await onApplyRecurrence({
-      start_time: timesValid ? startTime : breakItem.start_time,
-      end_time: timesValid ? endTime : breakItem.end_time,
+      start_time: String(breakItem.start_time).slice(0, 5),
+      end_time: String(breakItem.end_time).slice(0, 5),
       employee_id: breakItem.employee_id,
-      dates,
+      dates: kept,
     });
 
     setApplying(false);
@@ -232,14 +240,19 @@ export default function BreakModal({ breakItem, employees, onClose, onDelete, on
           </button>
 
           {recurrenceMode !== 'none' && (
-            <button
-              onClick={handleApply}
-              disabled={applying || (recurrenceMode === 'custom' && selectedDays.length === 0)}
-              className="flex items-center gap-1.5 px-4 py-2 text-xs rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-all disabled:opacity-50"
-            >
-              <Repeat className="w-3.5 h-3.5" />
-              {applying ? 'Application...' : 'Appliquer la récurrence'}
-            </button>
+            <div className="flex flex-col items-end gap-1">
+              <button
+                onClick={handleApply}
+                disabled={applying || timesChanged || (recurrenceMode === 'custom' && selectedDays.length === 0)}
+                className="flex items-center gap-1.5 px-4 py-2 text-xs rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-all disabled:opacity-50"
+              >
+                <Repeat className="w-3.5 h-3.5" />
+                {applying ? 'Application...' : 'Appliquer la récurrence'}
+              </button>
+              {timesChanged && (
+                <p className="text-[11px] text-amber-400 text-right">Enregistrez d'abord les nouveaux horaires</p>
+              )}
+            </div>
           )}
         </DialogFooter>
       </DialogContent>

@@ -120,6 +120,12 @@ export default function NotificationPrompt() {
   };
 
   const canOpenSettings = isNative && platform === 'ios';
+  // Marche à suivre selon la plateforme : le chemin « Applications → D’Home Barber » n'existe
+  // que pour l'app native (Android ici, iOS a le bouton) ; l'app web installée se règle dans le
+  // navigateur ou, sur iPhone, dans Réglages → Notifications
+  const deniedHelp = isNative
+    ? ' Pour les réactiver : Paramètres du téléphone → Applications → D’Home Barber → Notifications.'
+    : ' Pour les réactiver : autorise les notifications pour dhomebarber.fr dans les réglages du navigateur (icône à gauche de l’adresse), ou sur iPhone : Réglages → Notifications → D’Home Barber.';
 
   return (
     <AnimatePresence>
@@ -204,7 +210,7 @@ export default function NotificationPrompt() {
                   Tu ne recevras ni le rappel de ton rendez-vous ni les créneaux last minute.
                   {canOpenSettings
                     ? ' Tu peux les réactiver en un geste dans les réglages.'
-                    : ' Pour les réactiver : Paramètres du téléphone → Applications → D’Home Barber → Notifications.'}
+                    : deniedHelp}
                 </p>
                 {canOpenSettings && (
                   <motion.button

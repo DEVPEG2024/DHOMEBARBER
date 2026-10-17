@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { api } from '@/api/apiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Pencil, Trash2, Package, Upload, X, Percent, ArrowLeft, ArrowRight, Images } from 'lucide-react';
@@ -11,6 +11,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
+import LoadError, { isNetworkError } from '@/components/shared/LoadError';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 const categoryLabels = {
   hair_care: 'Cheveux', beard_care: 'Barbe', styling: 'Coiffant',
@@ -19,6 +24,14 @@ const categoryLabels = {
 
 /** Galerie : la première photo est la couverture (`image_url`), la liste complète part dans `images`. */
 const MAX_IMAGES = 8;
+
+/** Hausse maximale de « Modifier tous les prix » (garde-fou contre une faute de frappe). */
+const MAX_INCREASE_PERCENT = 1000;
+
+/** Message d'erreur lisible (jamais « Load failed » ni « HTTP 400 »). */
+const errorText = (err, fallback) => (isNetworkError(err)
+  ? 'Pas de connexion internet : réessayez.'
+  : (err?.data?.error || (err?.message && !/^HTTP \d+$/.test(err.message) ? err.message : '') || fallback));
 
 /** Couverture + galerie en une seule liste dédoublonnée (compat : anciens produits sans `images`). */
 function mergeImages(coverUrl, images) {
@@ -39,58 +52,121 @@ export default function AdminProducts() {
   const [showPriceDialog, setShowPriceDialog] = useState(false);
   const [pricePercent, setPricePercent] = useState('');
   const [priceDirection, setPriceDirection] = useState('increase');
+  // Suppression confirmée dans une fenêtre (la corbeille est collée au crayon)
+  const [productToDelete, setProductToDelete] = useState(null);
+  const [deactivating, setDeactivating] = useState(false);
+  // « Modifier tous les prix » : prix cibles figés une fois pour toutes (clé sens|pourcentage) ;
+  // un produit mis à jour sort du plan, un nouvel essai ne refait que les restants
+  const pricePlanRef = useRef(null);
   const queryClient = useQueryClient();
 
-  const { data: products = [] } = useQuery({
+  const productsQuery = useQuery({
     queryKey: ['products', 'all'], // liste complète (inactifs inclus) : clé distincte de la boutique
     queryFn: () => api.entities.Product.list('name', 200),
+    // Le stock affiché à l'ouverture doit être le plus frais possible
+    refetchOnMount: 'always',
   });
+  const products = productsQuery.data ?? [];
+  const productsFailed = productsQuery.isError && !productsQuery.data;
 
   const saveMutation = useMutation({
     mutationFn: (data) => {
       // La première photo de la galerie devient la couverture ; la liste complète part dans `images`
       const images = mergeImages(null, data.images);
-      const payload = { ...data, image_url: images[0] || '', images };
-      if (payload.id) {
-        const { id, ...rest } = payload;
-        return api.entities.Product.update(id, rest);
+      if (data.id) {
+        // Seuls les champs du formulaire : renvoyer toute la ligne lue à l'ouverture réécrivait le
+        // stock d'alors (ventes faites entre-temps annulées). Le stock ne part que s'il a été touché.
+        const update = {
+          name: data.name,
+          description: data.description ?? '',
+          price: data.price,
+          category: data.category,
+          brand: data.brand ?? '',
+          is_active: !!data.is_active,
+          image_url: images[0] || '',
+          images,
+        };
+        if ((data.stock ?? null) !== data._initialStock) update.stock = data.stock;
+        return api.entities.Product.update(data.id, update);
       }
-      return api.entities.Product.create(payload);
+      const { _initialStock, ...rest } = data;
+      return api.entities.Product.create({ ...rest, image_url: images[0] || '', images });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['products'] });
       setShowDialog(false);
       toast.success('Produit sauvegardé');
     },
-    onError: (err) => toast.error(err?.message || 'Erreur lors de la sauvegarde'),
+    onError: (err) => toast.error(errorText(err, 'Erreur lors de la sauvegarde')),
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id) => api.entities.Product.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['products'] });
+      setProductToDelete(null);
       toast.success('Produit supprimé');
     },
-    onError: (err) => toast.error(err?.message || 'Erreur lors de la suppression'),
+    onError: (err) => toast.error(errorText(err, 'Erreur lors de la suppression')),
   });
+
+  /** « Désactiver plutôt » : retiré de la vente sans rien perdre (photos, description). */
+  const deactivateProduct = async (product) => {
+    if (!product || deactivating) return;
+    setDeactivating(true);
+    try {
+      await api.entities.Product.update(product.id, { is_active: false });
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+      toast.success(`${product.name} retiré de la vente`);
+      setProductToDelete(null);
+    } catch (err) {
+      toast.error(errorText(err, 'Désactivation impossible'));
+    } finally {
+      setDeactivating(false);
+    }
+  };
+
+  const percentValue = parseFloat(String(pricePercent).replace(',', '.'));
+  const priceError = !Number.isFinite(percentValue) || percentValue <= 0
+    ? 'Pourcentage invalide'
+    : priceDirection === 'decrease' && percentValue >= 100
+      ? 'Une baisse doit être inférieure à 100 %'
+      : priceDirection === 'increase' && percentValue > MAX_INCREASE_PERCENT
+        ? `Une hausse ne peut pas dépasser ${MAX_INCREASE_PERCENT} %`
+        : null;
 
   const applyPriceMutation = useMutation({
     mutationFn: async () => {
-      const percent = parseFloat(pricePercent);
-      if (!percent || percent <= 0) throw new Error('Pourcentage invalide');
-      const multiplier = priceDirection === 'increase' ? 1 + percent / 100 : 1 - percent / 100;
-      for (const product of products) {
-        const newPrice = Math.round(product.price * multiplier * 100) / 100;
-        await api.entities.Product.update(product.id, { price: newPrice });
+      if (priceError) throw new Error(priceError);
+      const key = `${priceDirection}|${percentValue}`;
+      if (!pricePlanRef.current || pricePlanRef.current.key !== key) {
+        const multiplier = priceDirection === 'increase' ? 1 + percentValue / 100 : 1 - percentValue / 100;
+        const prices = new Map(products.map(p => [String(p.id), Math.max(0, Math.round((Number(p.price) || 0) * multiplier * 100) / 100)]));
+        pricePlanRef.current = { key, prices, total: prices.size };
+      }
+      const plan = pricePlanRef.current;
+      for (const [id, newPrice] of [...plan.prices]) {
+        await api.entities.Product.update(id, { price: newPrice });
+        plan.prices.delete(id);
       }
     },
     onSuccess: () => {
+      pricePlanRef.current = null;
       queryClient.invalidateQueries({ queryKey: ['products'] });
       setShowPriceDialog(false);
       setPricePercent('');
       toast.success('Prix mis à jour');
     },
-    onError: (err) => toast.error(err.message),
+    onError: (err) => {
+      // Les prix déjà changés restent : la liste les montre, un nouvel essai finit les autres
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+      const plan = pricePlanRef.current;
+      if (plan && plan.prices.size < plan.total) {
+        toast.error(`${plan.total - plan.prices.size} produits sur ${plan.total} mis à jour, réessayez pour terminer (${errorText(err, 'erreur')})`);
+      } else {
+        toast.error(errorText(err, 'Prix non mis à jour'));
+      }
+    },
   });
 
   const [upload, setUpload] = useState(null); // { done, total } pendant un envoi séquentiel
@@ -101,7 +177,8 @@ export default function AdminProducts() {
     setShowDialog(true);
   };
   const openEdit = (product) => {
-    setEditProduct({ ...product, images: mergeImages(product.image_url, product.images) });
+    // Stock d'origine mémorisé : il n'est renvoyé que s'il a été modifié dans la fiche
+    setEditProduct({ ...product, images: mergeImages(product.image_url, product.images), _initialStock: product.stock ?? null });
     setShowDialog(true);
   };
 
@@ -151,10 +228,10 @@ export default function AdminProducts() {
           <h1 className="font-display text-2xl font-bold">Produits</h1>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => setShowPriceDialog(true)} className="rounded-lg">
+          <Button variant="outline" onClick={() => setShowPriceDialog(true)} disabled={productsFailed || productsQuery.isPending} className="rounded-lg">
             <Percent className="w-4 h-4 mr-1.5" /> Modifier les prix
           </Button>
-          <Button onClick={openNew} className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg">
+          <Button onClick={openNew} disabled={productsFailed} className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg">
             <Plus className="w-4 h-4 mr-1.5" /> Ajouter
           </Button>
         </div>
@@ -174,6 +251,7 @@ export default function AdminProducts() {
               <div className="flex items-center gap-2">
                 <h3 className="text-sm font-semibold truncate">{product.name}</h3>
                 {product.brand && <Badge variant="outline" className="text-[9px] border-border">{product.brand}</Badge>}
+                {!product.is_active && <Badge variant="outline" className="text-[9px] border-border text-muted-foreground">Masqué</Badge>}
                 {Array.isArray(product.images) && product.images.length > 1 && (
                   <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground shrink-0" title={`${product.images.length} photos`}>
                     <Images className="w-3 h-3" /> {product.images.length}
@@ -191,7 +269,8 @@ export default function AdminProducts() {
                 <Pencil className="w-3.5 h-3.5" />
               </Button>
               <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10"
-                onClick={() => deleteMutation.mutate(product.id)}>
+                aria-label="Supprimer le produit"
+                onClick={() => setProductToDelete(product)}>
                 <Trash2 className="w-3.5 h-3.5" />
               </Button>
             </div>
@@ -199,7 +278,13 @@ export default function AdminProducts() {
         ))}
       </div>
 
-      {products.length === 0 && (
+      {productsFailed ? (
+        <LoadError what="les produits" error={productsQuery.error} onRetry={productsQuery.refetch} retrying={productsQuery.isFetching} />
+      ) : productsQuery.isPending ? (
+        <div className="space-y-2" aria-busy="true">
+          {[0, 1, 2].map(i => <div key={i} className="h-20 rounded-xl bg-card border border-border animate-pulse" />)}
+        </div>
+      ) : products.length === 0 && (
         <div className="text-center py-16 text-muted-foreground text-sm">
           Aucun produit. Cliquez sur "Ajouter" pour commencer.
         </div>
@@ -274,7 +359,7 @@ export default function AdminProducts() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label className="text-xs">Prix (€)</Label>
-                  <Input type="number" value={editProduct.price} onChange={e => setEditProduct({ ...editProduct, price: parseFloat(e.target.value) || 0 })}
+                  <Input type="number" min="0" step="0.01" value={editProduct.price} onChange={e => setEditProduct({ ...editProduct, price: parseFloat(e.target.value) || 0 })}
                     className="bg-secondary border-border mt-1" />
                 </div>
                 <div>
@@ -311,6 +396,7 @@ export default function AdminProducts() {
                 disabled={saveMutation.isPending || uploading}
                 onClick={() => {
                   if (!editProduct.name?.trim()) { toast.error('Le nom du produit est obligatoire'); return; }
+                  if (!(Number(editProduct.price) >= 0)) { toast.error('Le prix ne peut pas être négatif'); return; }
                   saveMutation.mutate(editProduct);
                 }}>
                 {saveMutation.isPending ? 'Sauvegarde…' : uploading ? 'Envoi des photos…' : 'Sauvegarder'}
@@ -350,14 +436,15 @@ export default function AdminProducts() {
                 className="bg-secondary border-border mt-1"
               />
             </div>
-            {pricePercent && parseFloat(pricePercent) > 0 && (
+            {pricePercent && !priceError && (
               <p className="text-xs text-muted-foreground">
                 {priceDirection === 'increase' ? '↑' : '↓'} {pricePercent}% sur {products.length} produits
               </p>
             )}
+            {pricePercent && priceError && <p className="text-xs text-red-400">{priceError}</p>}
             <Button
               className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
-              disabled={!pricePercent || parseFloat(pricePercent) <= 0 || applyPriceMutation.isPending}
+              disabled={!!priceError || applyPriceMutation.isPending}
               onClick={() => applyPriceMutation.mutate()}
             >
               {applyPriceMutation.isPending ? 'Application...' : 'Appliquer'}
@@ -365,6 +452,33 @@ export default function AdminProducts() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Suppression : définitive, confirmée (bouton Annuler visible, pas de fermeture au tap à côté) */}
+      <AlertDialog open={!!productToDelete} onOpenChange={(o) => { if (!o && !deleteMutation.isPending && !deactivating) setProductToDelete(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Supprimer {productToDelete?.name} ?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Le produit disparaît de la Boutique, des favoris et des paniers, avec ses photos et sa description. Cette action est irréversible. Pour le retirer de la vente sans le perdre, désactive-le plutôt (interrupteur Actif dans la fiche).
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-2">
+            <AlertDialogCancel disabled={deleteMutation.isPending || deactivating}>Annuler</AlertDialogCancel>
+            {productToDelete?.is_active && (
+              <Button variant="outline" disabled={deleteMutation.isPending || deactivating} onClick={() => deactivateProduct(productToDelete)}>
+                {deactivating ? 'Désactivation…' : 'Désactiver plutôt'}
+              </Button>
+            )}
+            <AlertDialogAction
+              disabled={deleteMutation.isPending || deactivating}
+              onClick={(e) => { e.preventDefault(); if (productToDelete) deleteMutation.mutate(productToDelete.id); }}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {deleteMutation.isPending ? 'Suppression…' : 'Supprimer'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

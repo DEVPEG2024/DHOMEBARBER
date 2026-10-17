@@ -1,10 +1,23 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { api } from '@/api/apiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Eye, EyeOff, MessageSquare, Star, ExternalLink, MapPin, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import StarRating from '@/components/shared/StarRating';
+import LoadError, { isNetworkError } from '@/components/shared/LoadError';
+
+/** Message d'une erreur d'API : réseau traduit, message du serveur, sinon le repli. */
+function errorMessage(err, fallback) {
+  if (isNetworkError(err)) return 'Pas de connexion internet : réessayez.';
+  return err?.message && !/^HTTP \d+$/.test(err.message) ? err.message : fallback;
+}
+
+function formatReviewDate(value) {
+  if (!value) return '';
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('fr-FR', { timeZone: 'Europe/Paris' });
+}
 
 const GOOGLE_PLACE_ID = 'ChIJm6cgTFprjEcRZsuEqhCEPXY';
 const GOOGLE_REVIEW_URL = `https://search.google.com/local/writereview?placeid=${GOOGLE_PLACE_ID}`;
@@ -14,24 +27,52 @@ export default function AdminReviews() {
   const queryClient = useQueryClient();
   const [tab, setTab] = useState('app');
 
-  const { data: reviews = [] } = useQuery({
+  // Suppression en deux taps : la corbeille arme la confirmation, qui retombe seule après 4 s
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  useEffect(() => {
+    if (!confirmDeleteId) return undefined;
+    const t = setTimeout(() => setConfirmDeleteId(null), 4000);
+    return () => clearTimeout(t);
+  }, [confirmDeleteId]);
+
+  const { data: reviews = [], isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ['allReviews'],
     queryFn: () => api.entities.Review.list('-created_date', 200),
   });
+  // Liste en échec : jamais « 0 avis » ni « Aucun avis pour le moment »
+  const loadFailed = isError && reviews.length === 0;
+  const countKnown = !isLoading && !loadFailed;
+
+  // Accueil, /reviews et Mes avis lisent leurs propres clés : toutes rafraîchies
+  const invalidateReviews = () => {
+    queryClient.invalidateQueries({ queryKey: ['allReviews'] });
+    queryClient.invalidateQueries({ queryKey: ['reviews'] });
+    queryClient.invalidateQueries({ queryKey: ['myReviews'] });
+    queryClient.invalidateQueries({ queryKey: ['adminActivity'] });
+  };
 
   const toggleVisibility = useMutation({
     mutationFn: (review) => api.entities.Review.update(review.id, { is_visible: !review.is_visible }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['allReviews'] });
+      invalidateReviews();
       toast.success('Visibilité mise à jour');
+    },
+    onError: (err) => {
+      toast.error(errorMessage(err, 'Impossible de modifier la visibilité'));
+      invalidateReviews();
     },
   });
 
   const deleteReview = useMutation({
     mutationFn: (id) => api.entities.Review.delete(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['allReviews'] });
+      setConfirmDeleteId(null);
+      invalidateReviews();
       toast.success('Avis supprimé');
+    },
+    onError: (err) => {
+      toast.error(errorMessage(err, "Impossible de supprimer l'avis"));
+      invalidateReviews();
     },
   });
 
@@ -44,9 +85,13 @@ export default function AdminReviews() {
       <div className="mb-6">
         <p className="text-[10px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Modération</p>
         <h1 className="font-display text-2xl font-bold">Avis Clients</h1>
-        <p className="text-xs text-muted-foreground mt-1">
-          {reviews.length} avis · Note moyenne: {avgRating}/5
-        </p>
+        {countKnown ? (
+          <p className="text-xs text-muted-foreground mt-1">
+            {reviews.length} avis · Note moyenne : {avgRating}/5
+          </p>
+        ) : isLoading ? (
+          <p className="text-xs text-muted-foreground mt-1">Chargement…</p>
+        ) : null}
       </div>
 
       {/* Google Actions */}
@@ -102,7 +147,7 @@ export default function AdminReviews() {
             tab === 'app' ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground'
           }`}
         >
-          Avis App ({reviews.length})
+          {countKnown ? `Avis App (${reviews.length})` : 'Avis App'}
         </button>
         <button
           onClick={() => setTab('google')}
@@ -116,37 +161,69 @@ export default function AdminReviews() {
 
       {tab === 'app' && (
         <>
+          {loadFailed && (
+            <LoadError what="les avis" error={error} onRetry={refetch} retrying={isFetching} />
+          )}
+          {isLoading && (
+            <div className="space-y-3" aria-hidden="true">
+              {[0, 1, 2].map(i => <div key={i} className="h-24 rounded-xl bg-card border border-border animate-pulse" />)}
+            </div>
+          )}
           <div className="space-y-3">
             {reviews.map(review => (
               <div key={review.id} className={`bg-card border border-border rounded-xl p-4 ${!review.is_visible ? 'opacity-50' : ''}`}>
-                <div className="flex items-start justify-between mb-2">
-                  <div>
+                <div className="flex items-start justify-between gap-2 mb-2">
+                  <div className="min-w-0">
                     <p className="text-sm font-semibold">{review.client_name || 'Anonyme'}</p>
                     <StarRating rating={review.rating} />
                     <p className="text-[10px] text-muted-foreground mt-0.5">
-                      {new Date(review.created_date).toLocaleDateString('fr-FR')}
+                      {formatReviewDate(review.created_date)}
                       {review.employee_name && ` · ${review.employee_name}`}
                     </p>
                   </div>
-                  <div className="flex gap-1">
+                  {confirmDeleteId === review.id ? (
+                    <div className="flex flex-wrap justify-end gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDeleteId(null)}
+                        disabled={deleteReview.isPending}
+                        className="h-8 px-3 rounded-lg text-xs font-medium bg-secondary text-muted-foreground disabled:opacity-50"
+                      >
+                        Annuler
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deleteReview.mutate(review.id)}
+                        disabled={deleteReview.isPending}
+                        className="h-8 px-3 rounded-lg text-xs font-semibold bg-red-500 text-white disabled:opacity-60"
+                      >
+                        {deleteReview.isPending && deleteReview.variables === review.id ? 'Suppression…' : 'Supprimer'}
+                      </button>
+                    </div>
+                  ) : (
+                  <div className="flex gap-1 shrink-0">
                     <Button variant="ghost" size="icon" className="h-8 w-8"
+                      aria-label={review.is_visible ? "Masquer l'avis" : "Réafficher l'avis"}
+                      disabled={toggleVisibility.isPending && toggleVisibility.variables?.id === review.id}
                       onClick={() => toggleVisibility.mutate(review)}>
                       {review.is_visible ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4 text-muted-foreground" />}
                     </Button>
                     <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-red-500"
-                      onClick={() => { if (confirm('Supprimer cet avis ?')) deleteReview.mutate(review.id); }}>
+                      aria-label="Supprimer l'avis"
+                      onClick={() => setConfirmDeleteId(review.id)}>
                       <Trash2 className="w-4 h-4" />
                     </Button>
                   </div>
+                  )}
                 </div>
                 {review.comment && (
-                  <p className="text-xs text-muted-foreground leading-relaxed mt-2">{review.comment}</p>
+                  <p className="text-xs text-muted-foreground leading-relaxed mt-2 break-words">{review.comment}</p>
                 )}
               </div>
             ))}
           </div>
 
-          {reviews.length === 0 && (
+          {!isLoading && !isError && reviews.length === 0 && (
             <div className="text-center py-16">
               <MessageSquare className="w-12 h-12 text-muted-foreground/30 mx-auto mb-3" />
               <p className="text-sm text-muted-foreground">Aucun avis pour le moment</p>

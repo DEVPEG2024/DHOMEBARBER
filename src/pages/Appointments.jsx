@@ -11,18 +11,28 @@ import { toast } from 'sonner';
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
-import { hapticFeedback } from '@/lib/capacitor';
+import { hapticFeedback, isNative } from '@/lib/capacitor';
+import LoadError, { isNetworkError } from '@/components/shared/LoadError';
 import { appointmentEvent, openCalendar, parisInstant } from '@/lib/calendarLinks';
 import {
   SALON_PHONE, SALON_PHONE_HREF, CANCEL_REASON_MAX, APPOINTMENT_CANCEL_REASONS,
   useCancelFeatures, friendlyCancelError, cancelledByLabel, cleanReason,
 } from '@/lib/cancellation';
-import { findRescheduleSlots, moveAppointment } from '@/lib/reschedule';
+import { findRescheduleSlots, moveAppointment, currentServices } from '@/lib/reschedule';
 import { openOrdersByAppointment, orderItemsLabel } from '@/lib/appointmentProducts';
 import { formatPrice } from '@/components/shop/productUtils';
 
 /** Aucune commande : valeur stable (évite de recalculer la carte des commandes à chaque rendu). */
 const NO_ORDERS = [];
+/** Aucun rendez-vous : valeur stable (dépendance du useMemo de la liste). */
+const NO_APPOINTMENTS = [];
+
+/** Message du serveur lisible (jamais « HTTP 409 » ni un message réseau en anglais), sans point final. */
+function serverMessage(err, fallback) {
+  const raw = err?.data?.error || err?.message || '';
+  if (!raw || /^HTTP \d+$/.test(raw) || /failed to fetch|load failed|network/i.test(raw)) return fallback;
+  return String(raw).trim().replace(/[.!\s]+$/, '');
+}
 
 /** Total d'une commande (prix serveur, sinon somme des lignes). */
 const orderTotalOf = (order) => {
@@ -39,10 +49,10 @@ const ordersLabel = (orders) => orders.map(orderItemsLabel).filter(Boolean).join
 const manyProducts = (orders) => orders
   .reduce((n, o) => n + (Array.isArray(o?.items) ? o.items.length : 0), 0) > 1;
 
-/** Cibles « Ajouter au calendrier ». */
+/** Cibles « Ajouter au calendrier » : le .ics ne s'ouvre pas dans l'app native, seulement sur le web. */
 const CALENDAR_TARGETS = [
   { kind: 'google', label: 'Google Agenda' },
-  { kind: 'ics', label: 'Apple / Outlook' },
+  ...(isNative ? [] : [{ kind: 'ics', label: 'Apple / Outlook' }]),
 ];
 
 /** Statuts qui rangent un rendez-vous dans l'historique, quelle que soit sa date. */
@@ -111,12 +121,16 @@ export default function Appointments() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
 
-  const { data: appointments = [], isLoading } = useQuery({
+  const appointmentsQuery = useQuery({
     queryKey: ['myAppointments', user?.email],
     queryFn: () => api.entities.Appointment.filter({ client_email: user.email }, '-date', 100),
     enabled: !!user?.email,
     refetchInterval: 30000, // Auto-refresh toutes les 30s
   });
+  const appointments = appointmentsQuery.data || NO_APPOINTMENTS;
+  const isLoading = appointmentsQuery.isLoading;
+  // Échec sans données : « Aucun rendez-vous » serait faux (le client en réserverait un second)
+  const appointmentsFailed = appointmentsQuery.isError && !appointmentsQuery.data;
 
   // Produits ajoutés aux rendez-vous : mêmes clé et requête que Mes commandes (cache partagé).
   // Simple bonus : si la requête échoue, rien n'est affiché. Rechargée à chaque arrivée sur la
@@ -144,27 +158,41 @@ export default function Appointments() {
   const salonPhone = settings?.phone || SALON_PHONE;
   const salonPhoneHref = settings?.phone ? telHref(settings.phone) : SALON_PHONE_HREF;
 
-  // Barbers actifs et congés : mêmes requêtes et mêmes caches que la réservation
-  const { data: employees = [], isPending: employeesPending } = useQuery({
+  // Barbers actifs, congés et catalogue : mêmes requêtes et mêmes caches que la réservation
+  const employeesQuery = useQuery({
     queryKey: ['employees'],
     staleTime: 5 * 60 * 1000,
     queryFn: () => api.entities.Employee.filter({ is_active: true }, 'sort_order', 50),
     enabled: !!cancelApt,
   });
-  const { data: timeOffs = [], isPending: timeOffsPending } = useQuery({
+  const { data: employees = [], isPending: employeesPending } = employeesQuery;
+  const timeOffsQuery = useQuery({
     queryKey: ['timeOffs'],
     queryFn: () => api.entities.TimeOff.list('-start_date', 200),
     enabled: !!cancelApt,
   });
+  const timeOffs = timeOffsQuery.data || [];
+  // Catalogue actif : durée d'aujourd'hui des prestations, et prestation retirée détectée.
+  // En échec, on ne bloque pas : repli sur les prestations enregistrées sur le RDV.
+  const servicesQuery = useQuery({
+    queryKey: ['services'],
+    staleTime: 5 * 60 * 1000,
+    queryFn: () => api.entities.Service.filter({ is_active: true }, 'sort_order', 100),
+    enabled: !!cancelApt,
+  });
+  const catalog = servicesQuery.data || null;
+  const catalogSettled = !servicesQuery.isPending;
   const moveBarber = useMemo(
     () => (cancelApt ? employees.find(e => String(e.id) === String(cancelApt.employee_id)) || null : null),
     [employees, cancelApt],
   );
+  // Une prestation de ce RDV n'est plus proposée : aucun créneau, seulement « Choisir une autre date »
+  const serviceRetired = !!cancelApt && !!catalog && currentServices(cancelApt, catalog).missing;
   // Prochains créneaux libres avec le même barber et les mêmes prestations
   const slotsQuery = useQuery({
     queryKey: ['rescheduleSlots', cancelApt?.id, moveBarber?.id],
-    queryFn: () => findRescheduleSlots({ appointment: cancelApt, employee: moveBarber, timeOffs }),
-    enabled: !!cancelApt && dialogMode === 'move' && !!moveBarber && !timeOffsPending,
+    queryFn: () => findRescheduleSlots({ appointment: cancelApt, employee: moveBarber, timeOffs, catalog }),
+    enabled: !!cancelApt && dialogMode === 'move' && !!moveBarber && timeOffsQuery.isSuccess && catalogSettled && !serviceRetired,
     staleTime: 30 * 1000,
     retry: false,
   });
@@ -178,8 +206,13 @@ export default function Appointments() {
     }
     return days;
   }, [suggestions]);
-  const barberGone = !!cancelApt && !employeesPending && !moveBarber;
-  const loadingSuggestions = !!cancelApt && !barberGone && (employeesPending || timeOffsPending || slotsQuery.isPending);
+  // Barbers ou congés impossibles à charger : jamais « ne prend plus de rendez-vous » ni des
+  // créneaux sur un jour de congé, mais l'écran d'erreur avec « Réessayer »
+  const suggestionsLoadFailed = !!cancelApt
+    && ((employeesQuery.isError && !employeesQuery.data) || (timeOffsQuery.isError && !timeOffsQuery.data));
+  const barberGone = !!cancelApt && employeesQuery.isSuccess && !moveBarber;
+  const loadingSuggestions = !!cancelApt && !barberGone && !suggestionsLoadFailed && !serviceRetired
+    && (employeesPending || timeOffsQuery.isPending || !catalogSettled || slotsQuery.isPending);
 
   // Horloge à la minute : un rendez-vous passe dans l'historique dès que son heure de fin est passée
   const [now, setNow] = useState(() => Date.now());
@@ -193,6 +226,19 @@ export default function Appointments() {
     if (!features.appointmentCancelReason || !reasonChoice) return '';
     if (reasonChoice === 'Autre') return reasonOther.trim().slice(0, CANCEL_REASON_MAX);
     return reasonChoice;
+  };
+
+  /** Le RDV est-il entré dans le délai d'annulation du salon (calculé maintenant) ? */
+  const tooLateNow = (apt) => !!apt && cancelHours > 0
+    && startsAt(apt) - Date.now() < cancelHours * 3600 * 1000;
+
+  /** Délai passé pendant que la fenêtre était ouverte : on ferme et on renvoie vers le salon. */
+  const refuseTooLate = () => {
+    setCancelApt(null);
+    toast.error(`Ce rendez-vous est dans moins de ${cancelHours} h : pour le déplacer ou l'annuler, appelez le salon au ${salonPhone}.`, {
+      duration: 10000,
+      action: { label: 'Appeler', onClick: () => { window.location.href = salonPhoneHref; } },
+    });
   };
 
   /** Ouvre la fenêtre : d'abord la proposition de déplacement, l'annulation ensuite. */
@@ -230,7 +276,7 @@ export default function Appointments() {
         : old));
       queryClient.invalidateQueries({ queryKey: ['myAppointments'] });
       queryClient.invalidateQueries({ queryKey: ['appointments'] }); // « Comme la dernière fois »
-      queryClient.invalidateQueries({ queryKey: ['appointments-confirmed'] }); // créneaux de la réservation
+      queryClient.invalidateQueries({ queryKey: ['appointments-day'] }); // créneaux de la réservation
       // Le serveur annule avec le RDV les produits ajoutés encore à préparer (stock rendu)
       queryClient.invalidateQueries({ queryKey: ['myOrders'] });
       queryClient.invalidateQueries({ queryKey: ['products'] });
@@ -260,30 +306,62 @@ export default function Appointments() {
       user,
       slot,
       withReason: features.appointmentCancelReason,
+      catalog,
     }),
     onSuccess: ({ oldCancelled }, slot) => {
       hapticFeedback();
       queryClient.invalidateQueries({ queryKey: ['myAppointments'] });
       queryClient.invalidateQueries({ queryKey: ['appointments'] });
-      queryClient.invalidateQueries({ queryKey: ['appointments-confirmed'] });
+      queryClient.invalidateQueries({ queryKey: ['appointments-day'] });
       queryClient.invalidateQueries({ queryKey: ['rescheduleSlots'] });
       queryClient.invalidateQueries({ queryKey: ['myOrders'] }); // les produits ajoutés suivent le nouveau RDV
       if (oldCancelled) {
         toast.success(`Rendez-vous déplacé au ${slot.label} à ${slot.time}`);
       } else {
+        // Ancien RDV non annulé : s'il est déjà dans le délai d'annulation, seul le salon peut le faire
         toast.warning(
-          `Nouveau rendez-vous confirmé le ${slot.label} à ${slot.time}, mais l'ancien n'a pas pu être annulé : annulez-le ci-dessous ou appelez le salon au ${salonPhone}.`,
+          tooLateNow(cancelApt)
+            ? `Nouveau rendez-vous confirmé le ${slot.label} à ${slot.time}, mais l'ancien n'a pas pu être annulé : appelez le salon au ${salonPhone}.`
+            : `Nouveau rendez-vous confirmé le ${slot.label} à ${slot.time}, mais l'ancien n'a pas pu être annulé : annulez-le ci-dessous ou appelez le salon au ${salonPhone}.`,
           { duration: 12000 },
         );
       }
       setCancelApt(null);
     },
     onError: (err) => {
-      const message = err?.data?.error || err?.message;
-      const shown = message && !/^HTTP \d+$/.test(message) ? message : 'Ce créneau n\'a pas pu être réservé.';
-      toast.error(`${shown} Choisissez un autre créneau.`);
       setChosenSlot(null);
-      queryClient.invalidateQueries({ queryKey: ['rescheduleSlots'] });
+      // Réseau coupé : le déplacement est peut-être passé (réponse perdue), ne pas inviter à
+      // reprendre un autre créneau
+      if (isNetworkError(err)) {
+        toast.error('Connexion perdue : le déplacement a peut-être été enregistré. Vérifiez vos rendez-vous avant de réessayer.');
+        queryClient.invalidateQueries({ queryKey: ['myAppointments'] });
+        queryClient.invalidateQueries({ queryKey: ['rescheduleSlots'] });
+        return;
+      }
+      const shown = serverMessage(err, 'Ce créneau n\'a pas pu être réservé');
+      // Prestation retirée ou changée : changer d'heure n'y fera rien, le catalogue est relu
+      if (err?.status === 400 && /prestation/i.test(shown)) {
+        toast.error(`${shown}. Choisissez une autre date.`);
+        queryClient.invalidateQueries({ queryKey: ['services'] });
+        return;
+      }
+      // Ancien RDV entré dans le délai d'annulation (refusé par le serveur) : le salon s'en occupe
+      if (err?.status === 409 && /pour le déplacer|ne peut plus être déplacé/i.test(shown)) {
+        setCancelApt(null);
+        toast.error(`${shown}.`, {
+          duration: 10000,
+          action: { label: 'Appeler', onClick: () => { window.location.href = salonPhoneHref; } },
+        });
+        queryClient.invalidateQueries({ queryKey: ['myAppointments'] });
+        queryClient.invalidateQueries({ queryKey: ['salonSettings'] });
+        return;
+      }
+      if (err?.status === 409 || err?.status === 400) {
+        toast.error(`${shown}. Choisissez un autre créneau.`);
+        queryClient.invalidateQueries({ queryKey: ['rescheduleSlots'] });
+      } else {
+        toast.error(`${shown}.`);
+      }
     },
   });
   const busy = cancelMutation.isPending || moveMutation.isPending;
@@ -293,9 +371,17 @@ export default function Appointments() {
     cancelMutation.mutate({ id: cancelApt.id, reason: chosenReason() });
   };
 
+  /** Déplacement vers un créneau proposé, le délai d'annulation revérifié au moment du tap. */
+  const confirmMove = () => {
+    if (!chosenSlot || busy) return;
+    if (tooLateNow(cancelApt)) { refuseTooLate(); return; }
+    moveMutation.mutate(chosenSlot);
+  };
+
   /** « Déplacer » : nouvelle réservation pré-remplie, l'ancien RDV n'est annulé qu'une fois le nouveau confirmé. */
   const goReschedule = (apt) => {
     hapticFeedback();
+    if (tooLateNow(apt)) { refuseTooLate(); return; }
     setCancelApt(null);
     navigate(rescheduleHref(apt));
   };
@@ -386,6 +472,13 @@ export default function Appointments() {
               <div key={i} className="h-36 rounded-2xl bg-white/5 animate-pulse" />
             ))}
           </div>
+        ) : appointmentsFailed ? (
+          <LoadError
+            what="vos rendez-vous"
+            error={appointmentsQuery.error}
+            onRetry={appointmentsQuery.refetch}
+            retrying={appointmentsQuery.isFetching}
+          />
         ) : list.length === 0 ? (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-20">
             <div className="w-20 h-20 rounded-3xl bg-white/5 border border-white/8 flex items-center justify-center mx-auto mb-5">
@@ -576,7 +669,7 @@ export default function Appointments() {
                                 animate={{ opacity: 1, y: 0 }}
                                 exit={{ opacity: 0, y: reduceMotion ? 0 : -4 }}
                                 transition={{ duration: 0.18, ease: 'easeOut' }}
-                                className="mt-3 grid grid-cols-2 gap-2"
+                                className={`mt-3 grid ${CALENDAR_TARGETS.length > 1 ? 'grid-cols-2' : 'grid-cols-1'} gap-2`}
                               >
                                 {CALENDAR_TARGETS.map(({ kind, label }) => (
                                   <motion.button
@@ -653,7 +746,22 @@ export default function Appointments() {
                   {/* Créneaux libres proposés : même barber, mêmes prestations */}
                   <div className="min-w-0">
                     <p className="text-xs font-semibold text-foreground mb-2">Prochains créneaux disponibles</p>
-                    {barberGone ? (
+                    {suggestionsLoadFailed ? (
+                      <LoadError
+                        compact
+                        what="les créneaux libres"
+                        error={employeesQuery.error || timeOffsQuery.error}
+                        onRetry={() => {
+                          if (employeesQuery.isError) employeesQuery.refetch();
+                          if (timeOffsQuery.isError) timeOffsQuery.refetch();
+                        }}
+                        retrying={employeesQuery.isFetching || timeOffsQuery.isFetching}
+                      />
+                    ) : serviceRetired ? (
+                      <p className="text-xs text-muted-foreground">
+                        Une prestation de ce rendez-vous n'est plus proposée : choisissez une autre date.
+                      </p>
+                    ) : barberGone ? (
                       <p className="text-xs text-muted-foreground">
                         {cancelApt.employee_name || 'Ce barber'} ne prend plus de rendez-vous en ligne : choisissez une date et un autre barber.
                       </p>
@@ -701,7 +809,7 @@ export default function Appointments() {
                     <button
                       type="button"
                       disabled={busy}
-                      onClick={() => moveMutation.mutate(chosenSlot)}
+                      onClick={confirmMove}
                       className="w-full h-11 rounded-2xl bg-primary text-primary-foreground text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-60"
                     >
                       {moveMutation.isPending

@@ -67,19 +67,34 @@ export function formatParisDate(iso) {
   return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Europe/Paris' });
 }
 
-/** ISO → valeur d'un `<input type="datetime-local">` dans le fuseau local de l'appareil. */
+const PARIS_INPUT_FORMAT = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+});
+
+/**
+ * ISO → valeur d'un `<input type="datetime-local">` en heure de Paris, quel que soit le fuseau
+ * de l'appareil (même heure que celle affichée sur les cartes et côté client).
+ */
 export function toLocalInputValue(iso) {
   if (!iso) return '';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const parts = {};
+  PARIS_INPUT_FORMAT.formatToParts(d).forEach((p) => { parts[p.type] = p.value; });
+  const hour = parts.hour === '24' ? '00' : parts.hour; // certains moteurs écrivent minuit « 24 »
+  return `${parts.year}-${parts.month}-${parts.day}T${pad(hour)}:${pad(parts.minute)}`;
 }
 
-/** Valeur d'un `<input type="datetime-local">` (heure locale) → ISO UTC, ou null si vide. */
+/**
+ * Valeur d'un `<input type="datetime-local">` (heure de Paris) → chaîne « AAAA-MM-JJTHH:MM »
+ * envoyée telle quelle, sans fuseau : le serveur la lit en heure de Paris
+ * (isoDateTimeOrNull → parisToUtc). null si vide ou invalide.
+ */
 export function fromLocalInputValue(value) {
   if (!value) return null;
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+  const v = String(value).trim();
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(v) ? v : null;
 }
 
 // ─── Montants ───

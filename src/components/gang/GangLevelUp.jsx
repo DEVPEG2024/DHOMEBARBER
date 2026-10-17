@@ -49,7 +49,10 @@ export function GangStoryFallback({ url, onClose }) {
         alt="Ta carte Gang au format story"
         className="max-h-[72vh] max-w-full w-auto rounded-2xl shadow-2xl object-contain"
       />
-      <p className="mt-4 text-sm font-semibold text-white text-center">Maintiens l’image pour l’enregistrer</p>
+      {/* Dans l'app, l'appui long sur l'image ne fait rien (WebView) : capture d'écran */}
+      <p className="mt-4 text-sm font-semibold text-white text-center">
+        {isNative ? 'Fais une capture d’écran pour la garder' : 'Maintiens l’image pour l’enregistrer'}
+      </p>
       <p className="mt-1 text-xs text-white/60 text-center">Puis publie-la en story depuis Instagram, Snapchat ou WhatsApp.</p>
       {!isNative && (
         <a

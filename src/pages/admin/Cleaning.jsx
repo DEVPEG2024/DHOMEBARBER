@@ -12,6 +12,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { toast } from 'sonner';
 import { format, startOfWeek, addDays } from 'date-fns';
 import { fr } from 'date-fns/locale';
+import LoadError, { isNetworkError } from '@/components/shared/LoadError';
+
+/** Message d'une action qui échoue (jamais « Load failed » ni « HTTP 500 »). */
+const actionError = (e) => toast.error(isNetworkError(e)
+  ? 'Pas de connexion internet'
+  : (e?.data?.error || (e?.message && !/^HTTP \d+$/.test(e.message) ? e.message : '') || 'Erreur, réessayez'));
 
 
 const DAY_LABELS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
@@ -48,15 +54,17 @@ export default function Cleaning() {
   const weekStart = format(mondayDate, 'yyyy-MM-dd');
 
   // Queries
-  const { data: tasks = [] } = useQuery({
+  const tasksQuery = useQuery({
     queryKey: ['cleaningTasks'],
     queryFn: () => api.entities.CleaningTask.list('sort_order', 50),
   });
+  const tasks = tasksQuery.data ?? [];
 
-  const { data: schedule = [] } = useQuery({
+  const scheduleQuery = useQuery({
     queryKey: ['cleaningSchedule', weekStart],
     queryFn: () => api.entities.CleaningSchedule.filter({ week_start: weekStart }, 'date', 500),
   });
+  const schedule = scheduleQuery.data ?? [];
 
   const { data: employees = [] } = useQuery({
     queryKey: ['employees'],
@@ -110,6 +118,7 @@ export default function Cleaning() {
       queryClient.invalidateQueries({ queryKey: ['cleaningTasks'] });
       toast.success('Tâche supprimée');
     },
+    onError: actionError,
   });
 
   const toggleDone = useMutation({
@@ -118,6 +127,7 @@ export default function Cleaning() {
       queryClient.invalidateQueries({ queryKey: ['cleaningSchedule'] });
       queryClient.invalidateQueries({ queryKey: ['cleaningHistory'] });
     },
+    onError: actionError,
   });
 
   // Generate schedule
@@ -140,9 +150,19 @@ export default function Cleaning() {
     setNotifying(true);
     try {
       const data = await apiRequest('POST', apiUrl('/cleaning/notify-today'));
-      toast.success(`Notifications envoyées à ${data.employees || 0} barber(s)`);
-    } catch {
-      toast.error('Erreur lors de l\'envoi');
+      // Ce qui est vraiment parti (sent), pas le nombre de barbers qui ont des tâches
+      if (data?.message) {
+        toast.info(data.message);
+      } else if (!data?.sent) {
+        toast.warning(data?.employees
+          ? "Aucune notification n'est partie : les barbers concernés n'ont pas activé les notifications sur leur appareil"
+          : 'Aucune notification envoyée');
+      } else {
+        toast.success(`${data.sent} notification${data.sent > 1 ? 's' : ''} envoyée${data.sent > 1 ? 's' : ''}${data.failed ? ` (${data.failed} échec${data.failed > 1 ? 's' : ''})` : ''}`);
+      }
+    } catch (e) {
+      // « HTTP 500 » sans message utile : texte de repli
+      toast.error(e?.data?.error || (e?.message && !/^HTTP \d+$/.test(e.message) ? e.message : '') || "Erreur lors de l'envoi");
     }
     setNotifying(false);
   };
@@ -196,7 +216,9 @@ export default function Cleaning() {
       {/* Task list */}
       <div className="mb-6">
         <h2 className="text-sm font-semibold mb-3">Tâches ménagères</h2>
-        {tasks.length === 0 ? (
+        {tasksQuery.isError && !tasksQuery.data ? (
+          <LoadError compact what="les tâches" error={tasksQuery.error} onRetry={tasksQuery.refetch} retrying={tasksQuery.isFetching} />
+        ) : tasks.length === 0 ? (
           <p className="text-xs text-muted-foreground py-4">Aucune tâche. Ajoutez des tâches pour commencer.</p>
         ) : (
           <div className="space-y-1.5">
@@ -252,7 +274,9 @@ export default function Cleaning() {
       )}
 
       {/* Schedule grid */}
-      {Object.keys(scheduleGrid).length === 0 ? (
+      {scheduleQuery.isError && !scheduleQuery.data ? (
+        <LoadError what="le planning" error={scheduleQuery.error} onRetry={scheduleQuery.refetch} retrying={scheduleQuery.isFetching} className="mb-4" />
+      ) : Object.keys(scheduleGrid).length === 0 ? (
         <div className="text-center py-12 bg-card border border-border rounded-xl">
           <Sparkles className="w-10 h-10 text-muted-foreground/20 mx-auto mb-3" />
           <p className="text-sm text-muted-foreground mb-1">Aucun planning cette semaine</p>

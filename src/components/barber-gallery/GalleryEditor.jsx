@@ -6,6 +6,10 @@ import { api } from '@/api/apiClient';
 import { Button } from '@/components/ui/button';
 import { GALLERY_CAPTION_MAX, GALLERY_MAX, galleryOf } from '@/lib/barberGallery';
 
+// Photos envoyées par lot : le serveur limite les envois à 20 par quart d'heure et par adresse
+// IP, quota partagé avec tous les téléphones du salon (même Wi-Fi). Un lot de 10 laisse de la marge.
+const BATCH_MAX = 10;
+
 const errorText = (err, fallback) => {
   const msg = err?.message;
   return msg && !/^HTTP \d+$/.test(msg) && !(err instanceof TypeError) ? msg : fallback;
@@ -25,6 +29,10 @@ export default function GalleryEditor({ employee }) {
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null); // url
   const busy = !!uploading || saving;
+  // Liste à jour, lue par les enregistrements asynchrones (fin d'envoi, retour en arrière) :
+  // une closure figée au début d'un envoi écraserait ce qui a changé entre-temps.
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
 
   // Fiche rechargée ailleurs : on reprend la galerie du serveur, sauf pendant un envoi
   const serverKey = JSON.stringify(galleryOf(employee));
@@ -33,7 +41,8 @@ export default function GalleryEditor({ employee }) {
   }, [serverKey]);
 
   const save = async (next, { success } = {}) => {
-    const previous = items;
+    const previous = itemsRef.current;
+    itemsRef.current = next;
     setItems(next);
     setSaving(true);
     try {
@@ -42,6 +51,7 @@ export default function GalleryEditor({ employee }) {
       if (success) toast.success(success);
       return true;
     } catch (err) {
+      itemsRef.current = previous;
       setItems(previous);
       toast.error(errorText(err, 'Galerie non enregistrée, réessayez'));
       return false;
@@ -56,24 +66,34 @@ export default function GalleryEditor({ employee }) {
     if (!files.length || !employee?.id) return;
     const room = GALLERY_MAX - items.length;
     if (room <= 0) return toast.error(`La galerie est limitée à ${GALLERY_MAX} photos`);
-    const batch = files.slice(0, room);
-    if (files.length > room) toast.message(`Seules ${room} photo(s) ajoutée(s) : ${GALLERY_MAX} au maximum`);
+    const batch = files.slice(0, Math.min(room, BATCH_MAX));
+    if (files.length > batch.length) {
+      toast.message(batch.length === room
+        ? `Seules ${room} photo(s) ajoutée(s) : ${GALLERY_MAX} au maximum`
+        : `${BATCH_MAX} photos au plus par envoi : ajoutez la suite ensuite`);
+    }
 
     setUploading({ done: 0, total: batch.length });
     const added = [];
+    let limited = false;
     for (const file of batch) {
       try {
         const { file_url } = await api.integrations.Core.UploadFile({ file });
         added.push({ url: file_url, caption: '' });
       } catch (err) {
+        // Quota d'envoi atteint : les suivantes échoueraient toutes, on s'arrête (un seul message)
+        if (err?.status === 429) { limited = true; break; }
         toast.error(errorText(err, `« ${file.name} » n'a pas pu être envoyée`));
       }
       setUploading((u) => (u ? { ...u, done: u.done + 1 } : u));
     }
     setUploading(null);
+    if (limited) {
+      toast.error(`Limite d'envoi atteinte : réessayez dans 15 min (${added.length} photo(s) ajoutée(s))`);
+    }
     if (added.length) {
       // Les plus récentes en tête : c'est ce que les clients voient d'abord
-      await save([...added, ...items], { success: added.length > 1 ? `${added.length} photos ajoutées` : 'Photo ajoutée' });
+      await save([...added, ...itemsRef.current], { success: added.length > 1 ? `${added.length} photos ajoutées` : 'Photo ajoutée' });
     }
   };
 
@@ -165,7 +185,8 @@ export default function GalleryEditor({ employee }) {
                 onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
                 placeholder="Légende…"
                 maxLength={GALLERY_CAPTION_MAX}
-                className="w-full bg-transparent px-2.5 py-2 text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none"
+                disabled={busy}
+                className="w-full bg-transparent px-2.5 py-2 text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none disabled:opacity-50"
               />
             </div>
           ))}

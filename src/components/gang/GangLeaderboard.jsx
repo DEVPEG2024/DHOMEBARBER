@@ -17,12 +17,16 @@ const plural = (n, one, many) => (n === 1 ? one : many);
  * - `variant="feed"` (en tête du fil) : rien tant que le classement est vide, en chargement ou
  *   en échec, avec un lien « Ma carte » ;
  * - `variant="page"` (page « Ta carte Gang ») : chargement, erreur et classement vide affichés.
+ *   `optedIn` : le client a activé l'option ; le classement vide explique alors le seuil de
+ *   visites au lieu de l'inviter à activer ce qu'il vient d'activer.
  */
-export default function GangLeaderboard({ variant = 'feed' }) {
+export default function GangLeaderboard({ variant = 'feed', optedIn = false }) {
   const query = useGangLeaderboard();
   const { data, isPending, isError, error, refetch, isFetching } = query;
   const entries = Array.isArray(data?.entries) ? data.entries.filter((e) => e?.card) : [];
   const days = Number(data?.days) || 90;
+  // Seuil de visites exigé par le serveur (codé en dur dans son SQL : 2), repli si absent
+  const minVisits = Number(data?.min_visits) || 2;
   const inFeed = variant === 'feed';
 
   if (inFeed && entries.length === 0) return null;
@@ -58,7 +62,9 @@ export default function GangLeaderboard({ variant = 'feed' }) {
 
       {!inFeed && !isPending && !(isError && !data) && entries.length === 0 && (
         <p className="rounded-2xl border border-border bg-card/60 px-4 py-5 text-center text-xs text-muted-foreground">
-          Personne pour l’instant : active l’option pour y figurer.
+          {optedIn
+            ? `Tu es inscrit : il faut au moins ${minVisits} visites sur les ${days} derniers jours pour apparaître dans le classement.`
+            : 'Personne pour l’instant : active l’option pour y figurer.'}
         </p>
       )}
 

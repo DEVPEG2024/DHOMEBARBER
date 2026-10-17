@@ -63,6 +63,12 @@ export function useAdminAlertPrefs() {
     settings,
     prefs,
     isLoading: query.isLoading,
+    // Échec sans donnée : la fenêtre affiche LoadError, jamais « paramètres introuvables »
+    // (hors ligne, la requête reste en pause : même traitement)
+    isError: (query.isError && !query.data) || (isAdmin && query.isPending && query.fetchStatus === 'paused'),
+    error: query.error,
+    refetch: query.refetch,
+    isFetching: query.isFetching,
     isEnabled: (type) => prefs[type] !== false,
     save: (next) => mutation.mutateAsync(next),
     saving: mutation.isPending,

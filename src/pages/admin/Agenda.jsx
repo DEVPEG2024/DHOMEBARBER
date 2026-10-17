@@ -28,7 +28,7 @@ import {
   BARBER_COLORS, timeToMinutes, toDateStr, parseDateParam, visibleRange, datesBetween,
   fetchAppointmentsForDates, agendaQueryKey, invalidateAppointmentQueries,
   isBreak, isLastMinuteSlot, slotIssues, aptDuration, isUnclaimedLastMinute,
-  isCancelledLike, minutesToTime,
+  isCancelledLike, minutesToTime, agendaErrorMessage, appointmentEndParis,
 } from '@/components/agenda/agendaUtils';
 
 const VIEWS = ['day', 'week', 'month'];
@@ -189,7 +189,7 @@ export default function Agenda() {
   const createBreak = useMutation({
     mutationFn: (breakData) => api.entities.Appointment.create(breakData),
     onSuccess: refreshAll,
-    onError: (e) => toast.error(e?.message || 'Erreur lors de la création de la pause'),
+    onError: (e) => toast.error(agendaErrorMessage(e, 'Erreur lors de la création de la pause')),
   });
 
   const deleteBreak = useMutation({
@@ -246,20 +246,52 @@ export default function Agenda() {
     setPendingBreak(null);
   };
 
+  // Récurrence d'une pause : jamais par-dessus un client, un congé ou une pause déjà posée à la
+  // même heure (l'index unique la refuserait) ; le bilan dit ce qui a été sauté et pourquoi
   const handleApplyRecurrence = async ({ start_time, end_time, employee_id, dates: recurrenceDates }) => {
+    let existing;
+    try {
+      existing = [];
+      // datesBetween / le filtre par liste de dates : par tranches de 62 jours
+      for (let i = 0; i < recurrenceDates.length; i += 62) {
+        existing.push(...(await fetchAppointmentsForDates(recurrenceDates.slice(i, i + 62))));
+      }
+    } catch (e) {
+      toast.error(agendaErrorMessage(e, 'Impossible de vérifier l\'agenda de ces jours : aucune pause créée'));
+      return;
+    }
+    const s = timeToMinutes(start_time);
+    const e = timeToMinutes(end_time);
     let created = 0;
+    let taken = 0;
+    let withClient = 0;
+    let onLeave = 0;
     let errors = 0;
     for (const date of recurrenceDates) {
+      const sameDay = existing.filter((a) => String(a.date).slice(0, 10) === date
+        && String(a.employee_id) === String(employee_id)
+        && !['cancelled', 'last_minute', 'no_show'].includes(a.status));
+      if (sameDay.some((a) => String(a.start_time).slice(0, 5) === start_time)) { taken++; continue; }
+      if (sameDay.some((a) => a.status !== 'break'
+        && timeToMinutes(a.start_time) < e && timeToMinutes(a.end_time || a.start_time) > s)) { withClient++; continue; }
+      if (approvedTimeOffs.some((t) => String(t.employee_id) === String(employee_id)
+        && date >= String(t.start_date).slice(0, 10) && date <= String(t.end_date).slice(0, 10))) { onLeave++; continue; }
       try {
         await api.entities.Appointment.create(buildBreakPayload(start_time, end_time, employee_id, date));
         created++;
-      } catch {
-        errors++;
+      } catch (err) {
+        if (err?.status === 409) taken++;
+        else errors++;
       }
     }
     refreshAll();
-    if (errors === 0) toast.success(`${created} pauses créées`);
-    else toast.warning(`${created} pauses créées, ${errors} erreurs`);
+    const parts = [`${created} pause${created > 1 ? 's' : ''} créée${created > 1 ? 's' : ''}`];
+    if (taken) parts.push(`${taken} jour${taken > 1 ? 's' : ''} déjà pris`);
+    if (withClient) parts.push(`${withClient} avec un client à cette heure (non posée${withClient > 1 ? 's' : ''})`);
+    if (onLeave) parts.push(`${onLeave} en congé`);
+    if (errors) parts.push(`${errors} erreur${errors > 1 ? 's' : ''}`);
+    if (taken + withClient + onLeave + errors === 0) toast.success(parts.join(' · '));
+    else toast.warning(parts.join(' · '), { duration: 8000 });
   };
 
   const handleExport = () => {
@@ -331,10 +363,10 @@ export default function Agenda() {
         action: {
           label: 'Annuler',
           onClick: () => saveMove(queryClient, { ...apt, ...fields }, before, false)
-            .catch((e) => toast.error(e?.message || 'Retour impossible')),
+            .catch((e) => toast.error(agendaErrorMessage(e, 'Retour impossible'))),
         },
       }))
-      .catch((e) => toast.error(e?.message || 'Modification impossible'));
+      .catch((e) => toast.error(agendaErrorMessage(e, 'Modification impossible')));
   };
 
   // Même heure de départ qu'un autre créneau du même barber : refusé par la base, on prévient avant
@@ -394,18 +426,16 @@ export default function Agenda() {
     return appointments.filter((a) => String(a.employee_id) === String(employeeId) && String(a.date).slice(0, 10) === date);
   };
 
-  // Créneaux last minute expirés (fin + 15 min passée) que personne n'a pris
+  // Créneaux last minute expirés (fin + 15 min passée, heure de Paris) que personne n'a pris
   useEffect(() => {
     if (!appointments.length) return;
-    const now = new Date();
-    const todayStr = format(now, 'yyyy-MM-dd');
-    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    const nowMs = Date.now();
 
     const expired = appointments.filter((a) =>
       a.status === 'last_minute'
       && !a.client_email
       && a.client_name === 'Last Minute'
-      && (a.date < todayStr || (a.date === todayStr && timeToMinutes(a.end_time || a.start_time) + 15 <= nowMinutes)));
+      && (() => { const end = appointmentEndParis(a); return end != null && end + 15 * 60000 <= nowMs; })());
 
     if (expired.length === 0) return;
 

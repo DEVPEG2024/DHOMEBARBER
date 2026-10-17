@@ -157,7 +157,9 @@ export default function Textile() {
         <div className="flex justify-center py-20">
           <div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
         </div>
-      ) : isError ? (
+      ) : isError && !data ? (
+        // Écran d'erreur seulement si rien n'a jamais été chargé : un rechargement raté (compte à
+        // rebours qui interroge le serveur toutes les 5 s) ne remplace pas la page déjà affichée
         <div className="text-center py-16 px-4">
           <div className="w-14 h-14 rounded-3xl bg-destructive/10 flex items-center justify-center mx-auto mb-4">
             <AlertTriangle className="w-7 h-7 text-destructive" />
@@ -185,6 +187,21 @@ export default function Textile() {
         </div>
       ) : (
         <div className="space-y-9">
+          {/* Rechargement raté avec des données en cache : bandeau discret, rien n'est remplacé */}
+          {isError && (
+            <div role="status" className="flex items-center gap-2 rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
+              <RefreshCw className={`w-3.5 h-3.5 shrink-0 ${isFetching ? 'animate-spin' : ''}`} />
+              <span className="flex-1 min-w-0">
+                {polling ? 'Connexion instable, nouvel essai en cours' : 'Connexion instable : les infos peuvent dater'}
+              </span>
+              {!polling && (
+                <button type="button" onClick={() => refetch()} disabled={isFetching}
+                  className="shrink-0 font-semibold underline underline-offset-2 disabled:opacity-60">
+                  Réessayer
+                </button>
+              )}
+            </div>
+          )}
           {/* Drop en vedette + ses pièces */}
           {featured && (
             <Section reduceMotion={reduceMotion} className="space-y-5">

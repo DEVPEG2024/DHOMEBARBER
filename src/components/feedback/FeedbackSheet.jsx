@@ -42,7 +42,10 @@ export default function FeedbackSheet({ type: initialType = 'bug', salonEmail, o
       const { file_url } = await api.integrations.Core.UploadFile({ file });
       setScreenshot(file_url);
     } catch (err) {
-      toast.error(err?.message || "Impossible d'ajouter la capture");
+      // « Load failed » / « Failed to fetch » traduits ; le message HEIC d'UploadFile reste affiché
+      toast.error(isNetworkError(err)
+        ? 'Pas de connexion internet. Vérifie ton réseau puis réessaie.'
+        : (err?.message && !/^HTTP \d+$/.test(err.message) ? err.message : "Impossible d'ajouter la capture"));
     } finally {
       setUploading(false);
     }

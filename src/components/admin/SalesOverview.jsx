@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { api } from '@/api/apiClient';
 import { TEXTILE_QUERY_KEY, fetchTextileOverview, ACTIVE_RESERVATION_STATUSES } from '@/lib/textileApi';
+import LoadError from '@/components/shared/LoadError';
 
 const ORDER_OPEN = ['pending', 'confirmed', 'ready'];
 const EVENT_OPEN = ['pending', 'quoted'];
@@ -72,10 +73,11 @@ function Mini({ label, value, icon: Icon, color, hint }) {
   );
 }
 
-function ChannelPanel({ title, icon: Icon, color, to, children, badge }) {
+function ChannelPanel({ title, icon: Icon, color, to, children, badge, failed = false }) {
   const navigate = useNavigate();
   return (
     <div className="bg-card border border-border rounded-xl p-4">
+      {failed && <p className="text-[10px] text-amber-400 mb-2">Données indisponibles : chiffres masqués (—)</p>}
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-xs font-semibold uppercase tracking-wider flex items-center gap-1.5" style={{ color }}>
           <Icon className="w-3.5 h-3.5" /> {title}
@@ -102,23 +104,43 @@ export default function SalesOverview({ appointments }) {
   const today = format(new Date(), 'yyyy-MM-dd');
   const monthPrefix = today.slice(0, 7);
 
-  const { data: orders = [] } = useQuery({
+  const ordersQ = useQuery({
     queryKey: ['dashboard', 'orders'],
     queryFn: () => api.entities.Order.list('-created_date', 500),
   });
-  const { data: giftCards = [] } = useQuery({
+  const giftCardsQ = useQuery({
     queryKey: ['dashboard', 'giftCards'],
     queryFn: () => api.entities.GiftCard.list('-created_at', 500),
   });
-  const { data: events = [] } = useQuery({
+  const eventsQ = useQuery({
     queryKey: ['dashboard', 'events'],
     queryFn: () => api.entities.Event.list('-created_at', 300),
   });
-  const { data: textile } = useQuery({ queryKey: TEXTILE_QUERY_KEY, queryFn: fetchTextileOverview });
-  const { data: reservations = [] } = useQuery({
+  const textileQ = useQuery({ queryKey: TEXTILE_QUERY_KEY, queryFn: fetchTextileOverview });
+  const resQ = useQuery({
     queryKey: ['textileReservations', 'all'],
     queryFn: () => api.entities.TextileReservation.list('-created_at', 500),
   });
+  const orders = ordersQ.data ?? [];
+  const giftCards = giftCardsQ.data ?? [];
+  const events = eventsQ.data ?? [];
+  const textile = textileQ.data;
+  const reservations = resQ.data ?? [];
+  // Canal dont la source n'a pas pu se charger : jamais « 0 € », mais « — » et une alerte
+  const failed = {
+    boutique: ordersQ.isError && !ordersQ.data,
+    cartes: giftCardsQ.isError && !giftCardsQ.data,
+    privatisations: eventsQ.isError && !eventsQ.data,
+    textile: (textileQ.isError && !textileQ.data) || (resQ.isError && !resQ.data),
+  };
+  const failedLabels = [
+    failed.boutique && 'Boutique', failed.cartes && 'Cartes cadeau',
+    failed.privatisations && 'Privatisations', failed.textile && 'Textile',
+  ].filter(Boolean);
+  const incomplete = failedLabels.length > 0;
+  const retryFailed = () => Promise.all([ordersQ, giftCardsQ, eventsQ, textileQ, resQ]
+    .filter((q) => q.isError).map((q) => q.refetch()));
+  const money = (key, value) => (failed[key] ? '—' : eur(value));
 
   const stats = useMemo(() => {
     const isToday = (v) => dayOf(v) === today;
@@ -142,9 +164,17 @@ export default function SalesOverview({ appointments }) {
     const sold = giftCards.filter((c) => c.status === 'validated' || c.status === 'used');
     const soldDate = (c) => c.validated_at || c.created_at;
     const pendingCards = giftCards.filter((c) => c.status === 'pending');
+    // Moyen de paiement noté à la validation (cb / especes) ; les cartes d'avant : « non renseigné »
+    const byPayment = (rows) => ({
+      cb: sum(rows.filter((c) => c.payment_method === 'cb'), (c) => c.amount),
+      especes: sum(rows.filter((c) => c.payment_method === 'especes'), (c) => c.amount),
+      other: sum(rows.filter((c) => c.payment_method !== 'cb' && c.payment_method !== 'especes'), (c) => c.amount),
+    });
     const cartes = {
       today: sum(sold.filter((c) => isToday(soldDate(c))), (c) => c.amount),
       month: sum(sold.filter((c) => isMonth(soldDate(c))), (c) => c.amount),
+      todayBy: byPayment(sold.filter((c) => isToday(soldDate(c)))),
+      monthBy: byPayment(sold.filter((c) => isMonth(soldDate(c)))),
       monthCount: sold.filter((c) => isMonth(soldDate(c))).length,
       pendingCount: pendingCards.length,
       pendingAmount: sum(pendingCards, (c) => c.amount),
@@ -214,20 +244,26 @@ export default function SalesOverview({ appointments }) {
       boutique, cartes, privatisations, textile: textileStats, channels, totalToday, totalMonth, pending,
       rdvToday, rdvMonth, giftToday, giftMonth,
     };
-  }, [orders, giftCards, events, textile, reservations, appointments, today, monthPrefix]);
+  }, [ordersQ.data, giftCardsQ.data, eventsQ.data, textileQ.data, resQ.data, appointments, today, monthPrefix]);
 
   const { boutique, cartes, privatisations, textile: tx, channels, totalToday, totalMonth, pending, giftToday, giftMonth } = stats;
   const otherToday = totalToday - stats.rdvToday;
   const otherMonth = totalMonth - stats.rdvMonth;
   const drop = tx.currentDrop;
 
+  const payHint = (by) => `CB ${eur(by.cb)} · Espèces ${eur(by.especes)}${by.other > 0 ? ` · non renseigné ${eur(by.other)}` : ''}`;
+
   return (
     <>
+      {incomplete && (
+        <LoadError compact className="mb-4" what={`les ventes de : ${failedLabels.join(', ')}`} onRetry={retryFailed}
+          retrying={[ordersQ, giftCardsQ, eventsQ, textileQ, resQ].some((q) => q.isFetching)} />
+      )}
       {/* CA global : tous les canaux */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-card border border-primary/30 rounded-xl p-4">
           <p className="text-[10px] text-primary font-medium uppercase tracking-wider">CA global aujourd'hui</p>
-          <p className="text-2xl font-bold mt-1 text-foreground">{eur(totalToday)}</p>
+          <p className="text-2xl font-bold mt-1 text-foreground">{eur(totalToday)}{incomplete && <span className="text-xs font-medium text-amber-400"> (incomplet)</span>}</p>
           <p className="text-[10px] text-muted-foreground mt-0.5">tous canaux · dont {eur(otherToday)} hors RDV</p>
           {giftToday > 0 && (
             <p className="text-[10px] text-muted-foreground mt-0.5">RDV réglés par carte cadeau : {eur(giftToday)}, non recomptés</p>
@@ -235,7 +271,7 @@ export default function SalesOverview({ appointments }) {
         </motion.div>
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-card border border-primary/30 rounded-xl p-4">
           <p className="text-[10px] text-primary font-medium uppercase tracking-wider">CA global du mois</p>
-          <p className="text-2xl font-bold mt-1 text-foreground">{eur(totalMonth)}</p>
+          <p className="text-2xl font-bold mt-1 text-foreground">{eur(totalMonth)}{incomplete && <span className="text-xs font-medium text-amber-400"> (incomplet)</span>}</p>
           <p className="text-[10px] text-muted-foreground mt-0.5">tous canaux · dont {eur(otherMonth)} hors RDV</p>
           {giftMonth > 0 && (
             <p className="text-[10px] text-muted-foreground mt-0.5">RDV réglés par carte cadeau : {eur(giftMonth)}, non recomptés</p>
@@ -286,16 +322,17 @@ export default function SalesOverview({ appointments }) {
         </h3>
         <div className="space-y-2.5">
           {channels.map((c) => {
-            const pct = totalMonth > 0 ? Math.round((c.month / totalMonth) * 100) : 0;
+            const missing = !!failed[c.key];
+            const pct = totalMonth > 0 && !missing ? Math.round((c.month / totalMonth) * 100) : 0;
             return (
               <div key={c.key}>
                 <div className="flex items-center justify-between mb-1">
                   <div className="flex items-center gap-2 min-w-0">
                     <c.icon className="w-3.5 h-3.5 shrink-0" style={{ color: c.color }} />
                     <span className="text-xs font-medium truncate">{c.label}</span>
-                    <span className="text-[10px] text-muted-foreground shrink-0">{pct}%</span>
+                    <span className="text-[10px] text-muted-foreground shrink-0">{missing ? '—' : `${pct}%`}</span>
                   </div>
-                  <span className="text-xs font-bold shrink-0 ml-2">{eur(c.month)}<span className="text-[10px] text-muted-foreground font-normal"> · auj. {eur(c.today)}</span></span>
+                  <span className="text-xs font-bold shrink-0 ml-2">{missing ? '—' : eur(c.month)}<span className="text-[10px] text-muted-foreground font-normal"> · auj. {missing ? '—' : eur(c.today)}</span></span>
                 </div>
                 <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
                   <motion.div initial={{ width: 0 }} animate={{ width: `${pct}%` }} transition={{ duration: 0.6, ease: 'easeOut' }}
@@ -310,36 +347,39 @@ export default function SalesOverview({ appointments }) {
 
       {/* Un panneau par canal */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
-        <ChannelPanel title="Boutique" icon={ShoppingBag} color={CHANNEL_COLORS.boutique} to="/admin/orders"
-          badge={boutique.openCount > 0 && <span className="ml-1 px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 text-[10px]">{boutique.openCount} en cours</span>}>
-          <Mini label="Commandes retirées auj." value={eur(boutique.today)} icon={Euro} color={CHANNEL_COLORS.boutique} />
-          <Mini label="Commandes retirées ce mois" value={eur(boutique.month)} icon={Euro} color={CHANNEL_COLORS.boutique} hint={`${boutique.monthCount} commande${boutique.monthCount > 1 ? 's' : ''}`} />
-          <Mini label="En cours (à encaisser)" value={eur(boutique.openAmount)} icon={Clock} color="#f59e0b" hint={`${boutique.openCount} commande${boutique.openCount > 1 ? 's' : ''}`} />
-          <Mini label="Prêtes à retirer" value={boutique.readyCount} icon={PackageCheck} color="#4ade80" />
+        <ChannelPanel title="Boutique" icon={ShoppingBag} color={CHANNEL_COLORS.boutique} to="/admin/orders" failed={failed.boutique}
+          badge={!failed.boutique && boutique.openCount > 0 && <span className="ml-1 px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 text-[10px]">{boutique.openCount} en cours</span>}>
+          <Mini label="Commandes retirées auj." value={money('boutique', boutique.today)} icon={Euro} color={CHANNEL_COLORS.boutique} />
+          <Mini label="Commandes retirées ce mois" value={money('boutique', boutique.month)} icon={Euro} color={CHANNEL_COLORS.boutique} hint={failed.boutique ? '' : `${boutique.monthCount} commande${boutique.monthCount > 1 ? 's' : ''}`} />
+          <Mini label="En cours (à encaisser)" value={money('boutique', boutique.openAmount)} icon={Clock} color="#f59e0b" hint={failed.boutique ? '' : `${boutique.openCount} commande${boutique.openCount > 1 ? 's' : ''}`} />
+          <Mini label="Prêtes à retirer" value={failed.boutique ? '—' : boutique.readyCount} icon={PackageCheck} color="#4ade80" />
         </ChannelPanel>
 
-        <ChannelPanel title="Cartes cadeau" icon={Gift} color={CHANNEL_COLORS.cartes} to="/admin/gift-cards"
-          badge={cartes.pendingCount > 0 && <span className="ml-1 px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 text-[10px]">{cartes.pendingCount} à valider</span>}>
-          <Mini label="Validées aujourd'hui" value={eur(cartes.today)} icon={Euro} color={CHANNEL_COLORS.cartes} />
-          <Mini label="Validées ce mois" value={eur(cartes.month)} icon={Euro} color={CHANNEL_COLORS.cartes} hint={`${cartes.monthCount} carte${cartes.monthCount > 1 ? 's' : ''}`} />
-          <Mini label="En attente de paiement" value={eur(cartes.pendingAmount)} icon={Clock} color="#f59e0b" hint={`${cartes.pendingCount} carte${cartes.pendingCount > 1 ? 's' : ''}`} />
-          <Mini label="Solde en circulation" value={eur(cartes.balance)} icon={Wallet} color="#60a5fa" hint="reste à consommer" />
+        <ChannelPanel title="Cartes cadeau" icon={Gift} color={CHANNEL_COLORS.cartes} to="/admin/gift-cards" failed={failed.cartes}
+          badge={!failed.cartes && cartes.pendingCount > 0 && <span className="ml-1 px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 text-[10px]">{cartes.pendingCount} à valider</span>}>
+          <Mini label="Validées aujourd'hui" value={money('cartes', cartes.today)} icon={Euro} color={CHANNEL_COLORS.cartes} hint={failed.cartes || !cartes.today ? '' : payHint(cartes.todayBy)} />
+          <Mini label="Validées ce mois" value={money('cartes', cartes.month)} icon={Euro} color={CHANNEL_COLORS.cartes} hint={failed.cartes ? '' : `${cartes.monthCount} carte${cartes.monthCount > 1 ? 's' : ''}`} />
+          <Mini label="En attente de paiement" value={money('cartes', cartes.pendingAmount)} icon={Clock} color="#f59e0b" hint={failed.cartes ? '' : `${cartes.pendingCount} carte${cartes.pendingCount > 1 ? 's' : ''}`} />
+          <Mini label="Solde en circulation" value={money('cartes', cartes.balance)} icon={Wallet} color="#60a5fa" hint="reste à consommer" />
+          {!failed.cartes && cartes.month > 0 && (
+            <p className="col-span-2 text-[10px] text-muted-foreground px-1 break-words">Ventes du mois : {payHint(cartes.monthBy)}</p>
+          )}
         </ChannelPanel>
 
-        <ChannelPanel title="Privatisations" icon={PartyPopper} color={CHANNEL_COLORS.privatisations} to="/admin/events"
-          badge={privatisations.openCount > 0 && <span className="ml-1 px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 text-[10px]">{privatisations.openCount} demande{privatisations.openCount > 1 ? 's' : ''}</span>}>
-          <Mini label="Événements du mois" value={eur(privatisations.month)} icon={Euro} color={CHANNEL_COLORS.privatisations} hint={`${privatisations.monthCount} accepté${privatisations.monthCount > 1 ? 's' : ''} / confirmé${privatisations.monthCount > 1 ? 's' : ''}`} />
-          <Mini label="À venir" value={eur(privatisations.upcomingAmount)} icon={Timer} color="#60a5fa" hint={`${privatisations.upcomingCount} événement${privatisations.upcomingCount > 1 ? 's' : ''}`} />
-          <Mini label="Devis en attente" value={eur(privatisations.quotedAmount)} icon={Clock} color="#f59e0b" hint="réponse du client attendue" />
-          <Mini label="Demandes à traiter" value={privatisations.openCount} icon={Users} color="#f59e0b" />
+        <ChannelPanel title="Privatisations" icon={PartyPopper} color={CHANNEL_COLORS.privatisations} to="/admin/events" failed={failed.privatisations}
+          badge={!failed.privatisations && privatisations.openCount > 0 && <span className="ml-1 px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 text-[10px]">{privatisations.openCount} demande{privatisations.openCount > 1 ? 's' : ''}</span>}>
+          <Mini label="Événements du mois" value={money('privatisations', privatisations.month)} icon={Euro} color={CHANNEL_COLORS.privatisations} hint={failed.privatisations ? '' : `${privatisations.monthCount} accepté${privatisations.monthCount > 1 ? 's' : ''} / confirmé${privatisations.monthCount > 1 ? 's' : ''}`} />
+          <Mini label="À venir" value={money('privatisations', privatisations.upcomingAmount)} icon={Timer} color="#60a5fa" hint={failed.privatisations ? '' : `${privatisations.upcomingCount} événement${privatisations.upcomingCount > 1 ? 's' : ''}`} />
+          <Mini label="Devis en attente" value={money('privatisations', privatisations.quotedAmount)} icon={Clock} color="#f59e0b" hint="réponse du client attendue" />
+          <Mini label="Demandes à traiter" value={failed.privatisations ? '—' : privatisations.openCount} icon={Users} color="#f59e0b" />
         </ChannelPanel>
 
-        <ChannelPanel title="Textile · drops" icon={Shirt} color={CHANNEL_COLORS.textile} to="/admin/textile?tab=reservations"
-          badge={tx.toPayCount > 0 && <span className="ml-1 px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 text-[10px]">{tx.toPayCount} à payer</span>}>
-          <Mini label="Précommandes payées auj." value={eur(tx.today)} icon={Euro} color={CHANNEL_COLORS.textile} />
-          <Mini label="Précommandes payées ce mois" value={eur(tx.month)} icon={Euro} color={CHANNEL_COLORS.textile} hint={`total ${eur(tx.total)} · ${tx.paidCount} pièce${tx.paidCount > 1 ? 's' : ''}`} />
-          <Mini label="À payer au salon" value={eur(tx.toPayAmount)} icon={Clock} color="#f59e0b" hint={`${tx.toPayCount} réservation${tx.toPayCount > 1 ? 's' : ''}`} />
-          <Mini label="Prêtes à retirer" value={tx.readyCount} icon={PackageCheck} color="#a78bfa" hint={drop ? `${drop.name} · ${tx.currentDropPieces} pièce${tx.currentDropPieces > 1 ? 's' : ''}` : `${tx.labVotes} vote${tx.labVotes > 1 ? 's' : ''} au Labo`} />
+        <ChannelPanel title="Textile · drops" icon={Shirt} color={CHANNEL_COLORS.textile} to="/admin/textile?tab=reservations" failed={failed.textile}
+          badge={!failed.textile && tx.toPayCount > 0 && <span className="ml-1 px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 text-[10px]">{tx.toPayCount} à payer</span>}>
+          <Mini label="Précommandes payées auj." value={money('textile', tx.today)} icon={Euro} color={CHANNEL_COLORS.textile} />
+          <Mini label="Précommandes payées ce mois" value={money('textile', tx.month)} icon={Euro} color={CHANNEL_COLORS.textile} hint={failed.textile ? '' : `total ${eur(tx.total)} · ${tx.paidCount} pièce${tx.paidCount > 1 ? 's' : ''}`} />
+          <Mini label="À payer au salon" value={money('textile', tx.toPayAmount)} icon={Clock} color="#f59e0b" hint={failed.textile ? '' : `${tx.toPayCount} réservation${tx.toPayCount > 1 ? 's' : ''}`} />
+          <Mini label="Prêtes à retirer" value={failed.textile ? '—' : tx.readyCount} icon={PackageCheck} color="#a78bfa" hint={drop ? `${drop.name} · ${tx.currentDropPieces} pièce${tx.currentDropPieces > 1 ? 's' : ''}` : `${tx.labVotes} vote${tx.labVotes > 1 ? 's' : ''} au Labo`} />
           {drop && drop.status === 'teasing' && (
             <div className="col-span-2 flex items-center gap-2 text-[11px] text-muted-foreground px-1">
               <Flame className="w-3.5 h-3.5 text-orange-400" /> Drop « {drop.name} » annoncé · {Number(drop.alerts_count) || 0} abonné{(Number(drop.alerts_count) || 0) > 1 ? 's' : ''} à l'alerte

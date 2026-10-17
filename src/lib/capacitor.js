@@ -15,6 +15,24 @@ export const platform = Capacitor.getPlatform(); // 'ios' | 'android' | 'web'
 /**
  * Initialize native plugins — call once at app startup
  */
+// ─── Bouton retour Android : pile des fenêtres ouvertes ───
+// Chaque fenêtre ouverte empile sa fonction de fermeture (useAndroidBack) ; le retour ferme la
+// fenêtre du dessus seulement. Pile plutôt qu'événement annulable : l'ordre reste juste quand
+// deux fenêtres sont empilées.
+const backHandlers = [];
+
+/**
+ * Empile `fn` (fermeture de la fenêtre du dessus) ; renvoie la fonction qui la retire.
+ * Sans effet hors Android (aucun bouton retour matériel).
+ */
+export function registerBackHandler(fn) {
+  backHandlers.push(fn);
+  return () => {
+    const i = backHandlers.lastIndexOf(fn);
+    if (i >= 0) backHandlers.splice(i, 1);
+  };
+}
+
 export async function initCapacitor() {
   if (!isNative) return;
 
@@ -46,6 +64,12 @@ export async function initCapacitor() {
   // Handle back button on Android
   if (platform === 'android') {
     App.addListener('backButton', ({ canGoBack }) => {
+      // Une fenêtre est ouverte : le retour la ferme (comme sa croix), sans quitter la page ni
+      // l'app — la saisie reste intacte (règle « fermeture par la croix uniquement »)
+      if (backHandlers.length) {
+        try { backHandlers[backHandlers.length - 1](); } catch { /* fermeture au mieux */ }
+        return;
+      }
       if (canGoBack) {
         window.history.back();
       } else {

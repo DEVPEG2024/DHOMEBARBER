@@ -14,6 +14,7 @@ import { toast } from 'sonner';
 import { api } from '@/api/apiClient';
 import { Button } from '@/components/ui/button';
 import { RESERVATION_STATUSES } from '@/lib/textileApi';
+import LoadError from '@/components/shared/LoadError';
 import {
   RESERVATION_STATUS_STYLES, reservationStatusLabel, StatusPill, TwoTapButton, ActionButton, Spinner, EmptyState,
   formatParisDateTime, formatEuros, reservationTotal, invalidateTextile,
@@ -66,8 +67,11 @@ function NotesEditor({ reservation, onSave, saving }) {
  * @param {object} props
  * @param {Array} props.reservations   Réservations triées par date décroissante
  * @param {boolean} props.isLoading
+ * @param {Error|null} [props.error]   Échec du chargement sans donnée : LoadError, jamais « Aucune réservation »
+ * @param {() => void} [props.onRetry]
+ * @param {boolean} [props.retrying]
  */
-export default function ReservationsTab({ reservations, isLoading }) {
+export default function ReservationsTab({ reservations, isLoading, error = null, onRetry, retrying = false }) {
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
@@ -79,8 +83,13 @@ export default function ReservationsTab({ reservations, isLoading }) {
       invalidateTextile(queryClient, 'textileReservations');
       toast.success(successMessage || (data.status ? 'Statut mis à jour' : 'Note enregistrée'));
     },
-    onError: (err) => toast.error(err?.message || 'Erreur lors de la mise à jour'),
+    onError: (err) => {
+      toast.error(err?.message || 'Erreur lors de la mise à jour');
+      // Refus du serveur (réservation expirée / annulée entre-temps) : la carte doit montrer l'état réel
+      invalidateTextile(queryClient, 'textileReservations');
+    },
   });
+  const loadFailed = !!error && reservations.length === 0;
 
   const counts = useMemo(() => {
     const c = { all: reservations.length };
@@ -117,7 +126,8 @@ export default function ReservationsTab({ reservations, isLoading }) {
 
   return (
     <div>
-      {/* Stats */}
+      {/* Stats (masquées en échec : pas de « 0 » ni « 0 € » trompeurs) */}
+      {!loadFailed && (
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-5">
         <div className="bg-card rounded-2xl border border-border p-4">
           <p className="text-xs text-amber-400 font-medium">À payer</p>
@@ -145,6 +155,7 @@ export default function ReservationsTab({ reservations, isLoading }) {
           <p className="text-[10px] text-muted-foreground">payées + prêtes + retirées</p>
         </div>
       </div>
+      )}
 
       {/* Recherche + filtres */}
       <div className="relative mb-3">
@@ -169,6 +180,8 @@ export default function ReservationsTab({ reservations, isLoading }) {
 
       {isLoading ? (
         <Spinner />
+      ) : loadFailed ? (
+        <LoadError what="les réservations" error={error} onRetry={onRetry} retrying={retrying} />
       ) : filtered.length === 0 ? (
         <EmptyState icon={ClipboardList} title="Aucune réservation"
           hint={reservations.length > 0 ? 'Aucune ne correspond à ce filtre.' : 'Les réservations des clients apparaîtront ici dès l\'ouverture d\'un drop.'} />

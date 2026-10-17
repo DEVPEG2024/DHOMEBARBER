@@ -24,6 +24,7 @@ import {
   EVENTS_KEY, INVITES_KEY, invalidateSalonEvents, statsByEvent, EMPTY_STATS, Spinner, EmptyState,
 } from '@/components/salon-events-admin/shared';
 import EventCard from '@/components/salon-events-admin/EventCard';
+import LoadError from '@/components/shared/LoadError';
 import EventDialog from '@/components/salon-events-admin/EventDialog';
 import PublishDialog from '@/components/salon-events-admin/PublishDialog';
 import GuestsDialog from '@/components/salon-events-admin/GuestsDialog';
@@ -118,6 +119,8 @@ export default function AdminSalonEvents() {
 
   const busy = statusMutation.isPending || deleteMutation.isPending;
   const loading = events.length === 0 && eventsQ.isLoading;
+  // Échec sans donnée : LoadError à la place de « Aucun événement » (le bandeau ne sert qu'avec un cache)
+  const loadFailed = eventsQ.isError && !eventsQ.data;
 
   return (
     <div>
@@ -171,7 +174,7 @@ export default function AdminSalonEvents() {
         })}
       </div>
 
-      {eventsQ.error && (
+      {eventsQ.error && !loadFailed && (
         <div className="mb-4 flex items-start gap-2 rounded-xl border border-red-500/25 bg-red-500/10 p-3 text-xs text-red-300">
           <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
           <span>Impossible de charger les événements : {eventsQ.error.message}</span>
@@ -186,6 +189,8 @@ export default function AdminSalonEvents() {
 
       {loading ? (
         <Spinner />
+      ) : loadFailed ? (
+        <LoadError what="les événements" error={eventsQ.error} onRetry={eventsQ.refetch} retrying={eventsQ.isFetching} />
       ) : visible.length === 0 ? (
         <EmptyState icon={filter === 'upcoming' ? PartyPopper : CalendarClock} title={current.empty} hint={isAdmin ? current.hint : undefined} />
       ) : (

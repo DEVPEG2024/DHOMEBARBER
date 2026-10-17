@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { api } from '@/api/apiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
+import LoadError, { isNetworkError } from '@/components/shared/LoadError';
 
 // Doit rester aligné sur EVENT_TYPES de src/pages/Events.jsx (pas d'EVJF : clientèle masculine).
 const EVENT_TYPES = {
@@ -22,6 +23,14 @@ const TIME_SLOTS = {
   full_day: 'Journée complète (9h-20h)',
 };
 
+/** Message d'erreur d'un enregistrement : celui du serveur s'il en donne un, sinon un texte clair. */
+function saveErrorMessage(err) {
+  if (isNetworkError(err)) return 'Pas de connexion internet';
+  const msg = err?.message;
+  if (msg && !/^HTTP \d+/.test(msg)) return msg;
+  return 'Impossible d\'enregistrer, réessayez';
+}
+
 const STATUS_CONFIG = {
   pending: { label: 'En attente', color: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20', icon: Clock },
   quoted: { label: 'Devis envoyé', color: 'bg-blue-500/10 text-blue-400 border-blue-500/20', icon: Euro },
@@ -35,20 +44,32 @@ export default function AdminEvents() {
   const [editingId, setEditingId] = useState(null);
   const [editNotes, setEditNotes] = useState('');
   const [editPrice, setEditPrice] = useState('');
+  // Refus en deux taps : le refus envoie tout de suite un email définitif au client
+  const [confirmDeclineId, setConfirmDeclineId] = useState(null);
   const queryClient = useQueryClient();
 
-  const { data: events = [] } = useQuery({
+  const { data, isError, error, refetch, isFetching } = useQuery({
     queryKey: ['adminEvents'],
     queryFn: () => api.entities.Event.list('-created_at', 200),
   });
+  const events = data || [];
 
+  // La confirmation du refus se désarme seule au bout de 4 s
+  useEffect(() => {
+    if (!confirmDeclineId) return undefined;
+    const t = setTimeout(() => setConfirmDeclineId(null), 4000);
+    return () => clearTimeout(t);
+  }, [confirmDeclineId]);
+
+  // Le toast de succès n'apparaît qu'après la réponse du serveur ; en cas d'échec la saisie reste
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }) => api.entities.Event.update(id, data),
-    onSuccess: () => {
+    mutationFn: ({ id, data: patch }) => api.entities.Event.update(id, patch),
+    onSuccess: (_, vars) => {
+      toast.success(vars?.successMsg || 'Statut mis à jour');
       queryClient.invalidateQueries({ queryKey: ['adminEvents'] });
       setEditingId(null);
     },
-    onError: () => toast.error('Erreur'),
+    onError: (err) => toast.error(saveErrorMessage(err)),
   });
 
   const deleteMutation = useMutation({
@@ -57,9 +78,15 @@ export default function AdminEvents() {
       queryClient.invalidateQueries({ queryKey: ['adminEvents'] });
       toast.success('Demande supprimée');
     },
+    onError: (err) => toast.error(saveErrorMessage(err)),
   });
 
+  const busy = updateMutation.isPending;
+
   const handleStatus = (event, status) => {
+    if (busy) return;
+    const messages = { confirmed: 'Événement confirmé', declined: 'Événement refusé', quoted: 'Devis envoyé au client' };
+    setConfirmDeclineId(null);
     updateMutation.mutate({
       id: event.id,
       data: {
@@ -67,9 +94,8 @@ export default function AdminEvents() {
         admin_notes: editingId === event.id ? editNotes : event.admin_notes,
         price: editingId === event.id ? (parseFloat(editPrice) || null) : event.price,
       },
+      successMsg: messages[status] || 'Statut mis à jour',
     });
-    const messages = { confirmed: 'Événement confirmé', declined: 'Événement refusé', quoted: 'Devis envoyé au client' };
-    toast.success(messages[status] || 'Statut mis à jour');
   };
 
   const handleSendQuote = (event) => {
@@ -79,18 +105,18 @@ export default function AdminEvents() {
       return;
     }
     handleStatus(event, 'quoted');
-    setEditingId(null);
   };
 
   const handleSaveNotes = (event) => {
+    if (busy) return;
     updateMutation.mutate({
       id: event.id,
       data: {
         admin_notes: editNotes,
         price: parseFloat(editPrice) || null,
       },
+      successMsg: 'Notes sauvegardées',
     });
-    toast.success('Notes sauvegardées');
   };
 
   const filtered = filter === 'all' ? events : events.filter(e => e.status === filter);
@@ -131,6 +157,11 @@ export default function AdminEvents() {
         ))}
       </div>
 
+      {/* Liste en échec sans données : erreur à la place de la liste et de l'état vide */}
+      {isError && !data ? (
+        <LoadError what="les demandes de privatisation" error={error} onRetry={refetch} retrying={isFetching} />
+      ) : (
+      <>
       {/* Events list */}
       <div className="space-y-3">
         {filtered.map((event, i) => {
@@ -210,7 +241,7 @@ export default function AdminEvents() {
                       className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm resize-none" />
                   </div>
                   <div className="flex gap-2">
-                    <Button size="sm" className="flex-1" onClick={() => handleSaveNotes(event)}>
+                    <Button size="sm" className="flex-1" disabled={busy} onClick={() => handleSaveNotes(event)}>
                       Sauvegarder
                     </Button>
                     <Button size="sm" variant="outline" onClick={() => setEditingId(null)}>
@@ -243,14 +274,30 @@ export default function AdminEvents() {
                 {event.status === 'pending' && (
                   <>
                     <Button size="sm" className="flex-1 gap-1.5 bg-blue-600 hover:bg-blue-700"
+                      disabled={busy}
                       onClick={() => handleSendQuote(event)}>
                       <Euro className="w-3.5 h-3.5" /> Envoyer le devis
                     </Button>
-                    <Button size="sm" variant="outline"
-                      className="border-red-500/30 text-red-400 hover:bg-red-500/10 gap-1.5"
-                      onClick={() => handleStatus(event, 'declined')}>
-                      <XCircle className="w-3.5 h-3.5" /> Refuser
-                    </Button>
+                    {confirmDeclineId === event.id ? (
+                      <>
+                        <Button size="sm"
+                          className="flex-1 gap-1.5 bg-red-600 hover:bg-red-700 text-white whitespace-normal h-auto py-1.5"
+                          disabled={busy}
+                          onClick={() => handleStatus(event, 'declined')}>
+                          <XCircle className="w-3.5 h-3.5 shrink-0" /> Confirmer le refus (le client reçoit un email)
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => setConfirmDeclineId(null)}>
+                          Annuler
+                        </Button>
+                      </>
+                    ) : (
+                      <Button size="sm" variant="outline"
+                        className="border-red-500/30 text-red-400 hover:bg-red-500/10 gap-1.5"
+                        disabled={busy}
+                        onClick={() => setConfirmDeclineId(event.id)}>
+                        <XCircle className="w-3.5 h-3.5" /> Refuser
+                      </Button>
+                    )}
                   </>
                 )}
                 {/* Quoted: en attente de réponse client */}
@@ -263,6 +310,7 @@ export default function AdminEvents() {
                 {/* Accepted: client a accepté, confirmer après paiement */}
                 {event.status === 'accepted' && (
                   <Button size="sm" className="flex-1 gap-1.5 bg-green-600 hover:bg-green-700"
+                    disabled={busy}
                     onClick={() => handleStatus(event, 'confirmed')}>
                     <CheckCircle className="w-3.5 h-3.5" /> Confirmer (payé au salon)
                   </Button>
@@ -276,6 +324,7 @@ export default function AdminEvents() {
                 )}
                 <Button size="sm" variant="outline"
                   className="border-red-500/20 text-red-400 hover:bg-red-500/10 hover:text-red-300 gap-1.5 px-3"
+                  disabled={deleteMutation.isPending}
                   onClick={() => { if (window.confirm('Supprimer définitivement cette demande ?')) deleteMutation.mutate(event.id); }}>
                   <Trash2 className="w-3.5 h-3.5" /> Supprimer
                 </Button>
@@ -285,11 +334,13 @@ export default function AdminEvents() {
         })}
       </div>
 
-      {filtered.length === 0 && (
+      {data && filtered.length === 0 && (
         <div className="text-center py-16">
           <PartyPopper className="w-12 h-12 text-muted-foreground/20 mx-auto mb-3" />
           <p className="text-sm text-muted-foreground">Aucune demande d'événement</p>
         </div>
+      )}
+      </>
       )}
     </div>
   );

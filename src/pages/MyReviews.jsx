@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { api } from '@/api/apiClient';
@@ -116,7 +116,7 @@ function ReviewCard({ review, index, showAuthor }) {
         <span className="text-[10px] text-muted-foreground whitespace-nowrap">{formatDate(review.created_date)}</span>
       </div>
       {review.employee_name && <p className="text-[11px] text-primary/80 mb-1">avec {review.employee_name}</p>}
-      {review.comment && <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-line">{review.comment}</p>}
+      {review.comment && <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-line break-words">{review.comment}</p>}
     </motion.div>
   );
 }
@@ -174,6 +174,16 @@ export default function MyReviews() {
   const reviewsLoaded = myReviewsData !== undefined;
   // Plafond atteint seulement quand la liste est réellement chargée (une erreur ne bloque pas l'envoi)
   const limitReached = reviewsLoaded && reviews.length >= MAX_REVIEWS;
+
+  // Lien de la demande d'avis (push / email) : /reviews?tab=mine&write=1 ouvre le formulaire
+  // dès que mes avis sont chargés (au plafond, le bandeau existant suffit), puis retire `write`
+  // pour qu'un rechargement ou un retour arrière ne le rouvre pas.
+  const wantsWrite = searchParams.get('write') === '1';
+  useEffect(() => {
+    if (!wantsWrite || !reviewsLoaded) return;
+    if (!limitReached) setShowForm(true);
+    setSearchParams({ tab: 'mine' }, { replace: true });
+  }, [wantsWrite, reviewsLoaded, limitReached, setSearchParams]);
 
   // Même requête et même clé que l'accueil et le profil barber (barbers actifs)
   const { data: barbers = [] } = useQuery({

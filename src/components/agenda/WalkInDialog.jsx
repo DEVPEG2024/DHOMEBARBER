@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import ClientAccountPicker, { foldText } from './ClientAccountPicker';
 import {
   timeToMinutes, minutesToTime, addMinutesToTime, parseDateParam, slotIssues, appointmentEndParis,
-  invalidateAppointmentQueries,
+  invalidateAppointmentQueries, agendaErrorMessage,
 } from './agendaUtils';
 
 const inputCls = 'w-full min-w-0 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-primary/50';
@@ -148,8 +148,7 @@ function WalkInForm({ employees, defaultEmployeeId, defaultDate, onCancel, onCre
         toast.error(`${employee?.name || 'Ce barber'} a déjà un rendez-vous qui commence à ${startTime}. Choisissez une autre heure de début (par exemple ${addMinutesToTime(startTime, 5)}).`);
         queryClient.invalidateQueries({ queryKey: ['agendaAppointments', 'edit-check', date, employeeId] });
       } else {
-        const msg = typeof e?.message === 'string' && !/^HTTP/.test(e.message) ? e.message : '';
-        toast.error(msg || 'Enregistrement impossible. Vérifiez la connexion et réessayez.');
+        toast.error(agendaErrorMessage(e, 'Enregistrement impossible. Vérifiez la connexion et réessayez.'));
       }
     } finally {
       setSaving(false);

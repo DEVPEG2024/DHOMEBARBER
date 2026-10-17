@@ -37,26 +37,64 @@ export function appointmentDuration(apt) {
 const FALLBACK_DAYS = 10;
 
 /**
- * RDV confirmés et pauses du barber sur ces jours (projection « créneaux » côté client).
+ * La ligne occupe-t-elle le créneau pour une réservation client ? Le serveur le calcule
+ * (`blocks_client`, mêmes règles que son contrôle : RDV terminés, absents, last minute rattachés
+ * à un client compris). Repli pour un ancien serveur sans ce champ : confirmés et pauses.
+ * Partagé par la réservation (Booking.jsx) et le déplacement.
+ */
+export function blocksClient(row) {
+  if (!row) return false;
+  if (row.blocks_client === true) return true;
+  return row.blocks_client === undefined && (row.status === 'confirmed' || row.status === 'break');
+}
+
+/**
+ * Lignes du barber sur ces jours qui occupent un créneau (projection « créneaux » côté client),
+ * sans filtre de statut : le serveur dit lesquelles bloquent (`blocksClient`).
  * `keys` = jours effectivement chargés : seuls ceux-là peuvent être proposés (un jour non chargé
  * paraîtrait entièrement libre).
  * @returns {Promise<{ rows: object[], keys: string[] }>}
  */
 async function fetchBusy(employeeId, keys) {
-  const load = (status, dates) => api.entities.Appointment.filter({ employee_id: employeeId, date: dates, status }, 'start_time', 1000);
+  const load = (dates) => api.entities.Appointment.filter({ employee_id: employeeId, date: dates }, 'start_time', 1000);
   try {
-    const [confirmed, breaks] = await Promise.all([load('confirmed', keys), load('break', keys)]);
-    return { rows: [...(confirmed || []), ...(breaks || [])], keys };
+    const rows = await load(keys);
+    return { rows: (rows || []).filter(blocksClient), keys };
   } catch {
     // Filtre par liste de dates refusé : un jour à la fois, sur les 10 premiers jours seulement
     const rows = [];
     const loaded = keys.slice(0, FALLBACK_DAYS);
     for (const key of loaded) {
-      const [c, b] = await Promise.all([load('confirmed', key), load('break', key)]);
-      rows.push(...(c || []), ...(b || []));
+      const day = await load(key);
+      rows.push(...(day || []).filter(blocksClient));
     }
     return { rows, keys: loaded };
   }
+}
+
+/**
+ * Prestations de l'ancien RDV relues dans le catalogue actif (durée et prix d'aujourd'hui).
+ * `missing` : une prestation n'est plus proposée (retirée du catalogue) ; le serveur refuserait
+ * alors le déplacement. Sans catalogue, `duration` vaut 0 (repli sur la durée enregistrée).
+ * @returns {{ services: Array<{ service_id, name, duration, price }>, missing: boolean, duration: number }}
+ */
+export function currentServices(appointment, catalog) {
+  const list = Array.isArray(appointment?.services) ? appointment.services : [];
+  if (!Array.isArray(catalog)) return { services: [], missing: false, duration: 0 };
+  const byId = new Map(catalog.map(s => [String(s.id), s]));
+  const services = [];
+  let missing = false;
+  let duration = 0;
+  for (const s of list) {
+    const id = s?.service_id ?? s?.id;
+    const found = id !== undefined && id !== null ? byId.get(String(id)) : null;
+    if (!found) { missing = true; continue; }
+    const d = Number(found.duration) || 0;
+    duration += d;
+    services.push({ service_id: found.id, name: found.name, duration: d, price: Number(found.price) || 0 });
+  }
+  if (list.length === 0) missing = false;
+  return { services, missing, duration };
 }
 
 /**
@@ -65,9 +103,12 @@ async function fetchBusy(employeeId, keys) {
  * au plus tard ; au plus `limit` créneaux sur `days` jours, à partir d'aujourd'hui.
  * @returns {Promise<Array<{ date: string, time: string, label: string }>>}
  */
-export async function findRescheduleSlots({ appointment, employee, timeOffs = [], days = RESCHEDULE_DAYS, limit = RESCHEDULE_LIMIT }) {
+export async function findRescheduleSlots({ appointment, employee, timeOffs = [], catalog = null, days = RESCHEDULE_DAYS, limit = RESCHEDULE_LIMIT }) {
   if (!appointment || !employee) return [];
-  const duration = appointmentDuration(appointment);
+  // Durée d'aujourd'hui des prestations (catalogue) ; une prestation retirée : aucun créneau
+  const current = currentServices(appointment, catalog);
+  if (current.missing) return [];
+  const duration = current.duration > 0 ? current.duration : appointmentDuration(appointment);
   const target = toMinutes(appointment.start_time);
   const wanted = Array.from({ length: days }, (_, i) => parisDay(i));
   const { rows: busy, keys: loadedKeys } = await fetchBusy(employee.id, wanted.map(d => d.key));
@@ -100,14 +141,19 @@ export async function findRescheduleSlots({ appointment, employee, timeOffs = []
 
 /**
  * Déplace `appointment` au créneau `{ date, time }` : crée le nouveau rendez-vous (mêmes barber
- * et prestations), puis annule l'ancien. Sans `withReason`, l'annulation envoie exactement
+ * et prestations), puis annule l'ancien. Le serveur annule désormais l'ancien lui-même à la
+ * création (`reschedule_of`) ; l'appel qui suit ne fait alors plus rien (déjà annulé). Sans `withReason`, l'annulation envoie exactement
  * `{ status: 'cancelled' }` (un champ inconnu ferait refuser l'annulation).
  * @returns {Promise<{ created: object, oldCancelled: boolean }>} — lève l'erreur du serveur si la
  *   création est refusée (créneau pris entre-temps : 409)
  */
-export async function moveAppointment({ appointment, employee, user, slot, withReason = false }) {
-  const duration = appointmentDuration(appointment);
-  const services = (Array.isArray(appointment.services) ? appointment.services : []).map(s => ({
+export async function moveAppointment({ appointment, employee, user, slot, withReason = false, catalog = null }) {
+  // Prestations et durée d'aujourd'hui quand le catalogue est connu (le serveur recalcule de
+  // toute façon), sinon celles enregistrées sur l'ancien RDV
+  const current = currentServices(appointment, catalog);
+  const useCurrent = !current.missing && current.duration > 0;
+  const duration = useCurrent ? current.duration : appointmentDuration(appointment);
+  const services = useCurrent ? current.services : (Array.isArray(appointment.services) ? appointment.services : []).map(s => ({
     service_id: s?.service_id ?? s?.id,
     name: s?.name,
     duration: s?.duration,
@@ -123,7 +169,9 @@ export async function moveAppointment({ appointment, employee, user, slot, withR
     start_time: slot.time,
     end_time: toHHMM(toMinutes(slot.time) + duration),
     total_duration: duration,
-    total_price: Number(appointment.total_price) || services.reduce((t, s) => t + (Number(s.price) || 0), 0),
+    total_price: useCurrent
+      ? services.reduce((t, s) => t + (Number(s.price) || 0), 0)
+      : Number(appointment.total_price) || services.reduce((t, s) => t + (Number(s.price) || 0), 0),
     status: 'confirmed',
     notes: appointment.notes || '',
     // Le serveur fait suivre au nouveau RDV les produits ajoutés à l'ancien

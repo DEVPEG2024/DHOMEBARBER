@@ -5,12 +5,13 @@ import { motion } from 'framer-motion';
 import { toast } from 'sonner';
 import { CalendarClock, Scissors, PenLine, CheckCircle2, AlertTriangle, Minus, Clock, ArrowRight } from 'lucide-react';
 import { api } from '@/api/apiClient';
-import LoadError from '@/components/shared/LoadError';
+import LoadError, { isNetworkError } from '@/components/shared/LoadError';
 import {
   giftCardBalance, formatEuro, round2, parisToday, giftCardState,
-  debitGiftCard, undoGiftCardDebit, friendlyGiftCardError, invalidateGiftCardQueries, patchGiftCardCache,
+  debitGiftCard, friendlyGiftCardError, invalidateGiftCardQueries, patchGiftCardCache,
   fetchTodayAppointmentsToCash, giftCardTodayAppointmentsKey, closestAppointmentId, appointmentPrice,
-  appointmentServicesLabel, closeAppointmentWithGiftCard, reopenAppointment,
+  appointmentServicesLabel, closeAppointmentWithGiftCard, fetchGiftCard, newClientRef, runGiftCardUndo,
+  DEBIT_NETWORK_MESSAGE,
 } from '@/lib/giftCardDebit';
 
 const MODES = [
@@ -80,6 +81,13 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
   const sendingRef = useRef(false);
   const [closeApt, setCloseApt] = useState(true);
   const [result, setResult] = useState(null);
+  // « Annuler ce débit » de l'écran de succès : deux taps, un seul envoi à la fois
+  const [confirmUndo, setConfirmUndo] = useState(false);
+  const [undoing, setUndoing] = useState(false);
+  const undoingRef = useRef(false);
+  // Référence du débit (`client_ref`) : la même tant que l'admin retente le même débit (même
+  // montant, même RDV, mêmes prestations, même mode) et qu'aucun débit n'a réussi
+  const clientRefRef = useRef({ key: null, ref: null });
   const mountedRef = useRef(true);
   useEffect(() => () => { mountedRef.current = false; }, []);
   useEffect(() => { onResultChange?.(!!result); }, [result, onResultChange]);
@@ -141,25 +149,21 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
   };
 
   const runUndo = async (snapshot) => {
+    if (undoingRef.current) return;
+    undoingRef.current = true;
+    if (mountedRef.current) setUndoing(true);
     try {
-      const fresh = await undoGiftCardDebit(snapshot.card, snapshot.transaction);
-      if (snapshot.previousApt) {
-        try {
-          await reopenAppointment(snapshot.previousApt, queryClient);
-        } catch (err) {
-          toast.warning(`Solde remis, mais le RDV n'a pas pu être rouvert : ${friendlyGiftCardError(err)}`);
-        }
-      }
-      if (fresh) {
-        patchGiftCardCache(queryClient, fresh);
-        onCardChange?.(fresh);
-      }
-      invalidateGiftCardQueries(queryClient, snapshot.card.id);
-      queryClient.invalidateQueries({ queryKey: giftCardTodayAppointmentsKey(today) });
-      toast.success('Débit annulé', { description: fresh ? `Solde remis à ${formatEuro(giftCardBalance(fresh))}` : undefined });
-      if (mountedRef.current) setResult((r) => (r ? { ...r, undone: true } : r));
-    } catch (err) {
-      toast.error("Impossible d'annuler le débit", { description: friendlyGiftCardError(err) });
+      const ok = await runGiftCardUndo({
+        card: snapshot.card,
+        transaction: snapshot.transaction,
+        previousApt: snapshot.previousApt,
+        queryClient,
+        onCardChange,
+      });
+      if (ok && mountedRef.current) setResult((r) => (r ? { ...r, undone: true } : r));
+    } finally {
+      undoingRef.current = false;
+      if (mountedRef.current) { setUndoing(false); setConfirmUndo(false); }
     }
   };
 
@@ -169,13 +173,22 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
     setSending(true);
     const apt = selectedApt;
     const shouldClose = !!apt && fullyCovered && closeApt;
+    // Montant demandé (et non débité) : relu après une réponse perdue, le solde baisse et le débit
+    // recalculé changerait ; la même référence fait alors refuser un second débit (ref_mismatch)
+    const refKey = [mode, requested, apt?.id ?? '', [...selectedServiceIds].sort().join(',')].join('|');
+    if (clientRefRef.current.key !== refKey || !clientRefRef.current.ref) {
+      clientRefRef.current = { key: refKey, ref: newClientRef() };
+    }
     try {
       const { card: fresh, transaction } = await debitGiftCard(card, {
         amount: debit,
         appointmentId: apt?.id ?? null,
         services: selectedServices.map((s) => ({ id: s.id, name: s.name, price: Number(s.price) || 0 })),
         note: buildNote(),
+        clientRef: clientRefRef.current.ref,
       });
+      // Débit fait : le prochain sera un autre débit (nouvelle référence)
+      clientRefRef.current = { key: null, ref: null };
       // Avant la carte à jour : une carte épuisée n'est plus « débitable », le parent doit garder
       // ce panneau monté pour l'écran de succès (même lot de rendu)
       onResultChange?.(true);
@@ -209,11 +222,28 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
         apt,
         closed: !!previousApt,
         closeFailed,
+        snapshot,
       });
       setConfirming(false);
     } catch (err) {
-      toast.error('Débit impossible', { description: friendlyGiftCardError(err) });
       setConfirming(false);
+      // Pas de réponse (réseau) : le débit est peut-être passé. Jamais « réessayez » ; la carte est
+      // relue pour que le solde affiché et le montant recalculé partent du solde réel. Un nouvel
+      // essai garde la même référence : le serveur ne débite pas deux fois.
+      const noAnswer = isNetworkError(err) || (!err?.status && err?.name === 'TypeError');
+      if (noAnswer) toast.error('Débit incertain', { description: DEBIT_NETWORK_MESSAGE, duration: 12000 });
+      else toast.error('Débit impossible', { description: friendlyGiftCardError(err) });
+      // Refus (solde changé, carte annulée ou épuisée ailleurs) ou réponse perdue : carte relue
+      if (noAnswer || err?.status === 409 || err?.local) {
+        invalidateGiftCardQueries(queryClient, card.id);
+        try {
+          const fresh = await fetchGiftCard(card.id);
+          if (fresh) {
+            patchGiftCardCache(queryClient, fresh);
+            onCardChange?.(fresh);
+          }
+        } catch { /* relecture au mieux : le toast suffit */ }
+      }
     } finally {
       sendingRef.current = false;
       if (mountedRef.current) setSending(false);
@@ -222,6 +252,8 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
 
   const startOver = () => {
     setResult(null);
+    setConfirmUndo(false);
+    clientRefRef.current = { key: null, ref: null };
     setSelectedAptId(null);
     setSelectedServiceIds(new Set());
     setFreeAmount('');
@@ -266,7 +298,7 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
             {result.apt && !result.closed && (
               <div className="mt-2 text-xs text-muted-foreground">
                 {result.rest > 0
-                  ? <>Reste {formatEuro(result.rest)} : clôturez le RDV dans l'agenda avec le moyen de paiement du reste.</>
+                  ? <>Reste {formatEuro(result.rest)} : clôturez le RDV dans l'agenda avec le moyen de paiement du reste ; seuls ces {formatEuro(result.rest)} compteront en CB / espèces.</>
                   : <>Le RDV n'a pas été clôturé : faites-le dans l'agenda.</>}
                 <Link to={agendaLink(result.apt)} className="mt-1 flex items-center justify-center gap-1 font-semibold text-primary">
                   Ouvrir l'agenda <ArrowRight className="w-3 h-3" />
@@ -274,6 +306,28 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
               </div>
             )}
           </>
+        )}
+        {/* Débit erroné : annulable ici (le serveur l'accepte 24 h, l'historique aussi) */}
+        {!result.undone && result.snapshot?.transaction?.id && (
+          <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+            {!confirmUndo ? (
+              <button type="button" onClick={() => setConfirmUndo(true)} disabled={undoing}
+                className="px-3 py-2 rounded-xl text-xs font-semibold text-amber-300 bg-amber-500/10 border border-amber-500/25 hover:bg-amber-500/15 disabled:opacity-50">
+                Annuler ce débit
+              </button>
+            ) : (
+              <>
+                <button type="button" onClick={() => runUndo(result.snapshot)} disabled={undoing}
+                  className="px-3 py-2 rounded-xl text-xs font-semibold text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-60">
+                  {undoing ? 'Annulation…' : "Confirmer l'annulation"}
+                </button>
+                <button type="button" onClick={() => setConfirmUndo(false)} disabled={undoing}
+                  className="px-3 py-2 rounded-xl text-xs font-medium text-muted-foreground bg-white/5 border border-white/10 hover:bg-white/10 disabled:opacity-50">
+                  Non
+                </button>
+              </>
+            )}
+          </div>
         )}
         <div className="mt-4 flex gap-2">
           {canContinue && (
@@ -414,7 +468,7 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
           )}
           {selectedApt && rest > 0 && (
             <p className="text-[11px] text-muted-foreground">
-              Reste {formatEuro(rest)} : clôturez le RDV dans l'agenda avec le moyen de paiement du reste.{' '}
+              Reste {formatEuro(rest)} : clôturez le RDV dans l'agenda avec le moyen de paiement du reste ; seuls ces {formatEuro(rest)} compteront en CB / espèces.{' '}
               <Link to={agendaLink(selectedApt)} className="font-semibold text-primary whitespace-nowrap">Ouvrir l'agenda</Link>
             </p>
           )}

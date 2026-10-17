@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { api } from '@/api/apiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Pencil, Trash2, Mail, Upload, Images } from 'lucide-react';
@@ -13,6 +13,11 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
+import LoadError from '@/components/shared/LoadError';
+
+/** Message du serveur (409 « a N rendez-vous à venir… », photo refusée…), sinon le repli. */
+const serverText = (err, fallback) =>
+  (err?.message && !/^HTTP \d+$/.test(err.message) ? err.message : fallback);
 
 const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 const DAY_LABELS = { monday: 'Lundi', tuesday: 'Mardi', wednesday: 'Mercredi', thursday: 'Jeudi', friday: 'Vendredi', saturday: 'Samedi', sunday: 'Dimanche' };
@@ -30,11 +35,19 @@ export default function Team() {
   // Fiche dont on édite les réalisations (id : la fiche affichée suit le cache rechargé)
   const [galleryEmployeeId, setGalleryEmployeeId] = useState(null);
   const queryClient = useQueryClient();
+  // Suppression en deux taps : la corbeille devient « Supprimer ? », qui retombe seule après 4 s
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  useEffect(() => {
+    if (!confirmDeleteId) return undefined;
+    const t = setTimeout(() => setConfirmDeleteId(null), 4000);
+    return () => clearTimeout(t);
+  }, [confirmDeleteId]);
 
-  const { data: employees = [] } = useQuery({
+  const employeesQuery = useQuery({
     queryKey: ['employees', 'all'], // liste complète (inactifs inclus) : clé distincte des pages client
     queryFn: () => api.entities.Employee.list('sort_order', 50),
   });
+  const employees = employeesQuery.data ?? [];
 
   const saveMutation = useMutation({
     mutationFn: (data) => {
@@ -50,19 +63,21 @@ export default function Team() {
       setShowDialog(false);
       toast.success('Collaborateur sauvegardé');
     },
-    onError: () => {
-      toast.error('Erreur lors de la sauvegarde');
+    onError: (err) => {
+      toast.error(serverText(err, 'Erreur lors de la sauvegarde'));
     },
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id) => api.entities.Employee.delete(id),
     onSuccess: () => {
+      setConfirmDeleteId(null);
       queryClient.invalidateQueries({ queryKey: ['employees'] });
       toast.success('Collaborateur supprimé');
     },
-    onError: () => {
-      toast.error('Erreur lors de la suppression');
+    onError: (err) => {
+      setConfirmDeleteId(null);
+      toast.error(serverText(err, 'Erreur lors de la suppression'));
     },
   });
 
@@ -94,6 +109,9 @@ export default function Team() {
         </Button>
       </div>
 
+      {employeesQuery.isError && !employeesQuery.data ? (
+        <LoadError what="l'équipe" error={employeesQuery.error} onRetry={employeesQuery.refetch} retrying={employeesQuery.isFetching} />
+      ) : (
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {employees.map(emp => (
           <div key={emp.id} className="bg-card border border-border rounded-xl p-5">
@@ -113,28 +131,47 @@ export default function Team() {
                 </div>
                 <p className="text-[10px] text-muted-foreground uppercase tracking-wider">{emp.title || 'Barber'}</p>
                 {emp.email && (
-                  <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
-                    <Mail className="w-3 h-3" /> {emp.email}
+                  <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1 min-w-0">
+                    <Mail className="w-3 h-3 shrink-0" /> <span className="truncate">{emp.email}</span>
                   </p>
                 )}
               </div>
-              <div className="flex gap-1">
-                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setEditEmployee({ ...emp, working_hours: emp.working_hours || defaultHours }); setShowDialog(true); }}>
+              <div className="flex gap-1 shrink-0">
+                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setConfirmDeleteId(null); setEditEmployee({ ...emp, working_hours: emp.working_hours || defaultHours }); setShowDialog(true); }}>
                   <Pencil className="w-3.5 h-3.5" />
                 </Button>
                 <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Réalisations de ${emp.name}`}
                   onClick={() => setGalleryEmployeeId(emp.id)}>
                   <Images className="w-3.5 h-3.5" />
                 </Button>
-                <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10"
-                  onClick={() => deleteMutation.mutate(emp.id)}>
-                  <Trash2 className="w-3.5 h-3.5" />
-                </Button>
+                {confirmDeleteId === emp.id ? (
+                  <button
+                    type="button"
+                    onClick={() => { if (!deleteMutation.isPending) deleteMutation.mutate(emp.id); }}
+                    disabled={deleteMutation.isPending}
+                    className="h-8 px-2.5 rounded-lg text-xs font-semibold bg-red-500 text-white disabled:opacity-60"
+                  >
+                    {deleteMutation.isPending ? 'Suppression…' : 'Supprimer ?'}
+                  </button>
+                ) : (
+                  <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10"
+                    aria-label={`Supprimer ${emp.name}`}
+                    disabled={deleteMutation.isPending}
+                    onClick={() => setConfirmDeleteId(emp.id)}>
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </Button>
+                )}
               </div>
             </div>
+            {confirmDeleteId === emp.id && (
+              <p className="text-[11px] text-muted-foreground mt-2">
+                Suppression définitive. Pour le retirer de la réservation sans rien perdre, passez plutôt sa fiche en Inactif.
+              </p>
+            )}
           </div>
         ))}
       </div>
+      )}
 
       <Dialog open={showDialog} onOpenChange={setShowDialog}>
         <DialogContent className="bg-card border-border max-w-md max-h-[90vh] overflow-y-auto">
@@ -249,8 +286,9 @@ export default function Team() {
                 <Switch checked={editEmployee.is_active} onCheckedChange={v => setEditEmployee({ ...editEmployee, is_active: v })} />
               </div>
               <Button className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
-                onClick={() => saveMutation.mutate(editEmployee)}>
-                Sauvegarder
+                disabled={saveMutation.isPending}
+                onClick={() => { if (saveMutation.isPending) return; saveMutation.mutate(editEmployee); }}>
+                {saveMutation.isPending ? 'Enregistrement…' : 'Sauvegarder'}
               </Button>
             </div>
           )}

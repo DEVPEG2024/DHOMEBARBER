@@ -18,26 +18,28 @@ const allNavItems = [
   // pastille du nombre d'actions non lues (src/lib/adminActivity.js)
   { path: '/admin/activity', icon: Activity, label: 'Activité clients', adminOnly: true, badge: 'activity' },
   { path: '/admin/agenda', icon: Calendar, label: 'Agenda', perm: 'agenda' },
-  { path: '/admin/smart-agenda', icon: Brain, label: 'Agenda IA', perm: 'smart-agenda' },
+  // Écritures réservées à l'admin côté serveur : ces pages ne s'ouvrent plus par une permission
+  // barber (une ancienne permission en base n'y donne plus accès, la garde de route redirige)
+  { path: '/admin/smart-agenda', icon: Brain, label: 'Agenda IA', adminOnly: true },
   { path: '/admin/clients', icon: UserCircle, label: 'Clients', perm: 'clients', category: 'Clients' },
   // Cartes Gang : niveaux, habitués à relancer, top de la saison, écussons (admin seulement)
   { path: '/admin/gang-cards', icon: IdCard, label: 'Cartes Gang', adminOnly: true, category: 'Clients' },
   { path: '/admin/reviews', icon: Star, label: 'Avis', perm: 'reviews', category: 'Clients' },
-  { path: '/admin/notifications', icon: Bell, label: 'Notifications', perm: 'notifications', category: 'Clients' },
+  { path: '/admin/notifications', icon: Bell, label: 'Notifications', adminOnly: true, category: 'Clients' },
   { path: '/admin/feedback', icon: Bug, label: 'Bugs et suggestions', adminOnly: true, category: 'Clients' },
-  { path: '/admin/services', icon: Scissors, label: 'Prestations', perm: 'services', category: 'Commerce' },
-  { path: '/admin/products', icon: ShoppingBag, label: 'Produits', perm: 'products', category: 'Commerce' },
-  { path: '/admin/stock', icon: Warehouse, label: 'Stock Produits', perm: 'products', category: 'Commerce' },
+  { path: '/admin/services', icon: Scissors, label: 'Prestations', adminOnly: true, category: 'Commerce' },
+  { path: '/admin/products', icon: ShoppingBag, label: 'Produits', adminOnly: true, category: 'Commerce' },
+  { path: '/admin/stock', icon: Warehouse, label: 'Stock Produits', adminOnly: true, category: 'Commerce' },
   { path: '/admin/orders', icon: ClipboardList, label: 'Commandes', perm: 'orders', category: 'Commerce' },
   { path: '/admin/gift-cards', icon: Gift, label: 'Cartes Cadeau', adminOnly: true, category: 'Commerce' },
   // Textile & drops : l'admin gère drops et pièces, un barber avec la permission produits suit les retraits
   { path: '/admin/textile', icon: Shirt, label: 'Textile & Drops', perm: 'products', category: 'Commerce' },
   // Bons plans du Gang : partenaires du salon et leurs remises réservées aux clients
   { path: '/admin/partners', icon: Handshake, label: 'Bons plans', adminOnly: true, category: 'Commerce' },
-  { path: '/admin/team', icon: Users, label: 'Équipe', perm: 'team', category: 'Équipe' },
+  { path: '/admin/team', icon: Users, label: 'Équipe', adminOnly: true, category: 'Équipe' },
   { path: '/admin/barber-accounts', icon: ShieldCheck, label: 'Comptes Barbers', adminOnly: true, category: 'Équipe' },
   { path: '/admin/leave', icon: CalendarDays, label: 'Congés', adminOnly: true, category: 'Équipe' },
-  { path: '/admin/cleaning', icon: Sparkles, label: 'Entretien', perm: 'cleaning', category: 'Équipe' },
+  { path: '/admin/cleaning', icon: Sparkles, label: 'Entretien', adminOnly: true, category: 'Équipe' },
   { path: '/admin/my-cleaning', icon: Sparkles, label: 'Entretien', barberOnly: true, alwaysShow: true, category: 'Mon espace' },
   { path: '/admin/my-leave', icon: CalendarDays, label: 'Mes Congés', barberOnly: true, alwaysShow: true, category: 'Mon espace' },
   { path: '/admin/my-settings', icon: Settings, label: 'Paramètres', barberOnly: true, alwaysShow: true, category: 'Mon espace' },
@@ -48,7 +50,7 @@ const allNavItems = [
   { path: '/admin/salon-events', icon: Sparkles, label: 'Événements du salon', adminOnly: true, category: 'Divers' },
   // Filtres Snap (Camera Kit) : interrupteur, lentilles, palette, jeton, statistiques
   { path: '/admin/snap', icon: Camera, label: 'Filtres Snap', adminOnly: true, category: 'Divers' },
-  { path: '/admin/settings', icon: Settings, label: 'Paramètres', perm: 'settings', category: 'Divers' },
+  { path: '/admin/settings', icon: Settings, label: 'Paramètres', adminOnly: true, category: 'Divers' },
 ];
 
 const CATEGORY_ICONS = {

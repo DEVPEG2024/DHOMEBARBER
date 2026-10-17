@@ -3,6 +3,8 @@ import { api } from '@/api/apiClient';
 import { isUnclaimedLastMinute } from '@/components/agenda/agendaUtils';
 import { useQuery } from '@tanstack/react-query';
 import LoadError from '@/components/shared/LoadError';
+// Même CA par RDV que le tableau de bord (prestations + produit vendu, hors pourboire)
+import { revenueOf, round2 } from '@/lib/revenue';
 import { TrendingUp, Calendar, Users, AlertTriangle, Target } from 'lucide-react';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
@@ -51,7 +53,7 @@ export default function Stats() {
     const completed = real.filter(a => a.status === 'completed');
     const cancelled = real.filter(a => a.status === 'cancelled');
     const noShows = real.filter(a => a.status === 'no_show');
-    const totalRevenue = completed.reduce((sum, a) => sum + (a.total_price || 0), 0);
+    const totalRevenue = round2(completed.reduce((sum, a) => sum + revenueOf(a), 0));
     const avgTicket = completed.length > 0 ? totalRevenue / completed.length : 0;
 
     // Monthly trend
@@ -59,10 +61,12 @@ export default function Stats() {
     completed.forEach(a => {
       const month = a.date?.substring(0, 7);
       if (!monthlyData[month]) monthlyData[month] = { month, revenue: 0, count: 0 };
-      monthlyData[month].revenue += a.total_price || 0;
+      monthlyData[month].revenue += revenueOf(a);
       monthlyData[month].count++;
     });
-    const monthly = Object.values(monthlyData).sort((a, b) => a.month.localeCompare(b.month)).slice(-6);
+    const monthly = Object.values(monthlyData)
+      .map(m => ({ ...m, revenue: round2(m.revenue) }))
+      .sort((a, b) => a.month.localeCompare(b.month)).slice(-6);
 
     // Top services
     const serviceCount = {};
@@ -73,7 +77,9 @@ export default function Stats() {
         serviceCount[s.name].revenue += s.price || 0;
       });
     });
-    const topServices = Object.values(serviceCount).sort((a, b) => b.count - a.count).slice(0, 5);
+    const topServices = Object.values(serviceCount)
+      .map(sv => ({ ...sv, revenue: round2(sv.revenue) }))
+      .sort((a, b) => b.count - a.count).slice(0, 5);
 
     // Per employee
     const empStats = {};
@@ -81,9 +87,11 @@ export default function Stats() {
       const name = a.employee_name || 'N/A';
       if (!empStats[name]) empStats[name] = { name, count: 0, revenue: 0 };
       empStats[name].count++;
-      empStats[name].revenue += a.total_price || 0;
+      empStats[name].revenue += revenueOf(a);
     });
-    const perEmployee = Object.values(empStats).sort((a, b) => b.revenue - a.revenue);
+    const perEmployee = Object.values(empStats)
+      .map(e => ({ ...e, revenue: round2(e.revenue) }))
+      .sort((a, b) => b.revenue - a.revenue);
 
     return {
       totalRevenue, avgTicket, completed: completed.length,

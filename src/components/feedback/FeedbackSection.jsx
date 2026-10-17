@@ -7,6 +7,8 @@ import { api } from '@/api/apiClient';
 import {
   FEEDBACK_QUERY_KEY, FEEDBACK_TYPES, FEEDBACK_STATUSES, fetchMyFeedback, formatFeedbackDate,
 } from '@/lib/feedbackApi';
+import LoadError from '@/components/shared/LoadError';
+import { useAndroidBack } from '@/lib/useAndroidBack';
 import FeedbackSheet from './FeedbackSheet';
 
 const ACTIONS = [
@@ -20,11 +22,15 @@ export default function FeedbackSection({ user }) {
   const [openType, setOpenType] = useState(null);
   const [expanded, setExpanded] = useState(null);
 
-  const { data: mine = [] } = useQuery({
+  const { data, error, isError, refetch, isFetching } = useQuery({
     queryKey: FEEDBACK_QUERY_KEY,
     queryFn: fetchMyFeedback,
     enabled: !!user,
   });
+  const mine = Array.isArray(data) ? data : [];
+
+  // Android : le bouton retour ferme la fenêtre (comme sa croix), la saisie n'est pas perdue
+  useAndroidBack(!!openType, () => setOpenType(null));
 
   // Repli par email tant que le serveur ne connaît pas l'entité
   const { data: salonSettings = [] } = useQuery({
@@ -57,6 +63,12 @@ export default function FeedbackSection({ user }) {
             <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
           </button>
         ))}
+
+        {isError && !data && (
+          <div className="border-t border-white/5 px-4 pt-3 pb-4">
+            <LoadError compact what="tes envois" error={error} onRetry={refetch} retrying={isFetching} />
+          </div>
+        )}
 
         {mine.length > 0 && (
           <div className="border-t border-white/5 px-4 pt-3 pb-4">

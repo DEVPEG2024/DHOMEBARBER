@@ -11,8 +11,9 @@ import { format, addDays, addMonths, isBefore, isSameDay } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import ServicePicker from '@/components/services/ServicePicker';
 import EmployeeCard from '@/components/shared/EmployeeCard';
-import LoadError from '@/components/shared/LoadError';
-import { hapticFeedback } from '@/lib/capacitor';
+import LoadError, { isNetworkError } from '@/components/shared/LoadError';
+import { hapticFeedback, isNative } from '@/lib/capacitor';
+import { blocksClient } from '@/lib/reschedule';
 import { BARBER_PHOTO_ASPECT } from '@/lib/barberPhoto';
 import { appointmentEvent, openCalendar, parisInstant } from '@/lib/calendarLinks';
 import { SALON_PHONE, SALON_PHONE_HREF, useCancelFeatures } from '@/lib/cancellation';
@@ -38,11 +39,19 @@ const SUCCESS_DURATION = 4200;
 /** Pluie de lames : nombre et instant de l'éclatement (s). */
 const BLADE_COUNT = 30;
 const BURST_AT = 0.35;
-/** Cibles « Ajouter au calendrier » de l'écran de succès. */
+/**
+ * Cibles « Ajouter au calendrier » de l'écran de succès. Le fichier .ics ne s'ouvre pas dans
+ * l'app native (rien ne se passe sur iPhone) : seulement sur le web, en attendant l'écriture du
+ * fichier par @capacitor/filesystem + @capacitor/share.
+ */
 const CALENDAR_TARGETS = [
   { kind: 'google', label: 'Google Agenda' },
-  { kind: 'ics', label: 'Apple / Outlook' },
+  ...(isNative ? [] : [{ kind: 'ics', label: 'Apple / Outlook' }]),
 ];
+/** Note de réservation : même limite que CREATE_RULES.appointments côté serveur. */
+const NOTES_MAX = 1000;
+/** Refus 400 du serveur qui portent sur le créneau lui-même (assertSlotAvailable) : passé, horaires, fermeture, congé. */
+const SLOT_REFUSED_RE = /déjà passé|ne reçoit pas à cette heure|ferme à|absent ce jour/i;
 
 /**
  * « Peu importe » : raison commune quand aucun barber n'a de créneau.
@@ -582,6 +591,18 @@ export default function Booking() {
     enabled: !!rescheduleId && !!user?.email,
   });
   const myAppointments = myAppointmentsQuery.data || EMPTY_LIST;
+  // Délai d'annulation du salon (mêmes requête et cache que Mes rendez-vous) : un RDV qui entre
+  // dans ce délai ne se déplace plus en ligne (le serveur refuserait d'annuler l'ancien)
+  const settingsQuery = useQuery({
+    queryKey: ['salonSettings'],
+    staleTime: 5 * 60 * 1000,
+    queryFn: () => api.entities.SalonSettings.list(),
+    enabled: !!rescheduleId,
+  });
+  const cancelHours = parseInt(settingsQuery.data?.[0]?.cancellation_hours, 10) || 0;
+  /** Le RDV commence-t-il dans moins de `cancelHours` heures (calculé à l'instant `nowMs`) ? */
+  const withinCancelDelay = (apt, nowMs = Date.now()) => !!apt && cancelHours > 0
+    && parisInstant(apt.date, apt.start_time || '00:00') - nowMs < cancelHours * 3600 * 1000;
   // RDV à déplacer : le sien, confirmé, pas encore commencé ; sinon le paramètre est ignoré
   const oldApt = useMemo(() => {
     if (!rescheduleId) return null;
@@ -594,9 +615,11 @@ export default function Booking() {
     : '';
   // Tant qu'on ne sait pas si le RDV à déplacer existe, « Confirmer » attend : sinon le nouveau
   // serait créé sans annuler l'ancien (doublon). Session en cours de vérification comprise.
-  const reschedulePending = !!rescheduleId && !oldApt && (
+  const reschedulePending = (!!rescheduleId && !oldApt && (
     isLoadingAuth || (!!user?.email && myAppointmentsQuery.isPending)
-  );
+  )) || (!!oldApt && settingsQuery.isPending);
+  // RDV à déplacer entré dans le délai d'annulation : « Confirmer » bloqué, le salon s'en occupe
+  const rescheduleTooLate = !!oldApt && !settingsQuery.isPending && withinCancelDelay(oldApt);
   // Lien « Déplacer » inutilisable (RDV introuvable, annulé, passé, ou liste impossible à charger) :
   // on le dit clairement, la réservation devient un nouveau rendez-vous.
   const rescheduleUnavailable = !!rescheduleId && !oldApt && !reschedulePending && !!user?.email;
@@ -643,43 +666,37 @@ export default function Booking() {
   });
   const timeOffs = timeOffsQuery.data || EMPTY_LIST;
 
-  // RDV du jour servant au calcul des créneaux. En mode « peu importe » : une requête par statut,
-  // sans filtre employee_id (tous les barbers) ; sinon uniquement ceux du barber choisi.
+  // Lignes du jour servant au calcul des créneaux : une seule requête, sans filtre de statut (tous
+  // les barbers en mode « peu importe », sinon ceux du barber choisi). Le serveur dit lesquelles
+  // occupent le créneau (`blocks_client` : RDV, pauses, terminés, absents, last minute rattachés
+  // à un client) ; ne charger que confirmés et pauses proposait des heures qu'il refusait (409).
   // Le client ne reçoit que les colonnes de créneau (employee_id, date, start_time, end_time, status).
   const selectedDateStr = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : null;
   const slotScope = anyBarber ? 'all' : (selectedEmployee?.id ?? null);
   const slotsEnabled = !!selectedDate && (anyBarber || !!selectedEmployee);
-  const fetchDayAppointments = (status) => {
+  const fetchDayAppointments = () => {
     if (!slotsEnabled) return Promise.resolve([]);
-    const filter = { date: selectedDateStr, status };
-    // Tous barbers : limite explicite, la limite par défaut du serveur pourrait tronquer la journée
-    if (anyBarber) return api.entities.Appointment.filter(filter, 'start_time', 1000);
-    filter.employee_id = selectedEmployee.id;
-    return api.entities.Appointment.filter(filter);
+    const filter = { date: selectedDateStr };
+    if (!anyBarber) filter.employee_id = selectedEmployee.id;
+    // Limite explicite : la limite par défaut du serveur pourrait tronquer la journée
+    return api.entities.Appointment.filter(filter, 'start_time', 1000);
   };
 
-  const confirmedQuery = useQuery({
-    queryKey: ['appointments-confirmed', selectedDateStr, slotScope],
-    queryFn: () => fetchDayAppointments('confirmed'),
+  const dayQuery = useQuery({
+    queryKey: ['appointments-day', selectedDateStr, slotScope],
+    queryFn: fetchDayAppointments,
     enabled: slotsEnabled,
   });
 
-  const breaksQuery = useQuery({
-    queryKey: ['appointments-breaks', selectedDateStr, slotScope],
-    queryFn: () => fetchDayAppointments('break'),
-    enabled: slotsEnabled,
-  });
-
-  const confirmedApts = confirmedQuery.data;
-  const breakApts = breaksQuery.data;
-  const appointments = useMemo(() => [...(confirmedApts || []), ...(breakApts || [])], [confirmedApts, breakApts]);
+  const dayRows = dayQuery.data;
+  const appointments = useMemo(() => (dayRows || []).filter(blocksClient), [dayRows]);
 
   // Créneaux calculables seulement quand RDV, pauses et congés sont là : sans eux, toute la
   // journée paraîtrait libre. Chargement → squelette ; échec (sans données) → écran d'erreur.
   // « Peu importe » : la liste des barbers fait aussi partie du calcul
   const slotQueries = anyBarber
-    ? [confirmedQuery, breaksQuery, timeOffsQuery, employeesQuery]
-    : [confirmedQuery, breaksQuery, timeOffsQuery];
+    ? [dayQuery, timeOffsQuery, employeesQuery]
+    : [dayQuery, timeOffsQuery];
   const slotsLoading = slotsEnabled && slotQueries.some(q => q.isPending);
   const slotsFailedQuery = slotsEnabled && !slotsLoading
     ? slotQueries.find(q => q.isError && q.data === undefined) || null
@@ -969,8 +986,12 @@ export default function Booking() {
       const [sh, sm] = selectedTime.split(':').map(Number);
       const endMin = sh * 60 + sm + totalDuration;
       const endTime = `${String(Math.floor(endMin / 60)).padStart(2, '0')}:${String(endMin % 60).padStart(2, '0')}`;
-      // RDV à déplacer figé au moment de l'envoi
+      // RDV à déplacer figé au moment de l'envoi ; délai d'annulation revérifié maintenant (pas
+      // sur la valeur calculée à l'affichage : la page a pu rester ouverte plusieurs minutes)
       const previous = oldApt;
+      if (previous && withinCancelDelay(previous, Date.now())) {
+        throw Object.assign(new Error(`Ce rendez-vous est dans moins de ${cancelHours} h : pour le déplacer, appelez le salon au ${SALON_PHONE}.`), { tooLate: true });
+      }
       const created = await api.entities.Appointment.create({
         client_email: user.email,
         client_name: user.full_name || user.name || '',
@@ -983,7 +1004,7 @@ export default function Booking() {
         total_duration: totalDuration,
         total_price: totalPrice,
         status: 'confirmed',
-        notes,
+        notes: notes.slice(0, NOTES_MAX),
         // Déplacement : le serveur fait suivre au nouveau RDV les produits ajoutés à l'ancien
         ...(previous ? { reschedule_of: previous.id } : {}),
       });
@@ -1004,7 +1025,9 @@ export default function Booking() {
       return { created, previous, addon };
     },
     onSuccess: ({ created, previous, addon }) => {
-      queryClient.invalidateQueries({ queryKey: ['appointments-confirmed'] });
+      queryClient.invalidateQueries({ queryKey: ['appointments-day'] });
+      queryClient.invalidateQueries({ queryKey: ['myAppointments'] });
+      queryClient.invalidateQueries({ queryKey: ['appointments'] }); // « Comme la dernière fois » / prochain RDV de l'accueil
       // Le rendez-vous créé (id, heure de fin et prix recalculés par le serveur) alimente
       // l'« Ajouter au calendrier » de l'écran de succès
       setCreatedAppointment(created && typeof created === 'object' ? created : null);
@@ -1033,38 +1056,58 @@ export default function Booking() {
       if (previous) cancelPreviousAppointment(previous);
     },
     onError: (err) => {
-      // Le serveur vérifie désormais la disponibilité et refuse pour des raisons précises
-      // (créneau passé, hors horaires, congé, chevauchement, plafond de rendez-vous).
-      // Afficher son message : « Erreur lors de la création » laissait l'utilisateur sans
-      // rien à faire, et sur un créneau pris entre-temps il retentait le même en boucle.
-      const message = err?.data?.error || err?.message;
-      const shown = message && !/^HTTP \d+$/.test(message) ? message : 'Erreur lors de la création du rendez-vous';
+      // Réseau coupé pendant l'envoi : le rendez-vous a peut-être été créé (réponse perdue). Le
+      // serveur reconnaît le même envoi pendant 10 minutes et ne le crée pas deux fois : on reste
+      // sur la confirmation, l'heure choisie gardée.
+      if (isNetworkError(err)) {
+        toast.error('Connexion perdue : votre rendez-vous a peut-être été enregistré. Vérifiez Mes rendez-vous ou touchez de nouveau « Confirmer » (il ne sera pas créé deux fois).', { duration: 10000 });
+        queryClient.invalidateQueries({ queryKey: ['myAppointments'] });
+        queryClient.invalidateQueries({ queryKey: ['appointments-day'] });
+        return;
+      }
+      // Le serveur vérifie la disponibilité et refuse pour des raisons précises (créneau passé,
+      // hors horaires, congé, chevauchement, plafond de rendez-vous) : son message est affiché.
+      const shown = serverMessage(err, 'Erreur lors de la création du rendez-vous');
+      // Déplacement impossible en ligne (ancien RDV dans le délai d'annulation, ou plus
+      // déplaçable) : le salon s'en occupe, on reste sur la page
+      if (err?.tooLate || (oldApt && err?.status === 409 && /pour le déplacer|ne peut plus être déplacé/i.test(shown))) {
+        toast.error(`${shown}.`, {
+          duration: 10000,
+          action: { label: 'Appeler', onClick: () => { window.location.href = SALON_PHONE_HREF; } },
+        });
+        queryClient.invalidateQueries({ queryKey: ['salonSettings'] });
+        queryClient.invalidateQueries({ queryKey: ['myAppointments'] });
+        return;
+      }
       if (oldApt && err?.status === 409) {
         // Déplacement : l'ancien RDV, encore confirmé, occupe son créneau et compte dans le
         // plafond des rendez-vous à venir. Un décalage de quelques minutes passe par le salon.
-        toast.error(`${shown} Pour décaler sur le même créneau ou juste à côté, appelez le salon au ${SALON_PHONE}.`, {
+        toast.error(`${shown}. Pour décaler sur le même créneau ou juste à côté, appelez le salon au ${SALON_PHONE}.`, {
           duration: 10000,
           action: { label: 'Appeler', onClick: () => { window.location.href = SALON_PHONE_HREF; } },
         });
       } else {
         toast.error(shown);
       }
-      if (err?.status === 409 || err?.status === 400) {
-        // Les créneaux affichés datent d'au plus une minute : on les recharge et on
-        // désélectionne l'horaire refusé pour que le client en choisisse un autre.
-        if (err?.status === 409) {
-          // Retour au choix de l'heure : rester sur la confirmation laissait un récapitulatif sans
-          // heure et un bouton actif. Les créneaux sont vidés puis rechargés (squelette pendant ce
-          // temps) : l'heure refusée ne peut pas être reprise avant d'avoir les données à jour.
-          queryClient.resetQueries({ queryKey: ['appointments-confirmed'] });
-          queryClient.resetQueries({ queryKey: ['appointments-breaks'] });
-          setSelectedTime(null);
-          if (anyBarber) setSelectedEmployee(null);
-          goToStep(2);
-        } else {
-          queryClient.invalidateQueries({ queryKey: ['appointments-confirmed'] });
-          queryClient.invalidateQueries({ queryKey: ['appointments-breaks'] });
+      // Refus 400 qui porte sur le créneau (passé entre-temps, congé posé, horaires changés) :
+      // même chemin qu'un créneau pris, sinon la page restait sur l'heure refusée
+      const slotRefused = err?.status === 400 && SLOT_REFUSED_RE.test(shown);
+      if (err?.status === 409 || slotRefused) {
+        // Retour au choix de l'heure : rester sur la confirmation laissait un récapitulatif sans
+        // heure et un bouton actif. Les créneaux sont vidés puis rechargés (squelette pendant ce
+        // temps) : l'heure refusée ne peut pas être reprise avant d'avoir les données à jour.
+        queryClient.resetQueries({ queryKey: ['appointments-day'] });
+        if (slotRefused) {
+          // Congé ou horaires changés : barbers et congés relus aussi
+          queryClient.invalidateQueries({ queryKey: ['employees'] });
+          queryClient.invalidateQueries({ queryKey: ['timeOffs'] });
         }
+        setSelectedTime(null);
+        if (anyBarber) setSelectedEmployee(null);
+        goToStep(2);
+      } else if (err?.status === 400) {
+        // Autres refus (plafond de rendez-vous, prestation, note) : on reste sur la confirmation
+        queryClient.invalidateQueries({ queryKey: ['appointments-day'] });
       }
     },
   });
@@ -1079,7 +1122,7 @@ export default function Booking() {
 
   const hasRecap = selectedServices.length > 0 || !!selectedEmployee || anyBarber || !!selectedTime;
   // « Confirmer » : sélection complète, et RDV à déplacer identifié (ou écarté) avant l'envoi
-  const canConfirm = !!selectedEmployee && !!selectedDate && !!selectedTime && !reschedulePending;
+  const canConfirm = !!selectedEmployee && !!selectedDate && !!selectedTime && !reschedulePending && !rescheduleTooLate;
 
   // Date sans créneau : pourquoi (repos, congé, journée terminée ou complète), et le conseil sur la
   // durée des prestations seulement quand un créneau plus court tiendrait ce jour-là.
@@ -1208,8 +1251,20 @@ export default function Booking() {
             </div>
           )}
 
+          {/* Déplacement impossible en ligne : l'ancien RDV est entré dans le délai d'annulation */}
+          {rescheduleTooLate && !success && (
+            <div role="status" className="mt-4 rounded-2xl border border-amber-500/25 bg-amber-500/10 px-3.5 py-3 text-xs leading-relaxed text-amber-200/90 break-words">
+              Votre rendez-vous du <span className="font-semibold">{oldAptLabel}</span> est dans moins de {cancelHours} h : pour le déplacer,{' '}
+              <a href={SALON_PHONE_HREF} className="font-semibold text-primary whitespace-nowrap">appelez le salon au {SALON_PHONE}</a>.
+              {' '}
+              <button type="button" onClick={dropReschedule} className="font-semibold text-primary underline underline-offset-2 whitespace-nowrap">
+                Réserver un nouveau rendez-vous
+              </button>
+            </div>
+          )}
+
           {/* Déplacement d'un rendez-vous existant */}
-          {oldApt && !success && (
+          {oldApt && !rescheduleTooLate && !success && (
             <div className="mt-4 rounded-2xl border border-primary/25 bg-primary/10 px-3.5 py-3 text-xs leading-relaxed text-foreground/90 break-words">
               Déplacement de votre rendez-vous du <span className="font-semibold">{oldAptLabel}</span>
               {oldApt.employee_name ? <> avec <span className="font-semibold">{oldApt.employee_name}</span></> : null}
@@ -1471,13 +1526,17 @@ export default function Booking() {
                 <p className="mt-1 text-right text-[10px] text-muted-foreground/70">À régler au salon</p>
               </motion.div>
 
-              <Textarea
-                placeholder="Ajouter une note (optionnel)..."
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                className="backdrop-blur-xl bg-white/5 border-white/10 resize-none rounded-2xl placeholder:text-muted-foreground/40"
-                rows={3}
-              />
+              <div>
+                <Textarea
+                  placeholder="Ajouter une note (optionnel)..."
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value.slice(0, NOTES_MAX))}
+                  maxLength={NOTES_MAX}
+                  className="backdrop-blur-xl bg-white/5 border-white/10 resize-none rounded-2xl placeholder:text-muted-foreground/40"
+                  rows={3}
+                />
+                <p className="mt-1 text-right text-[10px] text-muted-foreground">{notes.length}/{NOTES_MAX}</p>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>

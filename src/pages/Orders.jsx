@@ -20,6 +20,11 @@ import {
   SALON_PHONE, SALON_PHONE_HREF,
 } from '@/lib/cancellation';
 import LoadError from '@/components/shared/LoadError';
+import { parisInstant } from '@/lib/calendarLinks';
+
+/** Heure de fin du RDV (heure de Paris) passée : même règle que « à venir » dans Mes rendez-vous. */
+const aptEnded = (apt) => !apt?.date
+  || parisInstant(String(apt.date).slice(0, 10), String(apt.end_time || apt.start_time || '23:59').slice(0, 5)) <= Date.now();
 
 const parisDateTime = new Intl.DateTimeFormat('fr-FR', {
   timeZone: 'Europe/Paris',
@@ -86,7 +91,7 @@ export default function Orders() {
   // Commandes ajoutées à un rendez-vous : on retrouve le RDV avec les mêmes clé et requête que
   // Mes rendez-vous (cache partagé). Échec sans conséquence : « Pour votre rendez-vous » seul.
   const hasLinked = orders.some((o) => !!o?.appointment_id);
-  const { data: myAppointments } = useQuery({
+  const { data: myAppointments, isSuccess: appointmentsLoaded } = useQuery({
     queryKey: ['myAppointments', user?.email],
     queryFn: () => api.entities.Appointment.filter({ client_email: user.email }, '-date', 100),
     enabled: !!user?.email && hasLinked,
@@ -196,8 +201,13 @@ export default function Orders() {
                 ? (withAppointment ? 'Annulée avec votre rendez-vous' : cancelledByLabel(order, 'client'))
                 : null;
               const motive = statusKey === 'cancelled' && !withAppointment ? cleanReason(order.cancellation_reason) : '';
-              // Remise par le barber pendant le RDV, tant qu'elle n'est pas prête au salon
-              const handedAtAppointment = linked && (statusKey === 'pending' || statusKey === 'confirmed');
+              // Remise par le barber pendant le RDV, tant qu'elle n'est pas prête au salon — et
+              // seulement si ce RDV a encore lieu. Rien d'affirmé tant que les RDV ne sont pas
+              // chargés (ou en cas d'échec).
+              const linkedOpen = linked && (statusKey === 'pending' || statusKey === 'confirmed');
+              const aptActive = !!linkedApt && linkedApt.status === 'confirmed' && !aptEnded(linkedApt);
+              const handedAtAppointment = linkedOpen && appointmentsLoaded && aptActive;
+              const appointmentGone = linkedOpen && appointmentsLoaded && !aptActive;
               return (
                 <motion.div key={order.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
                   className="rounded-2xl border border-white/8 bg-white/4 backdrop-blur-xl p-4">
@@ -243,6 +253,11 @@ export default function Orders() {
                   {handedAtAppointment && (
                     <p className="mt-3 text-[11px] text-muted-foreground leading-relaxed">
                       Votre barber vous la remet pendant le rendez-vous.
+                    </p>
+                  )}
+                  {appointmentGone && (
+                    <p className="mt-3 text-[11px] text-amber-300/90 leading-relaxed">
+                      Ce rendez-vous n'a plus lieu : passez la retirer au salon ou annulez-la.
                     </p>
                   )}
 

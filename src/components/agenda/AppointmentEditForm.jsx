@@ -8,7 +8,7 @@ import { useAppointmentOrders, orderItemsLabel } from '@/lib/appointmentProducts
 import ClientAccountPicker from './ClientAccountPicker';
 import {
   timeToMinutes, addMinutesToTime, parseDateParam, slotIssues, isUpcomingSlot,
-  LAST_MINUTE_MARKER, withLastMinuteMarker, stripLastMinuteMarker,
+  LAST_MINUTE_MARKER, withLastMinuteMarker, stripLastMinuteMarker, agendaErrorMessage,
 } from './agendaUtils';
 
 const inputCls = 'w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-primary/50';
@@ -124,8 +124,12 @@ export default function AppointmentEditForm({ appointment, employees, onCancel, 
       internal_notes: hadLastMinuteMarker ? withLastMinuteMarker(internalNotes) : internalNotes.trim(),
       notify_client: canNotify ? notify : false,
     };
-    // Compte rattaché à un créneau last minute libre : il est pris (comme l'assignation de la fiche)
-    if (accountChanged && clientEmail && appointment.status === 'last_minute') {
+    // Compte rattaché à un créneau last minute libre, ou vrai nom saisi pour un client venu sans
+    // compte (mêmes noms libres que LAST_MINUTE_NAMES côté serveur) : le créneau est pris, il
+    // devient un rendez-vous confirmé (bloquant pour les clients, sans expiration automatique)
+    const typedName = clientName.trim();
+    const walkInNamed = !clientEmail && typedName !== '' && typedName !== 'Last Minute';
+    if (appointment.status === 'last_minute' && ((accountChanged && clientEmail) || walkInNamed)) {
       payload.status = 'confirmed';
       payload.internal_notes = withLastMinuteMarker(internalNotes);
     }
@@ -145,7 +149,7 @@ export default function AppointmentEditForm({ appointment, employees, onCancel, 
         : (accountChanged && clientEmail ? 'Compte client rattaché au rendez-vous' : 'Rendez-vous modifié'));
       onSaved({ ...appointment, ...payload, ...(updated || {}) });
     } catch (e) {
-      toast.error(e?.message || 'Erreur lors de l\'enregistrement');
+      toast.error(agendaErrorMessage(e, 'Erreur lors de l\'enregistrement'));
     } finally {
       setSaving(false);
     }

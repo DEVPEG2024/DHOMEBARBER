@@ -6,6 +6,7 @@ import { api } from '@/api/apiClient';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   addMinutesToTime, aptDuration, invalidateAppointmentQueries, isBreak, isUpcomingSlot, shortDayLabel, slotIssues,
+  agendaErrorMessage,
 } from './agendaUtils';
 
 /** Champs écrits par un déplacement : jour, heure, fin recalculée (même durée), barber. */
@@ -88,7 +89,7 @@ export default function MoveDialog({ move, employees, appointments, timeOffs, on
       toast.success(canNotify && notify ? 'Rendez-vous déplacé · client prévenu' : 'Rendez-vous déplacé');
       onClose();
     } catch (e) {
-      toast.error(e?.message || 'Déplacement impossible');
+      toast.error(agendaErrorMessage(e, 'Déplacement impossible'));
     } finally {
       setSaving(false);
     }

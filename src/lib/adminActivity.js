@@ -16,22 +16,17 @@
  *    « fiches client » créées par l'admin dans Clients (RDV `cancelled` de 09:00 à 09:00 sans
  *    prestation) ne sont jamais des actions client ;
  *  - toute ligne dont l'email client appartient à un compte staff (admin / barber) est ignorée ;
- *  - qui a annulé un RDV : `cancellationActor` (src/lib/cancellation.js) lit `cancelled_by` quand
- *    le serveur le fournit, sinon le déduit du motif (motif last minute → système, « Salon… »
- *    posé par l'agenda → staff, « Client… » → client). Les annulations du salon et du système
- *    sont ignorées ; sans indice, le détail indique « Annulé (client ou salon) » ;
+ *  - annulations de RDV : seules celles du client sont chargées (`cancelled_by = 'client'`, posé
+ *    par le serveur avec `cancelled_at`) ; `cancellationActor` (src/lib/cancellation.js) écarte
+ *    encore, par sécurité, une annulation du salon ou du système ;
  *  - commandes annulées : `order_cancelled` n'est émis que si le serveur fournit
  *    `cancelled_by === 'client'` et `cancelled_at` (docs/backend-orders-cancellation.md) ;
  *    une commande annulée garde son `order_new`, marqué `cancelled: true` (« annulée depuis »),
  *    et n'entre plus dans le chiffre du jour.
  *
- * Limites connues (horodatages) :
- *  - annulations de RDV (sauf si le serveur fournit `cancelled_at`) et réponses aux devis sont
- *    datées par `updated_date` / `updated_at`,
- *    c'est-à-dire la dernière modification de la ligne, par le client OU par le salon : une
- *    retouche de l'admin (note, prix, confirmation) fait remonter l'élément et le rend non lu ;
- *  - si le serveur ne sait pas trier les RDV par `updated_*` (400), les annulations sont
- *    abandonnées pour la session, sans bandeau d'échec.
+ * Horodatages : les annulations de RDV sont datées par `cancelled_at`, les réponses aux devis par
+ * `answered_at` (posé seulement par la réponse du client). Plus aucun repli sur `updated_*` :
+ * une retouche de l'admin ne fait plus remonter un élément dans le fil.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -73,9 +68,6 @@ function toIso(value) {
   const t = Date.parse(value);
   return Number.isNaN(t) ? null : new Date(t).toISOString();
 }
-
-/** Horodatage de dernière modification, selon la convention de la table. */
-const updatedIso = (row) => toIso(row?.updated_date || row?.updated_at);
 
 const lower = (s) => String(s || '').trim().toLowerCase();
 
@@ -123,19 +115,6 @@ async function safe(name, failed, fn) {
   }
 }
 
-/** Essaie plusieurs requêtes dans l'ordre (ex. colonne de tri inconnue → 400) ; lève la dernière erreur. */
-async function firstWorking(...calls) {
-  let lastErr;
-  for (const call of calls) {
-    try {
-      return await call();
-    } catch (err) {
-      lastErr = err;
-    }
-  }
-  throw lastErr;
-}
-
 // ── Règles client / staff pour les rendez-vous ───────────────────────
 
 const STAFF_STATUSES = new Set(['break', 'last_minute']);
@@ -176,9 +155,6 @@ function appointmentWhen(apt) {
 
 // ── Chargement ───────────────────────────────────────────────────────
 
-/** Vrai dès que le serveur a refusé le tri des RDV annulés par `updated_*` (mémorisé pour la session). */
-let cancelledSortUnsupported = false;
-
 /** Statuts d'une privatisation après la réponse du client au devis. */
 const EVENT_ANSWER_STATUSES = ['accepted', 'confirmed', 'declined'];
 
@@ -196,26 +172,12 @@ export async function fetchAdminActivity({ days = DEFAULT_DAYS } = {}) {
   const staffPromise = safe('Comptes staff', failed, () =>
     E.User.filter({ role: ['admin', 'barber'] }, null, 200));
 
-  // Annulations : tri par date de modification. Si le serveur refuse les deux colonnes (400 :
-  // la table n'a pas d'horodatage de modification), on renonce silencieusement aux annulations
-  // pour toute la session : sans horodatage fiable, impossible de les dater, et inutile
-  // d'afficher un bandeau d'échec permanent ni de renvoyer deux requêtes perdues par minute.
-  const cancelledPromise = cancelledSortUnsupported
-    ? Promise.resolve([])
-    : safe('Rendez-vous annulés', failed, async () => {
-      try {
-        return await firstWorking(
-          () => E.Appointment.filter({ status: 'cancelled' }, '-updated_date', 200),
-          () => E.Appointment.filter({ status: 'cancelled' }, '-updated_at', 200),
-        );
-      } catch (err) {
-        if (err?.status === 400) {
-          cancelledSortUnsupported = true;
-          return [];
-        }
-        throw err; // panne réseau, 5xx… : vrai échec, signalé et retenté
-      }
-    });
+  // Annulations du client, triées par `cancelled_at` (posé par le serveur en même temps que
+  // `cancelled_by = 'client'`). Le filtre sur `cancelled_by` écarte les lignes à `cancelled_at`
+  // NULL (anciennes annulations, fiches client), que PostgreSQL classerait en tête en DESC et
+  // qui rempliraient la limite.
+  const cancelledPromise = safe('Rendez-vous annulés', failed, () =>
+    E.Appointment.filter({ status: 'cancelled', cancelled_by: 'client' }, '-cancelled_at', 200));
 
   const [
     staffUsers, newAppointments, cancelledAppointments, orders, reviews, giftCards,
@@ -230,10 +192,8 @@ export async function fetchAdminActivity({ days = DEFAULT_DAYS } = {}) {
     safe('Privatisations', failed, () => E.Event.list('-created_at', 200)),
     // `confirmed` = devis accepté puis marqué payé par l'admin : l'acceptation du client reste
     // une action à montrer, sinon elle sortirait du fil dès la confirmation.
-    safe('Réponses aux devis', failed, () => firstWorking(
-      () => E.Event.filter({ status: EVENT_ANSWER_STATUSES }, '-updated_at', 100),
-      () => E.Event.filter({ status: EVENT_ANSWER_STATUSES }, '-updated_date', 100),
-    )),
+    safe('Réponses aux devis', failed, () =>
+      E.Event.filter({ status: EVENT_ANSWER_STATUSES }, '-answered_at', 100)),
     safe('Précommandes textile', failed, () => E.TextileReservation.list('-created_at', 200)),
     safe('Réponses aux événements', failed, () =>
       E.SalonEventInvite.filter({ status: ['accepted', 'declined'] }, '-responded_at', 300)),
@@ -278,12 +238,12 @@ export async function fetchAdminActivity({ days = DEFAULT_DAYS } = {}) {
     });
   }
 
-  // Rendez-vous annulés : seulement les annulations du client (ou d'auteur inconnu), datées
+  // Rendez-vous annulés par le client (requête filtrée sur `cancelled_by`), datés par `cancelled_at`
   for (const apt of cancelledAppointments) {
     if (!isClientAppointment(apt, staffEmails) || isClientPlaceholder(apt)) continue;
     const actor = cancellationActor(apt);
-    if (actor === 'staff' || actor === 'system') continue; // agenda du salon, last minute expiré
-    const at = toIso(apt.cancelled_at) || updatedIso(apt);
+    if (actor === 'staff' || actor === 'system') continue; // sécurité : agenda du salon, last minute expiré
+    const at = toIso(apt.cancelled_at);
     if (!at) continue;
     push('appointment_cancelled', apt, at, {
       ...who(apt),
@@ -364,11 +324,9 @@ export async function fetchAdminActivity({ days = DEFAULT_DAYS } = {}) {
     if (isStaffEmail(ev.client_email)) continue;
     // Un refus sans prix est un refus du salon sur une demande en attente, pas une réponse au devis.
     if (ev.status === 'declined' && toNumber(ev.price) == null) continue;
-    // Limite connue : aucune colonne ne date la réponse du client. `updated_*` est la dernière
-    // modification de la ligne, client OU salon (notes, prix, confirmation du paiement) : une
-    // retouche de l'admin fait remonter l'événement en tête du fil et le rend de nouveau non lu.
-    // Le vrai correctif est côté serveur (colonne `answered_at`, voir docs/backend-admin-alerts.md).
-    const at = updatedIso(ev);
+    // `answered_at` n'est posé que par la réponse du client au devis (serveur) : les refus et
+    // retouches du salon ne le touchent pas, et les lignes sans réponse datée sont écartées.
+    const at = toIso(ev.answered_at);
     if (!at) continue;
     push('event_answer', ev, at, {
       ...who(ev),
