@@ -4,9 +4,17 @@ import { api } from '@/api/apiClient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Gift, CheckCircle2, XCircle, Clock, Search, X, Ban, CreditCard, Banknote, Minus, ScanLine, Camera, Trash2, AlertTriangle } from 'lucide-react';
+import { Gift, CheckCircle2, XCircle, Clock, Search, X, Ban, CreditCard, Banknote, ScanLine, Camera, Trash2, AlertTriangle, ChevronDown } from 'lucide-react';
 import { toast } from 'sonner';
 import jsQR from 'jsqr';
+import GiftCardSummary from '@/components/giftcards-admin/GiftCardSummary';
+import GiftCardDebitPanel from '@/components/giftcards-admin/GiftCardDebitPanel';
+import GiftCardHistory from '@/components/giftcards-admin/GiftCardHistory';
+import {
+  giftCardState, giftCardBalance, formatEuro, formatDay, invalidateGiftCardQueries, fetchGiftCardByCode, friendlyGiftCardError,
+  patchGiftCardCache,
+} from '@/lib/giftCardDebit';
+import LoadError from '@/components/shared/LoadError';
 
 const STATUS_CONFIG = {
   pending: { label: 'En attente', color: 'text-amber-400', bg: 'bg-amber-500/15 border-amber-500/20', icon: Clock },
@@ -15,24 +23,34 @@ const STATUS_CONFIG = {
   expired: { label: 'Expirée', color: 'text-red-400', bg: 'bg-red-500/15 border-red-500/20', icon: XCircle },
 };
 
-/** Après toute modification d'une carte : la liste admin, le tableau de bord (CA « Cartes cadeau »,
- *  solde en circulation) et le fil d'activité clients. */
-function invalidateGiftCardQueries(queryClient) {
-  for (const queryKey of [['adminGiftCards'], ['dashboard', 'giftCards'], ['adminActivity']]) {
-    queryClient.invalidateQueries({ queryKey });
-  }
+/** Bandeau d'état en tête de fiche quand la carte ne peut pas être débitée. */
+function StateBanner({ tone, children }) {
+  const tones = {
+    amber: 'bg-amber-500/10 border-amber-500/30 text-amber-300',
+    red: 'bg-red-500/10 border-red-500/30 text-red-300',
+    blue: 'bg-blue-500/10 border-blue-500/30 text-blue-300',
+  };
+  return (
+    <div role="status" data-testid="gc-banner" className={`flex items-start gap-2 rounded-2xl border px-3 py-2.5 mb-4 text-xs font-medium ${tones[tone] || tones.amber}`}>
+      <AlertTriangle className="w-4 h-4 shrink-0 mt-px" />
+      <span>{children}</span>
+    </div>
+  );
 }
 
-function ValidateModal({ card, onClose, onValidated }) {
+function ValidateModal({ card, onClose, onCardChange }) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [paymentMethod, setPaymentMethod] = useState('');
   const [loading, setLoading] = useState(false);
-  const [deductAmount, setDeductAmount] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmReject, setConfirmReject] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
-  const currentBalance = card.remaining_balance != null ? card.remaining_balance : card.amount;
+  const [showDetails, setShowDetails] = useState(card.status === 'pending');
+  // Écran de succès du débit : gardé même si la carte vient de passer à « utilisée »
+  const [debitResultShown, setDebitResultShown] = useState(false);
+  const state = giftCardState(card);
+  const showDebit = state === 'debitable' || debitResultShown;
 
   const handleValidate = async () => {
     if (!paymentMethod) {
@@ -41,18 +59,19 @@ function ValidateModal({ card, onClose, onValidated }) {
     }
     setLoading(true);
     try {
-      await api.entities.GiftCard.update(card.id, {
+      const updates = {
         status: 'validated',
         validated_at: new Date().toISOString(),
         validated_by: user?.full_name || user?.email || 'admin',
         remaining_balance: card.amount,
-      });
-      toast.success('Carte validée !', { description: `${card.amount}€ - ${card.recipient_name}` });
-      invalidateGiftCardQueries(queryClient);
-      onValidated?.();
-      onClose();
+      };
+      await api.entities.GiftCard.update(card.id, updates);
+      toast.success('Carte validée !', { description: `${formatEuro(card.amount)} - ${card.recipient_name}` });
+      invalidateGiftCardQueries(queryClient, card.id);
+      // La fiche reste ouverte : la carte, désormais payée, peut être débitée tout de suite
+      onCardChange?.({ ...card, ...updates });
     } catch (err) {
-      toast.error('Erreur', { description: err.message });
+      toast.error('Erreur', { description: friendlyGiftCardError(err) });
     } finally {
       setLoading(false);
     }
@@ -63,10 +82,10 @@ function ValidateModal({ card, onClose, onValidated }) {
     try {
       await api.entities.GiftCard.update(card.id, { status: 'expired' });
       toast.success('Carte rejetée');
-      invalidateGiftCardQueries(queryClient);
+      invalidateGiftCardQueries(queryClient, card.id);
       onClose();
     } catch (err) {
-      toast.error('Erreur', { description: err.message });
+      toast.error('Erreur', { description: friendlyGiftCardError(err) });
     } finally {
       setLoading(false);
     }
@@ -77,41 +96,10 @@ function ValidateModal({ card, onClose, onValidated }) {
     try {
       await api.entities.GiftCard.update(card.id, { status: 'expired', remaining_balance: 0 });
       toast.success('Carte annulée', { description: `${card.code} - ${card.recipient_name}` });
-      invalidateGiftCardQueries(queryClient);
+      invalidateGiftCardQueries(queryClient, card.id);
       onClose();
     } catch (err) {
-      toast.error('Erreur', { description: err.message });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleDeduct = async () => {
-    const val = Number(deductAmount);
-    if (!val || val <= 0) {
-      toast.error('Montant invalide');
-      return;
-    }
-    if (val > currentBalance) {
-      toast.error(`Solde insuffisant (${currentBalance}€)`);
-      return;
-    }
-    setLoading(true);
-    try {
-      const newBalance = Math.round((currentBalance - val) * 100) / 100;
-      const updates = { remaining_balance: newBalance };
-      if (newBalance <= 0) {
-        updates.status = 'used';
-        updates.used_at = new Date().toISOString();
-      }
-      await api.entities.GiftCard.update(card.id, updates);
-      toast.success(newBalance <= 0 ? 'Carte épuisée' : `${val}€ débité`, {
-        description: newBalance > 0 ? `Nouveau solde: ${newBalance}€` : 'La carte est maintenant utilisée',
-      });
-      invalidateGiftCardQueries(queryClient);
-      onClose();
-    } catch (err) {
-      toast.error('Erreur', { description: err.message });
+      toast.error('Erreur', { description: friendlyGiftCardError(err) });
     } finally {
       setLoading(false);
     }
@@ -122,10 +110,10 @@ function ValidateModal({ card, onClose, onValidated }) {
     try {
       await api.entities.GiftCard.delete(card.id);
       toast.success('Carte supprimée');
-      invalidateGiftCardQueries(queryClient);
+      invalidateGiftCardQueries(queryClient, card.id);
       onClose();
     } catch (err) {
-      toast.error('Erreur', { description: err.message });
+      toast.error('Erreur', { description: friendlyGiftCardError(err) });
     } finally {
       setLoading(false);
     }
@@ -143,73 +131,88 @@ function ValidateModal({ card, onClose, onValidated }) {
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.9 }}
         onClick={e => e.stopPropagation()}
-        className="relative w-full max-w-md max-h-full overflow-y-auto overscroll-contain rounded-3xl bg-card border border-border p-6 shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Carte cadeau ${card.code}`}
+        className="relative w-full max-w-md max-h-full overflow-y-auto overscroll-contain rounded-3xl bg-card border border-border p-5 sm:p-6 shadow-2xl"
       >
-        <button onClick={onClose} className="absolute top-4 right-4 w-8 h-8 rounded-full flex items-center justify-center hover:bg-secondary z-10">
+        <button onClick={onClose} aria-label="Fermer" className="absolute top-3 right-3 w-8 h-8 rounded-full flex items-center justify-center bg-black/40 hover:bg-secondary z-10">
           <X className="w-4 h-4" />
         </button>
 
-        {/* Card preview */}
-        <div className="relative overflow-hidden rounded-2xl mb-4" style={{ aspectRatio: '1.6/1' }}>
-          <div className="absolute inset-0 bg-gradient-to-br from-[#1a1a1a] via-[#111] to-[#0a0a0a]" />
-          <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-primary/20 to-transparent rounded-bl-full" />
-          <div className="absolute inset-[1px] rounded-2xl border border-white/10" />
-          <div className="relative h-full flex flex-col justify-between p-4">
-            <div className="flex justify-between items-start">
-              <div>
-                <p className="text-[9px] tracking-[0.3em] uppercase text-white/40">Carte Cadeau</p>
-                <p className="text-[10px] text-white/30 font-mono">{card.code}</p>
-              </div>
-              <img src="/logo.png" alt="" className="w-10 h-10 object-contain opacity-80" />
-            </div>
-            <div className="text-center">
-              <p className="text-3xl font-black text-white">{card.amount}€</p>
-            </div>
-            <div className="flex justify-between items-end">
-              <div>
-                <p className="text-[9px] text-white/40 uppercase">Pour</p>
-                <p className="text-xs font-semibold text-white">{card.recipient_name}</p>
-              </div>
-              <div className="text-right">
-                <p className="text-[9px] text-white/40 uppercase">De</p>
-                <p className="text-xs text-white/70">{card.sender_name}</p>
-              </div>
-            </div>
-          </div>
-        </div>
+        <GiftCardSummary card={card} />
 
-        {/* Status */}
-        <div className="flex items-center gap-2 mb-4">
-          <div className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-semibold ${statusConf.bg} ${statusConf.color}`}>
-            <StatusIcon className="w-3.5 h-3.5" />
-            {statusConf.label}
-          </div>
-          <span className="text-xs text-muted-foreground">
-            {card.created_at ? new Date(card.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' }) : ''}
-          </span>
-        </div>
+        {/* Ce qui empêche un débit */}
+        {!showDebit && state === 'pending' && (
+          <StateBanner tone="amber">À valider (paiement de la carte) avant de pouvoir la débiter.</StateBanner>
+        )}
+        {!showDebit && state === 'used' && (
+          <StateBanner tone="blue">
+            Carte entièrement utilisée{card.used_at ? ` le ${formatDay(card.used_at)}` : ''} : solde {formatEuro(giftCardBalance(card))}, aucun débit possible.
+          </StateBanner>
+        )}
+        {!showDebit && state === 'expired' && (
+          <StateBanner tone="red">Carte annulée ou expirée : aucun débit possible.</StateBanner>
+        )}
+        {!showDebit && state === 'outdated' && (
+          <StateBanner tone="red">
+            Date de validité dépassée ({formatDay(card.valid_until)}) : aucun débit possible.
+          </StateBanner>
+        )}
 
-        {/* Details */}
-        <div className="space-y-2 mb-5 text-sm">
-          <div className="flex justify-between"><span className="text-muted-foreground">Client</span><span className="font-medium">{card.sender_name}</span></div>
-          <div className="flex justify-between"><span className="text-muted-foreground">Email</span><span className="font-medium">{card.sender_email}</span></div>
-          <div className="flex justify-between"><span className="text-muted-foreground">Téléphone</span><span className="font-medium">{card.sender_phone || '-'}</span></div>
-          <div className="flex justify-between"><span className="text-muted-foreground">Bénéficiaire</span><span className="font-medium">{card.recipient_name}</span></div>
-          <div className="flex justify-between"><span className="text-muted-foreground">Validité</span><span>{card.valid_until ? new Date(card.valid_until).toLocaleDateString('fr-FR') : '-'}</span></div>
-          {card.recipient_message && (
-            <div className="bg-white/5 rounded-xl p-3 mt-1">
-              <p className="text-xs text-muted-foreground mb-1">Message</p>
-              <p className="text-sm italic">"{card.recipient_message}"</p>
+        {/* Débit */}
+        {showDebit && (
+          <GiftCardDebitPanel
+            card={card}
+            onCardChange={onCardChange}
+            onResultChange={setDebitResultShown}
+            onDone={onClose}
+          />
+        )}
+
+        {/* Historique des mouvements (si le serveur le fournit) */}
+        {card.status !== 'pending' && <GiftCardHistory cardId={card.id} />}
+
+        {/* Status + détails */}
+        <div className="mt-4">
+          <button
+            type="button"
+            onClick={() => setShowDetails(v => !v)}
+            className="w-full flex items-center justify-between gap-2 py-2 text-left"
+            aria-expanded={showDetails}
+          >
+            <span className="flex items-center gap-2 min-w-0">
+              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-semibold ${statusConf.bg} ${statusConf.color}`}>
+                <StatusIcon className="w-3.5 h-3.5" />
+                {statusConf.label}
+              </span>
+              <span className="text-xs text-muted-foreground truncate">Détails de la carte</span>
+            </span>
+            <ChevronDown className={`w-4 h-4 text-muted-foreground shrink-0 transition-transform ${showDetails ? 'rotate-180' : ''}`} />
+          </button>
+          {showDetails && (
+            <div className="space-y-2 mt-2 text-sm">
+              <div className="flex justify-between gap-3"><span className="text-muted-foreground shrink-0">Achetée le</span><span className="font-medium text-right">{card.created_at ? formatDay(card.created_at) : '-'}</span></div>
+              <div className="flex justify-between gap-3"><span className="text-muted-foreground shrink-0">Client</span><span className="font-medium text-right truncate">{card.sender_name}</span></div>
+              <div className="flex justify-between gap-3"><span className="text-muted-foreground shrink-0">Email</span><span className="font-medium text-right truncate">{card.sender_email}</span></div>
+              <div className="flex justify-between gap-3"><span className="text-muted-foreground shrink-0">Téléphone</span><span className="font-medium text-right">{card.sender_phone || '-'}</span></div>
+              <div className="flex justify-between gap-3"><span className="text-muted-foreground shrink-0">Bénéficiaire</span><span className="font-medium text-right truncate">{card.recipient_name}</span></div>
+              {card.recipient_message && (
+                <div className="bg-white/5 rounded-xl p-3 mt-1">
+                  <p className="text-xs text-muted-foreground mb-1">Message</p>
+                  <p className="text-sm italic break-words">"{card.recipient_message}"</p>
+                </div>
+              )}
+              {card.validated_by && (
+                <div className="flex justify-between gap-3"><span className="text-muted-foreground shrink-0">Validée par</span><span className="text-green-400 font-medium text-right truncate">{card.validated_by}</span></div>
+              )}
             </div>
           )}
-          {card.validated_by && (
-            <div className="flex justify-between"><span className="text-muted-foreground">Validée par</span><span className="text-green-400 font-medium">{card.validated_by}</span></div>
-          )}
         </div>
 
-        {/* Actions */}
+        {/* Validation d'une carte en attente */}
         {card.status === 'pending' && (
-          <div className="space-y-3">
+          <div className="space-y-3 mt-4">
             <p className="text-xs font-semibold text-foreground">Mode de paiement reçu</p>
             <div className="grid grid-cols-2 gap-2">
               <button
@@ -258,69 +261,34 @@ function ValidateModal({ card, onClose, onValidated }) {
           </div>
         )}
 
-        {card.status === 'validated' && (
-          <div className="space-y-3">
-            <div className="bg-primary/10 rounded-2xl p-4 text-center border border-primary/20">
-              <p className="text-xs text-muted-foreground mb-1">Solde disponible</p>
-              <p className="text-3xl font-black text-primary">{currentBalance}€</p>
-              <p className="text-[10px] text-muted-foreground mt-1">sur {card.amount}€</p>
-            </div>
-            <p className="text-xs font-semibold text-foreground">Débiter un montant</p>
-            <div className="flex gap-2">
-              <input
-                type="number"
-                value={deductAmount}
-                onChange={e => setDeductAmount(e.target.value)}
-                placeholder="Montant à débiter..."
-                min="0.01"
-                max={currentBalance}
-                step="0.01"
-                className="flex-1 px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-              />
+        {/* Annuler la carte (validée, solde restant) */}
+        {card.status === 'validated' && !debitResultShown && (
+          <div className="pt-3">
+            {!confirmCancel ? (
               <button
-                onClick={() => setDeductAmount(String(currentBalance))}
-                className="shrink-0 px-3 py-3 rounded-xl bg-white/5 border border-white/10 text-xs font-semibold text-muted-foreground hover:bg-white/10"
+                onClick={() => setConfirmCancel(true)}
+                disabled={loading}
+                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-medium text-amber-400/70 hover:text-amber-400 hover:bg-amber-500/10 transition-colors"
               >
-                Tout
+                <Ban className="w-3.5 h-3.5" /> Annuler cette carte
               </button>
-            </div>
-            <button
-              onClick={handleDeduct}
-              disabled={loading || !deductAmount}
-              className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50"
-            >
-              <Minus className="w-4 h-4" />
-              {loading ? 'Débit...' : deductAmount && Number(deductAmount) >= currentBalance ? 'Épuiser la carte' : 'Débiter'}
-            </button>
-
-            {/* Annuler la carte */}
-            <div className="pt-2">
-              {!confirmCancel ? (
+            ) : (
+              <div className="flex gap-2">
                 <button
-                  onClick={() => setConfirmCancel(true)}
-                  disabled={loading}
-                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-medium text-amber-400/70 hover:text-amber-400 hover:bg-amber-500/10 transition-colors"
+                  onClick={() => setConfirmCancel(false)}
+                  className="flex-1 py-2.5 rounded-xl text-xs font-medium text-muted-foreground bg-white/5 hover:bg-white/10 transition-colors"
                 >
-                  <Ban className="w-3.5 h-3.5" /> Annuler cette carte
+                  Non
                 </button>
-              ) : (
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setConfirmCancel(false)}
-                    className="flex-1 py-2.5 rounded-xl text-xs font-medium text-muted-foreground bg-white/5 hover:bg-white/10 transition-colors"
-                  >
-                    Non
-                  </button>
-                  <button
-                    onClick={handleCancel}
-                    disabled={loading}
-                    className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold text-white bg-amber-500 hover:bg-amber-600 transition-colors disabled:opacity-50"
-                  >
-                    <Ban className="w-3.5 h-3.5" /> Confirmer l'annulation
-                  </button>
-                </div>
-              )}
-            </div>
+                <button
+                  onClick={handleCancel}
+                  disabled={loading}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold text-white bg-amber-500 hover:bg-amber-600 transition-colors disabled:opacity-50"
+                >
+                  <Ban className="w-3.5 h-3.5" /> Confirmer l'annulation
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -553,49 +521,61 @@ export default function AdminGiftCards() {
   const [pendingScanCode, setPendingScanCode] = useState(null);
   const queryClient = useQueryClient();
 
-  const { data: giftCards = [], isLoading } = useQuery({
+  const { data: giftCards = [], isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ['adminGiftCards'],
     queryFn: () => api.entities.GiftCard.list('-created_at', 200),
   });
+  const giftCardsRef = useRef(giftCards);
+  giftCardsRef.current = giftCards;
 
-  // Resolve a scanned code: find in loaded cards or refetch
-  const resolveScanCode = useCallback(async (code) => {
-    // Try in current data first
-    let card = giftCards.find(c => c.code === code);
-    if (card) {
-      setSelectedCard(card);
-      setPendingScanCode(null);
+  // Fiche ouverte : la version de la liste (à jour après un débit ou un rechargement), sinon
+  // l'instantané (carte trouvée par son code, hors des 200 dernières)
+  const liveCard = selectedCard
+    ? giftCards.find(c => String(c.id) === String(selectedCard.id)) || selectedCard
+    : null;
+
+  const handleCardChange = useCallback((fresh) => {
+    if (!fresh?.id) return;
+    patchGiftCardCache(queryClient, fresh);
+    setSelectedCard(prev => (prev && String(prev.id) === String(fresh.id) ? { ...prev, ...fresh } : prev));
+  }, [queryClient]);
+
+  // Code scanné ou saisi : d'abord dans la liste chargée, sinon recherche directe par code
+  const openByCode = useCallback(async (raw) => {
+    const code = String(raw || '').trim().toUpperCase();
+    if (!code) return;
+    const known = giftCardsRef.current.find(c => String(c.code || '').toUpperCase() === code);
+    if (known) {
+      setSelectedCard(known);
       return;
     }
-    // Data might be stale — refetch and retry
     setPendingScanCode(code);
-    await queryClient.invalidateQueries({ queryKey: ['adminGiftCards'] });
-  }, [giftCards, queryClient]);
-
-  // When data refreshes and we have a pending code, resolve it
-  useEffect(() => {
-    if (!pendingScanCode || isLoading) return;
-    const card = giftCards.find(c => c.code === pendingScanCode);
-    if (card) {
-      setSelectedCard(card);
-      setPendingScanCode(null);
-    } else if (giftCards.length > 0) {
-      toast.error('Carte introuvable', { description: `Aucune carte avec le code ${pendingScanCode}` });
-      setPendingScanCode(null);
-    }
-  }, [giftCards, isLoading, pendingScanCode]);
-
-  // Handle QR scan from URL: ?scan=DHB-XXXX-XXXX
-  useEffect(() => {
-    const scanCode = searchParams.get('scan');
-    if (scanCode && giftCards.length > 0) {
-      const card = giftCards.find(c => c.code === scanCode);
-      if (card) {
-        setSelectedCard(card);
-        setSearchParams({}, { replace: true });
+    try {
+      const found = await fetchGiftCardByCode(code);
+      if (found) {
+        setSelectedCard(found);
+        queryClient.invalidateQueries({ queryKey: ['adminGiftCards'] });
+      } else {
+        toast.error('Carte introuvable', { description: `Aucune carte avec le code ${code}` });
       }
+    } catch (err) {
+      toast.error('Carte introuvable', { description: friendlyGiftCardError(err, `Aucune carte avec le code ${code}`) });
+    } finally {
+      setPendingScanCode(null);
     }
-  }, [searchParams, giftCards, setSearchParams]);
+  }, [queryClient]);
+
+  // QR code lu par l'appareil photo du téléphone : ?scan=DHB-XXXX-XXXX
+  const scanParam = searchParams.get('scan');
+  useEffect(() => {
+    if (!scanParam || isLoading) return;
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      next.delete('scan');
+      return next;
+    }, { replace: true });
+    openByCode(scanParam);
+  }, [scanParam, isLoading, openByCode, setSearchParams]);
 
   const filtered = giftCards.filter(c => {
     if (filter !== 'all' && c.status !== filter) return false;
@@ -695,7 +675,9 @@ export default function AdminGiftCards() {
       </div>
 
       {/* List */}
-      {isLoading ? (
+      {isError && !giftCards.length ? (
+        <LoadError what="les cartes cadeau" error={error} onRetry={refetch} retrying={isFetching} />
+      ) : isLoading ? (
         <div className="flex justify-center py-20">
           <div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
         </div>
@@ -760,7 +742,14 @@ export default function AdminGiftCards() {
 
       {/* Modals */}
       <AnimatePresence>
-        {selectedCard && <ValidateModal card={selectedCard} onClose={() => setSelectedCard(null)} />}
+        {liveCard && (
+          <ValidateModal
+            key={liveCard.id}
+            card={liveCard}
+            onClose={() => setSelectedCard(null)}
+            onCardChange={handleCardChange}
+          />
+        )}
       </AnimatePresence>
       <AnimatePresence>
         {showScanner && (
@@ -768,7 +757,7 @@ export default function AdminGiftCards() {
             onClose={() => setShowScanner(false)}
             onScanned={(code) => {
               setShowScanner(false);
-              resolveScanCode(code);
+              openByCode(code);
             }}
           />
         )}
