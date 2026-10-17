@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { api } from '@/api/apiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Pencil, Trash2, Mail, Upload } from 'lucide-react';
+import { Plus, Pencil, Trash2, Mail, Upload, Images } from 'lucide-react';
 import ImageCropDialog from '@/components/shared/ImageCropDialog';
+import GalleryEditor from '@/components/barber-gallery/GalleryEditor';
 import { BARBER_PHOTO_ASPECT, BARBER_PHOTO_BG, BARBER_PHOTO_RATIO } from '@/lib/barberPhoto';
 import { Button } from '@/components/ui/button';
 
@@ -26,6 +27,8 @@ export default function Team() {
   const [showDialog, setShowDialog] = useState(false);
   const [cropSrc, setCropSrc] = useState(null);
   const [showCrop, setShowCrop] = useState(false);
+  // Fiche dont on édite les réalisations (id : la fiche affichée suit le cache rechargé)
+  const [galleryEmployeeId, setGalleryEmployeeId] = useState(null);
   const queryClient = useQueryClient();
 
   const { data: employees = [] } = useQuery({
@@ -36,7 +39,8 @@ export default function Team() {
   const saveMutation = useMutation({
     mutationFn: (data) => {
       if (data.id) {
-        const { id, ...rest } = data;
+        // La galerie s'enregistre à part (GalleryEditor) : ne pas la réécrire avec une copie périmée
+        const { id, gallery: _gallery, ...rest } = data;
         return api.entities.Employee.update(id, rest);
       }
       return api.entities.Employee.create(data);
@@ -117,6 +121,10 @@ export default function Team() {
               <div className="flex gap-1">
                 <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setEditEmployee({ ...emp, working_hours: emp.working_hours || defaultHours }); setShowDialog(true); }}>
                   <Pencil className="w-3.5 h-3.5" />
+                </Button>
+                <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Réalisations de ${emp.name}`}
+                  onClick={() => setGalleryEmployeeId(emp.id)}>
+                  <Images className="w-3.5 h-3.5" />
                 </Button>
                 <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10"
                   onClick={() => deleteMutation.mutate(emp.id)}>
@@ -248,6 +256,21 @@ export default function Team() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Réalisations d'un barber : chaque geste est enregistré tout de suite */}
+      {(() => {
+        const galleryEmployee = employees.find(e => String(e.id) === String(galleryEmployeeId));
+        return (
+          <Dialog open={!!galleryEmployee} onOpenChange={(open) => !open && setGalleryEmployeeId(null)}>
+            <DialogContent className="bg-card border-border max-w-md max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle className="font-display">Réalisations de {galleryEmployee?.name}</DialogTitle>
+              </DialogHeader>
+              {galleryEmployee && <GalleryEditor key={galleryEmployee.id} employee={galleryEmployee} />}
+            </DialogContent>
+          </Dialog>
+        );
+      })()}
 
       <ImageCropDialog
         open={showCrop}

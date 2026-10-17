@@ -8,9 +8,71 @@ import { Star, MessageSquare, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
 import LoadError, { isNetworkError } from '@/components/shared/LoadError';
 import { contentFilterError } from '@/lib/contentFilter';
+import { openExternalUrl } from '@/lib/capacitor';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 const GOOGLE_PLACE_ID = 'ChIJm6cgTFprjEcRZsuEqhCEPXY';
 const GOOGLE_REVIEW_URL = `https://search.google.com/local/writereview?placeid=${GOOGLE_PLACE_ID}`;
+// Le client est passé par le lien Google depuis la fenêtre : on ne la lui remontre plus
+const googleDoneKey = (userId) => `dhb-google-review-done:${userId || 'guest'}`;
+const readGoogleDone = (userId) => {
+  try { return localStorage.getItem(googleDoneKey(userId)) === '1'; } catch { return false; }
+};
+
+/**
+ * Après un avis 5 étoiles : « Publiez-le aussi sur Google ». Le commentaire est copié dans le
+ * presse-papiers (à coller sur Google, qui n'accepte pas de texte prérempli), puis la page
+ * d'avis Google du salon s'ouvre. Fermeture par la croix ou « Plus tard ».
+ */
+function GoogleReviewPrompt({ open, comment, userId, onClose }) {
+  const [busy, setBusy] = useState(false);
+  const goToGoogle = async () => {
+    setBusy(true);
+    // Copie et ouverture lancées dans le même geste, sans attente entre les deux : Safari
+    // bloque un window.open qui suit un await
+    let copying = null;
+    try { copying = comment && navigator.clipboard ? navigator.clipboard.writeText(comment) : null; } catch { copying = null; }
+    const opening = openExternalUrl(GOOGLE_REVIEW_URL);
+    try { localStorage.setItem(googleDoneKey(userId), '1'); } catch { /* navigation privée */ }
+    if (copying) {
+      try {
+        await copying;
+        toast.success('Votre commentaire est copié : collez-le sur Google');
+      } catch { /* presse-papiers refusé : le client retapera son texte */ }
+    }
+    await opening;
+    setBusy(false);
+    onClose();
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="bg-card border-border max-w-sm rounded-2xl">
+        <DialogHeader>
+          <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-2">
+            <Star className="w-6 h-6 text-primary fill-primary" />
+          </div>
+          <DialogTitle className="font-display text-center">Merci pour vos 5 étoiles !</DialogTitle>
+          <DialogDescription className="text-center">
+            Un avis sur Google aide énormément le salon à se faire connaître. Ça prend 30 secondes.
+            {comment ? ' Votre commentaire sera copié, il suffira de le coller.' : ''}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2 pt-1">
+          <button type="button" onClick={goToGoogle} disabled={busy}
+            className="w-full py-3 rounded-xl bg-primary text-primary-foreground text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-60">
+            Publier aussi sur Google
+            <ExternalLink className="w-4 h-4" />
+          </button>
+          <button type="button" onClick={onClose}
+            className="w-full py-2.5 rounded-xl text-xs font-medium text-muted-foreground">
+            Plus tard
+          </button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 function StarSelect({ rating, onRate }) {
   return (
@@ -81,6 +143,8 @@ export default function MyReviews() {
   const [comment, setComment] = useState('');
   // Barber concerné (facultatif) : son nom part en `employee_name`, affiché « avec … » sur l'avis
   const [barberId, setBarberId] = useState('');
+  // Fenêtre « aussi sur Google » après un 5 étoiles : null = fermée, sinon le commentaire envoyé
+  const [googlePrompt, setGooglePrompt] = useState(null);
 
   // Même requête et même clé que l'accueil (dédupliquée par React Query)
   const {
@@ -131,10 +195,14 @@ export default function MyReviews() {
         return api.entities.Review.create(rest);
       }
     },
-    onSuccess: () => {
+    onSuccess: (_created, sent) => {
       queryClient.invalidateQueries({ queryKey: ['myReviews'] });
       queryClient.invalidateQueries({ queryKey: ['reviews'] });
-      toast.success('Merci pour votre avis !');
+      if (Number(sent?.rating) === 5 && !readGoogleDone(user?.id)) {
+        setGooglePrompt({ comment: sent.comment || '' });
+      } else {
+        toast.success('Merci pour votre avis !');
+      }
       setShowForm(false);
       setRating(0);
       setComment('');
@@ -332,6 +400,13 @@ export default function MyReviews() {
         </>
         )}
       </div>
+
+      <GoogleReviewPrompt
+        open={!!googlePrompt}
+        comment={googlePrompt?.comment || ''}
+        userId={user?.id}
+        onClose={() => setGooglePrompt(null)}
+      />
     </div>
   );
 }

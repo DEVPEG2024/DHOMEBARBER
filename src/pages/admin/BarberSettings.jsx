@@ -2,8 +2,9 @@ import React, { useState, useRef, useEffect } from 'react';
 import { api } from '@/api/apiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
-import { Camera, LogOut, Loader2, User, Save, Clock, Video, AlertTriangle } from 'lucide-react';
+import { Camera, LogOut, Loader2, User, Save, Clock, Video, AlertTriangle, Images } from 'lucide-react';
 import ImageCropDialog from '@/components/shared/ImageCropDialog';
+import GalleryEditor from '@/components/barber-gallery/GalleryEditor';
 import { BARBER_PHOTO_ASPECT, BARBER_PHOTO_BG, BARBER_PHOTO_RATIO } from '@/lib/barberPhoto';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
@@ -458,6 +459,17 @@ export default function BarberSettings() {
             );
           })()}
         </div>
+
+        {/* Réalisations : enregistrées à chaque geste, sans le bouton Sauvegarder */}
+        {employee && (
+          <div className="bg-card border border-border rounded-xl p-6">
+            <h3 className="text-sm font-semibold mb-1 flex items-center gap-2">
+              <Images className="w-4 h-4" /> Mes réalisations
+            </h3>
+            <p className="text-[11px] text-muted-foreground mb-4">Vos plus belles coupes, affichées sur votre profil. Enregistré automatiquement.</p>
+            <GalleryEditor employee={employee} />
+          </div>
+        )}
 
         {/* Bio */}
         <div className="bg-card border border-border rounded-xl p-6">

@@ -8,6 +8,7 @@ import { hapticFeedback } from '@/lib/capacitor';
 import { Button } from '@/components/ui/button';
 import LoadError from '@/components/shared/LoadError';
 import BarberCard, { buildCardStats, overallRating } from '@/components/shared/BarberCard';
+import BarberGallery from '@/components/barber-gallery/BarberGallery';
 
 function SkillBar({ category, level, delay }) {
   const labels = ['Non évalué', 'Débutant', 'Intermédiaire', 'Avancé', 'Expert', 'Maître'];
@@ -210,6 +211,9 @@ function BarberProfileContent({ employee, skillCategories }) {
 
       {/* Vidéo de présentation, si renseignée */}
       <MediaBlock videoUrl={videoUrl} photoUrl={photoUrl} />
+
+      {/* Réalisations (employees.gallery), rien sans photo */}
+      <BarberGallery employee={employee} delay={0.1} />
 
       {/* About section - Glass card */}
       {hasAboutContent && (
