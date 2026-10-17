@@ -1,6 +1,10 @@
 # Backend : carte cadeau dans Apple Wallet et Google Wallet
 
-> **État au 16 oct. 2026 : frontend prêt, serveur à faire.** À appliquer dans `dhomebarber-api/`
+> **Côté Apple appliqué le 17 oct. 2026** (backend 355f9dc, Heroku v117 ; variables Apple posées en
+> v118 ; `features.appleWallet` vrai en production ; pass réel vérifié par `openssl smime -verify`
+> jusqu'à la racine Apple ; certificat valable jusqu'au 16 nov. 2027). Google : en attente de l'émetteur.
+>
+> État au 16 oct. 2026 : frontend prêt, serveur à faire. À appliquer dans `dhomebarber-api/`
 > (hors de ce dépôt) par la session du Mac, qui a accès au code backend, au portail Apple Developer
 > et à Google Cloud. Puis `git push heroku main`.
 

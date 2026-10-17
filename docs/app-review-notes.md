@@ -25,6 +25,11 @@
 > - Déployer le filtre serveur de `docs/backend-content-filter.md`. Sinon, retirer « and on the
 >   server » du point 1.
 > - Remplir les deux lignes `<…>` des comptes de démonstration.
+> - Point 4 (Wallet, collé le 17 oct. 2026 : Apple Wallet est configuré sur le serveur) : donner au
+>   compte client de démonstration une carte cadeau **validée** de 10 € (Admin → Cartes cadeau), sinon
+>   retirer sa dernière phrase. La supprimer après la revue, sans supprimer le compte. Si Google Wallet
+>   est allumé d'ici là, remplacer l'avant-dernière phrase par « On Android the same button adds the
+>   card to Google Wallet. ».
 
 ## Bloc à coller (anglais, lu par App Review)
 
@@ -49,6 +54,9 @@ No code obfuscation is used.
 3. Payments (Guideline 3.1)
 The app sells no digital content. Appointments, shop orders, gift cards and clothing pre-orders are paid in person at the salon for physical services and goods (3.1.3(e)). There is no in-app payment and no external purchase link.
 
+4. [Gift cards in Apple Wallet]
+A client who has bought a gift card can add it to Apple Wallet: Home screen → "Carte Cadeau" block (page "Cartes Cadeau") → tap an active gift card (status "Validée", not expired, with a remaining balance) → "Ajouter à Apple Wallet". The button only appears for active cards, and only once the salon's server has a Wallet pass certificate (it is configured for this review). The app requests a link from our server; the server checks that the card belongs to the signed-in account and returns a short-lived (10 minutes) link to a signed .pkpass, which opens in Safari View Controller and shows the standard Wallet "Add" sheet. The pass is a store card showing the card code, the balance at the time it was added (the up-to-date balance stays in the app), the recipient, the expiry date and the same QR code as in the app; the salon scans it at the counter to deduct services. It contains no payment and no in-app purchase: gift cards are paid in person at the salon (3.1.3(e)). The pass uses the salon's address so Wallet can suggest it on the Lock Screen near the salon. Google Wallet (Android) is not enabled yet: no Wallet button is shown on Android. The demo client account has an active 10 € gift card for testing.
+
 Client demo account: <email / mot de passe du compte client de démonstration déjà fourni dans App Store Connect>
 ```
 
@@ -72,7 +80,11 @@ L'interrupteur d'Admin → Filtres Snap permet d'allumer les filtres **sans nouv
    Snap allumée : comment l'ouvrir, l'écran des CGU Camera Kit et la caméra.
 2. Allumer l'interrupteur seulement une fois cette version approuvée.
 
-## Carte cadeau dans Apple Wallet (à coller seulement une fois le Wallet configuré sur le serveur)
+## Carte cadeau dans Apple Wallet (paragraphe d'origine du § 8 de `docs/backend-wallet.md`)
+
+> **Collé le 17 oct. 2026 dans le bloc du build 12 ci-dessus (point 4)**, Apple Wallet étant configuré
+> sur le serveur (Heroku v118). Seule différence : Google Wallet n'étant pas encore allumé, la phrase
+> sur Android y dit qu'aucun bouton n'apparaît. Le texte ci-dessous reste pour mémoire.
 
 Avant le collage : déployer `docs/backend-wallet.md`, et donner au compte client de démonstration une
 carte cadeau validée de 10 € (à supprimer après la revue, règle « Nettoyage » de CLAUDE.md).
