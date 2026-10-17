@@ -75,6 +75,27 @@ export function useGangAdminOverview({ enabled = true } = {}) {
   });
 }
 
+/**
+ * Admin : toutes les cartes des clients (même calcul et même cache de 60 s que la vue d'ensemble)
+ * → { generated_at, cards: [{ user_id, email, full_name, phone, nudged_at, upcoming,
+ *      badges_unlocked: [clé], card: { tier, edition, name, photo_url, score, stats, visits, … } }] }
+ */
+export const GANG_ADMIN_CARDS_QUERY_KEY = ['gangAdminCards'];
+export const fetchGangAdminCards = () => apiRequest('GET', apiUrl('/gang-card/admin/cards'));
+export function useGangAdminCards({ enabled = true } = {}) {
+  return useQuery({ queryKey: GANG_ADMIN_CARDS_QUERY_KEY, queryFn: fetchGangAdminCards, enabled, staleTime: 60 * 1000 });
+}
+
+/**
+ * Admin : fiche d'un client → { account, card, tiers: [{ key, label, min, reached_on }],
+ *   badges: [{ …écusson, unlocked_on }], visits, missed, upcoming, absences, client_cancels }
+ */
+export const gangAdminClientKey = (id) => ['gangAdminClient', String(id)];
+export const fetchGangAdminClient = (id) => apiRequest('GET', apiUrl(`/gang-card/admin/client/${encodeURIComponent(id)}`));
+export function useGangAdminClient(id, { enabled = true } = {}) {
+  return useQuery({ queryKey: gangAdminClientKey(id || ''), queryFn: () => fetchGangAdminClient(id), enabled: enabled && !!id, staleTime: 60 * 1000 });
+}
+
 /** Clés des écussons, dans l'ordre fixe du serveur. */
 export const GANG_BADGE_ORDER = ['premiere_coupe', 'premiere_barbe', 'degrade_10', 'fidele_barber', 'leve_tot', 'anniv_salon', 'drop'];
 /** Libellés de repli (l'admin ne reçoit que des comptes par clé). */
