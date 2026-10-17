@@ -23,7 +23,7 @@ const WORDS = [
   'chinetoque', 'bamboula', 'nigger', 'nigga', 'faggot', 'tranny',
   // Sexuel explicite
   'bite', 'chatte', 'branlette', 'branleur', 'porno', 'porn', 'nudes', 'sodomie',
-  'fuck', 'fucking', 'motherfucker', 'bitch', 'cunt', 'whore', 'slut', 'dick', 'pussy', 'cock',
+  'fuck', 'fucking', 'motherfucker', 'bitch', 'cunt', 'whore', 'slut', 'pussy', 'cock',
   // Menaces
   'kys',
 ];
@@ -60,8 +60,8 @@ const PHRASE_LIST = PHRASES.map(normalizeForFilter);
 // Mots assez longs pour être cherchés aussi lettres collées (« c.o.n.n.a.r.d », « s a l o p e »)
 const SPELLED = [...WORD_SET].filter((w) => w.length >= 6);
 
-/** Vrai si le texte contient un terme bloqué. */
-export function hasObjectionableContent(text) {
+/** Vrai si le texte, tel quel, contient un terme bloqué. */
+function matchesBlockedTerm(text) {
   const norm = normalizeForFilter(text);
   if (!norm) return false;
   const tokens = norm.split(' ');
@@ -78,6 +78,20 @@ export function hasObjectionableContent(text) {
   const singles = norm.match(/(?:\b[a-z]\b ?){4,}/g);
   if (singles?.some((s) => SPELLED.some((w) => squeeze(s.replace(/ /g, '')).includes(squeeze(w))))) return true;
   return false;
+}
+
+// Mot coupé par un tiret, un tiret bas, un astérisque ou un point suivi d'une minuscule
+// (« con-nard », « sal_ope », « con.nard ») : recollé, puis vérifié une seconde fois. Jamais les
+// espaces ni les apostrophes (« le chat te voit » ne doit pas devenir « chatte »), ni un point suivi
+// d'une majuscule (fin de phrase sans espace).
+const JOINED_WORD = /([\p{L}\d@$€])(?:[-_*]+|\.(?=\p{Ll}))(?=[\p{L}\d@$€])/gu;
+
+/** Vrai si le texte contient un terme bloqué. */
+export function hasObjectionableContent(text) {
+  if (matchesBlockedTerm(text)) return true;
+  const raw = String(text || '');
+  const joined = raw.replace(JOINED_WORD, '$1');
+  return joined !== raw && matchesBlockedTerm(joined);
 }
 
 export const OBJECTIONABLE_MESSAGE =

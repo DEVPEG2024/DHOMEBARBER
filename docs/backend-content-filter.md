@@ -1,5 +1,7 @@
 # Notice backend : filtre des contenus choquants (App Store 1.2)
 
+> **Appliquée le 17 oct. 2026** (backend v113, commit 280e4e4 : `lib/contentFilter.js`, `assertPublishable` dans `routes/entities.js`, `register` dans `routes/auth.js`, `test/test-content-filter.js`). Écarts décidés : `dick` retiré de la liste des deux côtés (prénom) ; mots coupés par `-`, `_`, `*` ou un point suivi d'une minuscule recollés (« con-nard » refusé). Le nom d'un avis et le barber sont filtrés aussi quand ils viennent du corps.
+
 > Directives Apple mises à jour en oct. 2026. La 1.2 précise qu'une app avec du contenu publié par
 > les utilisateurs doit avoir **un moyen de filtrer les contenus choquants avant leur publication**,
 > en plus du signalement, du blocage et des coordonnées publiées. Un développeur qui ne met pas en

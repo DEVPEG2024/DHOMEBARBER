@@ -1,5 +1,7 @@
 # Débit des cartes cadeau au comptoir : notice serveur
 
+> **Appliquée le 17 oct. 2026** (backend v113, commit 280e4e4 : `lib/giftCardDebit.js`, `routes/giftCardDebit.js` monté avant `entitiesRouter`, table `gift_card_transactions` créée, `test/test-gift-card-debit.js`). Écarts : table absente → 501 `not_configured` ; `nothing_to_restore` (409) si le solde est déjà au montant initial ; barber → 404 sur l'historique ; push à l'acheteur coupé (`GIFT_CARD_DEBIT_NOTIFY_OWNER`).
+
 Pour la session du Mac qui a le code de `dhomebarber-api`. Le frontend (17 oct. 2026) est **déjà en
 place et fonctionne sans ces routes** : il les essaie d'abord, puis se replie sur l'entité générique
 `GiftCard.update` (solde relu juste avant, calcul côté client, pas d'historique). Déployer ce qui

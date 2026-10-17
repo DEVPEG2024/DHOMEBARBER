@@ -1,5 +1,7 @@
 # Notice backend : « j'envoie un Last Minute, rien n'est envoyé »
 
+> **Appliquée le 17 oct. 2026** (backend v113, commit 280e4e4 : `lib/lastMinutePush.js`, jointures `LOWER` de `lib/pushHelper.js`, `test/test-last-minute-push.js`). Diagnostic : 47 abonnements Android clients, **0 iOS** — `AppDelegate.swift` n'avait pas les méthodes d'enregistrement APNs (corrigé localement, nouveau build iOS nécessaire). Écarts : `end_time` vide toléré (anciennes apps) ; `url` limitée à `/booking` suivi d'une requête ou d'une ancre ; quota en mémoire.
+
 > Signalé par le propriétaire le 16 oct. 2026 : quand l'admin pose un Last Minute dans l'agenda et
 > touche « Envoyer la notification », aucun client ne reçoit rien. Le diagnostic et la correction se
 > font dans `dhomebarber-api` (Heroku), depuis la session du Mac. Le frontend est déjà corrigé (voir
