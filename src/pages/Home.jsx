@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { api } from '@/api/apiClient';
 import { fetchPublicBarbers } from '@/lib/publicBarbers';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { MapPin, Clock, Phone, Star, ArrowRight, Scissors, ShoppingBag, Newspaper, Sparkles, Gift, GripVertical, Pencil, Check, X, Volume2, VolumeX, Shirt, Handshake } from 'lucide-react';
+import { MapPin, Clock, Phone, Star, ArrowRight, Scissors, ShoppingBag, Newspaper, Gift, GripVertical, Pencil, Check, X, Volume2, VolumeX, Shirt, Handshake } from 'lucide-react';
 import { motion, useMotionValue, useSpring, useTransform, Reorder, useReducedMotion } from 'framer-motion';
 import { toast } from 'sonner';
 import LoadError, { isNetworkError, queryFailed } from '@/components/shared/LoadError';
@@ -22,6 +22,9 @@ import TextileHomeCard from '@/components/textile/TextileHomeCard';
 import SalonEventHomeCard from '@/components/salon-events/SalonEventHomeCard';
 import { TEXTILE_QUERY_KEY, fetchTextileOverview } from '@/lib/textileApi';
 import PartnersHomeCard from '@/components/partners/PartnersHomeCard';
+import Reveal from '@/components/motion/Reveal';
+import SnapCarousel from '@/components/motion/SnapCarousel';
+import TiltCard from '@/components/motion/TiltCard';
 import { PARTNERS_QUERY_KEY, fetchPartners, visiblePartners } from '@/lib/partnersApi';
 
 const IS_MOBILE = typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
@@ -60,16 +63,6 @@ function useParallaxTilt() {
 }
 
 const LOGO_URL = '/logo.png';
-
-const containerVariants = {
-  hidden: {},
-  visible: { transition: { staggerChildren: 0.08 } },
-};
-
-const itemVariants = {
-  hidden: { opacity: 0, y: 16 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: 'easeOut' } },
-};
 
 // Décor parallaxe sous les cartes des barbers : nuances de vert et de bleu
 // (halos flous répétés). Chaque couche est translatée modulo la période de son
@@ -567,21 +560,21 @@ export default function Home() {
           <div className="grid grid-cols-3 gap-2">
             <motion.div whileTap={editMode ? {} : { scale: 0.93 }} onClick={editMode ? undefined : () => setShowHours(true)}
               className="glass rounded-2xl p-3 text-center cursor-pointer active:bg-white/10 transition-colors">
-              <div className="w-10 h-10 rounded-2xl bg-green-500/15 flex items-center justify-center mx-auto mb-2 border border-green-500/20">
+              <div className="float-soft w-10 h-10 rounded-2xl bg-green-500/15 flex items-center justify-center mx-auto mb-2 border border-green-500/20">
                 <Clock className="w-4.5 h-4.5 text-green-500" />
               </div>
               <p className="text-xs font-semibold text-foreground">Horaires</p>
               <p className="text-[11px] text-muted-foreground mt-0.5">{openDaysLabel}</p>
             </motion.div>
             <motion.a href={editMode ? undefined : "tel:0666083605"} whileTap={editMode ? {} : { scale: 0.93 }} className="glass rounded-2xl p-3 text-center cursor-pointer active:bg-white/10 transition-colors">
-              <div className="w-10 h-10 rounded-2xl bg-white/15 flex items-center justify-center mx-auto mb-2 border border-white/20">
+              <div className="float-soft float-delay-1 w-10 h-10 rounded-2xl bg-white/15 flex items-center justify-center mx-auto mb-2 border border-white/20">
                 <Phone className="w-4.5 h-4.5 text-white" />
               </div>
               <p className="text-xs font-semibold text-foreground">Appeler</p>
               <p className="text-[11px] text-muted-foreground mt-0.5">06 66 08 36 05</p>
             </motion.a>
             <motion.a href={editMode ? undefined : "https://maps.google.com/?q=3+Rue+du+Bois+Arquet+74140+Douvaine"} target="_blank" rel="noopener noreferrer" whileTap={editMode ? {} : { scale: 0.93 }} className="glass rounded-2xl p-3 text-center cursor-pointer active:bg-white/10 transition-colors">
-              <div className="w-10 h-10 rounded-2xl bg-red-500/15 flex items-center justify-center mx-auto mb-2 border border-red-500/20">
+              <div className="float-soft float-delay-2 w-10 h-10 rounded-2xl bg-red-500/15 flex items-center justify-center mx-auto mb-2 border border-red-500/20">
                 <MapPin className="w-4.5 h-4.5 text-red-500" />
               </div>
               <p className="text-xs font-semibold text-foreground">Itinéraire</p>
@@ -608,7 +601,7 @@ export default function Home() {
         if (!snapEnabled && !editMode) return null;
         return (
           <Link to="/snap">
-            <motion.div whileTap={{ scale: 0.98 }} className="relative overflow-hidden rounded-3xl cursor-pointer group glass p-5">
+            <motion.div whileTap={{ scale: 0.98 }} className="shine-sweep shine-delay-1 relative overflow-hidden rounded-3xl cursor-pointer group glass p-5">
               <div className="absolute inset-0 opacity-70 pointer-events-none"
                 style={{ background: 'linear-gradient(120deg, rgba(255,214,0,0.16), rgba(224,82,155,0.18) 50%, rgba(30,136,229,0.18))' }} />
               <div className="relative flex items-center gap-4">
@@ -636,13 +629,13 @@ export default function Home() {
             <Link to="/feed">
               <motion.div whileTap={{ scale: 0.98 }} className="glass rounded-2xl overflow-hidden cursor-pointer group relative">
                 {latestPost.image_url && (
-                  <div className="w-full aspect-[16/9] relative">
-                    <img src={latestPost.image_url} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                  <div className="w-full aspect-[16/9] relative overflow-hidden">
+                    <img src={latestPost.image_url} alt="" className="kenburns w-full h-full object-cover" />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
                     <div className="absolute bottom-0 left-0 right-0 p-4">
                       <div className="flex items-center gap-2 mb-2">
                         <span className="inline-flex items-center gap-1 bg-primary/90 backdrop-blur-sm text-primary-foreground text-[10px] font-bold px-2 py-0.5 rounded-full">
-                          <Sparkles className="w-3 h-3" /> NEW
+                          <span className="live-dot text-primary-foreground !w-1.5 !h-1.5" aria-hidden="true" /> NEW
                         </span>
                         <span className="text-[11px] text-white/70">
                           {latestPost.created_at ? new Date(latestPost.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' }) : ''}
@@ -659,7 +652,7 @@ export default function Home() {
                   <div className="p-4">
                     <div className="flex items-center gap-2 mb-2">
                       <span className="inline-flex items-center gap-1 bg-primary/90 text-primary-foreground text-[10px] font-bold px-2 py-0.5 rounded-full">
-                        <Sparkles className="w-3 h-3" /> NEW
+                        <span className="live-dot text-primary-foreground !w-1.5 !h-1.5" aria-hidden="true" /> NEW
                       </span>
                       <Newspaper className="w-3.5 h-3.5 text-primary" />
                       <span className="text-[11px] text-muted-foreground">
@@ -685,22 +678,30 @@ export default function Home() {
             {queryFailed(servicesQuery) ? (
               <LoadError compact what="les prestations" error={servicesQuery.error} onRetry={servicesQuery.refetch} retrying={servicesQuery.isFetching} />
             ) : (
-            <div className="grid grid-cols-2 gap-2.5">
-              {services.slice(0, 4).map((service, i) => (
-                <Link key={service.id} to={`/booking?services=${encodeURIComponent(service.id)}`}>
-                  <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
-                    whileTap={{ scale: 0.97 }} className="glass rounded-2xl p-4 relative overflow-hidden cursor-pointer group h-full">
-                    <div className="absolute top-0 right-0 w-16 h-16 bg-gradient-to-bl from-primary/10 to-transparent rounded-bl-3xl" />
-                    <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center mb-3">
-                      <Scissors className="w-4 h-4 text-primary" />
-                    </div>
-                    <p className="text-sm font-semibold text-foreground mb-1">{service.name}</p>
-                    <p className="text-[11px] text-muted-foreground mb-2">{service.duration} min</p>
-                    <p className="text-base font-bold text-primary">{service.price}€</p>
-                  </motion.div>
+            /* Carrousel aimanté qui avance seul (pause dès qu'on le touche) ; cartes inclinables */
+            <SnapCarousel itemWidth="58%" autoplay={editMode ? 0 : 4200} label="Prestations">
+              {services.slice(0, 8).map((service, i) => (
+                <Link key={service.id} to={`/booking?services=${encodeURIComponent(service.id)}`} className="block h-full">
+                  <TiltCard max={7} className="rounded-2xl">
+                    <motion.div whileTap={{ scale: 0.97 }}
+                      className={`shine-sweep shine-delay-${i % 3} glass rounded-2xl p-4 cursor-pointer h-full min-h-[150px] flex flex-col`}>
+                      <div className="absolute -top-6 -right-6 w-20 h-20 rounded-full bg-primary/15 blur-2xl pointer-events-none" />
+                      <div className={`float-soft float-delay-${i % 3} w-10 h-10 rounded-xl bg-gradient-to-br from-primary/40 to-primary/10 border border-primary/25 flex items-center justify-center mb-3`}>
+                        <Scissors className="w-4 h-4 text-primary" />
+                      </div>
+                      <p className="text-sm font-semibold text-foreground mb-1 line-clamp-2">{service.name}</p>
+                      <p className="text-[11px] text-muted-foreground mb-2 flex items-center gap-1"><Clock className="w-3 h-3" />{service.duration} min</p>
+                      <div className="mt-auto flex items-center justify-between">
+                        <p className="text-base font-bold text-primary">{service.price}€</p>
+                        <span className="w-7 h-7 rounded-full bg-primary text-primary-foreground flex items-center justify-center">
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </span>
+                      </div>
+                    </motion.div>
+                  </TiltCard>
                 </Link>
               ))}
-            </div>
+            </SnapCarousel>
             )}
           </div>
         );
@@ -710,11 +711,11 @@ export default function Home() {
         return (
           <div>
             <SectionHeader title="Notre Boutique" subtitle="Shop" linkTo="/shop" />
-            <div className="grid grid-cols-2 gap-2.5">
-              {products.slice(0, 4).map((product, i) => (
-                <Link key={product.id} to="/shop">
-                  <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
-                    whileTap={{ scale: 0.97 }} className="glass rounded-2xl overflow-hidden cursor-pointer group">
+            <SnapCarousel itemWidth="46%" gap={10} label="Boutique" dots={products.length > 2}>
+              {products.slice(0, 8).map((product, i) => (
+                <Link key={product.id} to="/shop" className="block h-full">
+                  <TiltCard max={7} className="rounded-2xl">
+                  <motion.div whileTap={{ scale: 0.97 }} className={`shine-sweep shine-delay-${i % 3} glass rounded-2xl overflow-hidden cursor-pointer group h-full`}>
                     {product.image_url ? (
                       <div className="w-full aspect-square bg-white rounded-t-2xl overflow-hidden">
                         <img src={product.image_url} alt={product.name} className="w-full h-full object-contain p-2 group-hover:scale-105 transition-transform duration-300" />
@@ -730,9 +731,10 @@ export default function Home() {
                       <p className="text-sm font-bold text-primary mt-1">{product.price}€</p>
                     </div>
                   </motion.div>
+                  </TiltCard>
                 </Link>
               ))}
-            </div>
+            </SnapCarousel>
           </div>
         );
 
@@ -811,10 +813,9 @@ export default function Home() {
             <p className="text-[10px] text-muted-foreground -mt-2 mb-3">
               Avis de clients connectés, non vérifiés, du plus récent au plus ancien
             </p>
-            <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1 snap-x snap-mandatory scrollbar-hide">
-              {reviews.slice(0, 5).map((review, i) => (
-                <motion.div key={review.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.07 }}
-                  className="glass rounded-2xl p-4 snap-start shrink-0 w-[280px]">
+            <SnapCarousel itemWidth="84%" autoplay={editMode ? 0 : 5200} label="Avis clients">
+              {reviews.slice(0, 6).map((review) => (
+                <div key={review.id} className="glass rounded-2xl p-4 h-full">
                   <div className="flex items-start justify-between mb-2">
                     <div className="flex items-center gap-2.5">
                       <div className="w-9 h-9 rounded-full bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center text-sm font-bold text-primary border border-primary/20">
@@ -830,16 +831,16 @@ export default function Home() {
                     </span>
                   </div>
                   {review.comment && <p className="text-xs text-muted-foreground leading-relaxed line-clamp-3 break-words">{review.comment}</p>}
-                </motion.div>
+                </div>
               ))}
-            </div>
+            </SnapCarousel>
           </div>
         );
 
       case 'gift-card':
         return (
           <Link to="/gift-cards" className="pulse-card rounded-3xl">
-            <motion.div whileTap={{ scale: 0.98 }} className="relative overflow-hidden rounded-3xl cursor-pointer group" style={{ aspectRatio: '2.2/1' }}>
+            <motion.div whileTap={{ scale: 0.98 }} className="shine-sweep relative overflow-hidden rounded-3xl cursor-pointer group" style={{ aspectRatio: '2.2/1' }}>
               <div className="absolute inset-0 bg-gradient-to-br from-[#1a1a1a] via-[#111] to-[#0a0a0a]" />
               <div className="absolute top-0 right-0 w-40 h-40 bg-gradient-to-bl from-primary/20 to-transparent rounded-bl-full group-hover:from-primary/30 transition-all duration-500" />
               <div className="absolute bottom-0 left-0 w-32 h-32 bg-gradient-to-tr from-primary/10 to-transparent rounded-tr-full" />
@@ -1042,17 +1043,18 @@ export default function Home() {
           </Reorder.Group>
         ) : (
           /* Normal mode */
-          <motion.div variants={containerVariants} initial="hidden" animate="visible" className="space-y-8">
+          /* Chaque section se dévoile quand elle arrive à l'écran (et non toutes au chargement) */
+          <div className="space-y-8">
             {sectionOrder.map((id) => {
               const content = renderSection(id);
               if (!content) return null;
               return (
-                <motion.div key={id} variants={itemVariants} className="[&:has(>.auto-section:empty)]:hidden">
+                <Reveal key={id} className="[&:has(>.auto-section:empty)]:hidden">
                   {content}
-                </motion.div>
+                </Reveal>
               );
             })}
-          </motion.div>
+          </div>
         )}
         <div className="h-4" />
       </div>

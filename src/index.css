@@ -338,3 +338,103 @@ body.keyboard-open .login-logo {
 @media (prefers-reduced-motion: reduce) {
   .nav-orbit, .orbit-wrap::before { animation: none; opacity: 0.5; }
 }
+
+/* ---------------------------------------------------------------------------
+   App vivante (18 oct. 2026) : effets réutilisables, transform / opacity seulement.
+   --------------------------------------------------------------------------- */
+/* Pastille « en direct » : point fixe + onde qui s'élargit */
+.live-dot {
+  position: relative;
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  background: currentColor;
+}
+.live-dot::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: currentColor;
+  will-change: transform, opacity;
+  animation: live-ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+@keyframes live-ping {
+  0% { transform: scale(1); opacity: 0.7; }
+  80%, 100% { transform: scale(2.6); opacity: 0; }
+}
+
+/* Reflet qui balaie la carte de temps en temps (posé sur un conteneur overflow-hidden) */
+.shine-sweep {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+.shine-sweep::after {
+  content: '';
+  position: absolute;
+  top: -20%;
+  bottom: -20%;
+  left: 0;
+  width: 45%;
+  pointer-events: none;
+  z-index: 2;
+  background: linear-gradient(105deg, transparent 0%, rgba(255, 255, 255, 0.14) 45%, rgba(255, 255, 255, 0.22) 50%, rgba(255, 255, 255, 0.14) 55%, transparent 100%);
+  transform: translateX(-160%) skewX(-12deg);
+  will-change: transform;
+  animation: shine-sweep 5.5s cubic-bezier(0.45, 0, 0.25, 1) infinite;
+}
+.shine-sweep.shine-delay-1::after { animation-delay: 1.4s; }
+.shine-sweep.shine-delay-2::after { animation-delay: 2.8s; }
+@keyframes shine-sweep {
+  0%, 62% { transform: translateX(-160%) skewX(-12deg); }
+  100% { transform: translateX(330%) skewX(-12deg); }
+}
+
+/* Flottement doux (icônes, pastilles) */
+.float-soft {
+  will-change: transform;
+  animation: float-soft 4.2s cubic-bezier(0.37, 0, 0.63, 1) infinite;
+}
+.float-soft.float-delay-1 { animation-delay: -1.4s; }
+.float-soft.float-delay-2 { animation-delay: -2.8s; }
+@keyframes float-soft {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+/* Zoom lent d'une image de fond (posé sur l'<img> dans un cadre overflow-hidden) */
+.kenburns {
+  will-change: transform;
+  animation: kenburns 14s cubic-bezier(0.37, 0, 0.63, 1) infinite alternate;
+}
+@keyframes kenburns {
+  from { transform: scale(1); }
+  to { transform: scale(1.12) translate(-2%, -1%); }
+}
+
+/* Halo qui respire derrière un élément (pseudo-élément, opacité et échelle seulement) */
+.glow-breathe {
+  position: relative;
+  isolation: isolate;
+}
+.glow-breathe::before {
+  content: '';
+  position: absolute;
+  inset: -12%;
+  z-index: -1;
+  border-radius: 9999px;
+  background: radial-gradient(circle, hsl(var(--primary) / 0.35), transparent 65%);
+  will-change: transform, opacity;
+  animation: glow-breathe 3.6s cubic-bezier(0.37, 0, 0.63, 1) infinite;
+}
+@keyframes glow-breathe {
+  0%, 100% { transform: scale(0.92); opacity: 0.55; }
+  50% { transform: scale(1.08); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-dot::after, .shine-sweep::after, .float-soft, .kenburns, .glow-breathe::before { animation: none; }
+  .shine-sweep::after { opacity: 0; }
+}

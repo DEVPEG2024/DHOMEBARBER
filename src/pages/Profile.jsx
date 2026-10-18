@@ -4,21 +4,25 @@ import { api } from '@/api/apiClient';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { motion } from 'framer-motion';
-import { Calendar, Star, ShoppingBag, Settings, LogOut, ChevronRight, Shield, Bell, Camera, Shirt, Handshake, Heart, IdCard } from 'lucide-react';
+import {
+  Calendar, Star, ShoppingBag, Settings, LogOut, ChevronRight, Shield, Bell, Camera, Shirt,
+  Handshake, Heart, IdCard, Gift, CalendarCheck, CalendarClock, Wallet,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { friendlyError, queryFailed } from '@/components/shared/LoadError';
 import ImageCropDialog, { unreadableImageMessage } from '@/components/shared/ImageCropDialog';
-import { parisInstant } from '@/lib/calendarLinks';
 import { formatPrice } from '@/components/services/serviceUtils';
 import { useGangCard, useInvalidateGang } from '@/lib/gangCardApi';
 import GangCard, { GangCardPlaceholder } from '@/components/gang/GangCard';
 import { gangPalette } from '@/components/gang/gangTheme';
-
-// Fin d'un rendez-vous à l'heure de Paris (sans heure de fin : son début, sinon fin de journée)
-const endsAt = (apt) => parisInstant(apt.date, apt.end_time || apt.start_time || '23:59');
-// Une visite = rendez-vous honoré : confirmé (le salon n'utilise pas « Valider la prestation »)
-// ou terminé, et dont l'heure de fin est passée
-const VISIT_STATUSES = ['confirmed', 'completed'];
+import { fetchPublicBarbers } from '@/lib/publicBarbers';
+import { NOTIFICATIONS_EVENT, readNotifications } from '@/lib/pushNotifications';
+import Reveal, { RevealGroup, RevealItem } from '@/components/motion/Reveal';
+import AnimatedCounter from '@/components/motion/AnimatedCounter';
+import NextVisitCard from '@/components/profile/NextVisitCard';
+import ShortcutGrid from '@/components/profile/ShortcutGrid';
+import FavoritesCarousel from '@/components/profile/FavoritesCarousel';
+import { OPEN_ORDER_STATUSES, VISIT_STATUSES, endsAt, firstName } from '@/components/profile/profileUtils';
 
 // Taille de la carte en tête du profil : la largeur de l'écran moins les marges, 0,9 au plus
 function useProfileCardSize() {
@@ -32,17 +36,35 @@ function useProfileCardSize() {
   return size;
 }
 
-const menuItems = [
-  { icon: Calendar, label: 'Mes Rendez-vous', path: '/appointments', desc: 'Historique & prochains RDV' },
-  { icon: Bell, label: 'Notifications', path: '/notifications', desc: 'Messages & alertes' },
-  { icon: ShoppingBag, label: 'Mes Commandes', path: '/orders', desc: 'Suivi de vos achats' },
-  { icon: Heart, label: 'Mes favoris', path: '/favorites', desc: 'Prestations et produits que vous aimez' },
-  { icon: Shirt, label: 'Textile & Drops', path: '/textile', desc: 'Concepts, votes & réservations' },
-  { icon: Handshake, label: 'Bons plans du Gang', path: '/partners', desc: 'Remises chez nos partenaires' },
-  { icon: Star, label: 'Avis', path: '/reviews', desc: 'Avis clients et les vôtres' },
-  { icon: Settings, label: 'Paramètres', path: '/settings', desc: 'Compte & préférences' },
-];
+/** Notifications non lues rangées sur l'appareil (mises à jour à chaque réception / lecture). */
+function useUnreadNotifications(userId) {
+  const count = () => (userId ? readNotifications(userId).filter((n) => !n.read).length : 0);
+  const [unread, setUnread] = useState(count);
+  useEffect(() => {
+    const refresh = () => setUnread(count());
+    refresh();
+    window.addEventListener(NOTIFICATIONS_EVENT, refresh);
+    window.addEventListener('focus', refresh);
+    return () => {
+      window.removeEventListener(NOTIFICATIONS_EVENT, refresh);
+      window.removeEventListener('focus', refresh);
+    };
+  }, [userId]);
+  return unread;
+}
 
+/** Salut selon l'heure de Paris. */
+function greeting() {
+  const h = Number(new Intl.DateTimeFormat('fr-FR', { timeZone: 'Europe/Paris', hour: 'numeric', hour12: false }).format(new Date()));
+  if (h >= 5 && h < 18) return 'Salut';
+  return 'Bonsoir';
+}
+
+/**
+ * Profil client en tableau de bord (18 oct. 2026) : salut et réglages, carte Gang, prochaine
+ * visite (compte à rebours) ou jauge de fraîcheur, chiffres qui montent, raccourcis avec
+ * pastilles, carrousel des favoris. Le staff garde l'avatar à la place de la carte Gang.
+ */
 export default function Profile() {
   const invalidateGang = useInvalidateGang();
   const { user, logout, refreshUser } = useAuth();
@@ -87,9 +109,9 @@ export default function Profile() {
 
   // Carte Gang : en tête du profil pour un client (le staff garde l'avatar). Rien de bloquant si
   // la requête échoue sans aucune donnée, ou reste en pause hors connexion (React Query ne lève
-  // alors aucune erreur) : on retombe sur l'avatar et sur la ligne « Ma carte Gang » du menu,
-  // dont la page affiche « Pas de connexion ». Un rafraîchissement en arrière-plan qui échoue
-  // (`isError` avec la carte encore en cache) garde la carte affichée.
+  // alors aucune erreur) : on retombe sur l'avatar et sur la tuile « Carte Gang », dont la page
+  // affiche « Pas de connexion ». Un rafraîchissement en arrière-plan qui échoue (`isError` avec
+  // la carte encore en cache) garde la carte affichée.
   const isClient = user?.role === 'user';
   const gangQuery = useGangCard({ enabled: !!user && isClient });
   const { data: gangData, isPending: gangPending } = gangQuery;
@@ -98,13 +120,25 @@ export default function Profile() {
   const cardSize = useProfileCardSize();
   const gangDesc = gangCard
     ? `${gangPalette(gangCard).label} · ${gangCard.visits} visite${Number(gangCard.visits) > 1 ? 's' : ''}`
-    : 'Ta carte de collection du Gang';
+    : null;
 
   const { data: appointments = [], isLoading: loadingStats, isError: statsError } = useQuery({
     queryKey: ['myAppointments', user?.email],
     queryFn: () => api.entities.Appointment.filter({ client_email: user?.email }, '-date', 100),
     enabled: !!user,
   });
+  // Mêmes clé et requête que Mes commandes (cache partagé)
+  const { data: orders = [] } = useQuery({
+    queryKey: ['myOrders', user?.email],
+    queryFn: () => api.entities.Order.filter({ client_email: user?.email }, '-created_date', 100),
+    enabled: !!user?.email,
+  });
+  const { data: employees = [] } = useQuery({
+    queryKey: ['employees'],
+    staleTime: 5 * 60 * 1000,
+    queryFn: fetchPublicBarbers,
+  });
+  const unread = useUnreadNotifications(user?.id);
 
   const now = Date.now();
   const dated = (Array.isArray(appointments) ? appointments : []).filter(a => a?.date);
@@ -116,7 +150,29 @@ export default function Profile() {
   const totalSpent = visits.reduce((sum, a) => sum + (Number(a.grand_total) || Number(a.total_price) || 0), 0);
   // Pas de « 0 » trompeur pendant le chargement ou après un échec
   const statsReady = !loadingStats && !(statsError && !appointments.length);
+  const openOrders = (Array.isArray(orders) ? orders : []).filter(o => OPEN_ORDER_STATUSES.includes(o?.status)).length;
   const initials = user?.full_name?.split(' ').map(n => n[0]).join('').slice(0, 2) || '?';
+  const prenom = firstName(user?.full_name);
+
+  const shortcuts = [
+    { to: '/appointments', label: 'Rendez-vous', icon: Calendar, tint: 'from-emerald-400 to-emerald-700', badge: upcomingCount },
+    { to: '/orders', label: 'Commandes', icon: ShoppingBag, tint: 'from-sky-400 to-blue-700', badge: openOrders },
+    { to: '/notifications', label: 'Notifications', icon: Bell, tint: 'from-amber-300 to-orange-600', badge: unread },
+    { to: '/favorites', label: 'Favoris', icon: Heart, tint: 'from-rose-400 to-red-700', badge: 0 },
+    isClient
+      ? { to: '/gang-card', label: 'Carte Gang', icon: IdCard, tint: 'from-yellow-300 to-amber-700', badge: 0 }
+      : { to: '/settings', label: 'Paramètres', icon: Settings, tint: 'from-slate-400 to-slate-700', badge: 0 },
+    { to: '/gift-cards', label: 'Cartes cadeau', icon: Gift, tint: 'from-fuchsia-400 to-purple-700', badge: 0 },
+    { to: '/textile', label: 'Textile', icon: Shirt, tint: 'from-zinc-300 to-zinc-700', badge: 0 },
+    { to: '/partners', label: 'Bons plans', icon: Handshake, tint: 'from-teal-300 to-cyan-700', badge: 0 },
+    { to: '/reviews', label: 'Avis', icon: Star, tint: 'from-lime-300 to-green-700', badge: 0 },
+  ];
+
+  const stats = [
+    { icon: CalendarCheck, label: 'Visites', value: visitDays },
+    { icon: CalendarClock, label: 'À venir', value: upcomingCount },
+    { icon: Wallet, label: 'Total', value: totalSpent, format: (v) => formatPrice(Math.round(v)) },
+  ];
 
   return (
     <div className="min-h-screen relative overflow-hidden">
@@ -126,25 +182,43 @@ export default function Profile() {
         <div className="absolute bottom-40 -right-20 w-64 h-64 bg-accent/5 rounded-full blur-3xl" />
       </div>
 
-      <div className="relative max-w-lg mx-auto px-4 pt-8 pb-28">
-        {/* Hero Profile : la carte Gang en premier pour un client, sinon l'avatar */}
-        <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="text-center mb-8">
+      <div className="relative max-w-lg mx-auto px-4 pt-6 pb-28 space-y-6">
+        {/* Salut + réglages */}
+        {/* pr-10 : le bouton musique (32 px, en haut à droite de toutes les pages) reste à côté du réglage */}
+        <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="flex items-start justify-between gap-3 pr-10">
+          <div className="min-w-0">
+            <p className="text-[10px] uppercase tracking-[0.3em] text-primary font-semibold">Mon espace</p>
+            <h1 className="font-display text-2xl max-[360px]:text-xl font-bold text-foreground leading-tight break-words">
+              {user ? `${greeting()}${prenom ? ` ${prenom}` : ''} 👋` : 'Chargement...'}
+            </h1>
+            <p className="text-xs text-muted-foreground truncate">{gangDesc || user?.email}</p>
+          </div>
+          <Link to="/settings" aria-label="Paramètres"
+            className="w-11 h-11 shrink-0 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center active:scale-95 transition-transform">
+            <Settings className="w-5 h-5 text-foreground/80" />
+          </Link>
+        </motion.div>
+
+        {/* Carte Gang (client) ou avatar (staff) */}
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="text-center">
           {showGangHero && (
-            <div className="flex flex-col items-center mb-5">
-              {gangPending ? (
-                // Emplacement réservé pendant le chargement : la page ne saute pas
-                <div style={{ width: 300 * cardSize, height: 440 * cardSize }} aria-hidden="true" />
-              ) : gangCard ? (
-                <GangCard card={gangCard} size={cardSize} />
-              ) : (
-                <GangCardPlaceholder size={cardSize} />
-              )}
+            <div className="flex flex-col items-center">
+              <div className="glow-breathe">
+                {gangPending ? (
+                  // Emplacement réservé pendant le chargement : la page ne saute pas
+                  <div style={{ width: 300 * cardSize, height: 440 * cardSize }} aria-hidden="true" />
+                ) : gangCard ? (
+                  <GangCard card={gangCard} size={cardSize} />
+                ) : (
+                  <GangCardPlaceholder size={cardSize} />
+                )}
+              </div>
               {/* Lien seulement une fois la réponse connue : pendant le chargement, un client
                   fidèle ne doit pas lire « Réserver ma première visite » */}
               {!gangPending && (
                 <Link to={gangCard ? '/gang-card' : '/booking'}
                   className="mt-4 inline-flex items-center gap-1.5 text-xs font-semibold text-primary">
-                  {gangCard ? `${gangDesc} · voir ma carte et la collection` : 'Réserver ma première visite'}
+                  {gangCard ? 'Voir ma carte, mes écussons et la collection' : 'Réserver ma première visite'}
                   <ChevronRight className="w-3.5 h-3.5" />
                 </Link>
               )}
@@ -152,7 +226,7 @@ export default function Profile() {
           )}
 
           {/* Avatar (staff) ; pour un client, la photo est sur la carte : simple bouton pour la changer */}
-          <div className={`relative inline-block mb-4 ${showGangHero ? 'hidden' : ''}`}>
+          <div className={`relative inline-block ${showGangHero ? 'hidden' : ''}`}>
             <button
               onClick={() => fileInputRef.current?.click()}
               className="relative w-24 h-24 rounded-3xl overflow-hidden border border-primary/20 shadow-2xl shadow-primary/10 group"
@@ -177,10 +251,9 @@ export default function Profile() {
             <div className="absolute -bottom-1 -right-1 w-7 h-7 rounded-xl bg-primary flex items-center justify-center shadow-lg shadow-primary/30">
               <Camera className="w-3.5 h-3.5 text-primary-foreground" />
             </div>
-            <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoSelect} />
           </div>
+          <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoSelect} />
 
-          {/* Crop dialog */}
           <ImageCropDialog
             open={!!cropImage}
             imageSrc={cropImage}
@@ -188,110 +261,93 @@ export default function Profile() {
             onCropComplete={handleCropComplete}
           />
 
-          <h1 className="font-display text-2xl font-bold text-foreground">{user?.full_name || 'Chargement...'}</h1>
-          <p className="text-xs text-muted-foreground mt-1">{user?.email}</p>
           {showGangHero && (
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading}
-              className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-[11px] font-semibold text-muted-foreground hover:text-foreground transition-colors disabled:opacity-60"
-            >
-              <Camera className="w-3.5 h-3.5" />
-              {uploading ? 'Envoi…' : user?.photo_url ? 'Changer ma photo' : 'Ajouter ma photo sur la carte'}
-            </button>
+            <div>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-[11px] font-semibold text-muted-foreground hover:text-foreground transition-colors disabled:opacity-60"
+              >
+                <Camera className="w-3.5 h-3.5" />
+                {uploading ? 'Envoi…' : user?.photo_url ? 'Changer ma photo' : 'Ajouter ma photo sur la carte'}
+              </button>
+            </div>
           )}
 
           {(user?.role === 'admin' || user?.role === 'manager') && (
-            <Link to="/admin">
-              <motion.button whileTap={{ scale: 0.95 }}
-                className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs font-semibold">
-                <Shield className="w-3.5 h-3.5" />
-                Espace Admin
-              </motion.button>
-            </Link>
+            <div>
+              <Link to="/admin">
+                <motion.button whileTap={{ scale: 0.95 }}
+                  className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs font-semibold">
+                  <Shield className="w-3.5 h-3.5" />
+                  Espace Admin
+                </motion.button>
+              </Link>
+            </div>
           )}
         </motion.div>
 
-        {/* Stats */}
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
-          className="grid grid-cols-3 gap-3 mb-8">
-          {[
-            { value: statsReady ? visitDays : '–', label: 'Visites' },
-            { value: statsReady ? upcomingCount : '–', label: 'À venir' },
-            { value: statsReady ? formatPrice(totalSpent) : '–', label: 'Total' },
-          ].map(({ value, label }) => (
-            <div key={label} className="rounded-2xl bg-white/4 border border-white/8 backdrop-blur-xl p-4 text-center">
+        {/* Prochaine visite ou fraîcheur */}
+        <Reveal>
+          <NextVisitCard
+            appointments={appointments}
+            employees={employees}
+            gangCard={gangCard}
+            loading={loadingStats || (isClient && gangPending)}
+          />
+        </Reveal>
+
+        {/* Chiffres */}
+        <RevealGroup className="grid grid-cols-3 gap-2.5">
+          {stats.map(({ icon: Icon, label, value, format }, i) => (
+            <RevealItem key={label}
+              className="rounded-2xl bg-white/[0.04] border border-white/8 backdrop-blur-xl px-2 py-3.5 text-center">
+              <Icon className="w-4 h-4 text-primary/70 mx-auto mb-1.5" />
               {/* Montant long (« 1250 € ») : plus petit pour tenir dans la colonne à 320 px */}
-              <p className={`${String(value).length > 5 ? 'text-lg leading-8' : 'text-2xl'} font-bold text-primary font-display whitespace-nowrap`}>{value}</p>
-              <p className="text-[11px] uppercase tracking-widest text-muted-foreground mt-0.5">{label}</p>
-            </div>
+              <p className={`${statsReady && format && formatPrice(Math.round(value)).length > 5 ? 'text-lg leading-8' : 'text-2xl'} font-bold text-primary font-display whitespace-nowrap`}>
+                {statsReady ? <AnimatedCounter value={value} format={format} delay={0.1 + i * 0.08} /> : '–'}
+              </p>
+              <p className="text-[10px] uppercase tracking-widest text-muted-foreground mt-0.5">{label}</p>
+            </RevealItem>
           ))}
-        </motion.div>
+        </RevealGroup>
 
-        {/* Menu */}
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
-          className="rounded-2xl overflow-hidden border border-white/8 bg-white/4 backdrop-blur-xl mb-5">
-          {isClient && !showGangHero && (
-          <Link
-            to="/gang-card"
-            className="flex items-center justify-between px-4 py-3 hover:bg-white/5 transition-colors group border-b border-white/6"
-          >
-            <div className="flex items-center gap-3.5 min-w-0">
-              {gangCard ? (
-                // Mini-carte (300 × 440 à l'échelle 0,13 → 39 × 57 px)
-                <div className="w-10 flex justify-center flex-shrink-0" aria-hidden="true">
-                  <GangCard card={gangCard} size={0.13} flippable={false} interactive={false} />
-                </div>
-              ) : (
-                <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/15 flex items-center justify-center flex-shrink-0 group-hover:bg-primary/15 transition-colors">
-                  <IdCard className="w-4 h-4 text-primary" />
-                </div>
-              )}
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-foreground">Ma carte Gang</p>
-                <p className="text-[11px] text-muted-foreground truncate">{gangDesc}</p>
-              </div>
-            </div>
-            <ChevronRight className="w-4 h-4 text-muted-foreground/40 group-hover:text-muted-foreground transition-colors shrink-0" />
+        {/* Raccourcis */}
+        <section>
+          <p className="text-[10px] uppercase tracking-[0.25em] text-primary font-semibold mb-2">Ton espace</p>
+          <ShortcutGrid items={shortcuts} />
+        </section>
+
+        {/* Favoris */}
+        <FavoritesCarousel />
+
+        {/* Paramètres et déconnexion */}
+        <Reveal className="space-y-2.5">
+          <Link to="/settings"
+            className="flex items-center justify-between px-4 py-3.5 rounded-2xl border border-white/8 bg-white/[0.04] active:scale-[0.99] transition-transform">
+            <span className="flex items-center gap-3">
+              <span className="w-9 h-9 rounded-xl bg-white/8 flex items-center justify-center"><Settings className="w-4 h-4 text-foreground/80" /></span>
+              <span>
+                <span className="block text-sm font-semibold text-foreground">Paramètres</span>
+                <span className="block text-[11px] text-muted-foreground">Compte, notifications, bugs et suggestions</span>
+              </span>
+            </span>
+            <ChevronRight className="w-4 h-4 text-muted-foreground/50" />
           </Link>
-          )}
-          {menuItems.map((item, i) => (
-            <Link
-              key={item.path}
-              to={item.path}
-              className={`flex items-center justify-between px-4 py-4 hover:bg-white/5 transition-colors group ${
-                i < menuItems.length - 1 ? 'border-b border-white/6' : ''
-              }`}
-            >
-              <div className="flex items-center gap-3.5">
-                <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/15 flex items-center justify-center flex-shrink-0 group-hover:bg-primary/15 transition-colors">
-                  <item.icon className="w-4 h-4 text-primary" />
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-foreground">{item.label}</p>
-                  <p className="text-[11px] text-muted-foreground">{item.desc}</p>
-                </div>
-              </div>
-              <ChevronRight className="w-4 h-4 text-muted-foreground/40 group-hover:text-muted-foreground transition-colors" />
-            </Link>
-          ))}
-        </motion.div>
-
-        {/* Logout */}
-        <motion.button
-          initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }}
-          whileTap={{ scale: 0.97 }}
-          onClick={async () => {
-            setLoggingOut(true);
-            await logout();
-          }}
-          disabled={loggingOut}
-          className="w-full h-12 rounded-2xl border border-red-500/20 bg-red-500/8 text-red-400 text-sm font-semibold flex items-center justify-center gap-2 hover:bg-red-500/12 transition-colors disabled:opacity-60"
-        >
-          <LogOut className="w-4 h-4" />
-          {loggingOut ? 'Déconnexion…' : 'Déconnexion'}
-        </motion.button>
+          <motion.button
+            whileTap={{ scale: 0.97 }}
+            onClick={async () => {
+              setLoggingOut(true);
+              await logout();
+            }}
+            disabled={loggingOut}
+            className="w-full h-12 rounded-2xl border border-red-500/20 bg-red-500/8 text-red-400 text-sm font-semibold flex items-center justify-center gap-2 hover:bg-red-500/12 transition-colors disabled:opacity-60"
+          >
+            <LogOut className="w-4 h-4" />
+            {loggingOut ? 'Déconnexion…' : 'Déconnexion'}
+          </motion.button>
+        </Reveal>
       </div>
     </div>
   );
