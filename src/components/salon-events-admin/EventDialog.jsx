@@ -134,6 +134,10 @@ export default function EventDialog({ open, onOpenChange, event }) {
     const payload = payloadFromForm(form);
     if (!payload.title) { toast.error("Le titre de l'événement est obligatoire"); return; }
     if (!payload.starts_at) { toast.error('La date de début est obligatoire'); return; }
+    // Nouvel événement daté dans le passé (faute d'année…) : refusé par le serveur aussi (tour 7)
+    if (!event?.id && new Date(payload.starts_at).getTime() <= Date.now()) {
+      toast.error('La date de début est déjà passée'); return;
+    }
     if (payload.ends_at && new Date(payload.ends_at) <= new Date(payload.starts_at)) {
       toast.error('La fin doit être après le début'); return;
     }
@@ -183,8 +187,12 @@ export default function EventDialog({ open, onOpenChange, event }) {
   const isPast = !!event?.id && eventPhase(event) === 'past';
   const cancelsNow = form.status === 'cancelled' && event?.status !== 'cancelled' && wasPublished && !isPast;
   const publishesNow = form.status === 'published' && event?.status !== 'published';
+  // Nouvel horaire déjà terminé (correction d'archive) : le serveur ne prévient personne (tour 7)
+  const formTimes = payloadFromForm(form);
+  const formStartMs = formTimes.starts_at ? new Date(formTimes.starts_at).getTime() : NaN;
+  const formEndMs = formTimes.ends_at ? new Date(formTimes.ends_at).getTime() : formStartMs + 3 * 3600 * 1000;
   const rescheduled = wasPublished && form.status === 'published' && !!event?.starts_at && !!form.starts_at
-    && toLocalInputValue(event.starts_at) !== form.starts_at;
+    && toLocalInputValue(event.starts_at) !== form.starts_at && !(Number.isFinite(formEndMs) && formEndMs <= Date.now());
   // Lieu ou prix changé sur un événement publié (sans changement d'horaire, qui prévient déjà) :
   // le serveur prévient les invités qui n'ont pas refusé
   const eventPrice = Number(event?.price) > 0 ? Number(event.price) : null;

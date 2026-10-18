@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import { formatPrice } from '@/components/shop/productUtils';
+import { parisInstant } from '@/lib/calendarLinks';
 import LoadError, { isNetworkError, queryFailed } from '@/components/shared/LoadError';
 import {
   CANCEL_REASON_MAX,
@@ -42,6 +43,10 @@ const linkedNextStatusLabel = {
   ready: 'Produit préparé',
   delivered: 'Remis au RDV',
 };
+// RDV lié encore à venir (confirmé, pas commencé, heure de Paris) : sinon (annulé, absent, passé) le
+// produit se retire au salon comme une commande de la Boutique (tour 7, même règle que le serveur)
+const linkedAptUpcoming = (apt) => !!apt && apt.status === 'confirmed' && !!apt.date
+  && parisInstant(String(apt.date).slice(0, 10), String(apt.start_time || '00:00').slice(0, 5)) > Date.now();
 
 const FILTERS = [
   { id: 'all', label: 'Toutes' },
@@ -404,7 +409,7 @@ export default function AdminOrders() {
                 {next && (
                   <Button size="sm" className="flex-1 min-w-[120px] gap-1.5" disabled={busy}
                     onClick={() => updateMutation.mutate({ id: order.id, data: { status: next } })}>
-                    {(order.appointment_id && linkedNextStatusLabel[next]) || nextStatusLabel[next]}
+                    {(order.appointment_id && linkedAptUpcoming(appointmentById.get(String(order.appointment_id))) && linkedNextStatusLabel[next]) || nextStatusLabel[next]}
                   </Button>
                 )}
                 {!isCancelled && st !== 'delivered' && (

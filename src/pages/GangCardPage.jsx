@@ -135,7 +135,11 @@ export default function GangCardPage() {
     : { initial: { opacity: 0, y: 10 }, animate: { opacity: 1, y: 0 }, transition: { delay } });
 
   const freshness = Number(card?.stats?.FRA);
-  const lowFreshness = card && Number.isFinite(freshness) && freshness < FRESHNESS_LOW;
+  // Pas d'appel à « Réserver » quand un rendez-vous est déjà pris (`upcoming`, serveur v. 18 oct.) ;
+  // `!== true` : une réponse d'un serveur plus ancien garde le bandeau comme avant
+  const fadingCard = card && Number.isFinite(freshness) && freshness < FRESHNESS_LOW;
+  const lowFreshness = fadingCard && data?.upcoming !== true;
+  const fadingButBooked = fadingCard && data?.upcoming === true;
   const iconMonths = card && Number(card.visits) >= 18 ? monthsToIcon(card) : null;
 
   return (
@@ -228,6 +232,15 @@ export default function GangCardPage() {
                 <Link to="/booking" className="h-10 px-3 inline-flex items-center rounded-xl bg-primary text-primary-foreground text-xs font-bold shrink-0">
                   Réserver
                 </Link>
+              </motion.div>
+            )}
+
+            {fadingButBooked && (
+              <motion.div {...fade(0.1)} role="status"
+                className="mt-6 flex items-center gap-2 rounded-2xl border border-border bg-card/60 p-3 text-xs text-muted-foreground">
+                <Check className="w-4 h-4 text-primary shrink-0" aria-hidden="true" />
+                <span className="flex-1 min-w-0">Prochaine coupe déjà réservée : ta fraîcheur remontera à ta visite.</span>
+                <Link to="/appointments" className="font-semibold text-primary shrink-0">Voir</Link>
               </motion.div>
             )}
 

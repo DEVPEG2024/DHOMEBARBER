@@ -34,7 +34,7 @@ const MAX_ITEMS = 8;
 const euro = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 2 });
 
 const PANEL_POSITION = {
-  mobile: 'fixed top-[60px] left-2 right-2 sm:left-auto sm:w-[380px]',
+  mobile: 'fixed top-[calc(3.5rem+env(safe-area-inset-top,0px)+4px)] left-2 right-2 sm:left-auto sm:w-[380px]',
   sidebar: 'fixed top-3 left-[268px] w-[380px] max-w-[calc(100vw-280px)]',
 };
 

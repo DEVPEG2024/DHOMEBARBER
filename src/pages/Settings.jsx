@@ -9,7 +9,7 @@ import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
 import { isNative, platform, openExternalUrl } from '@/lib/capacitor';
 import FeedbackSection from '@/components/feedback/FeedbackSection';
-import { hasObjectionableContent } from '@/lib/contentFilter';
+import { hasObjectionableName } from '@/lib/contentFilter';
 import LoadError, { friendlyError, queryFailed } from '@/components/shared/LoadError';
 import { GANG_LEADERBOARD_QUERY_KEY } from '@/lib/gangCardApi';
 import { parisDay } from '@/lib/slots';
@@ -26,7 +26,7 @@ const squash = (s) => String(s || '').trim().replace(/\s+/g, ' ');
 const validateName = (v) => {
   if (!v) return 'Le nom est obligatoire.';
   if (v.length > NAME_MAX) return `Le nom ne peut pas dépasser ${NAME_MAX} caractères.`;
-  if (hasObjectionableContent(v)) return 'Ce nom contient un mot interdit par les règles de la communauté.';
+  if (hasObjectionableName(v)) return 'Ce nom contient un mot interdit par les règles de la communauté.';
   return null;
 };
 

@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { Trophy, ChevronRight } from 'lucide-react';
 import { useGangLeaderboard } from '@/lib/gangCardApi';
 import GangCard from '@/components/gang/GangCard';
-import LoadError from '@/components/shared/LoadError';
+import LoadError, { queryFailed } from '@/components/shared/LoadError';
 
 // Petites cartes : 300 × 440 à l'échelle 0,4 → 120 × 176 px
 const MINI = 0.4;
@@ -22,7 +22,9 @@ const plural = (n, one, many) => (n === 1 ? one : many);
  */
 export default function GangLeaderboard({ variant = 'feed', optedIn = false }) {
   const query = useGangLeaderboard();
-  const { data, isPending, isError, error, refetch, isFetching } = query;
+  const { data, isPending, error, refetch, isFetching } = query;
+  // Échec sans données, ou requête en pause faute de réseau (hors ligne) : sinon squelettes sans fin
+  const failed = queryFailed(query);
   const entries = Array.isArray(data?.entries) ? data.entries.filter((e) => e?.card) : [];
   const days = Number(data?.days) || 90;
   // Seuil de visites exigé par le serveur (codé en dur dans son SQL : 2), repli si absent
@@ -48,7 +50,7 @@ export default function GangLeaderboard({ variant = 'feed', optedIn = false }) {
         )}
       </div>
 
-      {!inFeed && isPending && (
+      {!inFeed && isPending && !failed && (
         <div className="flex gap-3 overflow-hidden" aria-busy="true">
           {[0, 1, 2].map((i) => (
             <div key={i} className="shrink-0 rounded-2xl bg-secondary animate-pulse" style={{ width: 300 * MINI, height: 440 * MINI }} />
@@ -56,11 +58,11 @@ export default function GangLeaderboard({ variant = 'feed', optedIn = false }) {
         </div>
       )}
 
-      {!inFeed && !isPending && isError && !data && (
+      {!inFeed && failed && (
         <LoadError compact what="le classement" error={error} onRetry={refetch} retrying={isFetching} />
       )}
 
-      {!inFeed && !isPending && !(isError && !data) && entries.length === 0 && (
+      {!inFeed && !isPending && !failed && entries.length === 0 && (
         <p className="rounded-2xl border border-border bg-card/60 px-4 py-5 text-center text-xs text-muted-foreground">
           {optedIn
             ? `Tu es inscrit : il faut au moins ${minVisits} visites sur les ${days} derniers jours pour apparaître dans le classement.`

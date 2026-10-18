@@ -308,6 +308,8 @@ export default function SalesOverview({ appointments }) {
           {giftMonth > 0 && (
             <p className="text-[10px] text-muted-foreground mt-0.5">RDV réglés par carte cadeau : {eur(giftMonth)}, non recomptés</p>
           )}
+          {/* Tour 7 : commandes, précommandes textile et privatisations payées par carte ne portent pas la part carte */}
+          <p className="text-[10px] text-muted-foreground/80 mt-0.5">Achats payés par carte cadeau hors RDV (boutique, textile, privatisations) : non déduits</p>
         </motion.div>
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
           onClick={canAgenda ? () => navigate('/admin/agenda?view=week') : undefined}

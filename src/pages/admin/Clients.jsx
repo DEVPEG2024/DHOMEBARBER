@@ -62,21 +62,29 @@ const isUpcomingUnpaid = (apt, now = Date.now()) =>
   ['confirmed', 'pending'].includes(apt.status) && !apt.payment_method && apt.payment_status !== 'paid'
   && !!apt.date && parisInstant(apt.date, apt.start_time || '00:00') > now;
 
-/** Exécute `fn` sur chaque élément, par petits lots (le serveur limite le nombre de requêtes par minute). */
+/** Exécute `fn` sur chaque élément, par petits lots (le serveur limite le nombre de requêtes par minute).
+ *  `failedItems` : les éléments en échec, pour ne pas supprimer le compte qui les porte. */
 async function runInBatches(items, fn, size = 8) {
   let ok = 0;
   let failed = 0;
+  const failedItems = [];
   for (let i = 0; i < items.length; i += size) {
-    const results = await Promise.allSettled(items.slice(i, i + size).map(fn));
-    for (const r of results) { if (r.status === 'fulfilled') ok++; else failed++; }
+    const batch = items.slice(i, i + size);
+    const results = await Promise.allSettled(batch.map(fn));
+    results.forEach((r, k) => {
+      if (r.status === 'fulfilled') ok++;
+      else { failed++; failedItems.push(batch[k]); }
+    });
   }
-  return { ok, failed };
+  return { ok, failed, failedItems };
 }
 
 /**
- * Suppression d'un compte client sans effacer son historique : les RDV passés ou encaissés restent
- * (CA, statistiques), les RDV à venir non encaissés sont annulés (le créneau se libère), seules les
- * fiches de contact posées par « Ajouter » / « Importer » sont supprimées.
+ * Suppression d'un compte client : les RDV passés ou encaissés restent (CA, statistiques) mais le
+ * serveur en détache l'adresse, donc la fiche quitte la liste ; les RDV à venir non encaissés sont
+ * annulés (le créneau se libère), seules les fiches de contact posées par « Ajouter » / « Importer »
+ * sont supprimées. Le compte n'est supprimé que si tout cela a abouti : une fois l'adresse détachée,
+ * un RDV resté confirmé ne serait plus retrouvable par une relance.
  */
 const cancelUpcoming = (apt) => api.entities.Appointment.update(apt.id, {
   status: 'cancelled',
@@ -274,6 +282,9 @@ export default function Clients() {
   const clientUpcomingCount = clientToDelete
     ? appointments.filter(a => a.client_email?.toLowerCase() === clientToDelete.email?.toLowerCase() && isUpcomingUnpaid(a)).length
     : 0;
+  // Avec un compte, le serveur détache l'adresse de tout son historique : la fiche quitte la liste
+  const clientHasAccount = !!clientToDelete && (!!clientToDelete.registeredAt
+    || registeredUsers.some(u => u.email?.toLowerCase() === clientToDelete.email?.toLowerCase()));
   // « Supprimer tout » ne touche qu'aux RDV des comptes clients : jamais à ceux d'une personne sans
   // compte (RDV pris au téléphone avec son email, fiche importée), qui serait sinon prévenue d'une
   // annulation par le salon
@@ -314,17 +325,24 @@ export default function Clients() {
       const now = Date.now();
       const upcoming = await runInBatches(clientAppointments.filter(apt => isUpcomingUnpaid(apt, now)), cancelUpcoming);
       const placeholders = await runInBatches(clientAppointments.filter(isPlaceholderAppointment), deletePlaceholder);
+      const name = clientToDelete.name || clientToDelete.email;
+      const notDone = upcoming.failed + placeholders.failed;
+      if (notDone > 0) {
+        // Compte gardé : ses RDV portent encore son adresse, un nouvel essai les retrouvera
+        toast.error(registeredUser
+          ? `${notDone} rendez-vous n'ont pas pu être annulés : le compte n'a pas été supprimé, réessayez`
+          : `${notDone} rendez-vous n'ont pas pu être traités : réessayez`);
+        return;
+      }
       if (registeredUser) {
         await api.entities.User.delete(registeredUser.id);
       }
-      const name = clientToDelete.name || clientToDelete.email;
-      if (upcoming.failed + placeholders.failed > 0) {
-        toast.warning(`Client "${name}" supprimé, mais ${upcoming.failed + placeholders.failed} rendez-vous n'ont pas pu être traités`);
-      } else {
-        toast.success(`Client "${name}" supprimé`, {
-          description: upcoming.ok > 0 ? `${upcoming.ok} rendez-vous à venir annulé${upcoming.ok > 1 ? 's' : ''}, historique conservé` : 'Historique conservé',
-        });
-      }
+      const history = registeredUser ? 'historique gardé dans le chiffre d\'affaires' : 'historique conservé';
+      toast.success(`Client "${name}" supprimé`, {
+        description: upcoming.ok > 0
+          ? `${upcoming.ok} rendez-vous à venir annulé${upcoming.ok > 1 ? 's' : ''}, ${history}`
+          : history.charAt(0).toUpperCase() + history.slice(1),
+      });
     } catch (err) {
       toast.error(friendlyError(err, 'Erreur lors de la suppression du client'));
     } finally {
@@ -335,7 +353,8 @@ export default function Clients() {
     }
   };
 
-  // Même règle pour tous les comptes clients : historique conservé, RDV à venir annulés
+  // Même règle pour tous les comptes clients : historique gardé dans le CA, RDV à venir annulés,
+  // compte gardé si l'un de ses RDV n'a pas pu être annulé (une relance le retrouvera)
   const handleDeleteAll = async () => {
     if (!isAdmin) return;
     setDeleting(true);
@@ -352,13 +371,22 @@ export default function Clients() {
         && accountEmails.has(apt.client_email.toLowerCase()) && !staffEmails.has(apt.client_email.toLowerCase()));
       const upcoming = await runInBatches(ofClients.filter(apt => isUpcomingUnpaid(apt, now)), cancelUpcoming);
       const placeholders = await runInBatches(ofClients.filter(isPlaceholderAppointment), deletePlaceholder);
-      const accounts = await runInBatches(clientUsers, u => api.entities.User.delete(u.id));
-      const failed = upcoming.failed + placeholders.failed + accounts.failed;
-      if (failed > 0) {
-        toast.warning(`${accounts.ok} compte(s) supprimé(s), ${failed} opération(s) en échec : relancez pour terminer`);
+      // Comptes dont un RDV n'a pas pu être annulé / supprimé : gardés (sinon le serveur détache leur
+      // adresse et le RDV resté confirmé devient introuvable)
+      const blocked = new Set([...upcoming.failedItems, ...placeholders.failedItems]
+        .map(apt => apt.client_email?.toLowerCase()).filter(Boolean));
+      const accounts = await runInBatches(
+        clientUsers.filter(u => !blocked.has(u.email?.toLowerCase())),
+        u => api.entities.User.delete(u.id),
+      );
+      if (blocked.size > 0 || accounts.failed > 0) {
+        const parts = [`${accounts.ok} compte(s) supprimé(s)`];
+        if (blocked.size > 0) parts.push(`${blocked.size} compte(s) gardé(s) car des rendez-vous n'ont pas pu être annulés`);
+        if (accounts.failed > 0) parts.push(`${accounts.failed} suppression(s) de compte en échec`);
+        toast.warning(`${parts.join(', ')} : relancez pour terminer`);
       } else {
         toast.success(`${accounts.ok} compte(s) client supprimé(s)`, {
-          description: `${upcoming.ok} rendez-vous à venir annulé(s), historique conservé`,
+          description: `${upcoming.ok} rendez-vous à venir annulé(s), historique gardé dans le chiffre d'affaires`,
         });
       }
     } catch {
@@ -791,8 +819,11 @@ export default function Clients() {
             <AlertDialogTitle>Supprimer le client</AlertDialogTitle>
             <AlertDialogDescription>
               Êtes-vous sûr de vouloir supprimer le compte de <strong>{clientToDelete?.name || clientToDelete?.email}</strong> ?
-              Ses rendez-vous à venir non encaissés ({clientUpcomingCount}) seront annulés. Son historique (rendez-vous
-              passés et encaissés) est conservé : il restera visible ici tant qu'il a des rendez-vous. Ses publications,
+              Ses rendez-vous à venir non encaissés ({clientUpcomingCount}) seront annulés.{' '}
+              {clientHasAccount
+                ? "Ses rendez-vous passés et encaissés restent comptés dans le chiffre d'affaires et les statistiques, mais ne sont plus rattachés à sa fiche : il disparaîtra de cette liste."
+                : "Son historique (rendez-vous passés et encaissés) est conservé : il restera visible ici tant qu'il a des rendez-vous."}{' '}
+              Ses publications,
               commentaires, réactions, avis, envois Bugs et suggestions, votes textile et invitations sont effacés. Cette action est irréversible.
             </AlertDialogDescription>
           </AlertDialogHeader>

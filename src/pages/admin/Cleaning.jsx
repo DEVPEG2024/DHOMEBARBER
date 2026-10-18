@@ -113,6 +113,8 @@ export default function Cleaning() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['cleaningTasks'] });
+      // Tâche désactivée ou renommée : le serveur retire / renomme ses affectations à venir
+      queryClient.invalidateQueries({ queryKey: ['cleaningSchedule'] });
       setShowDialog(false);
       toast.success('Tâche sauvegardée');
     },

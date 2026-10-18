@@ -115,7 +115,9 @@ export default function InviteTab({ event, invites, onSent }) {
     onError: (err) => (isUncertainSend(err) ? toast.warning : toast.error)(adminErrorMessage(err, "Erreur lors de l'envoi des invitations", { sending: true }), { duration: 10000 }),
   });
 
-  const canSend = isPublished && !sendMutation.isPending && (inviteAll || selected.size > 0);
+  // Événement commencé : les réponses sont closes, donc les invitations aussi (tour 7, comme le serveur)
+  const started = !!event.starts_at && new Date(event.starts_at).getTime() <= Date.now();
+  const canSend = isPublished && !started && !sendMutation.isPending && (inviteAll || selected.size > 0);
   const sendLabel = sendMutation.isPending
     ? 'Envoi…'
     : inviteAll
@@ -124,6 +126,12 @@ export default function InviteTab({ event, invites, onSent }) {
 
   return (
     <div className="space-y-4">
+      {isPublished && started && (
+        <div className="flex items-start gap-2 rounded-xl border border-amber-500/25 bg-amber-500/10 p-3 text-xs text-amber-300">
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+          <span>L'événement a commencé : les invitations sont closes.</span>
+        </div>
+      )}
       {!isPublished && (
         <div className="flex items-start gap-2 rounded-xl border border-amber-500/25 bg-amber-500/10 p-3 text-xs text-amber-300">
           <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />

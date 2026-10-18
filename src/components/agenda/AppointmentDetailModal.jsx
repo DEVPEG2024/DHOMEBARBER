@@ -88,6 +88,9 @@ function reducer(state, action) {
   }
 }
 
+/** Créneau last minute que personne n'a repris : sans email, nom « Last Minute ». */
+const wasLastMinuteRow = (apt) => !apt.client_email && apt.client_name === 'Last Minute';
+
 /** Une commande liée au RDV a changé : agenda (pastilles), commandes, tableau de bord, stock, activité. */
 function invalidateLinkedOrders(queryClient) {
   queryClient.invalidateQueries({ queryKey: ['agendaOrders'] });
@@ -200,6 +203,9 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
       if (appointment.status === 'last_minute') {
         updateData.status = 'confirmed';
         updateData.internal_notes = withLastMinuteMarker(appointment.internal_notes);
+        // Fiche restée sur un Last Minute libre alors qu'un client de l'app l'a repris (même id) :
+        // le serveur refuse (409) au lieu d'écraser son rendez-vous (tour 7)
+        updateData.if_free_last_minute = true;
       }
       await api.entities.Appointment.update(appointment.id, updateData);
       setAssignedClient({ name: u.full_name || u.email, email: u.email, phone: u.phone || '' });
@@ -208,6 +214,8 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
       invalidateAppointmentQueries(queryClient);
     } catch (e) {
       toast.error(errorMessage(e, 'Assignation impossible'));
+      // 409 : créneau repris entre-temps ; le rechargement montre son client
+      if (e?.status === 409) invalidateAppointmentQueries(queryClient);
     } finally {
       dispatch({ type: 'SAVING', value: false });
     }
@@ -244,7 +252,22 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
   const giftCapacity = Math.max(0, Math.round((serviceTotal + savedProd - (Number(appointment.gift_card_amount) || 0)) * 100) / 100);
   // 18 : last minute repris sans aucune prestation : pas d'encaissement à 0 €
   const needsService = isLastMinute && !isCompleted && !appointment.services?.length && selectedServices.length === 0;
-  const canValidate = !locked && !tipInvalid && state.paymentMethod && (tipValue === 0 || state.tipMethod) && !giftCardNeedsDebit && !giftShortOnCorrection && !needsService;
+  // Carte cadeau débitée de plus que le prix (prix baissé, produit retiré) : l'excédent est à rendre
+  // sur la carte (Cartes cadeau, historique de la carte). Bloquant seulement sur une vraie baisse
+  // saisie ici, comme le serveur (409) ; une ligne ancienne déjà sous le débit reste encaissable (tour 7)
+  const giftCents = Math.round((Number(appointment.gift_card_amount) || 0) * 100);
+  const priceNowCents = Math.round((serviceTotal + prodValue) * 100);
+  const savedPriceCents = Math.round(((Number(appointment.total_price) || 0) + savedProd) * 100);
+  const giftExcess = giftCents > priceNowCents ? (giftCents - priceNowCents) / 100 : 0;
+  const giftExcessBlocks = !locked && giftExcess > 0 && priceNowCents < savedPriceCents;
+  // Last minute non pris (« Absent » posé par l'agenda ou « Personne n'a pris le créneau ») : pas
+  // d'encaissement à 0 € sans client ni prestation ; « Un client l'a pris » d'abord (tour 7)
+  const unclaimedLastMinute = isClosedOut && wasLastMinuteRow(appointment);
+  // Last minute pris par un client de passage, pas encore enregistré : il n'apparaît dans Cartes
+  // cadeau qu'une fois confirmé avec un nom et une prestation (tour 7)
+  const lmNeedsSave = isLastMinute && !isCompleted && !appointment.client_email && !assignedClient
+    && (appointment.status === 'last_minute' || !appointment.services?.length);
+  const canValidate = !locked && !tipInvalid && state.paymentMethod && (tipValue === 0 || state.tipMethod) && !giftCardNeedsDebit && !giftShortOnCorrection && !needsService && !giftExcessBlocks && !unclaimedLastMinute;
   // 14 : RDV d'un client encore à venir : on l'annule (le client peut être prévenu), on ne le supprime pas
   const upcomingClient = !!appointment.client_email && ['confirmed', 'pending'].includes(appointment.status)
     && parisInstant(String(appointment.date || '').slice(0, 10), String(appointment.start_time || '00:00').slice(0, 5)) > Date.now();
@@ -384,8 +407,39 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
     await doRestore();
   };
 
+  /** Last minute pris par un client de passage : client et prestation enregistrés, pour le débit de la carte. */
+  const saveLastMinuteClient = async () => {
+    const name = String(state.clientName || '').trim();
+    if (!name || name === 'Last Minute') return;
+    dispatch({ type: 'SAVING', value: true });
+    try {
+      const updateData = {
+        client_name: name,
+        client_phone: state.clientPhone || '',
+        status: 'confirmed',
+        internal_notes: withLastMinuteMarker(appointment.internal_notes),
+      };
+      if (selectedServices.length > 0 && !appointment.services?.length) {
+        updateData.services = selectedServices.map(s => ({ service_id: s.id, name: s.name, price: s.price, duration: s.duration }));
+        updateData.total_price = manualServiceTotal;
+        updateData.total_duration = selectedServices.reduce((sum, s) => sum + (s.duration || 0), 0);
+      }
+      if (appointment.status === 'last_minute') updateData.if_free_last_minute = true;
+      await api.entities.Appointment.update(appointment.id, updateData);
+      toast.success('Client enregistré : débitez la carte dans Cartes cadeau');
+      invalidateAppointmentQueries(queryClient);
+      queryClient.invalidateQueries({ queryKey: ['giftCardTodayAppointments'] });
+      onUpdate?.();
+    } catch (e) {
+      toast.error(errorMessage(e, 'Enregistrement impossible'));
+      if (e?.status === 409) invalidateAppointmentQueries(queryClient);
+    } finally {
+      dispatch({ type: 'SAVING', value: false });
+    }
+  };
+
   const handleValidate = async () => {
-    if (giftCardNeedsDebit || giftShortOnCorrection || tipInvalid || needsService) return;
+    if (giftCardNeedsDebit || giftShortOnCorrection || tipInvalid || needsService || giftExcessBlocks || unclaimedLastMinute) return;
     dispatch({ type: 'SAVING', value: true });
     try {
       const updateData = {
@@ -407,7 +461,12 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
         updateData.total_duration = selectedServices.reduce((sum, s) => sum + (s.duration || 0), 0);
       }
       // Last minute validé sur place (walk-in) : compté comme converti par le tableau de bord
-      if (isLastMinute) updateData.internal_notes = withLastMinuteMarker(appointment.internal_notes);
+      if (isLastMinute || wasLastMinute) updateData.internal_notes = withLastMinuteMarker(appointment.internal_notes);
+      // RDV fermé (annulé / absent) puis validé : plus de motif d'annulation (ni le motif système
+      // qui le ferait passer pour « non pris »)
+      if (isClosedOut) updateData.cancellation_reason = null;
+      // Last Minute encore libre d'après la fiche : refus (409) si un client de l'app l'a repris
+      if (appointment.status === 'last_minute' && !assignedClient) updateData.if_free_last_minute = true;
       // For last_minute walk-ins: include manually entered client info
       // (pas après l'assignation d'un compte : une saisie walk-in abandonnée écraserait son nom)
       if (!assignedClient && (isLastMinute || !appointment.client_email)) {
@@ -436,6 +495,7 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
       onUpdate?.();
     } catch (e) {
       toast.error(errorMessage(e, 'Erreur lors de la validation'));
+      if (e?.status === 409) invalidateAppointmentQueries(queryClient);
     } finally {
       dispatch({ type: 'SAVING', value: false });
     }
@@ -569,7 +629,8 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
 
       {/* Client : recherche / walk-in seulement sur un créneau last minute libre. Un rendez-vous saisi
           sans email (téléphone, sans rendez-vous) affiche simplement son client. */}
-      {isLastMinute && !isCompleted && !appointment.client_email && !assignedClient ? (
+      {isLastMinute && !isCompleted && !appointment.client_email && !assignedClient
+        && ['', 'Last Minute'].includes(String(appointment.client_name || '').trim()) ? (
         <div className="bg-secondary rounded-xl p-3 space-y-2 relative">
           <ClientAccountPicker autoFocus={false} onSelect={assignAccount} />
           {/* Walk-in: manual name/phone for last minute */}
@@ -598,14 +659,18 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
             onClick={async () => {
               dispatch({ type: 'SAVING', value: true });
               try {
-                await api.entities.Appointment.update(appointment.id, {
-                  status: 'no_show',
-                  cancellation_reason: LAST_MINUTE_EXPIRED_REASON,
-                });
+                // Last minute encore libre : expiration système (le serveur la refuse s'il a été repris).
+                // Repris par « Un client l'a pris » mais le client n'est pas venu : absent, repère du
+                // last minute retiré (il ne compte plus en converti), nom « Last Minute » gardé (non pris)
+                await api.entities.Appointment.update(appointment.id, appointment.status === 'last_minute'
+                  ? { status: 'no_show', cancellation_reason: LAST_MINUTE_EXPIRED_REASON }
+                  : { status: 'no_show', cancellation_reason: null, internal_notes: stripLastMinuteMarker(appointment.internal_notes) || null });
                 toast.success('Créneau marqué comme non pris');
                 onUpdate?.();
               } catch (e) {
                 toast.error(errorMessage(e, 'Modification impossible'));
+                // 409 : un client a repris le Last Minute (cache périmé) ; le rechargement l'affiche
+                if (e?.status === 409) invalidateAppointmentQueries(queryClient);
               } finally {
                 dispatch({ type: 'SAVING', value: false });
               }
@@ -782,7 +847,7 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
             {showGiftPaid && (
               <>
                 <div className="flex items-center justify-between gap-2 text-xs text-amber-300">
-                  <span>Déjà payé par carte cadeau</span>
+                  <span>Déjà payé par carte cadeau{giftExcess > 0 ? ` (${formatPrice(giftCents / 100)} débités, dont ${formatPrice(giftExcess)} de trop)` : ''}</span>
                   <span className="shrink-0">−{formatPrice(giftPaid)}</span>
                 </div>
                 <div className="flex items-center justify-between gap-2 text-xs font-semibold text-foreground">
@@ -790,6 +855,13 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
                   <span className="shrink-0">{formatPrice(leftToCash)}</span>
                 </div>
               </>
+            )}
+            {isAdmin && ['cb', 'especes'].includes(appointment.payment_method) && (
+              <p className="text-[11px] text-muted-foreground break-words">
+                Le client paie finalement par carte cadeau ?{' '}
+                <Link to="/admin/gift-cards" className="font-semibold text-primary underline underline-offset-2">Cartes cadeau</Link>
+                {' '}→ scannez la carte → « Déjà encaissés en CB / espèces » : la part carte sera retirée du CB / espèces.
+              </p>
             )}
             <div className="flex items-center justify-between text-[10px] text-muted-foreground">
               <span>{appointment.total_duration} min</span>
@@ -800,6 +872,12 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
             </div>
           </div>
         </>
+      ) : unclaimedLastMinute ? (
+        <p role="status" className="rounded-xl border border-orange-500/25 bg-orange-500/10 px-3 py-2.5 text-xs leading-relaxed text-orange-200 break-words">
+          {lastMinuteOver
+            ? 'Créneau last minute non pris. Si un client l\'a pris, touchez « Un client l\'a pris » pour saisir le client, la prestation et encaisser.'
+            : 'Touchez « Rétablir le rendez-vous » pour le remettre en last minute.'}
+        </p>
       ) : (
         <>
           {/* Tip */}
@@ -917,7 +995,7 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
               {showGiftPaid && (
                 <>
                   <div className="flex items-center justify-between gap-2 text-xs text-amber-300">
-                    <span>Déjà payé par carte cadeau</span>
+                    <span>Déjà payé par carte cadeau{giftExcess > 0 ? ` (${formatPrice(giftCents / 100)} débités, dont ${formatPrice(giftExcess)} de trop)` : ''}</span>
                     <span className="shrink-0">−{formatPrice(giftPaid)}</span>
                   </div>
                   <div className="flex items-center justify-between gap-2 text-sm font-semibold text-foreground">
@@ -987,6 +1065,19 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
                         </>
                       )}
                     </>
+                  ) : isAdmin && lmNeedsSave ? (
+                    <>
+                      Pour payer ce Last Minute par carte cadeau, enregistrez d'abord le client et la prestation : le rendez-vous apparaîtra ensuite dans Cartes cadeau.
+                      <button
+                        type="button"
+                        onClick={saveLastMinuteClient}
+                        disabled={state.saving || !String(state.clientName || '').trim() || String(state.clientName || '').trim() === 'Last Minute'
+                          || (selectedServices.length === 0 && !appointment.services?.length)}
+                        className="mt-2 w-full py-2 rounded-lg bg-amber-500 text-black font-semibold disabled:opacity-50"
+                      >
+                        {state.saving ? 'Enregistrement…' : 'Enregistrer le client et la prestation'}
+                      </button>
+                    </>
                   ) : isAdmin ? (
                     <>
                       La carte cadeau se débite depuis Cartes cadeau : scannez le QR ou saisissez le code, puis choisissez ce rendez-vous (ou rattachez-y un débit déjà fait : historique de la carte → « Rattacher à un RDV »). Il sera clôturé automatiquement.{' '}
@@ -1011,6 +1102,17 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
               )}
             </div>
           </div>
+
+          {giftExcess > 0 && (
+            <div role="status" className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs leading-relaxed text-amber-200 break-words min-w-0">
+              La carte cadeau a réglé {formatPrice(giftCents / 100)} : {formatPrice(giftExcess)} de plus que le prix. Rendez-les d'abord sur la carte (Cartes cadeau, historique de la carte : « Annuler » sous 24 h, sinon « Rendre sur la carte »){giftExcessBlocks ? ', puis enregistrez' : ''}.
+              {isAdmin && (
+                <>{' '}
+                  <Link to="/admin/gift-cards" className="font-semibold text-primary underline underline-offset-2 whitespace-nowrap">Cartes cadeau</Link>
+                </>
+              )}
+            </div>
+          )}
 
           {needsService && state.paymentMethod && (
             <p role="status" className="text-xs text-amber-300 text-center">Choisissez la prestation effectuée pour valider</p>
@@ -1057,6 +1159,12 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
               {openOrders.length > 0 && (
                 <p className="text-[11px] text-muted-foreground break-words">
                   Les produits commandés avec ce rendez-vous seront annulés (sauf ceux déjà prêts).
+                </p>
+              )}
+              {giftCents > 0 && (
+                <p className="text-[11px] text-amber-300 break-words">
+                  {formatPrice(giftCents / 100)} ont été débités sur une carte cadeau pour ce rendez-vous : pensez à les rendre (Cartes cadeau, historique de la carte).{' '}
+                  {isAdmin && <Link to="/admin/gift-cards" className="font-semibold text-primary underline underline-offset-2 whitespace-nowrap">Cartes cadeau</Link>}
                 </p>
               )}
               {canNotifyCancel && (
@@ -1109,6 +1217,10 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
                   dispatch({ type: 'SAVING', value: true });
                   try {
                     await api.entities.Appointment.update(appointment.id, { status: 'no_show' });
+                    // Part déjà débitée d'une carte cadeau : à rendre, rien ne le fait tout seul (tour 7)
+                    if (giftCents > 0) {
+                      toast.warning(`${formatPrice(giftCents / 100)} ont été débités sur une carte cadeau pour ce rendez-vous : pensez à les rendre (Cartes cadeau, historique de la carte).`, { duration: 10000 });
+                    }
                     // Comme « Client venu ? » : un tap par erreur se rattrape tout de suite
                     toast('Marqué absent', {
                       duration: 8000,

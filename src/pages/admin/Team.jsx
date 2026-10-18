@@ -13,6 +13,7 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
+import { Link } from 'react-router-dom';
 import LoadError, { friendlyError, queryFailed } from '@/components/shared/LoadError';
 
 /**
@@ -106,6 +107,9 @@ export default function Team() {
   });
   const salonOpeningHours = salonSettingsQuery.data?.[0]?.opening_hours || null;
 
+  // Passage en Inactif refusé (409) : le barber a encore des RDV clients à venir (tour 7). Message du
+  // serveur, lien vers l'agenda et « Passer inactif quand même » (force_inactive)
+  const [inactiveConflict, setInactiveConflict] = useState(null);
   const saveMutation = useMutation({
     mutationFn: async (data) => {
       if (data.id) {
@@ -117,16 +121,22 @@ export default function Team() {
           if (data[key] !== undefined && !sameValue(data[key], base[key])) changes[key] = data[key];
         }
         if (Object.keys(changes).length === 0) return { unchanged: true };
+        if (data.force_inactive === true && changes.is_active === false) changes.force_inactive = true;
         return api.entities.Employee.update(data.id, changes);
       }
       return api.entities.Employee.create(data);
     },
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['employees'] });
+      setInactiveConflict(null);
       setShowDialog(false);
       toast.success(res?.unchanged ? 'Aucune modification' : 'Collaborateur sauvegardé');
     },
-    onError: (err) => {
+    onError: (err, data) => {
+      if (err?.status === 409 && data?.id && data.is_active === false && !data.force_inactive) {
+        setInactiveConflict(serverText(err, 'Ce barber a encore des rendez-vous clients à venir.'));
+        return;
+      }
       toast.error(serverText(err, 'Erreur lors de la sauvegarde'));
     },
   });
@@ -150,6 +160,7 @@ export default function Team() {
     setPhotoUploading(false);
     setOriginalEmployee(null);
     setEditEmployee({ name: '', title: '', bio: '', email: '', phone: '', is_active: true, working_hours: hoursFromSalon(salonOpeningHours), color: nextColor });
+    setInactiveConflict(null);
     setShowDialog(true);
   };
 
@@ -162,6 +173,7 @@ export default function Team() {
     const initial = { ...emp, working_hours: emp.working_hours || defaultHours };
     setOriginalEmployee(emp);
     setEditEmployee(initial);
+    setInactiveConflict(null);
     setShowDialog(true);
     try {
       const rows = await api.entities.Employee.filter({ id: emp.id }, null, 1);
@@ -394,8 +406,26 @@ export default function Team() {
               </div>
               <div className="flex items-center justify-between">
                 <Label className="text-xs">Actif</Label>
-                <Switch checked={editEmployee.is_active} onCheckedChange={v => setEditEmployee({ ...editEmployee, is_active: v })} />
+                <Switch checked={editEmployee.is_active} onCheckedChange={v => { setInactiveConflict(null); setEditEmployee({ ...editEmployee, is_active: v }); }} />
               </div>
+              {inactiveConflict && editEmployee.id && editEmployee.is_active === false && (
+                <div role="alert" className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 space-y-2 text-xs text-amber-200">
+                  <p className="break-words">{inactiveConflict}</p>
+                  <div className="flex flex-wrap gap-2">
+                    <Link to="/admin/agenda?view=week&barber=all" className="px-3 py-1.5 rounded-lg bg-white/10 border border-white/15 text-foreground font-semibold">
+                      Ouvrir l'agenda
+                    </Link>
+                    <button
+                      type="button"
+                      disabled={saveMutation.isPending}
+                      onClick={() => saveMutation.mutate({ ...editEmployee, force_inactive: true })}
+                      className="px-3 py-1.5 rounded-lg bg-amber-500 text-black font-semibold disabled:opacity-60"
+                    >
+                      Passer inactif quand même
+                    </button>
+                  </div>
+                </div>
+              )}
               {editEmployee.id && (
                 <p className="text-[11px] text-muted-foreground -mt-2">
                   Inactif retire aussi l'accès de ce barber à l'app (agenda, clients). Pour un départ définitif, supprimez son compte dans Comptes barbers.

@@ -58,6 +58,8 @@ export default function NotifyDialog({ drop, reservations = [], onClose }) {
   const [message, setMessage] = useState('');
   const [audience, setAudience] = useState('subscribers');
   const [result, setResult] = useState(null);
+  // Après un envoi réussi, « Renvoyer » demande un second tap (sinon une seconde vague partait d'un tap, tour 7)
+  const [confirmResend, setConfirmResend] = useState(false);
   // Clé d'envoi gardée au niveau du module (textileApi.sendKeyFor) : après une réponse perdue, un
   // nouvel essai (même fermé puis rouvert) ne renvoie pas le push ; un autre message ou une autre
   // audience donne d'office un nouvel envoi. `uncertainTick` relit l'état après un échec.
@@ -80,6 +82,7 @@ export default function NotifyDialog({ drop, reservations = [], onClose }) {
     if (drop) {
       setMessage('');
       setResult(null);
+      setConfirmResend(false);
       // Drop terminé (ou déjà passé par l'ouverture) : l'usage naturel est d'annoncer les commandes prêtes
       setAudience(drop.status === 'ended' && paidClients > 0 ? 'paid' : 'subscribers');
     }
@@ -94,11 +97,17 @@ export default function NotifyDialog({ drop, reservations = [], onClose }) {
       invalidateTextile(queryClient, 'textileDrops', 'textileReservations');
       const sent = Number(data?.sent) || 0;
       const marked = Number(data?.marked) || 0;
+      // Emails « Ta pièce est prête » (audience payé, tour 7) ; absent d'un ancien serveur → 0
+      const emailed = Number(data?.emailed) || 0;
+      const mails = emailed > 0 ? ` · ${emailed} email${emailed > 1 ? 's' : ''}` : '';
+      const markedLabel = `${marked} réservation${marked > 1 ? 's' : ''} passée${marked > 1 ? 's' : ''} à « Prête »`;
       toast.success(
         sent > 0
-          ? `${sent} notification${sent > 1 ? 's' : ''} envoyée${sent > 1 ? 's' : ''}${marked > 0 ? ` · ${marked} réservation${marked > 1 ? 's' : ''} passée${marked > 1 ? 's' : ''} à « Prête »` : ''}`
+          ? `${sent} notification${sent > 1 ? 's' : ''} envoyée${sent > 1 ? 's' : ''}${marked > 0 ? ` · ${markedLabel}` : ''}${mails}`
           : marked > 0
-            ? `Aucun client joignable par push, ${marked} réservation${marked > 1 ? 's' : ''} passée${marked > 1 ? 's' : ''} à « Prête »`
+            ? (emailed > 0
+              ? `${markedLabel}, ${emailed} client${emailed > 1 ? 's' : ''} prévenu${emailed > 1 ? 's' : ''} par email`
+              : `Aucun client joignable par push, ${markedLabel}`)
             : 'Aucun destinataire joignable',
       );
     },
@@ -126,7 +135,9 @@ export default function NotifyDialog({ drop, reservations = [], onClose }) {
     : drop.status === 'live' ? `🔥 Drop ${drop.name} ouvert !` : `📣 ${drop.name}`;
   const defaultBody = isPaid ? READY_BODY : announceBody(drop, audience === 'everyone');
   // Avant l'ouverture, un envoi aux abonnés / à tous est une relance : le push d'ouverture partira quand même
-  const isReminder = !isPaid && (drop.status === 'teasing' || drop.status === 'draft');
+  const isReminder = !isPaid && drop.status === 'teasing';
+  // Brouillon : invisible des clients et impossible à suivre ; le serveur refuse l'annonce (tour 7)
+  const isDraft = drop.status === 'draft';
 
   const AUDIENCES = [
     {
@@ -150,7 +161,7 @@ export default function NotifyDialog({ drop, reservations = [], onClose }) {
     },
   ];
   const current = AUDIENCES.find((a) => a.key === audience) || AUDIENCES[1];
-  const nothingToSend = current.count === 0;
+  const nothingToSend = current.count === 0 || (isDraft && !isPaid);
 
   return (
     <Dialog open={!!drop} onOpenChange={(open) => { if (!open) onClose(); }}>
@@ -172,7 +183,8 @@ export default function NotifyDialog({ drop, reservations = [], onClose }) {
                   <button
                     key={a.key}
                     type="button"
-                    onClick={() => { setAudience(a.key); setResult(null); }}
+                    onClick={() => { setAudience(a.key); setResult(null); setConfirmResend(false); }}
+                    disabled={isDraft && a.key !== 'paid'}
                     className={`w-full text-left rounded-xl border p-3 flex items-start gap-3 transition-colors ${
                       active ? 'border-primary/50 bg-primary/10' : 'border-border bg-secondary/40 hover:bg-secondary'
                     }`}
@@ -237,6 +249,7 @@ export default function NotifyDialog({ drop, reservations = [], onClose }) {
                 <>
                   {' '}· {Number(result.clients) || 0} client{(Number(result.clients) || 0) > 1 ? 's' : ''} ayant payé
                   {' '}· {Number(result.marked) || 0} réservation{(Number(result.marked) || 0) > 1 ? 's' : ''} passée{(Number(result.marked) || 0) > 1 ? 's' : ''} à « Prête »
+                  {Number(result.emailed) > 0 && <>{' '}· {Number(result.emailed)} email{Number(result.emailed) > 1 ? 's' : ''}</>}
                 </>
               )}
               {Number(result.failed) > 0 && <span className="text-amber-300"> · {result.failed} en échec</span>}
@@ -248,12 +261,19 @@ export default function NotifyDialog({ drop, reservations = [], onClose }) {
             <Button
               className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90"
               disabled={sendMutation.isPending || nothingToSend}
-              onClick={() => sendMutation.mutate()}
+              onClick={() => {
+                if (result && !confirmResend) { setConfirmResend(true); return; }
+                setConfirmResend(false);
+                sendMutation.mutate();
+              }}
             >
               <Send className="w-4 h-4 mr-1.5" />
-              {sendMutation.isPending ? 'Envoi…' : result ? 'Renvoyer' : 'Envoyer'}
+              {sendMutation.isPending ? 'Envoi…' : result ? (confirmResend ? 'Renvoyer à nouveau ?' : 'Renvoyer') : 'Envoyer'}
             </Button>
           </div>
+          {isDraft && !isPaid && (
+            <p className="text-[11px] text-amber-300 text-center">Annoncez le drop avant de prévenir les clients.</p>
+          )}
           {nothingToSend && (
             <p className="text-[11px] text-muted-foreground text-center">
               {isPaid

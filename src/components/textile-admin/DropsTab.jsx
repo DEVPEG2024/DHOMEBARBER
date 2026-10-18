@@ -307,8 +307,11 @@ export default function DropsTab({ drops, concepts, reservations, isAdmin, isLoa
                         <ActionButton icon={Rocket} label="Ouvrir maintenant" onClick={() => setOpenTarget(drop)} disabled={busy}
                           className="border-green-500/30 text-green-400 hover:bg-green-500/10" />
                       )}
-                      <ActionButton icon={Bell} label="Prévenir" onClick={() => setNotifyTarget(drop)} disabled={busy}
-                        className="border-primary/30 text-primary hover:bg-primary/10" />
+                      {/* Brouillon : invisible des clients, rien à annoncer (le serveur refuse, tour 7) */}
+                      {drop.status !== 'draft' && (
+                        <ActionButton icon={Bell} label="Prévenir" onClick={() => setNotifyTarget(drop)} disabled={busy}
+                          className="border-primary/30 text-primary hover:bg-primary/10" />
+                      )}
                       {canEnd && (
                         <TwoTapButton icon={Flag} label="Terminer" confirmLabel="Terminer ce drop ?" disabled={busy}
                           className="border-blue-500/30 text-blue-400 hover:bg-blue-500/10"

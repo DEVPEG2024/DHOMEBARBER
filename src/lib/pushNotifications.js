@@ -10,7 +10,14 @@ const isNative = Capacitor.isNativePlatform();
 // On le garde donc ici et il part dès qu'une session est ouverte (voir syncPushSubscription).
 const NATIVE_TOKEN_KEY = 'dhb-native-push-token';
 // Désactivation volontaire dans Paramètres : l'appareil n'est plus réabonné au lancement.
+// La marque vaut pour le compte qui l'a posée (son id) : sur un appareil partagé, le compte
+// suivant n'en hérite pas. L'ancienne valeur '1' (avant le 18 oct. 2026) vaut pour tous.
 const PUSH_OPTOUT_KEY = 'dhb-push-optout';
+// Compte connecté sur l'appareil (posé par AuthContext, voir setNotificationsOwner)
+const NOTIFS_OWNER_KEY = 'dhb-notif-owner';
+// Natif : `<id du compte>|<jeton>` du dernier jeton accepté par le serveur. Sans lui, Paramètres
+// allumait l'interrupteur dès l'autorisation accordée, même si aucun jeton n'était arrivé.
+const NATIVE_SENT_KEY = 'dhb-native-push-sent';
 
 function readLocal(key) {
   try { return localStorage.getItem(key); } catch { return null; }
@@ -21,6 +28,33 @@ function writeLocal(key, value) {
     if (value == null) localStorage.removeItem(key);
     else localStorage.setItem(key, value);
   } catch { /* stockage indisponible */ }
+}
+
+/** Notifications coupées dans Paramètres par ce compte (le compte courant si `userId` est omis). */
+function isOptedOut(userId) {
+  const v = readLocal(PUSH_OPTOUT_KEY);
+  if (!v) return false;
+  if (v === '1') return true;
+  const id = userId != null && userId !== '' ? userId : readLocal(NOTIFS_OWNER_KEY);
+  return id != null && id !== '' && v === String(id);
+}
+
+// Réactivation : lève la marque de ce compte (ou l'ancienne marque commune), jamais celle d'un autre
+function clearOptOut(userId) {
+  const v = readLocal(PUSH_OPTOUT_KEY);
+  if (v && (v === '1' || isOptedOut(userId))) writeLocal(PUSH_OPTOUT_KEY, null);
+}
+
+// Compte d'un jeton de session (charge utile du JWT, sans vérification), null s'il est illisible
+function sessionUserId(session) {
+  try {
+    const part = String(session || '').split('.')[1];
+    if (!part) return null;
+    const payload = JSON.parse(atob(part.replace(/-/g, '+').replace(/_/g, '/')));
+    return payload && payload.userId != null ? String(payload.userId) : null;
+  } catch {
+    return null;
+  }
 }
 
 // Dernier couple session + jeton envoyé : évite de renvoyer deux fois le même jeton
@@ -40,12 +74,27 @@ async function sendNativeToken(token) {
       platform: Capacitor.getPlatform(),
     });
     lastSentNative = key;
+    writeLocal(NATIVE_SENT_KEY, `${sessionUserId(session) || ''}|${token}`);
     return true;
   } catch {
     // Réseau ou session : renvoyé à la prochaine ouverture de session
     return false;
   }
 }
+
+// Natif : jeton de cet appareil accepté par le serveur pour le compte connecté
+function nativeTokenSent() {
+  const sent = readLocal(NATIVE_SENT_KEY);
+  const token = readLocal(NATIVE_TOKEN_KEY);
+  if (!sent || !token) return false;
+  const account = sessionUserId(getToken()) || readLocal(NOTIFS_OWNER_KEY) || '';
+  return sent === `${account}|${token}`;
+}
+
+// Activation en cours (subscribeNativePush) : `{ resolve, reject }`, dénoué par l'événement
+// « registration » (jeton accepté par le serveur), « registrationError » ou le délai de 10 s
+let pendingRegistration = null;
+const REGISTRATION_TIMEOUT = 10000;
 
 // Get VAPID public key from backend
 export async function getVapidPublicKey() {
@@ -68,7 +117,7 @@ export function isPushSupported() {
 export async function getPushPermission() {
   if (!isPushSupported()) return 'unsupported';
   if (isNative) {
-    if (readLocal(PUSH_OPTOUT_KEY) === '1') return 'optout';
+    if (isOptedOut()) return 'optout';
     try {
       const { receive } = await PushNotifications.checkPermissions();
       if (receive === 'granted') return 'granted';
@@ -80,7 +129,7 @@ export async function getPushPermission() {
   }
   // Désactivées dans Paramètres (marque posée par unsubscribeFromPush) : « denied » garde la
   // priorité, pour que Paramètres affiche toujours l'aide aux réglages du navigateur
-  if (readLocal(PUSH_OPTOUT_KEY) === '1' && Notification.permission !== 'denied') return 'optout';
+  if (isOptedOut() && Notification.permission !== 'denied') return 'optout';
   if (Notification.permission === 'granted') return 'granted';
   if (Notification.permission === 'denied') return 'denied';
   return 'prompt';
@@ -90,9 +139,10 @@ export async function getPushPermission() {
 export async function isSubscribed() {
   if (!isPushSupported()) return false;
   if (isNative) {
-    if (readLocal(PUSH_OPTOUT_KEY) === '1') return false;
+    if (isOptedOut()) return false;
     const permStatus = await PushNotifications.checkPermissions();
-    return permStatus.receive === 'granted';
+    // Autorisation accordée ne suffit pas : le jeton doit être arrivé au serveur pour ce compte
+    return permStatus.receive === 'granted' && nativeTokenSent();
   }
   const reg = await navigator.serviceWorker.ready;
   const sub = await reg.pushManager.getSubscription();
@@ -119,10 +169,32 @@ async function subscribeNativePush() {
   if (permStatus.receive !== 'granted') {
     throw new Error('Permission push refusée');
   }
-  writeLocal(PUSH_OPTOUT_KEY, null);
+  clearOptOut();
   // Le jeton arrive par l'événement « registration » (voir initNativePush) : envoyé tout
-  // de suite avec une session, gardé pour la connexion sinon.
-  await PushNotifications.register();
+  // de suite avec une session, gardé pour la connexion sinon. On attend son enregistrement
+  // par le serveur : avant, « Notifications activées » s'affichait même quand aucun jeton
+  // n'était arrivé (iPhone sans événement « registration », Android hors réseau).
+  if (pendingRegistration) {
+    pendingRegistration.reject(new Error("L'enregistrement de l'appareil n'a pas abouti. Réessayez."));
+  }
+  let mine = null;
+  const waited = new Promise((resolve, reject) => {
+    mine = { resolve, reject };
+    pendingRegistration = mine;
+  });
+  // Pas de rejet « non traité » si register() échoue avant l'attente
+  waited.catch(() => {});
+  const timer = setTimeout(() => {
+    if (pendingRegistration === mine) pendingRegistration = null;
+    mine.reject(new Error("L'enregistrement de l'appareil n'a pas abouti. Réessayez."));
+  }, REGISTRATION_TIMEOUT);
+  try {
+    await PushNotifications.register();
+    await waited;
+  } finally {
+    clearTimeout(timer);
+    if (pendingRegistration === mine) pendingRegistration = null;
+  }
   return true;
 }
 
@@ -136,12 +208,24 @@ export function initNativePush() {
     // Jeton obtenu (ou renouvelé) : gardé, puis envoyé si une session est ouverte
     PushNotifications.addListener('registration', async (token) => {
       writeLocal(NATIVE_TOKEN_KEY, token.value);
-      await sendNativeToken(token.value);
+      // Sans session, le jeton attend la connexion (syncPushSubscription) : ce n'est pas un échec
+      const ok = getToken() ? await sendNativeToken(token.value) : true;
+      const pending = pendingRegistration;
+      if (pending) {
+        pendingRegistration = null;
+        if (ok) pending.resolve(true);
+        else pending.reject(new Error("Votre appareil n'a pas pu être enregistré. Vérifiez votre connexion et réessayez."));
+      }
     }),
 
     // Registration error
     PushNotifications.addListener('registrationError', (error) => {
       console.warn('Push registration failed:', error);
+      const pending = pendingRegistration;
+      if (pending) {
+        pendingRegistration = null;
+        pending.reject(new Error("Votre appareil n'a pas pu être enregistré. Réessayez."));
+      }
     }),
 
     // Notification reçue app ouverte : rangée dans le centre de notifications du compte
@@ -176,19 +260,22 @@ export function initNativePush() {
  * - réattribue l'appareil quand un autre compte s'y connecte.
  * Ne demande jamais d'autorisation et ne crée pas d'abonnement web sans geste de l'utilisateur.
  */
+// `userId` : compte qui ouvre la session (AuthContext). Indispensable à la connexion : le
+// propriétaire de l'appareil (`dhb-notif-owner`) n'est posé qu'ensuite, par un effet.
 let syncing = null;
-export function syncPushSubscription() {
+export function syncPushSubscription(userId) {
   if (!syncing) {
-    syncing = doSyncPushSubscription().finally(() => { syncing = null; });
+    syncing = doSyncPushSubscription(userId).finally(() => { syncing = null; });
   }
   return syncing;
 }
 
-async function doSyncPushSubscription() {
+async function doSyncPushSubscription(userId) {
   if (!getToken()) return;
   try {
     if (isNative) {
-      if (readLocal(PUSH_OPTOUT_KEY) === '1') return;
+      // Coupées par CE compte seulement : un autre compte de l'appareil est réabonné
+      if (isOptedOut(userId ?? sessionUserId(getToken()))) return;
       await initNativePush();
       const permStatus = await PushNotifications.checkPermissions();
       if (permStatus.receive !== 'granted') return;
@@ -218,7 +305,7 @@ async function subscribeWebPush() {
   const permission = await Notification.requestPermission();
   if (permission !== 'granted') throw new Error('Permission refusée');
   // Réactivées : la marque du refus (Paramètres) est levée, comme sur les apps
-  writeLocal(PUSH_OPTOUT_KEY, null);
+  clearOptOut();
 
   const registration = await navigator.serviceWorker.register('/sw.js');
   await navigator.serviceWorker.ready;
@@ -252,6 +339,8 @@ export async function detachPushFromAccount() {
     if (isNative) {
       const token = readLocal(NATIVE_TOKEN_KEY);
       lastSentNative = null;
+      // Le compte qui s'en va n'est plus rattaché : Paramètres du suivant n'en hérite pas
+      writeLocal(NATIVE_SENT_KEY, null);
       if (!token) return;
       await apiRequest('POST', apiUrl('/push/unsubscribe'), {
         endpoint: `native://${Capacitor.getPlatform()}/${token}`,
@@ -270,13 +359,19 @@ export async function detachPushFromAccount() {
   }
 }
 
+// Marque « coupées » au nom du compte connecté (Paramètres n'est accessible que connecté) ;
+// '1' (tous les comptes) seulement si aucun compte n'est connu
+function optOutMark() {
+  return readLocal(NOTIFS_OWNER_KEY) || sessionUserId(getToken()) || '1';
+}
+
 // Unsubscribe from push
 export async function unsubscribeFromPush() {
   if (isNative) {
     // Désactivation réelle : le serveur oublie l'appareil, le jeton est révoqué et le
     // lancement suivant ne réabonne pas (avant : seuls les écouteurs étaient retirés,
     // le serveur continuait d'envoyer et une réactivation n'envoyait plus le jeton).
-    writeLocal(PUSH_OPTOUT_KEY, '1');
+    writeLocal(PUSH_OPTOUT_KEY, optOutMark());
     const token = readLocal(NATIVE_TOKEN_KEY);
     if (token && getToken()) {
       try {
@@ -287,13 +382,14 @@ export async function unsubscribeFromPush() {
     }
     try { await PushNotifications.unregister(); } catch {}
     writeLocal(NATIVE_TOKEN_KEY, null);
+    writeLocal(NATIVE_SENT_KEY, null);
     lastSentNative = null;
     return;
   }
 
   if (!isPushSupported()) return;
   // Le web garde aussi la trace du refus : « Me prévenir » (textile) ne réabonne pas en silence
-  writeLocal(PUSH_OPTOUT_KEY, '1');
+  writeLocal(PUSH_OPTOUT_KEY, optOutMark());
   const reg = await navigator.serviceWorker.ready;
   const subscription = await reg.pushManager.getSubscription();
 
@@ -326,7 +422,7 @@ function urlBase64ToUint8Array(base64String) {
 // Sur le web, le service worker range aussi chaque push dans IndexedDB (`dhb-notifs`, voir
 // public/sw.js) : les notifications reçues app fermée sont fusionnées à l'ouverture de la page.
 const NOTIFS_LEGACY_KEY = 'dhome_notifications';
-const NOTIFS_OWNER_KEY = 'dhb-notif-owner';
+// NOTIFS_OWNER_KEY ('dhb-notif-owner') est déclarée en tête du module
 const NOTIFS_MAX = 50;
 // Deux entrées sans identifiant commun, même titre et même texte à moins de 5 min : une seule
 const DUPLICATE_WINDOW = 5 * 60 * 1000;
@@ -423,11 +519,16 @@ export function setNotificationsOwner(userId) {
   }
   const owner = String(userId);
   const previousOwner = readLocal(NOTIFS_OWNER_KEY);
-  if (!previousOwner) {
-    const last = readLocal(NOTIFS_LAST_OWNER_KEY);
-    if (last && last !== owner && !isNative) {
-      swQueuePurge = readServiceWorkerNotifications(true).then(() => undefined, () => undefined);
-    }
+  // Compte précédent : celui encore en place (session fermée sans clearSession, par exemple
+  // l'écran hors ligne → « Se connecter avec un autre compte »), sinon le dernier parti
+  const departed = previousOwner || readLocal(NOTIFS_LAST_OWNER_KEY);
+  if (departed && departed !== owner && !isNative) {
+    swQueuePurge = readServiceWorkerNotifications(true).then((items) => {
+      // Propriétaire encore connu : la file (pushs reçus app fermée) lui revient au lieu d'être jetée
+      if (previousOwner && items.length) {
+        storeNotifications(previousOwner, mergeNotifications(readNotifications(previousOwner), items));
+      }
+    }).then(() => undefined, () => undefined);
   }
   writeLocal(NOTIFS_LAST_OWNER_KEY, null);
   writeLocal(NOTIFS_OWNER_KEY, owner);

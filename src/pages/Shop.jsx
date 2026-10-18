@@ -16,6 +16,7 @@ import { useFavorites } from '@/lib/favorites';
 import { formatPrice, productCategoryLabel, productImages, stockInfo, isShopProduct, MAX_PER_PRODUCT, PER_PRODUCT_LIMIT_MESSAGE } from '@/components/shop/productUtils';
 import LoadError, { isNetworkError, queryFailed } from '@/components/shared/LoadError';
 import { useAndroidBack } from '@/lib/useAndroidBack';
+import { normalizeOrderStatus } from '@/lib/cancellation';
 
 /** Vol de la vignette produit vers le panier : taille du disque (px) et durée (s). */
 const FLY_SIZE = 56;
@@ -60,17 +61,18 @@ const cartStorageKey = (userId) => `dhb-cart:${userId || 'guest'}`;
  * (`dhb-order-ref:<id>`, valeur `{ key, sig, at }`). Si la réponse du serveur se perd (métro),
  * le renvoi du même panier, même après avoir quitté la Boutique ou relancé l'app, repart avec la
  * même clé et retombe sur la commande déjà créée (`client_ref`, index unique côté serveur).
- * Valable 24 h ; stockage absent ou illisible = pas de clé gardée.
+ * Pas de durée limite (le panier non plus n'en a pas) : la clé vit jusqu'à un succès, un refus du
+ * serveur ou un rapprochement avec la commande retrouvée (`reconcileOrderRef`). Stockage absent ou
+ * illisible = pas de clé gardée.
  */
 const orderRefStorageKey = (userId) => `dhb-order-ref:${userId || 'guest'}`;
-const ORDER_REF_TTL_MS = 24 * 60 * 60 * 1000;
 
 function loadOrderRef(userId) {
   try {
     const raw = JSON.parse(localStorage.getItem(orderRefStorageKey(userId)) || 'null');
     if (!raw || typeof raw !== 'object' || typeof raw.key !== 'string' || !raw.key
       || typeof raw.sig !== 'string' || !Number.isFinite(raw.at)) return null;
-    if (Date.now() - raw.at >= ORDER_REF_TTL_MS || raw.at > Date.now() + 60_000) return null;
+    if (raw.at > Date.now() + 60_000) return null; // horloge de l'appareil recalée : clé ignorée
     return { key: raw.key, sig: raw.sig, at: raw.at };
   } catch {
     return null;
@@ -83,6 +85,52 @@ function saveOrderRef(userId, ref) {
     else localStorage.setItem(orderRefStorageKey(userId), JSON.stringify(ref));
   } catch {
     // stockage indisponible : la clé reste en mémoire pour la durée de la page
+  }
+}
+
+/** Signature du panier (contenu + note) : même signature = même envoi, donc même clé d'essai. */
+const cartSignature = (items, notes) => JSON.stringify(items.map(([id, qty]) => [String(id), qty]).sort()) + notes.trim();
+
+const NETWORK_ORDER_MESSAGE = 'Pas de connexion : votre panier est gardé. Réessayez quand la connexion revient, la commande ne sera pas passée deux fois.';
+
+/** Quantités par produit d'une commande enregistrée (`items` en tableau ou en JSON). */
+function orderedQuantities(order) {
+  let items = order?.items;
+  if (typeof items === 'string') {
+    try { items = JSON.parse(items); } catch { items = []; }
+  }
+  const out = new Map();
+  (Array.isArray(items) ? items : []).forEach((it) => {
+    const id = it && (it.product_id ?? it.id);
+    const q = parseInt(it?.quantity, 10);
+    if (id === undefined || id === null || id === '' || !(q > 0)) return;
+    out.set(String(id), (out.get(String(id)) || 0) + q);
+  });
+  return out;
+}
+
+/** Panier moins les quantités d'une commande déjà passée (ligne retirée à 0). */
+function cartWithout(cart, ordered) {
+  const next = {};
+  Object.entries(cart || {}).forEach(([id, qty]) => {
+    const left = Math.max(0, qty - (ordered.get(String(id)) || 0));
+    if (left > 0) next[id] = left;
+  });
+  return next;
+}
+
+/** Date d'une commande à l'heure de Paris (« 18 octobre à 14:05 », jour seul pour une date sans heure). */
+function parisOrderDate(value) {
+  if (!value) return '';
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(String(value));
+  const d = new Date(dateOnly ? `${value}T12:00:00Z` : value);
+  if (Number.isNaN(d.getTime())) return '';
+  try {
+    return new Intl.DateTimeFormat('fr-FR', dateOnly
+      ? { timeZone: 'Europe/Paris', day: 'numeric', month: 'long' }
+      : { timeZone: 'Europe/Paris', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }).format(d);
+  } catch {
+    return '';
   }
 }
 
@@ -176,14 +224,24 @@ export default function Shop() {
   const [notes, setNotes] = useState('');
   const [ordering, setOrdering] = useState(false);
   const [orderSuccess, setOrderSuccess] = useState(false);
+  // Total enregistré par le serveur (prix en base), affiché sur l'écran de succès
+  const [successTotal, setSuccessTotal] = useState(null);
   // Fiche produit ouverte (bottom sheet) : id du produit, résolu dans la liste à chaque rendu
   const [openProductId, setOpenProductId] = useState(null);
   // Garde contre le double envoi (deux taps avant que `ordering` ne soit rendu)
   const submittingRef = useRef(false);
   // Clé d'essai de la commande en cours ({ key, sig } : sig = contenu du panier). Gardée tant que
   // l'envoi échoue sur le réseau (un nouvel essai retombe sur la même commande), remise à zéro après
-  // un succès ou un refus du serveur, ou quand le panier change
+  // un succès, un refus du serveur ou un rapprochement (commande retrouvée), et remplacée quand le
+  // panier change (après rapprochement)
   const orderRefKey = useRef(null);
+  // Rapprochement en cours ({ key, promise }) : un seul appel à la fois pour une même clé
+  const reconcilingRef = useRef(null);
+  // Rapprochement automatique déjà lancé pour ce compte (double effet du mode strict)
+  const autoReconcileRef = useRef(null);
+  // Panier courant, pour décider de vider la note après un rapprochement
+  const cartRef = useRef(cart);
+  useEffect(() => { cartRef.current = cart; }, [cart]);
   const queryClient = useQueryClient();
   const reduceMotion = useReducedMotion();
 
@@ -349,19 +407,124 @@ export default function Shop() {
     return product && qty > cartLimit(product);
   });
 
+  /**
+   * Rapprochement d'une clé d'essai gardée (réponse perdue) avec la commande peut-être déjà créée.
+   * Commande retrouvée : clé effacée ; si elle n'est pas annulée, ses quantités sont retirées du
+   * panier (les articles ajoutés depuis restent) et un toast le dit. Ne rejette jamais.
+   * @returns {Promise<{ status: 'found'|'cancelled'|'absent'|'unknown', network?: boolean }>}
+   *  found = commande enregistrée, panier rapproché ; cancelled = commande annulée depuis, clé
+   *  effacée, panier intact ; absent = aucune commande pour cette clé ; unknown = vérification
+   *  impossible (réseau, délai, erreur du serveur) : ne pas tirer de nouvelle clé.
+   */
+  const reconcileOrderRef = useCallback(async (ref) => {
+    if (!ref?.key || !user?.email) return { status: 'absent' };
+    if (reconcilingRef.current?.key === ref.key) return reconcilingRef.current.promise;
+    const promise = (async () => {
+      let rows;
+      try {
+        rows = await api.entities.Order.filter({ client_ref: ref.key }, '-created_date', 5);
+      } catch (err) {
+        const network = isNetworkError(err) || !!err?.timeout;
+        // Lecture refusée (4xx) : vérification impossible, comportement d'avant (nouvelle clé)
+        if (!network && err?.status >= 400 && err?.status < 500) return { status: 'absent' };
+        return { status: 'unknown', network };
+      }
+      // Comparaison stricte : une lecture qui ignore le filtre (compte sans accès complet aux
+      // commandes) ne rapproche jamais une autre commande
+      const order = (Array.isArray(rows) ? rows : []).find(o => String(o?.client_ref || '') === ref.key);
+      if (!order) return { status: 'absent' };
+      // Clé déjà effacée entre-temps (envoi réussi en parallèle) : panier déjà traité
+      const current = orderRefKey.current || loadOrderRef(user?.id);
+      if (!current || current.key !== ref.key) return { status: 'found' };
+      orderRefKey.current = null;
+      saveOrderRef(user?.id, null);
+      queryClient.invalidateQueries({ queryKey: ['myOrders'] });
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+      queryClient.invalidateQueries({ queryKey: ['adminOrders'] });
+      if (normalizeOrderStatus(order.status) === 'cancelled') return { status: 'cancelled' };
+      const ordered = orderedQuantities(order);
+      const before = cartRef.current || {};
+      const after = cartWithout(before, ordered);
+      const removed = Object.keys(before).some(id => (after[id] || 0) !== before[id]);
+      setCart(prev => cartWithout(prev, ordered));
+      if (Object.keys(after).length === 0) setNotes('');
+      const when = parisOrderDate(order.created_date || order.created_at);
+      toast.success(when ? `Votre commande du ${when} est bien enregistrée` : 'Votre commande est bien enregistrée', {
+        duration: 8000,
+        ...(removed ? { description: 'Les articles déjà commandés ont été retirés de votre panier.' } : {}),
+        action: { label: 'Mes commandes', onClick: () => navigate('/orders') },
+      });
+      return { status: 'found' };
+    })();
+    reconcilingRef.current = { key: ref.key, promise };
+    try {
+      return await promise;
+    } finally {
+      if (reconcilingRef.current?.promise === promise) reconcilingRef.current = null;
+    }
+  }, [user?.id, user?.email, queryClient, navigate, setCart]);
+
+  // Clé gardée d'un envoi sans réponse : rapprochement au montage (une fois par compte), au retour
+  // au premier plan et au retour du réseau. Le panier ne garde ainsi jamais des articles déjà
+  // commandés (ni un produit « en rupture » que le client a lui-même acheté)
+  useEffect(() => {
+    if (!productsLoaded || !user?.email) return undefined;
+    const run = () => {
+      if (submittingRef.current) return; // envoi en cours : sa réponse tranchera
+      const ref = orderRefKey.current || loadOrderRef(user?.id);
+      if (ref) reconcileOrderRef(ref);
+    };
+    if (autoReconcileRef.current !== (user?.id || user.email)) {
+      autoReconcileRef.current = user?.id || user.email;
+      run();
+    }
+    const onVisible = () => { if (document.visibilityState === 'visible') run(); };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('online', run);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('online', run);
+    };
+  }, [productsLoaded, user?.id, user?.email, reconcileOrderRef]);
+
+  // Panier identique à un envoi resté sans réponse : le renvoi repart avec la même clé et le serveur
+  // rend la commande existante avant tout contrôle du stock (elle a pu prendre les dernières unités)
+  const currentSig = cartSignature(cartItems, notes);
+  const keptRef = orderRefKey.current || loadOrderRef(user?.id);
+  const retryingSameOrder = !!keptRef && keptRef.sig === currentSig;
+  const blockedByStock = cartOverStock && !retryingSameOrder;
+
   const handleOrder = async () => {
     if (submittingRef.current || ordering) return;
     if (cartItems.length === 0) {
       toast.error('Votre panier est vide');
       return;
     }
-    if (cartOverStock) {
+    const sig = cartSignature(cartItems, notes);
+    const kept = orderRefKey.current || loadOrderRef(user?.id);
+    const sameAsKept = !!kept && kept.sig === sig;
+    if (cartOverStock && !sameAsKept) {
       toast.error('Ajustez les quantités : certains produits n\'ont plus assez de stock');
       return;
     }
     submittingRef.current = true;
     setOrdering(true);
     try {
+      // Panier ou note changés depuis un envoi sans réponse : avant de tirer une nouvelle clé, on
+      // vérifie si cet envoi a créé la commande (sinon la nouvelle reprendrait ses articles)
+      if (kept && !sameAsKept) {
+        const { status, network } = await reconcileOrderRef(kept);
+        // Retrouvée : le panier ne garde que les nouveaux articles, le client confirme de nouveau
+        if (status === 'found') return;
+        if (status === 'unknown') {
+          toast.error(network ? NETWORK_ORDER_MESSAGE : 'Impossible de vérifier votre commande précédente : réessayez dans un instant.', {
+            duration: 8000,
+            action: { label: 'Mes commandes', onClick: () => navigate('/orders') },
+          });
+          return;
+        }
+        // absent ou annulée : nouvelle clé ci-dessous
+      }
       const items = cartItems.map(([id, qty]) => {
         const product = products.find(p => String(p.id) === String(id));
         return {
@@ -372,7 +535,6 @@ export default function Shop() {
         };
       });
 
-      const sig = JSON.stringify(cartItems.map(([id, qty]) => [String(id), qty]).sort()) + notes.trim();
       // Page quittée ou app relancée depuis un essai sans réponse : on reprend la clé gardée
       if (!orderRefKey.current) orderRefKey.current = loadOrderRef(user?.id);
       if (!orderRefKey.current || orderRefKey.current.sig !== sig) {
@@ -398,9 +560,18 @@ export default function Shop() {
       });
       orderRefKey.current = null;
       saveOrderRef(user?.id, null);
+      // Serveur pas encore à jour : commande retrouvée par sa clé mais annulée depuis. Jamais
+      // « Commande validée ! » ; panier gardé, le prochain tap tire une nouvelle clé
+      if (res?.duplicate && normalizeOrderStatus(res.status) === 'cancelled') {
+        toast.error('Cette commande avait été annulée : touchez « Commander » pour la repasser.');
+        queryClient.invalidateQueries({ queryKey: ['myOrders'] });
+        return;
+      }
       // Même envoi déjà enregistré (réponse perdue puis nouvel essai) : pas un second succès
       if (res?.duplicate) toast.info('Cette commande était déjà enregistrée');
 
+      const total = Number(res?.total_price);
+      setSuccessTotal(Number.isFinite(total) && total > 0 ? total : null);
       setCart({});
       setNotes('');
       setOrderSuccess(true);
@@ -413,11 +584,12 @@ export default function Shop() {
       // panier gardé, et la clé d'essai, gardée sur l'appareil avec le panier, couvre le nouvel essai :
       // le renvoi retombe sur la même commande (rien n'est effacé ici)
       if (isNetworkError(err) || err?.timeout) {
-        toast.error('Pas de connexion : votre panier est gardé. Réessayez quand la connexion revient, la commande ne sera pas passée deux fois.', {
+        toast.error(NETWORK_ORDER_MESSAGE, {
           duration: 8000,
           action: { label: 'Mes commandes', onClick: () => navigate('/orders') },
         });
         queryClient.invalidateQueries({ queryKey: ['myOrders'] });
+        queryClient.invalidateQueries({ queryKey: ['products'] });
         return; // le bloc finally remet quand même submittingRef et ordering à zéro
       }
       // Refus du serveur : rien n'a été créé, le prochain envoi est une nouvelle commande
@@ -717,6 +889,11 @@ export default function Shop() {
                   <p className="text-sm text-muted-foreground text-center mb-1">
                     Votre commande a bien été enregistrée.
                   </p>
+                  {successTotal !== null && (
+                    <p className="text-sm font-semibold text-center mb-1">
+                      Total à régler au retrait : {formatPrice(successTotal)}
+                    </p>
+                  )}
                   <p className="text-xs text-muted-foreground text-center mb-6">
                     Le salon prépare votre commande. Suivez son état dans Mes commandes ; le paiement se fait au retrait.
                   </p>
@@ -825,7 +1002,7 @@ export default function Shop() {
                         <Store className="w-3.5 h-3.5" />
                         Retrait au salon — paiement sur place
                       </div>
-                      {cartOverStock && (
+                      {blockedByStock && (
                         <p className="text-[11px] text-red-400">
                           Certaines quantités dépassent le stock ou le maximum de {MAX_PER_PRODUCT} par produit : ajustez-les pour commander.
                         </p>
@@ -833,7 +1010,7 @@ export default function Shop() {
                       <Button
                         className="w-full h-12 rounded-xl text-sm font-semibold gap-2"
                         onClick={handleOrder}
-                        disabled={ordering || cartOverStock}
+                        disabled={ordering || blockedByStock}
                       >
                         <ShoppingCart className="w-4 h-4" />
                         {ordering ? 'Validation...' : `Commander — ${formatPrice(cartTotal)}`}

@@ -9,7 +9,7 @@ import LegalLink from '@/components/shared/LegalLink';
 import { isPushSupported, subscribeToPush } from '@/lib/pushNotifications';
 import { isNative } from '@/lib/capacitor';
 import { apiRequest, apiUrl, getToken } from '@/api/apiClient';
-import { hasObjectionableContent } from '@/lib/contentFilter';
+import { hasObjectionableName } from '@/lib/contentFilter';
 
 const LOGO_URL = '/logo.png';
 // Délai avant de pouvoir redemander un code de réinitialisation : aligné sur le serveur
@@ -50,6 +50,12 @@ export default function Login() {
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   // Fin du délai avant « Renvoyer le code » (horodatage), et seconde courante pour l'afficher
   const [resendAt, setResendAt] = useState(0);
+  // Adresse du dernier code envoyé : « Changer d'email » / « Retour à la connexion » ne doivent pas
+  // permettre de redemander tout de suite un code pour la même adresse (le serveur l'ignorerait
+  // en silence alors que l'app annoncerait un envoi)
+  const [lastResetEmail, setLastResetEmail] = useState('');
+  // Mots de passe refusés à la suite (pas les pannes réseau) : au 2e, piste « Mot de passe oublié »
+  const [loginFailures, setLoginFailures] = useState(0);
   const [now, setNow] = useState(() => Date.now());
   const resendIn = Math.max(0, Math.ceil((resendAt - now) / 1000));
 
@@ -107,10 +113,24 @@ export default function Login() {
     setLoading(true);
     try {
       const user = await login(email, password);
+      setLoginFailures(0);
       toast.success(`Bienvenue ${user.full_name || ''} !`);
     } catch (err) {
       // Une panne réseau n'est pas un mauvais mot de passe
-      toast.error(authErrorMessage(err, 'Email ou mot de passe incorrect'));
+      const shown = authErrorMessage(err, 'Email ou mot de passe incorrect');
+      // Mot de passe refusé (401) ou compte verrouillé (429 `locked`) : à partir du 2e refus, ou dès
+      // le verrou, le toast propose « Mot de passe oublié ? » (message du serveur inchangé)
+      const refused = err?.status === 401 || (err?.status === 429 && err?.data?.locked);
+      const failures = refused ? loginFailures + 1 : loginFailures;
+      if (refused) setLoginFailures(failures);
+      if (refused && (failures >= 2 || err?.data?.locked)) {
+        toast.error(shown, {
+          duration: 8000,
+          action: { label: 'Mot de passe oublié ?', onClick: () => setMode('forgot') },
+        });
+      } else {
+        toast.error(shown);
+      }
     } finally {
       setLoading(false);
     }
@@ -124,7 +144,7 @@ export default function Login() {
       return;
     }
     // Le nom est affiché aux autres clients (fil, avis) : même filtre que les publications
-    if (hasObjectionableContent(fullName)) {
+    if (hasObjectionableName(fullName)) {
       toast.error('Ce nom contient un mot interdit par les règles de la communauté.');
       return;
     }
@@ -156,12 +176,22 @@ export default function Login() {
       toast.error('Entrez votre adresse email');
       return;
     }
+    // Même adresse redemandée avant la minute (« Changer d'email », « Retour à la connexion ») :
+    // retour à l'étape du code avec le décompte en cours, sans appel ni annonce d'un nouvel envoi
+    const target = email.trim().toLowerCase();
+    if (target === lastResetEmail && resendAt > Date.now()) {
+      setResetStep('code');
+      const s = Math.ceil((resendAt - Date.now()) / 1000);
+      toast.info(`Un code vient d'être envoyé à cette adresse. Vous pourrez en redemander un dans ${s} s.`);
+      return;
+    }
     setLoading(true);
     try {
       await apiRequest('POST', apiUrl('/auth/forgot-password'), { email: email.trim() });
       toast.success('Si un compte existe avec cet email, un code vous a été envoyé.');
       setResetStep('code');
       setResendAt(Date.now() + RESEND_DELAY * 1000);
+      setLastResetEmail(target);
       setNow(Date.now());
     } catch (err) {
       toast.error(authErrorMessage(err, 'Erreur lors de la demande'));
@@ -216,6 +246,8 @@ export default function Login() {
       setConfirmNewPassword('');
       setPassword('');
       setResendAt(0);
+      setLastResetEmail('');
+      setLoginFailures(0);
     } catch (err) {
       const shown = authErrorMessage(err, 'Erreur lors de la réinitialisation');
       toast.error(shown);

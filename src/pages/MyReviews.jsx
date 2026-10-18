@@ -9,6 +9,7 @@ import { toast } from 'sonner';
 import LoadError, { isNetworkError } from '@/components/shared/LoadError';
 import { contentFilterError } from '@/lib/contentFilter';
 import { openExternalUrl } from '@/lib/capacitor';
+import LegalLink from '@/components/shared/LegalLink';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 const GOOGLE_PLACE_ID = 'ChIJm6cgTFprjEcRZsuEqhCEPXY';
@@ -269,7 +270,7 @@ export default function MyReviews() {
           <p className="text-[11px] text-muted-foreground mt-3 leading-relaxed">
             Avis publiés par des clients connectés, sans vérification de visite. Classés du plus récent au plus ancien.
             Le salon peut retirer un avis contraire aux{' '}
-            <a href="/cgu.html#avis" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-primary">CGU</a>.
+            <LegalLink path="/cgu.html#avis" className="underline underline-offset-2 hover:text-primary">CGU</LegalLink>.
           </p>
         </motion.div>
 

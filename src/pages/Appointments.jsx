@@ -18,7 +18,7 @@ import {
   SALON_PHONE, SALON_PHONE_HREF, CANCEL_REASON_MAX, APPOINTMENT_CANCEL_REASONS,
   useCancelFeatures, friendlyCancelError, cancelledByLabel, cleanReason,
 } from '@/lib/cancellation';
-import { findRescheduleSlots, moveAppointment, currentServices } from '@/lib/reschedule';
+import { findRescheduleSlots, moveAppointment, currentServices, appointmentDuration } from '@/lib/reschedule';
 import { openOrdersByAppointment, orderItemsLabel } from '@/lib/appointmentProducts';
 import { formatPrice } from '@/components/shop/productUtils';
 
@@ -196,10 +196,25 @@ export default function Appointments() {
   // aucun créneau rapide (le serveur refuserait « Aucune prestation sélectionnée »), seulement
   // « Choisir une autre date », qui démarre la réservation à l'étape des prestations
   const noServices = !!cancelApt && !(Array.isArray(cancelApt.services) && cancelApt.services.length > 0);
-  // Prochains créneaux libres avec le même barber et les mêmes prestations
+  // RDV à déplacer relu dans la liste à jour : durée allongée par le salon pendant que la fenêtre
+  // est ouverte reprise après un refus (409 « Le salon a prévu 1 h… »)
+  const liveCancelApt = useMemo(
+    () => (cancelApt ? appointments.find(a => String(a.id) === String(cancelApt.id)) || cancelApt : null),
+    [appointments, cancelApt],
+  );
+  // Congés du barber (empreinte stable : pas de nouveau calcul à chaque relecture identique)
+  const moveTimeOffsKey = useMemo(() => JSON.stringify(
+    (timeOffsQuery.data || [])
+      .filter(t => moveBarber && String(t.employee_id) === String(moveBarber.id))
+      .map(t => [t.id, t.start_date, t.end_date, t.status]),
+  ), [timeOffsQuery.data, moveBarber]);
+  // Prochains créneaux libres avec le même barber et les mêmes prestations. La clé suit les
+  // données du calcul (horaires du barber, ses congés, durée du RDV) : après un refus « ne reçoit
+  // pas à cette heure-là », barbers et congés relus relancent le calcul au lieu de reproposer
+  // les mêmes heures
   const slotsQuery = useQuery({
-    queryKey: ['rescheduleSlots', cancelApt?.id, moveBarber?.id],
-    queryFn: () => findRescheduleSlots({ appointment: cancelApt, employee: moveBarber, timeOffs, catalog }),
+    queryKey: ['rescheduleSlots', cancelApt?.id, moveBarber?.id, JSON.stringify(moveBarber?.working_hours ?? null), moveTimeOffsKey, appointmentDuration(liveCancelApt)],
+    queryFn: () => findRescheduleSlots({ appointment: liveCancelApt, employee: moveBarber, timeOffs, catalog }),
     enabled: !!cancelApt && dialogMode === 'move' && !!moveBarber && timeOffsQuery.isSuccess && catalogSettled && !serviceRetired && !noServices,
     staleTime: 30 * 1000,
     retry: false,
@@ -315,7 +330,7 @@ export default function Appointments() {
   /** Déplacement en un geste vers un créneau proposé : nouveau RDV créé, puis l'ancien annulé. */
   const moveMutation = useMutation({
     mutationFn: (slot) => moveAppointment({
-      appointment: cancelApt,
+      appointment: liveCancelApt,
       employee: moveBarber,
       user,
       slot,
@@ -377,6 +392,11 @@ export default function Appointments() {
       }
       if (err?.status === 409 || err?.status === 400) {
         toast.error(`${shown}. Choisissez un autre créneau.`);
+        // Horaires ou congés du barber changés, RDV allongé par le salon : relus, la clé des
+        // créneaux suit ces données et relance le calcul quand elles arrivent
+        queryClient.invalidateQueries({ queryKey: ['employees'] });
+        queryClient.invalidateQueries({ queryKey: ['timeOffs'] });
+        queryClient.invalidateQueries({ queryKey: ['myAppointments'] });
         queryClient.invalidateQueries({ queryKey: ['rescheduleSlots'] });
       } else {
         toast.error(`${shown}.`);

@@ -65,8 +65,9 @@ export const AuthProvider = ({ children }) => {
       setUser(currentUser);
       setIsAuthenticated(true);
       setAuthError(null);
-      // Rattache l'appareil au compte (jeton push obtenu hors session, autorisation déjà donnée)
-      syncPushSubscription();
+      // Rattache l'appareil au compte (jeton push obtenu hors session, autorisation déjà donnée).
+      // L'id du compte : la marque « notifications coupées » est rangée par compte
+      syncPushSubscription(currentUser?.id);
       return 'ok';
     } catch (err) {
       // Jeton remplacé pendant la vérification : renouvellement par un autre onglet (deux onglets
@@ -252,7 +253,7 @@ export const AuthProvider = ({ children }) => {
     setUser(fullUser);
     setIsAuthenticated(true);
     setAuthError(null);
-    syncPushSubscription();
+    syncPushSubscription(fullUser?.id);
     return fullUser;
   }, []);
 
@@ -267,7 +268,7 @@ export const AuthProvider = ({ children }) => {
     setIsAuthenticated(true);
     setAuthError(null);
     setWelcomePending(true);
-    syncPushSubscription();
+    syncPushSubscription(newUser?.id);
     return newUser;
   }, []);
 

@@ -881,14 +881,14 @@ export default function AdminGiftCards() {
       { key: 'pending', label: 'En attente' },
       { key: 'validated', label: 'Actives' },
       { key: 'used', label: 'Utilisées' },
-      { key: 'expired', label: 'Expirées' },
+      { key: 'expired', label: 'Annulées / expirées' },
     ]
     : [
       { key: 'all', label: 'Toutes' },
       { key: 'pending', label: `En attente (${stats.pending})` },
       { key: 'validated', label: `Actives (${stats.validated})` },
       { key: 'used', label: `Utilisées (${stats.used})` },
-      { key: 'expired', label: `Expirées${stats.expired ? ` (${stats.expired})` : ''}` },
+      { key: 'expired', label: `Annulées / expirées${stats.expired ? ` (${stats.expired})` : ''}` },
     ];
 
   return (

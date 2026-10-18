@@ -15,7 +15,7 @@ import { adminErrorMessage, isUncertainSend } from '@/lib/adminErrors';
 import { api } from '@/api/apiClient';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
-import { remindSalonEvent } from '@/lib/salonEventsApi';
+import { remindSalonEvent, eventPhase } from '@/lib/salonEventsApi';
 import { sendKeyFor, settleSendKey, isSendUncertain } from '@/lib/textileApi';
 import LoadError from '@/components/shared/LoadError';
 import { exportToCSV } from '@/utils/exportCSV';
@@ -72,6 +72,11 @@ export default function GuestListTab({ event, invites, isLoading, error, failed 
 
   const isPublished = event.status === 'published';
   const capacity = Number(event.capacity) || 0;
+  // Événement commencé : les sans-réponse ne peuvent plus répondre ; terminé : plus de rappel (tour 7,
+  // mêmes refus que le serveur)
+  const started = !!event.starts_at && new Date(event.starts_at).getTime() <= Date.now();
+  const over = eventPhase(event) === 'past';
+  const upcoming = isPublished && !started;
 
   const remindMutation = useMutation({
     mutationFn: (audience) => remindSalonEvent(event.id, { audience, message: remindMessage.trim(), sendKey: sendKeyFor('remind', event.id, audience, remindMessage.trim()) }),
@@ -81,10 +86,17 @@ export default function GuestListTab({ event, invites, isLoading, error, failed 
       setUncertainTick((t) => t + 1);
       const sent = Number(data?.sent) || 0;
       const recipients = Number(data?.recipients) || 0;
+      // Rappel aux participants dans les 36 h : il part aussi par email (tour 7)
+      const emails = Number(data?.emails) || 0;
       const who = audience === 'pending' ? 'sans réponse' : 'participants';
-      toast.success(sent > 0
-        ? `${countLabel(sent, 'rappel envoyé', 'rappels envoyés')} aux ${who} (${recipients} joignable${recipients > 1 ? 's' : ''} par push)`
-        : `Aucun ${who} joignable par push (notifications non activées)`);
+      const mails = emails > 0 ? ` et ${countLabel(emails, 'email de rappel', 'emails de rappel')}` : '';
+      if (sent > 0) {
+        toast.success(`${countLabel(sent, 'rappel envoyé', 'rappels envoyés')} aux ${who} (${recipients} joignable${recipients > 1 ? 's' : ''} par push)${mails}`);
+      } else if (emails > 0) {
+        toast.success(`Rappel envoyé aux ${who} : ${countLabel(emails, 'email', 'emails')} (aucun joignable par push)`);
+      } else {
+        toast.success(`Aucun ${who} joignable par push (notifications non activées)`);
+      }
       if (Number(data?.failed) > 0) toast.warning(`${data.failed} envoi${data.failed > 1 ? 's' : ''} en échec`);
     },
     // Coupure réseau : l'envoi est peut-être parti, avertir sans inviter à renvoyer
@@ -104,9 +116,15 @@ export default function GuestListTab({ event, invites, isLoading, error, failed 
 
   const removeMutation = useMutation({
     mutationFn: (inviteId) => api.entities.SalonEventInvite.delete(inviteId),
-    onSuccess: () => {
+    onSuccess: (_data, inviteId) => {
       invalidateSalonEvents(queryClient, event.id);
-      toast.success('Invitation retirée');
+      // Invité qui avait confirmé sa venue : il n'est prévenu par aucun message (tour 7)
+      const inv = rows.find((r) => r.id === inviteId);
+      if (inv && inv.status === 'accepted' && upcoming) {
+        toast.warning(`Invitation retirée : ${inv.user_name || inv.user_email || 'ce client'} n'a pas été prévenu`, { duration: 10000 });
+      } else {
+        toast.success('Invitation retirée');
+      }
     },
     onError: (err) => toast.error(adminErrorMessage(err, 'Erreur lors du retrait')),
   });
@@ -156,7 +174,7 @@ export default function GuestListTab({ event, invites, isLoading, error, failed 
       {/* Rappels */}
       <div className="rounded-xl border border-border bg-secondary/40 p-3 space-y-2">
         <div className="flex items-center justify-between">
-          <Label className="text-xs inline-flex items-center gap-1.5"><Bell className="w-3.5 h-3.5 text-primary" /> Rappels push</Label>
+          <Label className="text-xs inline-flex items-center gap-1.5"><Bell className="w-3.5 h-3.5 text-primary" /> Rappels</Label>
           <span className={`text-[11px] ${remindMessage.length >= REMIND_MESSAGE_MAX ? 'text-amber-400' : 'text-muted-foreground'}`}>
             {remindMessage.length}/{REMIND_MESSAGE_MAX}
           </span>
@@ -169,6 +187,7 @@ export default function GuestListTab({ event, invites, isLoading, error, failed 
           maxLength={REMIND_MESSAGE_MAX}
           className={INPUT_CLASS}
         />
+        <p className="text-[11px] text-muted-foreground">La veille (36 h avant le début), le rappel aux participants part aussi par email.</p>
         {uncertainAudience && (
           <p role="status" className="text-[11px] text-amber-300">
             Réponse non reçue : un nouvel essai ne renverra pas le rappel s'il est déjà parti.
@@ -176,14 +195,14 @@ export default function GuestListTab({ event, invites, isLoading, error, failed 
         )}
         <div className="flex flex-wrap gap-1.5">
           <TwoTapButton icon={BellRing} label={`Relancer les sans réponse (${stats.pending})`} confirmLabel="Envoyer la relance ?"
-            disabled={busy || !isPublished || stats.pending === 0}
-            title={!isPublished ? "L'événement n'est pas publié" : undefined}
+            disabled={busy || !isPublished || started || stats.pending === 0}
+            title={!isPublished ? "L'événement n'est pas publié" : started ? "L'événement a commencé : les invités ne peuvent plus répondre" : undefined}
             className="border-amber-500/30 text-amber-400 hover:bg-amber-500/10"
             armedClassName="border-amber-500 bg-amber-500 text-black animate-pulse"
             onConfirm={() => remindMutation.mutate('pending')} />
-          <TwoTapButton icon={BellRing} label={`Rappel aux participants (${stats.accepted})`} confirmLabel="Envoyer le rappel ?"
-            disabled={busy || !isPublished || stats.accepted === 0}
-            title={!isPublished ? "L'événement n'est pas publié" : undefined}
+          <TwoTapButton icon={BellRing} label={`Rappel aux participants (${stats.accepted})`} confirmLabel="Envoyer le rappel (push + email la veille) ?"
+            disabled={busy || !isPublished || over || stats.accepted === 0}
+            title={!isPublished ? "L'événement n'est pas publié" : over ? "L'événement est terminé" : undefined}
             className="border-green-500/30 text-green-400 hover:bg-green-500/10"
             armedClassName="border-green-500 bg-green-500 text-white animate-pulse"
             onConfirm={() => remindMutation.mutate('accepted')} />
@@ -253,11 +272,15 @@ export default function GuestListTab({ event, invites, isLoading, error, failed 
                       {!inv.notified_at && inv.invited_at && <span className="text-amber-400/80"> · push / email non envoyés</span>}
                     </p>
                   </div>
-                  {isAdmin && (
+                  {isAdmin && (inv.status === 'accepted' && upcoming ? (
+                    <TwoTapButton icon={Trash2} label="Retirer" confirmLabel={`Retirer (${countLabel(seats, 'place', 'places')}) ?`} disabled={busy}
+                      title="A confirmé sa venue : prévenez-le (téléphone ci-dessus), il ne recevra aucun message"
+                      onConfirm={() => removeMutation.mutate(inv.id)} />
+                  ) : (
                     <TwoTapButton icon={Trash2} label="Retirer" confirmLabel="Retirer ?" disabled={busy}
                       title="Retire l'invitation (le client ne verra plus l'événement s'il est sur invitation)"
                       onConfirm={() => removeMutation.mutate(inv.id)} />
-                  )}
+                  ))}
                 </div>
                 {removing && <p className="text-[10px] text-muted-foreground mt-1">Retrait…</p>}
               </div>

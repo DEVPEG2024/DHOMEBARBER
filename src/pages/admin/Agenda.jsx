@@ -424,9 +424,10 @@ export default function Agenda() {
   };
 
   // ─── Pause ou créneau sans client : enregistré tout de suite, « Annuler » dans la notification ───
-  const quickSave = (apt, fields, message) => {
+  // `guard` : drapeaux du premier enregistrement seulement (jamais renvoyés par « Annuler »)
+  const quickSave = (apt, fields, message, guard = {}) => {
     const before = Object.fromEntries(Object.keys(fields).map((k) => [k, apt[k] ?? null]));
-    saveMove(queryClient, apt, fields, false)
+    saveMove(queryClient, apt, fields, false, guard)
       .then(() => toast.success(message, {
         action: {
           label: 'Annuler',
@@ -459,7 +460,10 @@ export default function Agenda() {
       toast.error(clash);
       return;
     }
-    quickSave(apt, fields, `${isBreak(apt) ? 'Pause déplacée' : 'Créneau déplacé'} à ${fields.start_time}`);
+    // Last Minute encore libre d'après la carte : si un client de l'app l'a repris entre-temps, le
+    // serveur refuse (409) au lieu de déplacer son rendez-vous sans confirmation (tour 7)
+    const guard = !isBreak(apt) && apt.status === 'last_minute' ? { if_free_last_minute: true } : {};
+    quickSave(apt, fields, `${isBreak(apt) ? 'Pause déplacée' : 'Créneau déplacé'} à ${fields.start_time}`, guard);
   };
 
   // ─── Pause étirée par ses poignées, ou horaires saisis dans sa fenêtre ───
@@ -894,6 +898,14 @@ function LastMinuteForm({ open, employees, timeOffs, defaultEmployeeId, defaultD
     staleTime: 0,
   });
   const dayApts = dayQuery.data ?? cached;
+  // Last Minute déjà bloqués ce jour-là et encore à venir, pas forcément annoncés (réponse perdue,
+  // push refusé puis fenêtre fermée) : on peut les annoncer sans recréer de ligne (tour 7). Le
+  // serveur ignore un second envoi du même créneau dans les 15 min (anti-doublon).
+  const pendingLM = (!created && employee && validDate && Array.isArray(dayApts) ? dayApts : [])
+    .filter((a) => String(a.employee_id) === String(employee.id) && String(a.date).slice(0, 10) === form.date
+      && a.status === 'last_minute' && !String(a.client_email || '').trim() && a.client_name === 'Last Minute'
+      && a.start_time && parisInstant(form.date, String(a.end_time || a.start_time).slice(0, 5)) > Date.now())
+    .sort((a, b) => String(a.start_time).localeCompare(String(b.start_time)));
   // Privatisations confirmées du jour choisi (il peut sortir de la période affichée) : le salon est
   // réservé sur leur fenêtre, aucun client ne pourrait y prendre un Last Minute
   const privQuery = useQuery({
@@ -1013,14 +1025,24 @@ function LastMinuteForm({ open, employees, timeOffs, defaultEmployeeId, defaultD
         // (sinon un nouvel essai créerait une seconde ligne sur le même créneau)
         if (lastMinuteUncertain(e)) {
           let found = null;
+          let rereadFailed = false;
           try {
-            const { data } = await dayQuery.refetch();
+            const r = await dayQuery.refetch();
+            const data = r?.data;
+            rereadFailed = !!r?.isError;
             found = (Array.isArray(data) ? data : []).find((a) => a.status === 'last_minute'
               && String(a.employee_id) === String(employee.id)
               && String(a.date).slice(0, 10) === form.date
               && a.start_time?.slice(0, 5) === startTime
               && !String(a.client_email || '').trim()) || null;
-          } catch { found = null; }
+          } catch { found = null; rereadFailed = true; }
+          // Relecture impossible : on ne sait pas si la ligne existe ; jamais « Créneau non créé »
+          if (!found && rereadFailed) {
+            toast.warning('Le créneau a peut-être été créé : vérifiez l\'agenda avant de réessayer (il apparaîtra dans « Déjà bloqué » au retour du réseau)', { duration: 10000 });
+            onCreated?.();
+            setSending(false);
+            return;
+          }
           if (found) {
             setCreated({
               id: found.id, employee_id: employee.id, employee_name: employee.name || '',
@@ -1109,6 +1131,28 @@ function LastMinuteForm({ open, employees, timeOffs, defaultEmployeeId, defaultD
             className={fieldClass} />
           {dateLabel && <p className="mt-1 text-[11px] text-muted-foreground first-letter:uppercase">{dateLabel}</p>}
         </div>
+
+        {pendingLM.length > 0 && !sending && (
+          <div className="rounded-xl border border-orange-500/30 bg-orange-500/10 px-3 py-2.5 space-y-2">
+            <p className="text-xs font-semibold text-orange-300">Déjà bloqué, pas encore annoncé ?</p>
+            <div className="flex flex-wrap gap-2">
+              {pendingLM.map((a) => {
+                const st = String(a.start_time).slice(0, 5);
+                const en = String(a.end_time || a.start_time).slice(0, 5);
+                return (
+                  <button
+                    key={a.id}
+                    type="button"
+                    onClick={() => setCreated({ id: a.id, employee_id: employee.id, employee_name: employee.name || '', date: form.date, start_time: st, end_time: en })}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-orange-500 text-white hover:bg-orange-600"
+                  >
+                    Annoncer {st} – {en}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {blocker ? (
           <p role="status" className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-300">{blocker}</p>

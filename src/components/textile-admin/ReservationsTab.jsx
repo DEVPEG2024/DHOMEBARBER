@@ -94,7 +94,7 @@ export default function ReservationsTab({ reservations, isLoading, error = null,
       }
       toast.success(message, {
         // Revenir à « prête » renvoie la notification au client (le serveur la pousse à chaque passage)
-        ...(prev === 'ready' ? { description: 'Annuler remettra « Prête » et préviendra de nouveau le client.' } : {}),
+        ...(prev === 'ready' ? { description: 'Annuler remettra « Prête » et renverra la notification push au client.' } : {}),
         action: {
           label: 'Annuler',
           onClick: () => updateMutation.mutate({ id, data: { status: prev }, successMessage: 'Statut rétabli' }),

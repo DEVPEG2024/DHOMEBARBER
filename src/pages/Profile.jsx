@@ -6,7 +6,7 @@ import { useAuth } from '@/lib/AuthContext';
 import { motion } from 'framer-motion';
 import { Calendar, Star, ShoppingBag, Settings, LogOut, ChevronRight, Shield, Bell, Camera, Shirt, Handshake, Heart, IdCard } from 'lucide-react';
 import { toast } from 'sonner';
-import { friendlyError } from '@/components/shared/LoadError';
+import { friendlyError, queryFailed } from '@/components/shared/LoadError';
 import ImageCropDialog, { unreadableImageMessage } from '@/components/shared/ImageCropDialog';
 import { parisInstant } from '@/lib/calendarLinks';
 import { formatPrice } from '@/components/services/serviceUtils';
@@ -86,12 +86,15 @@ export default function Profile() {
   };
 
   // Carte Gang : en tête du profil pour un client (le staff garde l'avatar). Rien de bloquant si
-  // la requête échoue sans aucune donnée : on retombe sur l'avatar. Un rafraîchissement en
-  // arrière-plan qui échoue (`isError` avec la carte encore en cache) garde la carte affichée.
+  // la requête échoue sans aucune donnée, ou reste en pause hors connexion (React Query ne lève
+  // alors aucune erreur) : on retombe sur l'avatar et sur la ligne « Ma carte Gang » du menu,
+  // dont la page affiche « Pas de connexion ». Un rafraîchissement en arrière-plan qui échoue
+  // (`isError` avec la carte encore en cache) garde la carte affichée.
   const isClient = user?.role === 'user';
-  const { data: gangData, isPending: gangPending, isError: gangError } = useGangCard({ enabled: !!user && isClient });
+  const gangQuery = useGangCard({ enabled: !!user && isClient });
+  const { data: gangData, isPending: gangPending } = gangQuery;
   const gangCard = gangData?.card || null;
-  const showGangHero = isClient && !(gangError && !gangData);
+  const showGangHero = isClient && !queryFailed(gangQuery);
   const cardSize = useProfileCardSize();
   const gangDesc = gangCard
     ? `${gangPalette(gangCard).label} · ${gangCard.visits} visite${Number(gangCard.visits) > 1 ? 's' : ''}`
@@ -136,11 +139,15 @@ export default function Profile() {
               ) : (
                 <GangCardPlaceholder size={cardSize} />
               )}
-              <Link to={gangCard ? '/gang-card' : '/booking'}
-                className="mt-4 inline-flex items-center gap-1.5 text-xs font-semibold text-primary">
-                {gangCard ? `${gangDesc} · voir ma carte et la collection` : 'Réserver ma première visite'}
-                <ChevronRight className="w-3.5 h-3.5" />
-              </Link>
+              {/* Lien seulement une fois la réponse connue : pendant le chargement, un client
+                  fidèle ne doit pas lire « Réserver ma première visite » */}
+              {!gangPending && (
+                <Link to={gangCard ? '/gang-card' : '/booking'}
+                  className="mt-4 inline-flex items-center gap-1.5 text-xs font-semibold text-primary">
+                  {gangCard ? `${gangDesc} · voir ma carte et la collection` : 'Réserver ma première visite'}
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </Link>
+              )}
             </div>
           )}
 

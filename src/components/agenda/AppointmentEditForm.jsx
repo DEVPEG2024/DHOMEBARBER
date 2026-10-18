@@ -88,6 +88,13 @@ export default function AppointmentEditForm({ appointment, employees, onCancel, 
   const giftOverrun = appointment.status === 'completed' && appointment.payment_method === 'carte_cadeau'
     && giftDebited > 0
     && Math.round((totalPrice + (Number(appointment.product_price) || 0)) * 100) > Math.round(giftDebited * 100);
+  // Prix ramené sous ce que la carte a réglé (prestation retirée) : l'excédent resterait débité de la
+  // carte sans trace ; il faut d'abord le rendre (Cartes cadeau). Même refus que le serveur (409), tour 7
+  const newPriceCents = Math.round((totalPrice + (Number(appointment.product_price) || 0)) * 100);
+  const oldPriceCents = Math.round(((Number(appointment.total_price) || 0) + (Number(appointment.product_price) || 0)) * 100);
+  const giftExcessCents = giftDebited > 0 && servicesChanged && newPriceCents < oldPriceCents
+    ? Math.round(giftDebited * 100) - newPriceCents : 0;
+  const giftExcess = giftExcessCents > 0;
 
   const updateServices = (next) => {
     setServices(next);
@@ -341,6 +348,15 @@ export default function AppointmentEditForm({ appointment, employees, onCancel, 
         </p>
       )}
 
+      {giftExcess && (
+        <p role="status" className="rounded-xl px-3 py-2.5 border bg-amber-500/10 border-amber-500/30 text-xs text-amber-300 flex items-start gap-1.5">
+          <AlertTriangle className="w-3.5 h-3.5 mt-px shrink-0" />
+          <span className="min-w-0 break-words">
+            La carte cadeau a réglé {giftDebited}€ : le nouveau prix est plus bas de {(giftExcessCents / 100).toLocaleString('fr-FR', { maximumFractionDigits: 2 })}€. Rendez d'abord cette somme sur la carte (Cartes cadeau, historique de la carte : « Annuler » sous 24 h, sinon « Rendre sur la carte »), puis modifiez les prestations.
+          </span>
+        </p>
+      )}
+
       {canNotify && (
         <label className="flex items-start gap-2.5 bg-primary/10 border border-primary/20 rounded-xl px-3 py-2.5 cursor-pointer">
           <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} className="mt-0.5 w-4 h-4 accent-[hsl(var(--primary))]" />
@@ -356,7 +372,7 @@ export default function AppointmentEditForm({ appointment, employees, onCancel, 
           className="flex-1 py-3 rounded-xl text-sm font-medium bg-white/5 border border-white/10 hover:bg-white/10 transition-all disabled:opacity-60">
           Annuler
         </button>
-        <button type="button" onClick={handleSave} disabled={saving || !!clash}
+        <button type="button" onClick={handleSave} disabled={saving || !!clash || giftExcess}
           className="flex-[2] py-3 rounded-xl text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-all disabled:opacity-60 flex items-center justify-center gap-2">
           {(saving || checking) && <Loader2 className="w-4 h-4 animate-spin" />}
           {saving ? 'Enregistrement…' : warnings.length ? 'Enregistrer quand même' : 'Enregistrer'}

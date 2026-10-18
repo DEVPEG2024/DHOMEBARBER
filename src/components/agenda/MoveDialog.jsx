@@ -26,12 +26,13 @@ export function buildMoveFields(apt, { date, start_time, employee_id }, employee
  * optimiste du cache de l'agenda), puis toutes les listes de rendez-vous sont rechargées,
  * y compris en cas d'échec (la carte revient alors où elle était).
  */
-export async function saveMove(queryClient, apt, fields, notifyClient) {
+export async function saveMove(queryClient, apt, fields, notifyClient, extra = {}) {
   await queryClient.cancelQueries({ queryKey: ['agendaAppointments'] });
   queryClient.setQueriesData({ queryKey: ['agendaAppointments'] }, (old) =>
     (Array.isArray(old) ? old.map((a) => (a.id === apt.id ? { ...a, ...fields } : a)) : old));
   try {
-    return await api.entities.Appointment.update(apt.id, { ...fields, notify_client: !!notifyClient });
+    // `extra` : envoyé au serveur sans toucher au cache (ex. if_free_last_minute, tour 7)
+    return await api.entities.Appointment.update(apt.id, { ...fields, ...extra, notify_client: !!notifyClient });
   } finally {
     invalidateAppointmentQueries(queryClient);
   }

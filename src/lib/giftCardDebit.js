@@ -158,11 +158,14 @@ export async function fetchGiftCardByCode(code) {
  *    à repasser tel quel à `undoGiftCardDebit`.
  * Les erreurs sont lancées telles quelles (`friendlyGiftCardError` pour le message).
  */
-export async function debitGiftCard(card, { amount, appointmentId = null, services = [], note = '', clientRef = null } = {}) {
+export async function debitGiftCard(card, { amount, appointmentId = null, services = [], note = '', clientRef = null, correctPaid = false } = {}) {
   const value = round2(amount);
   if (!(value > 0)) throw localError('Montant invalide.');
   const body = { amount: value };
   if (appointmentId) body.appointment_id = appointmentId;
+  // RDV déjà validé en CB / espèces que le client paie finalement par carte (tour 7) : la part carte
+  // est rattachée sans rouvrir le RDV, le tableau de bord la retire du CB / espèces
+  if (appointmentId && correctPaid) body.correct_paid = true;
   if (services.length) body.services = services;
   if (note) body.note = String(note).slice(0, 300);
   // Même référence pour un nouvel essai du même débit : le serveur renvoie le débit déjà fait
@@ -209,11 +212,11 @@ export async function undoGiftCardDebit(card, transaction) {
  * Rattache à un RDV un débit fait sans RDV (modes « Prestations » / « Montant libre ») : la part
  * carte est portée sur le RDV, qui ne sera plus encaissé une seconde fois en CB / espèces.
  */
-export async function attachGiftCardDebit(card, transactionId, appointmentId, queryClient) {
+export async function attachGiftCardDebit(card, transactionId, appointmentId, queryClient, { correctPaid = false } = {}) {
   const data = await apiRequest(
     'POST',
     apiUrl(`/gift-cards/${encodeURIComponent(card.id)}/debit/${encodeURIComponent(transactionId)}/attach`),
-    { appointment_id: appointmentId },
+    { appointment_id: appointmentId, ...(correctPaid ? { correct_paid: true } : {}) },
   );
   if (queryClient) {
     invalidateGiftCardQueries(queryClient, card.id);
@@ -235,6 +238,35 @@ export async function fetchRecentAppointmentsToCash(days = 7, today = parisToday
     const name = String(a.client_name || '').trim();
     return !!(a.client_email || (name && name !== 'Last Minute'));
   });
+}
+
+// RDV des derniers jours déjà encaissés en CB / espèces (le client sort sa carte après coup, tour 7)
+export const giftCardRecentPaidKey = (day) => ['giftCardTodayAppointments', 'paid', day];
+export async function fetchRecentPaidAppointments(days = 7, today = parisToday()) {
+  const [y, m, d] = today.split('-').map(Number);
+  const keys = Array.from({ length: days }, (_, i) => new Date(Date.UTC(y, m - 1, d - i)).toISOString().slice(0, 10));
+  const rows = await api.entities.Appointment.filter({ date: keys, status: 'completed' }, '-date', 300);
+  return (Array.isArray(rows) ? rows : []).filter((a) => ['cb', 'especes'].includes(a.payment_method)
+    && appointmentDue(a) > 0);
+}
+
+/**
+ * Rend sur la carte une part débitée en trop pour un RDV (prix baissé, prestation retirée), à tout
+ * moment, même après 24 h (tour 7). Résout { card, transaction, returned, appointment }.
+ */
+export async function creditGiftCard(card, { appointmentId, amount, note = '' }, queryClient) {
+  const value = round2(amount);
+  if (!(value > 0)) throw localError('Montant invalide.');
+  const body = { appointment_id: appointmentId, amount: value };
+  if (note) body.note = String(note).slice(0, 300);
+  const data = await apiRequest('POST', apiUrl(`/gift-cards/${encodeURIComponent(card.id)}/credit`), body);
+  if (queryClient) {
+    invalidateGiftCardQueries(queryClient, card.id);
+    if (data?.card) patchGiftCardCache(queryClient, data.card);
+    queryClient.invalidateQueries({ queryKey: ['giftCardTodayAppointments'] });
+    invalidateAppointmentQueries(queryClient);
+  }
+  return data;
 }
 
 /** Délai pendant lequel le serveur accepte l'annulation d'un débit. */

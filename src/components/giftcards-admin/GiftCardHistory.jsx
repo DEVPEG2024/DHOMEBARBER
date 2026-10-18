@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { History, Link2, X } from 'lucide-react';
+import { History, Link2, X, Undo2 } from 'lucide-react';
 import { toast } from 'sonner';
 import LoadError, { isNetworkError } from '@/components/shared/LoadError';
 import {
@@ -9,6 +9,7 @@ import {
   giftCardRecentAppointmentsKey, parisToday, appointmentDue, appointmentPrice, appointmentServicesLabel, formatDay,
   closeAppointmentWithGiftCard, friendlyGiftCardError, round2, fetchAppointmentById,
   invalidateGiftCardQueries, ATTACH_NETWORK_MESSAGE,
+  fetchRecentPaidAppointments, giftCardRecentPaidKey, creditGiftCard,
 } from '@/lib/giftCardDebit';
 
 const lower = (v) => String(v || '').trim().toLowerCase();
@@ -23,6 +24,15 @@ function AttachPanel({ card, tx, onClose, onDone }) {
   const today = parisToday();
   const [sendingId, setSendingId] = useState(null);
   const [attached, setAttached] = useState(null); // RDV rattaché, entièrement couvert : proposer la clôture
+  // RDV déjà validé en CB / espèces, payé finalement par la carte (tour 7) : repliés, confirmation
+  const [showPaid, setShowPaid] = useState(false);
+  const [confirmPaidId, setConfirmPaidId] = useState(null);
+  const paidQ = useQuery({
+    queryKey: giftCardRecentPaidKey(today),
+    queryFn: () => fetchRecentPaidAppointments(7, today),
+    enabled: showPaid,
+    staleTime: 30 * 1000,
+  });
   const q = useQuery({
     queryKey: giftCardRecentAppointmentsKey(today),
     queryFn: () => fetchRecentAppointmentsToCash(7, today),
@@ -34,11 +44,23 @@ function AttachPanel({ card, tx, onClose, onDone }) {
     .filter((a) => appointmentDue(a) + 0.005 >= Number(tx.amount))
     .sort((a, b) => Number(isOwner(b)) - Number(isOwner(a)));
 
-  const attach = async (apt) => {
+  const paidList = (Array.isArray(paidQ.data) ? paidQ.data : [])
+    .filter((a) => appointmentDue(a) + 0.005 >= Number(tx.amount))
+    .sort((a, b) => Number(isOwner(b)) - Number(isOwner(a)));
+
+  const attach = async (apt, { correctPaid = false } = {}) => {
     if (sendingId) return;
     setSendingId(apt.id);
     try {
-      const data = await attachGiftCardDebit(card, tx.id, apt.id, queryClient);
+      const data = await attachGiftCardDebit(card, tx.id, apt.id, queryClient, { correctPaid });
+      if (correctPaid) {
+        toast.success(`${formatEuro(tx.amount)} rattachés au RDV de ${apt.client_name || 'ce client'}`, {
+          description: 'Payé par carte : cette part est retirée du CB / espèces au tableau de bord.',
+        });
+        onDone?.();
+        onClose();
+        return;
+      }
       if (data?.already) {
         // Déjà rattaché à ce RDV (première réponse perdue) : la part carte du RDV est relue, la
         // liste chargée pouvant la compter ou non
@@ -124,6 +146,101 @@ function AttachPanel({ card, tx, onClose, onDone }) {
           ))}
         </ul>
       )}
+      {!attached && (
+        <div className="border-t border-white/10 pt-2">
+          <button type="button" onClick={() => setShowPaid((v) => !v)} className="text-[11px] font-semibold text-muted-foreground hover:text-foreground">
+            {showPaid ? '▾' : '▸'} Déjà encaissés en CB / espèces (corriger)
+          </button>
+          {showPaid && (
+            paidQ.isError && !paidQ.data ? (
+              <LoadError compact what="les rendez-vous encaissés" error={paidQ.error} onRetry={paidQ.refetch} retrying={paidQ.isFetching} />
+            ) : paidQ.isPending ? (
+              <p className="text-[11px] text-muted-foreground mt-1">Chargement…</p>
+            ) : paidList.length === 0 ? (
+              <p className="text-[11px] text-muted-foreground mt-1">Aucun rendez-vous encaissé en CB / espèces ces 7 derniers jours pour ce montant.</p>
+            ) : (
+              <ul className="space-y-1.5 mt-1.5 max-h-56 overflow-y-auto">
+                {paidList.map((a) => (
+                  <li key={a.id} className={`rounded-lg border px-2.5 py-2 text-[11px] ${isOwner(a) ? 'border-primary/40 bg-primary/10' : 'border-white/10 bg-white/5'}`}>
+                    <span className="block font-semibold text-foreground break-words">{a.client_name || 'Client'}{isOwner(a) ? ' · titulaire de la carte' : ''}</span>
+                    <span className="block text-muted-foreground break-words">
+                      {formatDay(a.date)} · {String(a.start_time || '').slice(0, 5)}{a.employee_name ? ` · ${a.employee_name}` : ''} · encaissé {a.payment_method === 'cb' ? 'CB' : 'espèces'} {formatEuro(appointmentPrice(a))}
+                    </span>
+                    {confirmPaidId !== a.id ? (
+                      <button type="button" onClick={() => setConfirmPaidId(a.id)} disabled={!!sendingId}
+                        className="mt-1 font-semibold text-primary disabled:opacity-60">
+                        Payé par cette carte ?
+                      </button>
+                    ) : (
+                      <div className="mt-1 space-y-1">
+                        <p className="text-amber-300 break-words">
+                          {formatEuro(tx.amount)} seront comptés « carte cadeau » et retirés du {a.payment_method === 'cb' ? 'CB' : 'espèces'} de ce RDV au tableau de bord. Rendez cette somme au client si elle avait été encaissée.
+                        </p>
+                        <div className="flex gap-2">
+                          <button type="button" onClick={() => attach(a, { correctPaid: true })} disabled={!!sendingId}
+                            className="flex-1 py-1.5 rounded-lg font-semibold text-white bg-primary disabled:opacity-60">
+                            {sendingId === a.id ? 'Rattachement…' : 'Confirmer'}
+                          </button>
+                          <button type="button" onClick={() => setConfirmPaidId(null)} disabled={!!sendingId}
+                            className="flex-1 py-1.5 rounded-lg text-muted-foreground bg-white/5 border border-white/10">
+                            Non
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * « Rendre sur la carte » (tour 7) : part d'un débit de RDV payée en trop (prix baissé, prestation
+ * retirée), rendue même après les 24 h de l'annulation. Plafond calculé par le serveur.
+ */
+function CreditPanel({ card, tx, max, onClose, onDone }) {
+  const queryClient = useQueryClient();
+  const [amount, setAmount] = useState(() => (max > 0 ? String(max).replace('.', ',') : ''));
+  const [sending, setSending] = useState(false);
+  const value = round2(Number(String(amount).replace(',', '.')));
+  const valid = value > 0 && value <= max + 0.005;
+  const send = async () => {
+    if (!valid || sending) return;
+    setSending(true);
+    try {
+      const data = await creditGiftCard(card, { appointmentId: tx.appointment_id, amount: value, note: 'Rendu sur la carte (prix corrigé)' }, queryClient);
+      toast.success(`${formatEuro(data?.returned ?? value)} rendus sur la carte`);
+      onDone?.(data);
+      onClose();
+    } catch (err) {
+      toast.error('Impossible de rendre sur la carte', { description: err?.data?.error || friendlyGiftCardError(err) });
+      onDone?.();
+    } finally {
+      setSending(false);
+    }
+  };
+  return (
+    <div className="mt-2 rounded-xl border border-green-500/25 bg-green-500/5 p-2.5 space-y-2" data-testid="gc-credit">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[11px] font-semibold text-foreground">Rendre sur la carte (au plus {formatEuro(max)})</p>
+        <button type="button" onClick={onClose} aria-label="Fermer" className="p-1 rounded-lg text-muted-foreground hover:text-foreground">
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
+      <div className="flex items-center gap-2">
+        <input type="text" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.,]/g, ''))}
+          aria-label="Montant à rendre"
+          className="flex-1 min-w-0 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-sm text-foreground" />
+        <button type="button" onClick={send} disabled={!valid || sending}
+          className="px-3 py-1.5 rounded-lg text-[11px] font-semibold text-black bg-green-400 disabled:opacity-50">
+          {sending ? 'Envoi…' : 'Rendre'}
+        </button>
+      </div>
     </div>
   );
 }
@@ -155,7 +272,17 @@ export default function GiftCardHistory({ cardId, card, onCardChange }) {
   const [confirmId, setConfirmId] = useState(null);
   const [undoingId, setUndoingId] = useState(null);
   const [attachId, setAttachId] = useState(null);
+  const [creditId, setCreditId] = useState(null);
   const undoingRef = useRef(false);
+  // Net encore débité par cette carte sur un RDV (débits non annulés − crédits) : plafond du « Rendre »
+  const netByAppointment = new Map();
+  for (const t of Array.isArray(data) ? data : []) {
+    if (!t.appointment_id) continue;
+    const k = String(t.appointment_id);
+    const v = t.kind === 'debit' && !t.undone_at ? Number(t.amount) || 0 : t.kind === 'credit' ? -(Number(t.amount) || 0) : 0;
+    netByAppointment.set(k, round2((netByAppointment.get(k) || 0) + v));
+  }
+  const room = round2((Number(card?.amount) || 0) - (Number(card?.remaining_balance) || 0));
 
   const undo = async (tx) => {
     if (undoingRef.current || !card) return;
@@ -230,6 +357,25 @@ export default function GiftCardHistory({ cardId, card, onCardChange }) {
                 {attachId === tx.id && (
                   <AttachPanel card={card} tx={tx} onClose={() => setAttachId(null)} onDone={() => refetch()} />
                 )}
+                {(() => {
+                  const max = isOut && !undone && tx.appointment_id && tx.id && card && card.status !== 'expired'
+                    ? Math.max(0, Math.min(netByAppointment.get(String(tx.appointment_id)) || 0, room)) : 0;
+                  if (max <= 0) return null;
+                  if (creditId === tx.id) {
+                    return (
+                      <CreditPanel card={card} tx={tx} max={max} onClose={() => setCreditId(null)}
+                        onDone={(res) => { if (res?.card) onCardChange?.(res.card); refetch(); }} />
+                    );
+                  }
+                  return (
+                    <div className="mt-1.5 flex justify-end">
+                      <button type="button" onClick={() => { setCreditId(tx.id); setConfirmId(null); setAttachId(null); }}
+                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-green-400 hover:text-green-300">
+                        <Undo2 className="w-3 h-3" /> Rendre sur la carte
+                      </button>
+                    </div>
+                  );
+                })()}
                 {undoable && (
                   <div className="mt-1.5 flex flex-wrap items-center justify-end gap-2">
                     {confirmId !== tx.id ? (

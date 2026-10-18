@@ -29,7 +29,84 @@ const APPOINTMENTS_LIMIT = 2000;
 // CA d'un RDV (hors pourboire), part payée par carte cadeau, arrondi : partagés avec Statistiques
 import { revenueOf, round2, giftPartOf } from '@/lib/revenue';
 
+// ─── Calculs purs : bloc lu tel quel par dhomebarber-api/test/test-t7-3-dashboard.js ───
+// <calculs-purs>
 const PAYMENT_LABELS = { cb: 'CB', especes: 'Espèces', carte_cadeau: 'Carte cadeau' };
+
+// Last Minute publié : encore libre, pris par un client (repère « [last_minute] » dans la note
+// interne) ou que personne n'a pris. Un Last Minute déplacé par le client reste compté une fois :
+// le serveur laisse le repère sur l'ancienne ligne (annulée « Client : déplacé au … ») et ne le
+// recopie pas sur le nouveau RDV.
+const isPublishedLastMinute = (a) =>
+  a.status === 'last_minute' || isConvertedLastMinute(a) || isUnclaimedLastMinute(a);
+// « Converti » : pris par un client et pas annulé depuis. Un déplacement fait par le client reste une
+// conversion (il vient à un autre horaire) : l'ancienne ligne est la seule à porter le repère.
+const isCountedConversion = (a) =>
+  isConvertedLastMinute(a) && (!isCancelledLike(a) || isRescheduledCancel(a));
+
+/**
+ * Lignes de l'export comptable d'un RDV encaissé (prestations, puis produit vendu), **hors part payée
+ * par carte cadeau** : cette part a été comptée à la vente de la carte, comme au tableau de bord. Un
+ * RDV réglé en entier par carte cadeau ne sort donc pas. Débit partiel : chaque montant est réduit au
+ * prorata, le total du RDV vaut la part hors carte au centime près, et le moyen de paiement affiché
+ * porte « (hors carte cadeau) ». Sans carte cadeau : montants inchangés.
+ */
+function comptableLines(apt) {
+  const rev = revenueOf(apt);
+  const gift = giftPartOf(apt);
+  const outside = round2(rev - gift);
+  if (outside <= 0) return [];
+  // Même règle que sumBy : le reste d'un RDV « Carte cadeau » est « non renseigné »
+  const method = apt.payment_method === 'carte_cadeau' ? '' : (PAYMENT_LABELS[apt.payment_method] || '');
+  const paiement = gift > 0 && method ? `${method} (hors carte cadeau)` : method;
+
+  const lines = [];
+  if (apt.services?.length > 0) {
+    for (const svc of apt.services) {
+      lines.push({ type: 'Prestation', designation: svc.name || 'Prestation', price: Number(svc.price) || 0 });
+    }
+  } else {
+    lines.push({ type: 'Prestation', designation: 'Prestation', price: Number(apt.total_price) || 0 });
+  }
+  if (apt.product_sold && apt.product_price > 0) {
+    lines.push({ type: 'Produit', designation: apt.product_sold, price: Number(apt.product_price) || 0 });
+  }
+
+  if (gift > 0 && rev > 0) {
+    const ratio = outside / rev;
+    let left = outside;
+    const positive = lines.filter(l => l.price > 0);
+    for (const l of positive) {
+      l.price = round2(Math.min(round2(l.price * ratio), left));
+      left = round2(left - l.price);
+    }
+    // Reste d'arrondi (un centime par ligne au plus) : porté par la dernière ligne
+    const last = positive[positive.length - 1];
+    if (last && left > 0 && left <= 0.01 * positive.length + 1e-9) last.price = round2(last.price + left);
+  }
+  return lines.filter(l => l.price > 0).map(l => ({ ...l, paiement }));
+}
+
+/** Lignes de l'export jusqu'au montant cible, dans l'ordre des RDV reçus ; `total` en nombre. */
+function comptableRows(appts, target) {
+  const rows = [];
+  let remaining = target;
+  let total = 0;
+  for (const apt of appts) {
+    if (remaining <= 0) break;
+    for (const line of comptableLines(apt)) {
+      if (remaining <= 0) break;
+      const amount = Math.min(line.price, remaining);
+      if (amount > 0) {
+        rows.push({ apt, ...line, amount });
+        remaining -= amount;
+        total += amount;
+      }
+    }
+  }
+  return { rows, total };
+}
+// </calculs-purs>
 
 /** Jours du mois `yyyy-MM` (vide si la saisie est illisible). */
 function monthDates(month) {
@@ -139,16 +216,13 @@ export default function AdminDashboard() {
 
   // Last Minute : créneaux publiés = encore libres + pris par un client (repère dans la note interne)
   // + non pris ; « Convertis » = pris et pas annulés depuis
-  // Un Last Minute déplacé par le client n'est compté qu'une fois : l'ancienne ligne, annulée
-  // « Client : déplacé au … », est écartée (le nouveau RDV porte le créneau)
-  const lastMinuteAppts = useMemo(() => allAppointments.filter(a =>
-    (a.status === 'last_minute' || isConvertedLastMinute(a) || isUnclaimedLastMinute(a)) && !isRescheduledCancel(a)
-  ), [allAppointments]);
+  // Un Last Minute déplacé par le client reste compté une fois (créneau publié et converti) : le
+  // serveur laisse le repère sur l'ancienne ligne (annulée « Client : déplacé au … ») et ne le
+  // recopie pas sur le nouveau RDV (voir isPublishedLastMinute / isCountedConversion)
+  const lastMinuteAppts = useMemo(() => allAppointments.filter(isPublishedLastMinute), [allAppointments]);
   const lastMinuteToday = lastMinuteAppts.filter(a => a.date === today);
   const lastMinuteMonth = lastMinuteAppts.filter(a => a.date?.startsWith(monthPrefix));
-  const lastMinuteCompleted = useMemo(() => allAppointments.filter(a =>
-    isConvertedLastMinute(a) && !isCancelledLike(a)
-  ), [allAppointments]);
+  const lastMinuteCompleted = useMemo(() => allAppointments.filter(isCountedConversion), [allAppointments]);
   const lastMinuteCompletedMonth = lastMinuteCompleted.filter(a => a.date?.startsWith(monthPrefix));
 
   // Helper: consider an appointment as "paid/done" if payment_status is 'paid' OR status is 'completed'
@@ -315,68 +389,18 @@ export default function AdminDashboard() {
     // texte (SOMME à 0) et « 10.10 » pouvait devenir une date
     const euro = (n) => (Math.round(n * 100) / 100).toFixed(2).replace('.', ',');
 
-    // Build rows: prestations + products until we reach targetAmount
-    const rows = [];
-    let remaining = targetAmount;
-    // Total calculé sur les nombres (parseFloat('12,50') renverrait 12)
-    let totalExported = 0;
-
-    for (const apt of monthAppts) {
-      if (remaining <= 0) break;
-
-      // Add services
-      if (apt.services?.length > 0) {
-        for (const svc of apt.services) {
-          if (remaining <= 0) break;
-          const price = Math.min(svc.price || 0, remaining);
-          if (price > 0) {
-            rows.push({
-              date: apt.date,
-              type: 'Prestation',
-              designation: svc.name || 'Prestation',
-              client: apt.client_name || '',
-              barber: apt.employee_name || '',
-              paiement: PAYMENT_LABELS[apt.payment_method] || '',
-              montant: euro(price),
-            });
-            remaining -= price;
-            totalExported += price;
-          }
-        }
-      } else {
-        // No service detail, use total_price
-        const price = Math.min(apt.total_price || 0, remaining);
-        if (price > 0) {
-          rows.push({
-            date: apt.date,
-            type: 'Prestation',
-            designation: 'Prestation',
-            client: apt.client_name || '',
-            barber: apt.employee_name || '',
-            paiement: PAYMENT_LABELS[apt.payment_method] || '',
-            montant: euro(price),
-          });
-          remaining -= price;
-          totalExported += price;
-        }
-      }
-
-      // Add product if any
-      if (apt.product_sold && apt.product_price > 0 && remaining > 0) {
-        const price = Math.min(apt.product_price, remaining);
-        rows.push({
-          date: apt.date,
-          type: 'Produit',
-          designation: apt.product_sold,
-          client: apt.client_name || '',
-          barber: apt.employee_name || '',
-          paiement: PAYMENT_LABELS[apt.payment_method] || '',
-          montant: euro(price),
-        });
-        remaining -= price;
-        totalExported += price;
-      }
-    }
+    // Prestations puis produits jusqu'au montant cible, hors part payée par carte cadeau
+    // (comptableLines) ; total calculé sur les nombres (parseFloat('12,50') renverrait 12)
+    const { rows: lines, total: totalExported } = comptableRows(monthAppts, targetAmount);
+    const rows = lines.map(({ apt, type, designation, paiement, amount }) => ({
+      date: apt.date,
+      type,
+      designation,
+      client: apt.client_name || '',
+      barber: apt.employee_name || '',
+      paiement,
+      montant: euro(amount),
+    }));
 
     if (rows.length === 0) {
       toast.info('Aucune donnée à exporter pour ce mois');
@@ -790,7 +814,7 @@ export default function AdminDashboard() {
               <p className="mt-1 font-medium text-foreground">
                 {exportLoading
                   ? 'Chargement du mois sélectionné…'
-                  : `CA du mois sélectionné : ${exportSource.filter(a => a.date?.startsWith(exportMonth) && isRealAppt(a) && isPaid(a)).reduce((s, a) => s + getTotal(a), 0).toFixed(2)}€`}
+                  : `CA du mois sélectionné hors cartes cadeau : ${round2(exportSource.filter(a => a.date?.startsWith(exportMonth) && isRealAppt(a) && isPaid(a)).reduce((s, a) => s + outsideGift(a), 0)).toFixed(2)}€`}
               </p>
               {!exportInPeriod && exportQuery.isError && !exportQuery.data && (
                 <p className="mt-1 text-red-400">Impossible de charger ce mois (connexion ?). Réessayez.</p>

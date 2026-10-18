@@ -553,10 +553,16 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
           )}
           {attachAptId === null && (
             <p className="text-[11px] text-amber-300" data-testid="gc-attach-warning">
-              Sans rattachement, si ce client est ensuite encaissé en CB ou en espèces pour son RDV, le tableau de bord comptera {debit > 0 ? `ces ${formatEuro(debit)}` : 'cette somme'} deux fois.
+              Sans rattachement, si ce client est ensuite encaissé en CB ou en espèces, le tableau de bord comptera {debit > 0 ? `ces ${formatEuro(debit)}` : 'cette somme'} deux fois. Si ce débit paie une commande de la Boutique, une précommande textile ou une privatisation, ne la marquez pas comme payée en CB / espèces : elle serait comptée une seconde fois dans le CA (la carte l'est déjà à sa vente).
             </p>
           )}
         </div>
+      )}
+      {/* Aucun RDV du jour : le débit paie peut-être une commande, une précommande ou une privatisation (tour 7) */}
+      {attachMode && appointments.length === 0 && !aptLoadFailed && !aptQuery.isPending && (
+        <p className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-2.5 py-2 text-[11px] text-amber-300 break-words" data-testid="gc-other-channel-warning">
+          Si ce débit paie une commande de la Boutique, une précommande textile ou une privatisation, ne la marquez pas comme payée en CB / espèces : elle serait comptée une seconde fois dans le CA (la carte l'est déjà à sa vente).
+        </p>
       )}
 
       {mode === 'services' && (

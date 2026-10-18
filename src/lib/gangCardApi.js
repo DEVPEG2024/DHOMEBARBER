@@ -1,9 +1,11 @@
 /**
  * Carte Gang : client des routes /gang-card du serveur (lib/gangCard.js, routes/gangCard.js).
  *
- * `GET /gang-card/me` → `{ card, seen_tier, level_up, leaderboard_opt_in, tiers, seen_badges, new_badges }`
+ * `GET /gang-card/me` → `{ card, seen_tier, level_up, leaderboard_opt_in, tiers, seen_badges, new_badges, upcoming }`
  *   - `seen_badges` : clés des écussons déjà montés au client (animation passée)
  *   - `new_badges`  : écussons débloqués et pas encore vus → animation `GangBadgeUnlock` (GangLevelUp)
+ *   - `upcoming`    : vrai si le client a un rendez-vous confirmé à venir (pas de bandeau
+ *                     « Ta carte perd de la fraîcheur · Réserver ») ; absent sur un serveur antérieur
  *
  * Forme d'une carte (`card`, null tant que le client n'a aucune visite) :
  * { tier: 'bronze'|'argent'|'or'|'orrare'|'tots'|'icone', tier_label,
@@ -14,7 +16,7 @@
  *   days_since_last, barber, favorite, next: null | { tier, label, visits_needed, progress (0–100) },
  *   badges: [{ key, emoji, label, description, unlocked, progress: { current, target } | null }] }
  * `badges` est la liste COMPLÈTE dans un ordre fixe (verrouillés compris) : premiere_coupe,
- * premiere_barbe, degrade_10, fidele_barber, leve_tot, anniv_salon, drop.
+ * premiere_barbe, fidele_barber, leve_tot, anniv_salon, drop (degrade_10 retiré le 18 oct. 2026).
  * Aucun avantage n'est lié aux niveaux ni aux écussons (choix du salon).
  */
 import { useCallback } from 'react';
@@ -106,7 +108,9 @@ export function useGangAdminClient(id, { enabled = true } = {}) {
 }
 
 /** Clés des écussons, dans l'ordre fixe du serveur. */
-export const GANG_BADGE_ORDER = ['premiere_coupe', 'premiere_barbe', 'degrade_10', 'fidele_barber', 'leve_tot', 'anniv_salon', 'drop'];
+// « degrade_10 » retiré par le serveur le 18 oct. 2026 (objectif impossible) : libellé gardé dans
+// GANG_BADGE_INFO pour une réponse d'un serveur plus ancien
+export const GANG_BADGE_ORDER = ['premiere_coupe', 'premiere_barbe', 'fidele_barber', 'leve_tot', 'anniv_salon', 'drop'];
 /** Libellés de repli (l'admin ne reçoit que des comptes par clé). */
 export const GANG_BADGE_INFO = {
   premiere_coupe: { emoji: '🎉', label: 'Première coupe' },

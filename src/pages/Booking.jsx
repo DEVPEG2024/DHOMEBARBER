@@ -620,6 +620,9 @@ export default function Booking() {
   const presetTimeMatch = /^(\d{1,2}):(\d{2})$/.exec(urlParams.get('time') || '');
   const presetTime = presetTimeMatch ? `${presetTimeMatch[1].padStart(2, '0')}:${presetTimeMatch[2]}` : null;
   const presetApplied = useRef({ date: false, time: false });
+  // Heure du lien non proposée : 'gone' (prise, passée, date hors du bandeau) ou 'duration'
+  // (le créneau tiendrait pour une prestation courte). Un bandeau l'explique au lieu du silence.
+  const [presetMiss, setPresetMiss] = useState(null);
   const features = useCancelFeatures();
 
   // Mêmes clé et requête que Mes rendez-vous (cache partagé)
@@ -703,6 +706,14 @@ export default function Booking() {
   });
   const { data: employees = EMPTY_LIST, isPending: employeesPending } = employeesQuery;
   const employeesPaused = isPausedQuery(employeesQuery);
+  // Barber choisi lu dans la liste à jour : horaires réduits ou jour de repos posés par le salon
+  // depuis la sélection (lien, « Comme la dernière fois », page ouverte) sont repris. Sinon les
+  // créneaux restaient calculés sur l'objet mémorisé et le serveur refusait en boucle (« ne reçoit
+  // pas à cette heure-là »). Barber devenu inactif : l'objet d'origine reste (le serveur répond).
+  const liveEmployee = useMemo(
+    () => (selectedEmployee ? employees.find(e => String(e.id) === String(selectedEmployee.id)) || selectedEmployee : null),
+    [selectedEmployee, employees],
+  );
 
   // Barber passé dans l'URL (« Comme la dernière fois », relance « il est temps de revenir ») :
   // on ne saute l'étape 2 que s'il figure parmi les barbers actifs. Introuvable (parti du salon,
@@ -911,7 +922,10 @@ export default function Booking() {
     presetApplied.current.date = true;
     const match = selectedDate ? null : dates.find(d => format(d, 'yyyy-MM-dd') === presetDateKey);
     if (match) setSelectedDate(match);
-    else presetApplied.current.time = true;
+    else {
+      presetApplied.current.time = true;
+      if (presetTime && !selectedDate) setPresetMiss('gone');
+    }
   }, [preSelectedBarber, dates]);
 
   // Jour changé pendant la réservation : une date choisie désormais passée est retirée
@@ -934,9 +948,9 @@ export default function Booking() {
   const { options: slotOptions, reason: emptyReason } = useMemo(() => {
     if (!selectedDate || !slotsReady) return { options: [], reason: null };
     if (!anyBarber) {
-      if (!selectedEmployee) return { options: [], reason: null };
-      const { slots, reason } = analyzeDay(selectedEmployee, selectedDate, appointments, timeOffs, totalDuration, shortestDuration, privateEvents);
-      return { options: slots.map(time => ({ time, employee: selectedEmployee })), reason };
+      if (!liveEmployee) return { options: [], reason: null };
+      const { slots, reason } = analyzeDay(liveEmployee, selectedDate, appointments, timeOffs, totalDuration, shortestDuration, privateEvents);
+      return { options: slots.map(time => ({ time, employee: liveEmployee })), reason };
     }
     const byEmployee = new Map();
     for (const apt of appointments) {
@@ -958,7 +972,7 @@ export default function Booking() {
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([time, employee]) => ({ time, employee }));
     return { options, reason: options.length > 0 ? null : mergeDayReasons(reasons) };
-  }, [anyBarber, selectedEmployee, selectedDate, slotsReady, appointments, timeOffs, totalDuration, shortestDuration, employees, privateEvents, nowTick]);
+  }, [anyBarber, liveEmployee, selectedDate, slotsReady, appointments, timeOffs, totalDuration, shortestDuration, employees, privateEvents, nowTick]);
 
   // L'heure choisie est-elle encore réservable ? (prestation ajoutée après coup, créneau pris entre-
   // temps) null = on ne sait pas encore (chargement) : on ne tranche pas.
@@ -972,14 +986,14 @@ export default function Booking() {
       // Son propre RDV identique, déjà enregistré : écarté du contrôle (barber précis comme « peu importe »)
       const own = appointments.filter(a => String(a.id) !== String(ownSameBooking.id)
         && String(a.employee_id) === String(selectedEmployee.id));
-      return analyzeDay(selectedEmployee, selectedDate, own, timeOffs, totalDuration, shortestDuration, privateEvents).slots.includes(selectedTime);
+      return analyzeDay(liveEmployee, selectedDate, own, timeOffs, totalDuration, shortestDuration, privateEvents).slots.includes(selectedTime);
     }
     if (!anyBarber) return slotOptions.some(o => o.time === selectedTime);
     // « Peu importe » : le barber retenu doit encore être libre à cette heure (pas forcément le
     // premier de l'union, sinon un autre barber « passerait devant » à tort)
     const own = appointments.filter(a => String(a.employee_id) === String(selectedEmployee.id));
-    return analyzeDay(selectedEmployee, selectedDate, own, timeOffs, totalDuration, shortestDuration, privateEvents).slots.includes(selectedTime);
-  }, [selectedTime, selectedDate, slotsReady, anyBarber, selectedEmployee, slotOptions, appointments, timeOffs, totalDuration, shortestDuration, privateEvents, uncertainMatch, ownSameBooking, nowTick]);
+    return analyzeDay(liveEmployee, selectedDate, own, timeOffs, totalDuration, shortestDuration, privateEvents).slots.includes(selectedTime);
+  }, [selectedTime, selectedDate, slotsReady, anyBarber, selectedEmployee, liveEmployee, slotOptions, appointments, timeOffs, totalDuration, shortestDuration, privateEvents, uncertainMatch, ownSameBooking, nowTick]);
 
   // RDV qui commence dans moins de `cancelHours` heures : il ne pourra plus être annulé ni déplacé
   // en ligne. Rien tant que les paramètres du salon ne sont pas chargés.
@@ -995,8 +1009,24 @@ export default function Booking() {
     if (anyBarber || selectedTime) return;
     if (format(selectedDate, 'yyyy-MM-dd') !== presetDateKey) return;
     if (String(selectedEmployee.id) !== String(preSelectedBarberId)) return;
-    if (slotOptions.some(o => o.time === presetTime)) setSelectedTime(presetTime);
+    if (slotOptions.some(o => o.time === presetTime)) { setSelectedTime(presetTime); return; }
+    // Pas proposée : trop courte pour les prestations choisies (elle tiendrait pour 30 min au
+    // plus), ou plus disponible (prise entre-temps, passée, barber absent)
+    const passed = parisInstant(presetDateKey, presetTime) < Date.now();
+    const shortLength = Math.min(30, shortestDuration || 30);
+    const fitsShort = !passed && shortLength < totalDuration
+      && analyzeDay(liveEmployee, selectedDate, appointments, timeOffs, shortLength, shortestDuration, privateEvents).slots.includes(presetTime);
+    setPresetMiss(fitsShort ? 'duration' : 'gone');
   }, [step, slotsReady, slotOptions, selectedDate, selectedEmployee]);
+
+  // Le client choisit une autre heure, une autre date ou d'autres prestations : bandeau retiré
+  // (pas à la présélection des prestations du lien, qui peut arriver après le bandeau)
+  const prevServiceKey = useRef(selectedServiceKey);
+  useEffect(() => {
+    if (prevServiceKey.current && prevServiceKey.current !== selectedServiceKey) setPresetMiss(null);
+    prevServiceKey.current = selectedServiceKey;
+  }, [selectedServiceKey]);
+  useEffect(() => { if (selectedTime) setPresetMiss(null); }, [selectedTime]);
 
   /**
    * Repères du bandeau de dates (`yyyy-MM-dd` → `off` / `leave` / `closed`) : seulement ce qui est
@@ -1011,7 +1041,7 @@ export default function Booking() {
       const dateStr = format(date, 'yyyy-MM-dd');
       const statusOf = (emp) => (isOnLeave(emp, dateStr, timeOffs) ? 'leave' : workingHoursOf(emp, date) ? null : 'off');
       if (!anyBarber) {
-        const status = statusOf(selectedEmployee);
+        const status = statusOf(liveEmployee);
         if (status) marks.set(dateStr, status);
         continue;
       }
@@ -1020,7 +1050,7 @@ export default function Booking() {
       if (statuses.every(Boolean)) marks.set(dateStr, statuses.every(s => s === 'off') ? 'closed' : 'leave');
     }
     return marks;
-  }, [anyBarber, selectedEmployee, employees, timeOffs, dates]);
+  }, [anyBarber, selectedEmployee, liveEmployee, employees, timeOffs, dates]);
 
   // Ajout d'une prestation : la page descend jusqu'au récapitulatif et au bouton « Suivant »
   // (avec une longue carte, ils restaient hors de l'écran, sous la liste).
@@ -1178,8 +1208,8 @@ export default function Booking() {
       const created = await api.entities.Appointment.create({
         client_email: user.email,
         client_name: user.full_name || user.name || '',
-        employee_id: selectedEmployee.id,
-        employee_name: selectedEmployee.name,
+        employee_id: (liveEmployee || selectedEmployee).id,
+        employee_name: (liveEmployee || selectedEmployee).name,
         services: liveSelected.map(s => ({ service_id: s.id, name: s.name, duration: s.duration, price: s.price })),
         date: format(selectedDate, 'yyyy-MM-dd'),
         start_time: selectedTime,
@@ -1292,6 +1322,9 @@ export default function Booking() {
       if (oldApt && err?.status === 409) {
         // Déplacement : l'ancien RDV, encore confirmé, occupe son créneau et compte dans le
         // plafond des rendez-vous à venir. Un décalage de quelques minutes passe par le salon.
+        // Ancien RDV relu : sa durée allongée par le salon (« prévoir 1 h ») est reprise par
+        // `totalDuration`, sinon les mêmes heures trop courtes revenaient
+        queryClient.invalidateQueries({ queryKey: ['myAppointments'] });
         toast.error(`${shown}. Pour décaler sur le même créneau ou juste à côté, appelez le salon au ${SALON_PHONE}.`, {
           duration: 10000,
           action: { label: 'Appeler', onClick: () => { window.location.href = SALON_PHONE_HREF; } },
@@ -1601,10 +1634,19 @@ export default function Booking() {
                   key={todayKey}
                   dates={dates}
                   selectedDate={selectedDate}
-                  onSelect={(date) => { setSelectedDate(date); setSelectedTime(null); if (anyBarber) setSelectedEmployee(null); hapticFeedback(); }}
+                  onSelect={(date) => { setSelectedDate(date); setSelectedTime(null); setPresetMiss(null); if (anyBarber) setSelectedEmployee(null); hapticFeedback(); }}
                   marks={dayMarks}
                 />
               </div>
+
+              {/* Lien Last Minute dont l'heure n'est pas proposée : on dit pourquoi */}
+              {presetMiss && presetTime && !selectedTime && (!selectedDate || selectedDateStr === presetDateKey) && (
+                <div role="status" className="mb-4 rounded-2xl border border-amber-500/25 bg-amber-500/10 px-3.5 py-3 text-xs leading-relaxed text-amber-200/90 break-words">
+                  {presetMiss === 'duration'
+                    ? `Le créneau Last Minute de ${presetTime} est trop court pour vos prestations : choisissez une prestation plus courte ou une autre heure.`
+                    : `Le créneau Last Minute de ${presetTime} n'est plus disponible : choisissez une autre heure.`}
+                </div>
+              )}
 
               {selectedDate && (
                 <motion.div key={selectedDate.toISOString()} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
