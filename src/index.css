@@ -438,3 +438,45 @@ body.keyboard-open .login-logo {
   .live-dot::after, .shine-sweep::after, .float-soft, .kenburns, .glow-breathe::before { animation: none; }
   .shine-sweep::after { opacity: 0; }
 }
+
+/* Pastille des raccourcis du profil (style B animé, 18 oct. 2026) : verre teinté de vert.
+   ::before = vague de lumière (bordure qui s'allume tour à tour, --wave-delay par tuile),
+   ::after = halo qui respire sur une tuile qui a du nouveau (.tile-chip-hot). */
+.tile-chip {
+  position: relative;
+  isolation: isolate;
+  background: hsl(var(--primary) / 0.14);
+  border: 1px solid hsl(var(--primary) / 0.28);
+}
+.tile-chip::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: 0 0 0 1px hsl(var(--primary) / 0.9), 0 0 14px 1px hsl(var(--primary) / 0.45), inset 0 0 10px hsl(var(--primary) / 0.25);
+  opacity: 0;
+  will-change: opacity;
+  animation: tile-wave 6.3s ease-in-out infinite;
+  animation-delay: var(--wave-delay, 0s);
+}
+@keyframes tile-wave {
+  0%, 100% { opacity: 0; }
+  6% { opacity: 1; }
+  16% { opacity: 0; }
+}
+.tile-chip-hot::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  z-index: -1;
+  border-radius: 18px;
+  pointer-events: none;
+  background: radial-gradient(circle, hsl(var(--primary) / 0.45), transparent 70%);
+  will-change: transform, opacity;
+  animation: glow-breathe 2.6s cubic-bezier(0.37, 0, 0.63, 1) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tile-chip::before, .tile-chip-hot::after { animation: none; }
+  .tile-chip-hot::after { opacity: 0.6; }
+}

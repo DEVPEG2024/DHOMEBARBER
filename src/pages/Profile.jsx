@@ -155,17 +155,17 @@ export default function Profile() {
   const prenom = firstName(user?.full_name);
 
   const shortcuts = [
-    { to: '/appointments', label: 'Rendez-vous', icon: Calendar, tint: 'from-emerald-400 to-emerald-700', badge: upcomingCount },
-    { to: '/orders', label: 'Commandes', icon: ShoppingBag, tint: 'from-sky-400 to-blue-700', badge: openOrders },
-    { to: '/notifications', label: 'Notifications', icon: Bell, tint: 'from-amber-300 to-orange-600', badge: unread },
-    { to: '/favorites', label: 'Favoris', icon: Heart, tint: 'from-rose-400 to-red-700', badge: 0 },
+    { to: '/appointments', label: 'Rendez-vous', icon: Calendar, badge: upcomingCount },
+    { to: '/orders', label: 'Commandes', icon: ShoppingBag, badge: openOrders },
+    { to: '/notifications', label: 'Notifications', icon: Bell, badge: unread },
+    { to: '/favorites', label: 'Favoris', icon: Heart, badge: 0 },
     isClient
-      ? { to: '/gang-card', label: 'Carte Gang', icon: IdCard, tint: 'from-yellow-300 to-amber-700', badge: 0 }
-      : { to: '/settings', label: 'Paramètres', icon: Settings, tint: 'from-slate-400 to-slate-700', badge: 0 },
-    { to: '/gift-cards', label: 'Cartes cadeau', icon: Gift, tint: 'from-fuchsia-400 to-purple-700', badge: 0 },
-    { to: '/textile', label: 'Textile', icon: Shirt, tint: 'from-zinc-300 to-zinc-700', badge: 0 },
-    { to: '/partners', label: 'Bons plans', icon: Handshake, tint: 'from-teal-300 to-cyan-700', badge: 0 },
-    { to: '/reviews', label: 'Avis', icon: Star, tint: 'from-lime-300 to-green-700', badge: 0 },
+      ? { to: '/gang-card', label: 'Carte Gang', icon: IdCard, badge: 0 }
+      : { to: '/settings', label: 'Paramètres', icon: Settings, badge: 0 },
+    { to: '/gift-cards', label: 'Cartes cadeau', icon: Gift, badge: 0 },
+    { to: '/textile', label: 'Textile', icon: Shirt, badge: 0 },
+    { to: '/partners', label: 'Bons plans', icon: Handshake, badge: 0 },
+    { to: '/reviews', label: 'Avis', icon: Star, badge: 0 },
   ];
 
   const stats = [
