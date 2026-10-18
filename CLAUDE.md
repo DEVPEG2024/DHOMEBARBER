@@ -398,6 +398,12 @@ Le `server.js` exécute des migrations automatiques au démarrage (`ADD COLUMN I
 - Le CA utilise `grand_total || total_price` pour le total
 - Compteur d'utilisateurs connectés en direct via WebSocket
 
+### Créer un barber (revu le 18 oct. 2026, backend c75116a, frontend d311d0e)
+- **Deux étapes** : la fiche dans **Équipe** (`Team.jsx` → `Employee.create` : nom, horaires partis de ceux du salon, couleur, Actif), puis le compte de connexion dans **Comptes barbers** (`BarberAccounts.jsx` → `POST /barber-accounts`). Après l'ajout d'une fiche, le toast « Créer son compte » ouvre `/admin/barber-accounts?employee=<id>` avec la fiche présélectionnée
+- **Fiche inactive** : invisible des clients et connexion du compte refusée (`barberFicheClosed`), mais elle figure dans la liste de Comptes barbers (« fiche inactive » + explication) : le compte peut être préparé, il marchera dès que la fiche sera réactivée. Avant, seules les fiches actives étaient proposées, sans explication (cas réel du 18 oct. : fiche « BARBER TEST » créée inactive et fermée tous les jours, impossible de lui créer un compte)
+- **Serveur** (`routes/barberAccounts.js`) : refus 400 qui nomment le champ (`employee_required`, `email_required`, `email_invalid`, `password_short` / `password_long`), fiche mal désignée ou inconnue → 404 `employee_not_found`, adresse déjà prise sans tenir compte de la casse → 409 `email_client_account` (compte client du barber : choisir une autre adresse) ou `email_taken`, fiche déjà rattachée à un compte (tout rôle) → 409 `employee_has_account` ; nom vide = nom de la fiche ; permissions limitées aux 7 clés de l'écran (création et modification) ; compte + permissions dans une transaction ; réponse avec `employee_active`. Tests : `test/test-barber-account-create.js` (10)
+- **Horaires d'une fiche** (`ac.validateWorkingHours`, création et modification) : jour travaillé dont la fin n'est pas après le début, ou heure illisible → 400 qui nomme le jour ; l'écran bloque aussi « Sauvegarder », affiche « Repos » sur un jour non travaillé et avertit quand aucun jour n'est travaillé
+
 ### Profil barber
 - La vidéo de présentation est stockée **dans `employees.bio`** après le marqueur `\n%%VIDEO%%url` (pas dans working_hours). Ne pas écraser la bio sans préserver ce suffixe.
 - Comparer les ids employé en string (`String(a) === String(b)`) : mélange UUID / number selon la source
