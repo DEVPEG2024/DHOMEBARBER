@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link, useSearchParams } from 'react-router-dom';
 import { api, apiRequest, API_BASE } from '@/api/apiClient';
 import { motion } from 'framer-motion';
-import { ShieldCheck, Plus, Trash2, Eye, EyeOff, KeyRound, Save } from 'lucide-react';
+import { ShieldCheck, Plus, Trash2, Eye, EyeOff, KeyRound, Save, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -29,6 +30,8 @@ const ALL_PERMISSIONS = [
 const KNOWN_PERMISSIONS = new Set(ALL_PERMISSIONS.map(p => p.key));
 const PASSWORD_MIN = 8;
 const PASSWORD_MESSAGE = `Le mot de passe doit contenir au moins ${PASSWORD_MIN} caractères`;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const EMPTY_FORM = { email: '', password: '', full_name: '', employee_id: '', permissions: ['dashboard', 'agenda'] };
 
 function apiCall(method, path, body) {
   return apiRequest(method, `${API_BASE}${path}`, body);
@@ -36,8 +39,11 @@ function apiCall(method, path, body) {
 
 export default function BarberAccounts() {
   const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [showCreate, setShowCreate] = useState(false);
-  const [form, setForm] = useState({ email: '', password: '', full_name: '', employee_id: '', permissions: ['dashboard', 'agenda'] });
+  const [form, setForm] = useState(EMPTY_FORM);
+  // Nom et email repris de la fiche choisie : remplacés si l'admin change de fiche, jamais s'il les a tapés
+  const autoFilled = useRef({ full_name: '', email: '' });
   const [showPassword, setShowPassword] = useState(false);
   const [saving, setSaving] = useState(false);
   const [accountToDelete, setAccountToDelete] = useState(null);
@@ -58,37 +64,84 @@ export default function BarberAccounts() {
   const accountsFailed = (isError && !accountsData) || (isPending && fetchStatus === 'paused');
   const accountsReady = Array.isArray(accountsData);
 
-  const { data: employees = [] } = useQuery({
-    queryKey: ['employees'],
-    // Même requête que l'accueil (clé partagée ['employees'] : ordre sort_order)
-    queryFn: () => api.entities.Employee.filter({ is_active: true }, 'sort_order', 50),
+  // Toutes les fiches, inactives comprises (même requête et même clé qu'Équipe) : une fiche créée
+  // inactive (barber pas encore arrivé, essai) n'apparaissait nulle part ici, sans explication
+  const employeesQuery = useQuery({
+    queryKey: ['employees', 'all'],
+    queryFn: () => api.entities.Employee.list('sort_order', 50),
   });
+  const employees = employeesQuery.data ?? [];
+  const employeesReady = Array.isArray(employeesQuery.data);
 
-  // Employees without an account yet
-  const availableEmployees = employees.filter(
-    emp => !accounts.some(acc => String(acc.employee_id) === String(emp.id))
-  );
+  // Fiches sans compte, les actives d'abord
+  const availableEmployees = employees
+    .filter(emp => !accounts.some(acc => String(acc.employee_id) === String(emp.id)))
+    .sort((a, b) => Number(b.is_active !== false) - Number(a.is_active !== false));
+  const selectedEmployee = employees.find(em => String(em.id) === String(form.employee_id)) || null;
+
+  const selectEmployee = (id) => {
+    const emp = employees.find(em => String(em.id) === String(id));
+    setForm(prev => {
+      const next = { ...prev, employee_id: id };
+      // Champ vide ou encore rempli par la fiche précédente : repris de la nouvelle fiche
+      if (!prev.full_name.trim() || prev.full_name === autoFilled.current.full_name) next.full_name = emp?.name || '';
+      if (!prev.email.trim() || prev.email === autoFilled.current.email) next.email = emp?.email || '';
+      autoFilled.current = { full_name: next.full_name, email: next.email };
+      return next;
+    });
+  };
+
+  // Arrivée depuis Équipe (« Créer son compte ») : ?employee=<id> ouvre le formulaire sur cette fiche
+  const wantedEmployee = searchParams.get('employee');
+  useEffect(() => {
+    if (!wantedEmployee || !accountsReady || !employeesReady) return;
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      next.delete('employee');
+      return next;
+    }, { replace: true });
+    const emp = employees.find(em => String(em.id) === String(wantedEmployee));
+    if (!emp) return;
+    if (accounts.some(acc => String(acc.employee_id) === String(emp.id))) {
+      toast.info(`${emp.name} a déjà un compte : modifiez-le dans la liste`);
+      return;
+    }
+    setShowCreate(true);
+    selectEmployee(emp.id);
+  }, [wantedEmployee, accountsReady, employeesReady]);
 
   const handleCreate = async () => {
-    if (!form.email || !form.password || !form.employee_id) {
-      toast.error('Remplissez tous les champs obligatoires');
-      return;
-    }
-    if (form.password.length < PASSWORD_MIN) {
-      toast.error(PASSWORD_MESSAGE);
-      return;
-    }
+    const email = form.email.trim();
+    if (!form.employee_id) { toast.error('Choisissez le barber'); return; }
+    if (!email) { toast.error('Indiquez l\'email de connexion du barber'); return; }
+    if (!EMAIL_RE.test(email)) { toast.error('Adresse email invalide', { description: 'Exemple : prenom@dhomebarber.fr' }); return; }
+    if (form.password.length < PASSWORD_MIN) { toast.error(PASSWORD_MESSAGE); return; }
     setSaving(true);
     try {
-      await apiCall('POST', '/barber-accounts', form);
+      const created = await apiCall('POST', '/barber-accounts', { ...form, email, full_name: form.full_name.trim() });
       queryClient.invalidateQueries({ queryKey: ['barberAccounts'] });
       // Les permissions vivent sur la fiche employé : Équipe ne doit pas les renvoyer périmées
       queryClient.invalidateQueries({ queryKey: ['employees'] });
-      toast.success('Compte barber créé');
-      setForm({ email: '', password: '', full_name: '', employee_id: '', permissions: ['dashboard', 'agenda'] });
+      const name = created?.employee_name || selectedEmployee?.name || 'Le barber';
+      if (created?.employee_active === false || selectedEmployee?.is_active === false) {
+        toast.warning('Compte créé, connexion bloquée pour l\'instant', {
+          description: `La fiche de ${name} est inactive : il pourra se connecter dès qu'elle sera réactivée dans Équipe.`,
+          duration: 10000,
+        });
+      } else {
+        toast.success('Compte barber créé', { description: `${name} peut se connecter avec ${email}.` });
+      }
+      setForm(EMPTY_FORM);
+      autoFilled.current = { full_name: '', email: '' };
+      setShowPassword(false);
       setShowCreate(false);
     } catch (err) {
-      toast.error(friendlyError(err, 'Impossible de créer le compte'));
+      toast.error('Impossible de créer le compte', { description: friendlyError(err, 'Réessayez dans un instant.') });
+      // Fiche déjà dotée d'un compte ou supprimée entre-temps : listes relues
+      if (err?.status === 409 || err?.status === 404) {
+        queryClient.invalidateQueries({ queryKey: ['barberAccounts'] });
+        queryClient.invalidateQueries({ queryKey: ['employees'] });
+      }
     } finally {
       setSaving(false);
     }
@@ -175,21 +228,28 @@ export default function BarberAccounts() {
               <select
                 className="w-full h-9 px-3 rounded-md border border-border bg-background text-sm"
                 value={form.employee_id}
-                onChange={e => {
-                  const emp = employees.find(em => em.id === e.target.value);
-                  setForm(prev => ({
-                    ...prev,
-                    employee_id: e.target.value,
-                    full_name: emp?.name || prev.full_name,
-                    email: emp?.email || prev.email,
-                  }));
-                }}
+                disabled={!employeesReady || availableEmployees.length === 0}
+                onChange={e => selectEmployee(e.target.value)}
               >
-                <option value="">Choisir un barber...</option>
+                <option value="">
+                  {!employeesReady ? 'Chargement des fiches…' : availableEmployees.length === 0 ? 'Aucune fiche sans compte' : 'Choisir un barber...'}
+                </option>
                 {availableEmployees.map(emp => (
-                  <option key={emp.id} value={emp.id}>{emp.name}</option>
+                  <option key={emp.id} value={emp.id}>{emp.name}{emp.is_active === false ? ' (fiche inactive)' : ''}</option>
                 ))}
               </select>
+              {employeesQuery.isError && !employeesReady && (
+                <p className="text-[11px] text-red-400">
+                  Impossible de charger les fiches de l'équipe.{' '}
+                  <button type="button" className="underline" onClick={() => employeesQuery.refetch()}>Réessayer</button>
+                </p>
+              )}
+              {employeesReady && availableEmployees.length === 0 && (
+                <p className="text-[11px] text-muted-foreground">
+                  Toutes les fiches ont déjà un compte. Ajoutez d'abord le nouveau barber dans{' '}
+                  <Link to="/admin/team" className="text-primary underline">Équipe</Link>, puis revenez ici.
+                </p>
+              )}
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Nom complet</Label>
@@ -214,6 +274,17 @@ export default function BarberAccounts() {
               </div>
             </div>
           </div>
+
+          {selectedEmployee?.is_active === false && (
+            <div role="note" className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-600 dark:text-amber-300">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
+              <span>
+                La fiche de {selectedEmployee.name} est inactive : le compte sera créé, mais {selectedEmployee.name} ne pourra se connecter
+                qu'une fois la fiche réactivée dans <Link to="/admin/team" className="underline">Équipe</Link> (interrupteur « Actif »).
+                Une fiche active apparaît aussi dans la réservation des clients.
+              </span>
+            </div>
+          )}
 
           <div className="mt-4">
             <Label className="text-xs mb-2 block">Permissions</Label>

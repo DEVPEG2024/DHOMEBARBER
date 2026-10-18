@@ -13,7 +13,7 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import LoadError, { friendlyError, queryFailed } from '@/components/shared/LoadError';
 
 /**
@@ -72,7 +72,19 @@ function salonHoursWarning(openingHours, day, hours) {
   return parts.length ? `Le salon ${parts.join(' et ')} ce jour-là` : null;
 }
 
+/** Jour travaillé dont la fin n'est pas après le début : aucun créneau possible (le serveur refuse aussi). */
+function hoursError(hours) {
+  if (!hours || hours.closed) return null;
+  const start = hours.start || '09:00';
+  const end = hours.end || '19:00';
+  if (!HHMM.test(start) || !HHMM.test(end)) return 'Heure incomplète';
+  return end <= start ? 'La fin doit être après le début' : null;
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export default function Team() {
+  const navigate = useNavigate();
   const [editEmployee, setEditEmployee] = useState(null);
   // Ligne d'origine de la fiche ouverte (relue sur le serveur) : base de la comparaison à l'envoi
   const [originalEmployee, setOriginalEmployee] = useState(null);
@@ -124,12 +136,23 @@ export default function Team() {
         if (data.force_inactive === true && changes.is_active === false) changes.force_inactive = true;
         return api.entities.Employee.update(data.id, changes);
       }
-      return api.entities.Employee.create(data);
+      return api.entities.Employee.create({ ...data, name: data.name.trim(), email: (data.email || '').trim(), phone: (data.phone || '').trim() });
     },
-    onSuccess: (res) => {
+    onSuccess: (res, data) => {
       queryClient.invalidateQueries({ queryKey: ['employees'] });
       setInactiveConflict(null);
       setShowDialog(false);
+      // Nouvelle fiche : le barber ne peut pas encore se connecter, le compte se crée à part
+      if (!data?.id && res?.id) {
+        toast.success(`${res.name || 'Barber'} ajouté à l'équipe`, {
+          description: res.is_active === false
+            ? 'Fiche inactive : invisible des clients. Créez maintenant son compte pour qu\'il accède à l\'app (connexion possible une fois la fiche active).'
+            : 'Créez maintenant son compte pour qu\'il accède à l\'app (agenda, clients).',
+          duration: 12000,
+          action: { label: 'Créer son compte', onClick: () => navigate(`/admin/barber-accounts?employee=${encodeURIComponent(res.id)}`) },
+        });
+        return;
+      }
       toast.success(res?.unchanged ? 'Aucune modification' : 'Collaborateur sauvegardé');
     },
     onError: (err, data) => {
@@ -194,6 +217,14 @@ export default function Team() {
       setOriginalEmployee(fresh);
     } catch { /* hors ligne : la fiche du cache reste, la sauvegarde ne renvoie que les champs changés */ }
   };
+
+  // Contrôles du formulaire : horaires impossibles et email mal formé (seulement s'il a été modifié,
+  // une fiche ancienne ne reste pas bloquée) empêchent l'enregistrement ; aucun jour travaillé avertit
+  const hoursErrorDays = editEmployee ? DAYS.filter(d => hoursError(editEmployee.working_hours?.[d])) : [];
+  const noWorkingDay = !!editEmployee && DAYS.every(d => editEmployee.working_hours?.[d]?.closed);
+  const emailValue = (editEmployee?.email || '').trim();
+  const emailInvalid = !!editEmployee && emailValue !== '' && emailValue !== (originalEmployee?.email || '').trim() && !EMAIL_RE.test(emailValue);
+  const formBlocked = !editEmployee?.name?.trim() || hoursErrorDays.length > 0 || emailInvalid;
 
   const updateHours = (day, field, value) => {
     setEditEmployee(prev => ({
@@ -350,8 +381,9 @@ export default function Team() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label className="text-xs">Email</Label>
-                  <Input value={editEmployee.email || ''} onChange={e => setEditEmployee({ ...editEmployee, email: e.target.value })}
+                  <Input type="email" value={editEmployee.email || ''} onChange={e => setEditEmployee({ ...editEmployee, email: e.target.value })}
                     className="bg-secondary border-border mt-1" />
+                  {emailInvalid && <p className="text-[11px] text-red-400 mt-1">Email invalide</p>}
                 </div>
                 <div>
                   <Label className="text-xs">Téléphone</Label>
@@ -365,15 +397,19 @@ export default function Team() {
                 <div className="space-y-2">
                   {DAYS.map(day => {
                     const warning = salonHoursWarning(salonOpeningHours, day, editEmployee.working_hours?.[day]);
+                    const error = hoursError(editEmployee.working_hours?.[day]);
+                    const closed = !!editEmployee.working_hours?.[day]?.closed;
                     return (
                     <div key={day}>
                     <div className="flex items-center gap-2 text-xs min-w-0">
                       <span className="w-14 shrink-0 text-muted-foreground">{DAY_LABELS[day]}</span>
                       <Switch
-                        checked={!editEmployee.working_hours?.[day]?.closed}
+                        checked={!closed}
+                        aria-label={`${DAY_LABELS[day]} : ${closed ? 'repos' : 'travaillé'}`}
                         onCheckedChange={v => updateHours(day, 'closed', !v)}
                       />
-                      {!editEmployee.working_hours?.[day]?.closed && (
+                      {closed && <span className="text-muted-foreground">Repos</span>}
+                      {!closed && (
                         <>
                           <Input type="time" value={editEmployee.working_hours?.[day]?.start || '09:00'}
                             onChange={e => updateHours(day, 'start', e.target.value)}
@@ -385,13 +421,20 @@ export default function Team() {
                         </>
                       )}
                     </div>
-                    {warning && (
+                    {error ? (
+                      <p className="mt-0.5 pl-16 text-[11px] text-red-400" role="alert">{error}</p>
+                    ) : warning && (
                       <p className="mt-0.5 pl-16 text-[11px] text-amber-400" role="note">{warning}</p>
                     )}
                     </div>
                     );
                   })}
                 </div>
+                {noWorkingDay && (
+                  <p className="mt-2 text-[11px] text-amber-400" role="note">
+                    Aucun jour travaillé : aucun client ne pourra réserver avec ce barber.
+                  </p>
+                )}
               </div>
 
               <div>
@@ -431,9 +474,21 @@ export default function Team() {
                   Inactif retire aussi l'accès de ce barber à l'app (agenda, clients). Pour un départ définitif, supprimez son compte dans Comptes barbers.
                 </p>
               )}
+              {!editEmployee.id && (
+                <p className={`text-[11px] -mt-2 ${editEmployee.is_active === false ? 'text-amber-400' : 'text-muted-foreground'}`}>
+                  {editEmployee.is_active === false
+                    ? 'Fiche inactive : invisible des clients (accueil, réservation) et son compte barber ne pourra pas se connecter tant qu\'elle reste inactive.'
+                    : 'Active : visible des clients dès l\'enregistrement. Son accès à l\'app se crée ensuite dans Comptes barbers.'}
+                </p>
+              )}
+              {hoursErrorDays.length > 0 && (
+                <p className="text-[11px] text-red-400" role="alert">
+                  Horaires à corriger : {hoursErrorDays.map(d => DAY_LABELS[d]).join(', ')}.
+                </p>
+              )}
               <Button className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
-                disabled={saveMutation.isPending || photoUploading || !editEmployee.name?.trim()}
-                onClick={() => { if (saveMutation.isPending || photoUploading || !editEmployee.name?.trim()) return; saveMutation.mutate(editEmployee); }}>
+                disabled={saveMutation.isPending || photoUploading || formBlocked}
+                onClick={() => { if (saveMutation.isPending || photoUploading || formBlocked) return; saveMutation.mutate(editEmployee); }}>
                 {photoUploading ? 'Envoi de la photo…' : saveMutation.isPending ? 'Enregistrement…' : 'Sauvegarder'}
               </Button>
             </div>
