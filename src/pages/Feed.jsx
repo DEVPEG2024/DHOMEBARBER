@@ -1,5 +1,6 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { api } from '@/api/apiClient';
+import { fetchPublicBarbers } from '@/lib/publicBarbers';
 import { useQuery, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
@@ -725,7 +726,7 @@ export default function Feed() {
   const { data: employees = [] } = useQuery({
     queryKey: ['employees'],
     staleTime: 5 * 60 * 1000, // catalogue : change rarement
-    queryFn: () => api.entities.Employee.filter({ is_active: true }, 'sort_order', 50),
+    queryFn: fetchPublicBarbers,
   });
 
   // Utilisateurs que j'ai bloqués : leurs contenus sont masqués (le serveur filtre aussi)

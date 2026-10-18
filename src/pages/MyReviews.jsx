@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { api } from '@/api/apiClient';
+import { fetchPublicBarbers } from '@/lib/publicBarbers';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { Star, MessageSquare, ExternalLink } from 'lucide-react';
@@ -206,7 +207,7 @@ export default function MyReviews() {
   const { data: barbers = [] } = useQuery({
     queryKey: ['employees'],
     staleTime: 5 * 60 * 1000, // catalogue : change rarement
-    queryFn: () => api.entities.Employee.filter({ is_active: true }, 'sort_order', 50),
+    queryFn: fetchPublicBarbers,
   });
 
   const createReview = useMutation({

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '@/api/apiClient';
+import { fetchPublicBarbers } from '@/lib/publicBarbers';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { MapPin, Clock, Phone, Star, ArrowRight, Scissors, ShoppingBag, Newspaper, Sparkles, Gift, GripVertical, Pencil, Check, X, Volume2, VolumeX, Shirt, Handshake } from 'lucide-react';
 import { motion, useMotionValue, useSpring, useTransform, Reorder, useReducedMotion } from 'framer-motion';
@@ -419,7 +420,7 @@ export default function Home() {
   const employeesQuery = useQuery({
     queryKey: ['employees'],
     staleTime: 5 * 60 * 1000, // catalogue : change rarement
-    queryFn: () => api.entities.Employee.filter({ is_active: true }, 'sort_order', 50),
+    queryFn: fetchPublicBarbers,
   });
   const employees = employeesQuery.data ?? [];
 

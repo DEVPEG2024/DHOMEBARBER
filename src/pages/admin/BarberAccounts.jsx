@@ -235,7 +235,7 @@ export default function BarberAccounts() {
                   {!employeesReady ? 'Chargement des fiches…' : availableEmployees.length === 0 ? 'Aucune fiche sans compte' : 'Choisir un barber...'}
                 </option>
                 {availableEmployees.map(emp => (
-                  <option key={emp.id} value={emp.id}>{emp.name}{emp.is_active === false ? ' (fiche inactive)' : ''}</option>
+                  <option key={emp.id} value={emp.id}>{emp.name}{emp.is_active === false ? ' (fiche inactive)' : emp.is_hidden ? ' (fiche de test)' : ''}</option>
                 ))}
               </select>
               {employeesQuery.isError && !employeesReady && (

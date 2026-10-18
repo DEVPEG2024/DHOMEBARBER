@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { api } from '@/api/apiClient';
+import { fetchPublicBarbers } from '@/lib/publicBarbers';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { motion } from 'framer-motion';
@@ -58,7 +59,7 @@ export default function Events() {
   const { data: employees = [] } = useQuery({
     queryKey: ['employees'],
     staleTime: 5 * 60 * 1000, // catalogue : change rarement
-    queryFn: () => api.entities.Employee.filter({ is_active: true }, 'sort_order', 50),
+    queryFn: fetchPublicBarbers,
   });
 
   const myEventsQuery = useQuery({

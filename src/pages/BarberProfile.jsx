@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api } from '@/api/apiClient';
+import { fetchPublicBarbers } from '@/lib/publicBarbers';
 import { useQuery } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeft, ChevronRight, Scissors, Calendar, Clock } from 'lucide-react';
@@ -322,7 +323,7 @@ export default function BarberProfile() {
   const employeesQuery = useQuery({
     queryKey: ['employees'],
     staleTime: 5 * 60 * 1000, // catalogue : change rarement
-    queryFn: () => api.entities.Employee.filter({ is_active: true }, 'sort_order', 50),
+    queryFn: fetchPublicBarbers,
     retry: 1,
   });
   const { data: employees = [], isLoading, error, refetch, isFetching } = employeesQuery;

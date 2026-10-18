@@ -28,7 +28,7 @@ const DAY_LABELS = { monday: 'Lundi', tuesday: 'Mardi', wednesday: 'Mercredi', t
 // Champs du formulaire : seuls ceux-là partent, et seulement s'ils ont changé. Renvoyer la fiche
 // entière (copie du cache, parfois vieille de plusieurs heures) écrasait la photo, la bio, les
 // compétences ou les permissions modifiées ailleurs (Mes paramètres du barber, Comptes barbers).
-const FORM_FIELDS = ['name', 'title', 'email', 'phone', 'photo_url', 'bio', 'working_hours', 'color', 'is_active'];
+const FORM_FIELDS = ['name', 'title', 'email', 'phone', 'photo_url', 'bio', 'working_hours', 'color', 'is_active', 'is_hidden'];
 const sameValue = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
 const defaultHours = DAYS.reduce((acc, d) => ({
@@ -147,7 +147,9 @@ export default function Team() {
         toast.success(`${res.name || 'Barber'} ajouté à l'équipe`, {
           description: res.is_active === false
             ? 'Fiche inactive : invisible des clients. Créez maintenant son compte pour qu\'il accède à l\'app (connexion possible une fois la fiche active).'
-            : 'Créez maintenant son compte pour qu\'il accède à l\'app (agenda, clients).',
+            : res.is_hidden
+              ? 'Fiche de test : invisible des clients. Créez maintenant son compte pour vous connecter avec.'
+              : 'Créez maintenant son compte pour qu\'il accède à l\'app (agenda, clients).',
           duration: 12000,
           action: { label: 'Créer son compte', onClick: () => navigate(`/admin/barber-accounts?employee=${encodeURIComponent(res.id)}`) },
         });
@@ -182,7 +184,7 @@ export default function Team() {
     openToken.current++;
     setPhotoUploading(false);
     setOriginalEmployee(null);
-    setEditEmployee({ name: '', title: '', bio: '', email: '', phone: '', is_active: true, working_hours: hoursFromSalon(salonOpeningHours), color: nextColor });
+    setEditEmployee({ name: '', title: '', bio: '', email: '', phone: '', is_active: true, is_hidden: false, working_hours: hoursFromSalon(salonOpeningHours), color: nextColor });
     setInactiveConflict(null);
     setShowDialog(true);
   };
@@ -268,9 +270,10 @@ export default function Team() {
                 )}
               </div>
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                   <h3 className="text-sm font-semibold">{emp.name}</h3>
                   {!emp.is_active && <span className="text-[9px] bg-secondary text-muted-foreground px-1.5 py-0.5 rounded">Inactif</span>}
+                  {emp.is_hidden && <span className="text-[9px] bg-sky-500/15 text-sky-400 px-1.5 py-0.5 rounded">Test · invisible des clients</span>}
                 </div>
                 <p className="text-[10px] text-muted-foreground uppercase tracking-wider">{emp.title || 'Barber'}</p>
                 {emp.email && (
@@ -478,7 +481,24 @@ export default function Team() {
                 <p className={`text-[11px] -mt-2 ${editEmployee.is_active === false ? 'text-amber-400' : 'text-muted-foreground'}`}>
                   {editEmployee.is_active === false
                     ? 'Fiche inactive : invisible des clients (accueil, réservation) et son compte barber ne pourra pas se connecter tant qu\'elle reste inactive.'
-                    : 'Active : visible des clients dès l\'enregistrement. Son accès à l\'app se crée ensuite dans Comptes barbers.'}
+                    : editEmployee.is_hidden
+                      ? 'Active et cachée : son compte barber se connecte, les clients ne la voient pas.'
+                      : 'Active : visible des clients dès l\'enregistrement. Son accès à l\'app se crée ensuite dans Comptes barbers.'}
+                </p>
+              )}
+              {/* Fiche de test : active (le compte se connecte, l'agenda la montre), jamais visible
+                  ni réservable par un client, sans ménage ni Last Minute */}
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <Label className="text-xs">Fiche de test</Label>
+                  <p className="text-[11px] text-muted-foreground">Invisible des clients (accueil, réservation, profil), pour faire vos essais.</p>
+                </div>
+                <Switch checked={!!editEmployee.is_hidden} aria-label="Fiche de test, invisible des clients"
+                  onCheckedChange={v => setEditEmployee({ ...editEmployee, is_hidden: v })} />
+              </div>
+              {editEmployee.is_hidden && (
+                <p className="text-[11px] text-sky-400 -mt-2" role="note">
+                  Ni réservation client, ni Last Minute, ni tâche de ménage. Les rendez-vous de test se créent dans l'agenda (« Ajouter un client ») et sont à supprimer après vos essais.
                 </p>
               )}
               {hoursErrorDays.length > 0 && (

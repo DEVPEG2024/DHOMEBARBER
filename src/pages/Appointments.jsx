@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '@/api/apiClient';
+import { fetchPublicBarbers } from '@/lib/publicBarbers';
 import { useAuth } from '@/lib/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
@@ -175,7 +176,7 @@ export default function Appointments() {
   const employeesQuery = useQuery({
     queryKey: ['employees'],
     staleTime: 5 * 60 * 1000,
-    queryFn: () => api.entities.Employee.filter({ is_active: true }, 'sort_order', 50),
+    queryFn: fetchPublicBarbers,
     enabled: !!cancelApt,
   });
   const { data: employees = [], isPending: employeesPending } = employeesQuery;
