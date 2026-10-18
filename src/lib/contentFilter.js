@@ -20,7 +20,7 @@ const WORDS = [
   // Insultes
   'connard', 'connasse', 'conasse', 'salope', 'salopard', 'encule', 'enculer', 'enculee',
   'fdp', 'ntm', 'niquer', 'pute', 'pouffiasse', 'petasse',
-  'trouduc',
+  'trouduc', 'pd',
   // Propos haineux
   'pede', 'gouine', 'bougnoule', 'bicot', 'youpin',
   'chinetoque', 'nigger', 'nigga', 'faggot', 'tranny',
@@ -50,7 +50,6 @@ const PHRASES = [
   'espece de salaud', 'sale salaud', 'gros salaud', 'espece de conard', 'suce ma bite', 'grosse bite',
   'sale enfoire', 'sale enfoiree', 'espece d enfoire', 'espece d enfoiree', 'gros enfoire', 'pauvre enfoire',
   'bande d enfoires', 't es un enfoire', 'tu es un enfoire',
-  'sale pd', 'espece de pd', 't es un pd', 'tu es un pd', 'gros pd', 'mort aux pd',
   'sale bamboula', 'gros bamboula', 'espece de bamboula',
   'sale negre', 'sale negro', 'sale negresse', 'gros negre', 'sale race de negre',
 ];
