@@ -27,6 +27,10 @@ import { formatPrice } from '@/components/shop/productUtils';
 const NO_ORDERS = [];
 /** Aucun rendez-vous : valeur stable (dépendance du useMemo de la liste). */
 const NO_APPOINTMENTS = [];
+// Heure limite d'annulation en ligne, à l'heure du salon quel que soit le fuseau de l'appareil
+const PARIS_DEADLINE = new Intl.DateTimeFormat('fr-FR', {
+  timeZone: 'Europe/Paris', weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
+});
 
 /** Message du serveur lisible (jamais « HTTP 409 » ni un message réseau en anglais), sans point final. */
 function serverMessage(err, fallback) {
@@ -128,6 +132,9 @@ export default function Appointments() {
     queryFn: async () => ((await api.entities.Appointment.filter({ client_email: user.email }, '-date', 100)) || []).filter(a => !isClientPlaceholder(a)),
     enabled: !!user?.email,
     refetchInterval: 30000, // Auto-refresh toutes les 30s
+    // Retour dans l'app (déplacement ou annulation faits ailleurs, par le salon) : relu tout de
+    // suite, pas jusqu'à 30 s d'un état périmé qui laisse croire que l'ancien RDV est resté
+    refetchOnWindowFocus: true,
   });
   const appointments = appointmentsQuery.data || NO_APPOINTMENTS;
   // Requête mise en pause hors connexion (réseau tombé en cours d'usage) : ni chargement, ni
@@ -390,6 +397,16 @@ export default function Appointments() {
         });
         queryClient.invalidateQueries({ queryKey: ['myAppointments'] });
         queryClient.invalidateQueries({ queryKey: ['salonSettings'] });
+        return;
+      }
+      // Refus que seul le salon peut lever : pas d'invitation à choisir un autre créneau
+      if (/appelez le salon/i.test(shown)) {
+        setCancelApt(null);
+        toast.error(`${shown}.`, {
+          duration: 10000,
+          action: { label: 'Appeler', onClick: () => { window.location.href = salonPhoneHref; } },
+        });
+        queryClient.invalidateQueries({ queryKey: ['myAppointments'] });
         return;
       }
       if (err?.status === 409 || err?.status === 400) {
@@ -693,13 +710,23 @@ export default function Appointments() {
                           {callInstead && (
                             <p className="mt-2.5 text-[11px] leading-relaxed text-muted-foreground">
                               {tooLateToCancel
-                                ? `Annulation en ligne possible jusqu'à ${cancelHours} h avant le rendez-vous. Un empêchement ? `
+                                ? `Ce rendez-vous est dans moins de ${cancelHours} h : il ne peut plus être déplacé ni annulé en ligne, et réserver un autre créneau ne le supprimera pas. Pour le déplacer ou l'annuler, `
                                 : 'Pour modifier ou annuler ce rendez-vous, '}
                               <a href={salonPhoneHref} className="inline-flex items-center gap-1 font-semibold text-primary whitespace-nowrap">
                                 <Phone className="w-3 h-3" />
-                                {tooLateToCancel ? 'Appelez le salon' : 'appelez le salon'}
+                                appelez le salon
                               </a>
                               <span className="whitespace-nowrap"> au {salonPhone}</span>.
+                            </p>
+                          )}
+                          {/* Heure limite du délai d'annulation, pour ne pas la découvrir trop tard */}
+                          {canCancel && cancelHours > 0 && (
+                            <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+                              Déplaçable ou annulable en ligne jusqu'au{' '}
+                              <span className="font-semibold text-foreground/80">
+                                {PARIS_DEADLINE.format(new Date(startMs - cancelHours * 3600 * 1000)).replace(', ', ' à ')}
+                              </span>
+                              {' '}; ensuite, seul le salon pourra le faire.
                             </p>
                           )}
                           <AnimatePresence initial={false}>

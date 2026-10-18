@@ -626,11 +626,14 @@ export default function Booking() {
   const [presetMiss, setPresetMiss] = useState(null);
   const features = useCancelFeatures();
 
-  // Mêmes clé et requête que Mes rendez-vous (cache partagé)
+  // Mêmes clé et requête que Mes rendez-vous (cache partagé). Chargée pour tout client (pas
+  // seulement sur un lien « Déplacer ») : une réservation qui doublerait un RDV déjà pris le même
+  // jour est signalée avant « Confirmer » (incident du 18 oct. 2026 : l'ancien restait prévu)
+  const isStaffRole = user?.role === 'admin' || user?.role === 'barber';
   const myAppointmentsQuery = useQuery({
     queryKey: ['myAppointments', user?.email],
     queryFn: () => api.entities.Appointment.filter({ client_email: user.email }, '-date', 100),
-    enabled: !!rescheduleId && !!user?.email,
+    enabled: !!user?.email && (!!rescheduleId || !isStaffRole),
   });
   const myAppointments = myAppointmentsQuery.data || EMPTY_LIST;
   // Délai d'annulation du salon (mêmes requête et cache que Mes rendez-vous) : un RDV qui entre
@@ -1002,6 +1005,41 @@ export default function Booking() {
     return analyzeDay(liveEmployee, selectedDate, own, timeOffs, totalDuration, shortestDuration, privateEvents).slots.includes(selectedTime);
   }, [selectedTime, selectedDate, slotsReady, anyBarber, selectedEmployee, liveEmployee, slotOptions, appointments, timeOffs, totalDuration, shortestDuration, privateEvents, uncertainMatch, ownSameBooking, nowTick]);
 
+  // Autres rendez-vous à venir du client qu'une nouvelle réservation ne remplacera PAS : le même
+  // jour, ou les mêmes prestations à moins de 72 h (même règle que le serveur, qui refuse en 409 si
+  // l'ancien est déjà dans le délai d'annulation sans `confirm_second`). Le client choisit
+  // explicitement : « Déplacer plutôt celui-ci » (hors délai) ou « C'est un rendez-vous en plus ».
+  const [extraAck, setExtraAck] = useState(false);
+  const existingConflicts = useMemo(() => {
+    if (rescheduleId || isStaffRole || !selectedDateStr || !selectedTime) return [];
+    const now = Date.now();
+    const newStart = parisInstant(selectedDateStr, selectedTime);
+    return myAppointments
+      .filter((a) => {
+        if (!a || !['confirmed', 'pending'].includes(a.status) || !a.date) return false;
+        // Renvoi du même envoi (réponse perdue) : c'est ce rendez-vous-là, pas un autre
+        if (a.date === selectedDateStr && String(a.start_time || '').slice(0, 5) === selectedTime
+          && selectedEmployee && String(a.employee_id) === String(selectedEmployee.id)) return false;
+        const start = parisInstant(a.date, a.start_time || '00:00');
+        if (!(start > now)) return false;
+        if (a.date === selectedDateStr) return true;
+        return serviceKey(a.services) === selectedServiceKey && Math.abs(start - newStart) <= 72 * 3600 * 1000;
+      })
+      .map((a) => ({
+        apt: a,
+        locked: withinCancelDelay(a, now),
+        label: `${format(new Date(`${a.date}T12:00:00`), 'EEE d MMM', { locale: fr })} à ${String(a.start_time || '').slice(0, 5)}`,
+      }));
+  }, [myAppointments, rescheduleId, isStaffRole, selectedDateStr, selectedTime, selectedEmployee, selectedServiceKey, cancelHours]);
+  // Nouvelle sélection : le choix « rendez-vous en plus » est redemandé
+  useEffect(() => { setExtraAck(false); }, [selectedDateStr, selectedTime, selectedEmployee?.id, selectedServiceKey]);
+  /** « Déplacer plutôt celui-ci » : la même sélection devient le déplacement de ce rendez-vous. */
+  const moveInstead = (apt) => {
+    const params = new URLSearchParams(window.location.search);
+    params.set('reschedule', String(apt.id));
+    navigate(`/booking?${params.toString()}`, { replace: true });
+  };
+
   // RDV qui commence dans moins de `cancelHours` heures : il ne pourra plus être annulé ni déplacé
   // en ligne. Rien tant que les paramètres du salon ne sont pas chargés.
   const lateBooking = !!selectedDate && !!selectedTime && cancelHours > 0 && !settingsQuery.isPending
@@ -1188,7 +1226,9 @@ export default function Booking() {
     mutationFn: async () => {
       if (!isAuthenticated || !user) {
         // Redirect to login, will come back to booking
-        navigate('/login?redirect=/booking');
+        // Toute la requête est gardée (`reschedule`, barber, prestations) : sans elle, un
+        // déplacement repris après la connexion devenait un nouveau RDV et l'ancien restait prévu
+        navigate(`/login?redirect=${encodeURIComponent(`/booking${window.location.search}`)}`);
         throw new Error('Non connecté');
       }
       if (user.role === 'admin' || user.role === 'barber') throw new Error('Les comptes de l\'équipe réservent depuis l\'agenda.');
@@ -1229,6 +1269,8 @@ export default function Booking() {
         notes: notes.slice(0, NOTES_MAX),
         // Déplacement : le serveur fait suivre au nouveau RDV les produits ajoutés à l'ancien
         ...(previous ? { reschedule_of: previous.id } : {}),
+        // Rendez-vous en plus assumé par le client (un autre RDV reste prévu, bandeau coché)
+        ...(!previous && extraAck && existingConflicts.length > 0 ? { confirm_second: true } : {}),
       });
       // Produits ajoutés : commande rattachée au RDV, créée seulement une fois le RDV confirmé.
       // Son échec ne remet jamais en cause la réservation (stock épuisé entre-temps, quota…).
@@ -1317,6 +1359,17 @@ export default function Booking() {
       // Le serveur vérifie la disponibilité et refuse pour des raisons précises (créneau passé,
       // hors horaires, congé, chevauchement, plafond de rendez-vous) : son message est affiché.
       const shown = serverMessage(err, 'Erreur lors de la création du rendez-vous');
+      // Le client a déjà un RDV verrouillé (délai d'annulation) que celui-ci ne remplacerait pas :
+      // on reste sur la confirmation, la liste relue fait apparaître le bandeau et son choix
+      if (err?.data?.code === 'locked_appointment') {
+        setExtraAck(false);
+        queryClient.invalidateQueries({ queryKey: ['myAppointments'] });
+        toast.error(`${shown}.`, {
+          duration: 12000,
+          action: { label: 'Appeler', onClick: () => { window.location.href = SALON_PHONE_HREF; } },
+        });
+        return;
+      }
       // Déplacement impossible en ligne (ancien RDV dans le délai d'annulation, ou plus
       // déplaçable) : le salon s'en occupe, on reste sur la page
       if (err?.tooLate || (oldApt && err?.status === 409 && /pour le déplacer|ne peut plus être déplacé/i.test(shown))) {
@@ -1394,8 +1447,11 @@ export default function Booking() {
   // Comptes de l'équipe : ils réservent depuis l'agenda (le serveur refuse un RDV à leur propre
   // email). La navigation dans les étapes reste possible pour prévisualiser la page.
   const isStaffAccount = user?.role === 'admin' || user?.role === 'barber';
+  // Lien « Déplacer » non vérifiable (liste en échec) : pas d'envoi tant que ce n'est pas vérifié ou
+  // que le client n'a pas choisi « Réserver quand même » (l'ancien resterait prévu sans le savoir).
+  // Autre RDV que celui-ci ne remplacera pas : choix explicite demandé (bandeau)
   const canConfirm = !!selectedEmployee && !!selectedDate && !!selectedTime && !reschedulePending && !rescheduleTooLate && !isStaffAccount
-    && selectedSlotValid !== false;
+    && selectedSlotValid !== false && !rescheduleCheckFailed && (existingConflicts.length === 0 || extraAck);
 
   // Bouton retour d'Android : étape précédente (même règle que « Retour ») au lieu de quitter la
   // page et de perdre la sélection ; sur l'écran de succès, « Mes rendez-vous » tout de suite (sans
@@ -1528,14 +1584,20 @@ export default function Booking() {
           {rescheduleUnavailable && !success && !uncertainMatch && (
             <div role="status" className="mt-4 rounded-2xl border border-amber-500/25 bg-amber-500/10 px-3.5 py-3 text-xs leading-relaxed text-amber-200/90 break-words">
               {rescheduleCheckFailed
-                ? 'Impossible de vérifier le rendez-vous à déplacer : si vous confirmez, celui-ci sera un nouveau rendez-vous et l\'ancien restera prévu.'
+                ? 'Impossible de vérifier le rendez-vous à déplacer. Réessayez, ou réservez un nouveau rendez-vous : l\'ancien restera alors prévu.'
                 : 'Ce rendez-vous ne peut plus être déplacé : celui-ci sera un nouveau rendez-vous.'}
               {' '}
               {rescheduleCheckFailed ? (
-                <button type="button" onClick={() => myAppointmentsQuery.refetch()} disabled={myAppointmentsQuery.isFetching}
-                  className="font-semibold text-primary underline underline-offset-2 whitespace-nowrap disabled:opacity-60">
-                  {myAppointmentsQuery.isFetching ? 'Vérification…' : 'Réessayer'}
-                </button>
+                <>
+                  <button type="button" onClick={() => myAppointmentsQuery.refetch()} disabled={myAppointmentsQuery.isFetching}
+                    className="font-semibold text-primary underline underline-offset-2 whitespace-nowrap disabled:opacity-60">
+                    {myAppointmentsQuery.isFetching ? 'Vérification…' : 'Réessayer'}
+                  </button>
+                  {' · '}
+                  <button type="button" onClick={dropReschedule} className="font-semibold text-primary underline underline-offset-2">
+                    Réserver un rendez-vous en plus
+                  </button>
+                </>
               ) : (
                 <button type="button" onClick={dropReschedule} className="font-semibold text-primary underline underline-offset-2 whitespace-nowrap">
                   Compris
@@ -1550,9 +1612,12 @@ export default function Booking() {
               Votre rendez-vous du <span className="font-semibold">{oldAptLabel}</span> est dans moins de {cancelHours} h : pour le déplacer,{' '}
               <a href={SALON_PHONE_HREF} className="font-semibold text-primary whitespace-nowrap">appelez le salon au {SALON_PHONE}</a>.
               {' '}
-              <button type="button" onClick={dropReschedule} className="font-semibold text-primary underline underline-offset-2 whitespace-nowrap">
-                Réserver un nouveau rendez-vous
-              </button>
+              <span className="mt-1.5 block">
+                Réserver un autre créneau ne le supprimera pas : les deux resteraient prévus.{' '}
+                <button type="button" onClick={dropReschedule} className="font-semibold text-primary underline underline-offset-2">
+                  Réserver un rendez-vous en plus (celui du {oldAptLabel} reste prévu)
+                </button>
+              </span>
             </div>
           )}
 
@@ -1888,6 +1953,37 @@ export default function Booking() {
             <span className="font-semibold">Votre rendez-vous est bien enregistré.</span>{' '}
             Touchez « Confirmer » pour terminer, ou retrouvez-le dans{' '}
             <Link to="/appointments" className="font-semibold text-primary underline underline-offset-2 whitespace-nowrap">Mes rendez-vous</Link>.
+          </div>
+        )}
+
+        {/* Autre rendez-vous que celui-ci ne remplacera pas : choix explicite avant « Confirmer » */}
+        {step === 3 && !success && existingConflicts.length > 0 && (
+          <div role="status" className="mt-6 p-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 text-xs text-amber-200 leading-relaxed break-words">
+            {existingConflicts.map(({ apt, locked, label }) => (
+              <p key={apt.id} className="mb-2">
+                Vous avez déjà rendez-vous le <span className="font-semibold text-amber-100">{label}</span>
+                {apt.employee_name ? <> avec <span className="font-semibold text-amber-100">{apt.employee_name}</span></> : null}.
+                {' '}Ce nouveau rendez-vous s'ajoutera : <span className="font-semibold text-amber-100">celui-ci restera prévu</span>.
+                {locked ? (
+                  <>
+                    {' '}Il est dans moins de {cancelHours} h : il ne peut plus être déplacé ni annulé en ligne. Pour le déplacer,{' '}
+                    <a href={SALON_PHONE_HREF} className="font-semibold text-amber-100 underline whitespace-nowrap">appelez le salon au {SALON_PHONE}</a>.
+                  </>
+                ) : (
+                  <>
+                    {' '}
+                    <button type="button" onClick={() => moveInstead(apt)} className="font-semibold text-primary underline underline-offset-2">
+                      Déplacer plutôt celui du {label}
+                    </button>
+                  </>
+                )}
+              </p>
+            ))}
+            <label className="flex items-start gap-2 cursor-pointer text-amber-100">
+              <input type="checkbox" checked={extraAck} onChange={(e) => setExtraAck(e.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 accent-[hsl(var(--primary))]" />
+              <span>C'est un rendez-vous en plus (pour moi ou un proche) : je garde {existingConflicts.length > 1 ? 'les autres' : 'l\'autre'}.</span>
+            </label>
           </div>
         )}
 
