@@ -33,6 +33,11 @@ export default function GalleryEditor({ employee }) {
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null); // url
   const busy = !!uploading || saving;
+  // Les boutons de geste ne dépendent que de l'envoi des photos : l'enregistrement d'une légende
+  // (au blur) ne doit pas les désactiver avant la fin du tap. Les enregistrements sont mis en file.
+  const sending = !!uploading;
+  const saveChainRef = useRef(Promise.resolve());
+  const pendingSavesRef = useRef(0);
   // Liste à jour, lue par les enregistrements asynchrones (fin d'envoi, retour en arrière) :
   // une closure figée au début d'un envoi écraserait ce qui a changé entre-temps.
   const itemsRef = useRef(items);
@@ -63,7 +68,14 @@ export default function GalleryEditor({ employee }) {
       itemsRef.current = preview;
       setItems(preview);
     }
+    pendingSavesRef.current += 1;
     setSaving(true);
+    const run = saveChainRef.current.then(() => persist(apply, previous, success));
+    saveChainRef.current = run.catch(() => {});
+    return run;
+  };
+
+  const persist = async (apply, previous, success) => {
     try {
       const base = await fetchServerGallery();
       const next = apply(base);
@@ -88,7 +100,8 @@ export default function GalleryEditor({ employee }) {
       queryClient.invalidateQueries({ queryKey: ['employees'] });
       return false;
     } finally {
-      setSaving(false);
+      pendingSavesRef.current -= 1;
+      if (pendingSavesRef.current <= 0) setSaving(false);
     }
   };
 
@@ -133,11 +146,12 @@ export default function GalleryEditor({ employee }) {
   };
 
   const move = (index, dir) => {
+    const list = itemsRef.current;
     const target = index + dir;
-    if (target < 0 || target >= items.length) return;
+    if (target < 0 || target >= list.length || !list[index]) return;
     // Gestes exprimés par URL : la galerie du serveur peut compter d'autres photos
-    const a = items[index].url;
-    const b = items[target].url;
+    const a = list[index].url;
+    const b = list[target].url;
     save((base) => {
       const i = base.findIndex((it) => it.url === a);
       const j = base.findIndex((it) => it.url === b);
@@ -200,22 +214,22 @@ export default function GalleryEditor({ employee }) {
                 <img src={item.url} alt={item.caption || `Réalisation ${i + 1}`} loading="lazy" className="w-full h-full object-cover" />
                 <div className="absolute inset-x-0 top-0 flex justify-between p-1.5">
                   <div className="flex gap-1">
-                    <button type="button" aria-label="Plus tôt" disabled={busy || i === 0} onClick={() => move(i, -1)}
+                    <button type="button" aria-label="Plus tôt" disabled={sending || i === 0} onClick={() => move(i, -1)}
                       className="w-7 h-7 rounded-lg bg-black/60 text-white flex items-center justify-center disabled:opacity-30">
                       <ChevronLeft className="w-4 h-4" />
                     </button>
-                    <button type="button" aria-label="Plus tard" disabled={busy || i === items.length - 1} onClick={() => move(i, 1)}
+                    <button type="button" aria-label="Plus tard" disabled={sending || i === items.length - 1} onClick={() => move(i, 1)}
                       className="w-7 h-7 rounded-lg bg-black/60 text-white flex items-center justify-center disabled:opacity-30">
                       <ChevronRight className="w-4 h-4" />
                     </button>
                   </div>
                   {confirmDelete === item.url ? (
-                    <button type="button" disabled={busy} onClick={() => remove(item.url)}
+                    <button type="button" disabled={sending} onClick={() => remove(item.url)}
                       className="h-7 px-2 rounded-lg bg-destructive text-destructive-foreground text-[10px] font-semibold">
                       Retirer ?
                     </button>
                   ) : (
-                    <button type="button" aria-label="Retirer la photo" disabled={busy} onClick={() => setConfirmDelete(item.url)}
+                    <button type="button" aria-label="Retirer la photo" disabled={sending} onClick={() => setConfirmDelete(item.url)}
                       className="w-7 h-7 rounded-lg bg-black/60 text-white flex items-center justify-center">
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>

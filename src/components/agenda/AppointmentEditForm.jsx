@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Bell, Clock, Minus, Plus, X, Loader2, UserRound, Link2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/api/apiClient';
@@ -8,7 +8,7 @@ import { useAppointmentOrders, orderItemsLabel } from '@/lib/appointmentProducts
 import ClientAccountPicker from './ClientAccountPicker';
 import {
   timeToMinutes, addMinutesToTime, parseDateParam, slotIssues, isUpcomingSlot,
-  LAST_MINUTE_MARKER, withLastMinuteMarker, stripLastMinuteMarker, agendaErrorMessage,
+  LAST_MINUTE_MARKER, withLastMinuteMarker, stripLastMinuteMarker, agendaErrorMessage, invalidateAppointmentQueries,
 } from './agendaUtils';
 
 const inputCls = 'w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-primary/50';
@@ -31,6 +31,7 @@ const sameServices = (a, b) =>
  * d'un même barber est refusé, comme le fait la base.
  */
 export default function AppointmentEditForm({ appointment, employees, onCancel, onSaved }) {
+  const queryClient = useQueryClient();
   const original = useMemo(() => (appointment.services || []).map(normalizeService), [appointment]);
   const originalDuration = appointment.total_duration
     || (timeToMinutes(appointment.end_time) - timeToMinutes(appointment.start_time))
@@ -154,14 +155,21 @@ export default function AppointmentEditForm({ appointment, employees, onCancel, 
       }
     }
 
+    // Fiche ouverte sur un Last Minute libre : si un client l'a repris entre-temps, le serveur
+    // répond 409 au lieu d'écraser son rendez-vous (le drapeau n'est jamais écrit en base)
+    const guarded = appointment.status === 'last_minute';
+    if (guarded) payload.if_free_last_minute = true;
+
     setSaving(true);
     try {
       const updated = await api.entities.Appointment.update(appointment.id, payload);
+      delete payload.if_free_last_minute;
       toast.success(moved
         ? (canNotify && notify ? 'Rendez-vous déplacé · client prévenu' : 'Rendez-vous déplacé')
         : (accountChanged && clientEmail ? 'Compte client rattaché au rendez-vous' : 'Rendez-vous modifié'));
       onSaved({ ...appointment, ...payload, ...(updated || {}) });
     } catch (e) {
+      if (e?.status === 409) invalidateAppointmentQueries(queryClient);
       toast.error(agendaErrorMessage(e, 'Erreur lors de l\'enregistrement'));
     } finally {
       setSaving(false);

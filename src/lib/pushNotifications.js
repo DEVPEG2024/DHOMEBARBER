@@ -272,10 +272,10 @@ export function syncPushSubscription(userId) {
 
 async function doSyncPushSubscription(userId) {
   if (!getToken()) return;
+  // Coupées par CE compte seulement (web comme natif) : un autre compte de l'appareil est réabonné
+  if (isOptedOut(userId ?? sessionUserId(getToken()))) return;
   try {
     if (isNative) {
-      // Coupées par CE compte seulement : un autre compte de l'appareil est réabonné
-      if (isOptedOut(userId ?? sessionUserId(getToken()))) return;
       await initNativePush();
       const permStatus = await PushNotifications.checkPermissions();
       if (permStatus.receive !== 'granted') return;

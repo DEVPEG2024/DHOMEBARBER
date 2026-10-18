@@ -306,6 +306,8 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
   const handleConfirmCancel = async () => {
     dispatch({ type: 'SAVING', value: true });
     try {
+      // Last Minute : 409 avant toute écriture si un client l'a repris entre-temps
+      if (appointment.status === 'last_minute') await api.entities.Appointment.update(appointment.id, { if_free_last_minute: true });
       await api.entities.Appointment.update(appointment.id, {
         status: 'cancelled',
         cancellation_reason: formatStaffReason(cancelReason),
@@ -319,6 +321,7 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
       invalidateLinkedOrders(queryClient);
       onUpdate?.();
     } catch (e) {
+      if (e?.status === 409) invalidateAppointmentQueries(queryClient);
       toast.error(errorMessage(e, 'Annulation impossible'));
     } finally {
       dispatch({ type: 'SAVING', value: false });
@@ -328,12 +331,14 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
   const handleConfirmDelete = async () => {
     dispatch({ type: 'SAVING', value: true });
     try {
+      if (appointment.status === 'last_minute') await api.entities.Appointment.update(appointment.id, { if_free_last_minute: true });
       await api.entities.Appointment.delete(appointment.id);
       toast.success('Rendez-vous supprimé');
       setConfirmingDelete(false);
       invalidateLinkedOrders(queryClient);
       onDelete?.();
     } catch (e) {
+      if (e?.status === 409) invalidateAppointmentQueries(queryClient);
       toast.error(errorMessage(e, 'Suppression impossible'));
     } finally {
       dispatch({ type: 'SAVING', value: false });

@@ -60,11 +60,17 @@ const LEET = { 0: 'o', 1: 'i', 3: 'e', 4: 'a', 5: 's', 7: 't', '@': 'a', $: 's',
 // marques de direction, remplissages Hangul) : « sa​lope » s'affiche comme « salope ».
 const stripInvisible = (s) => String(s || '').replace(/[\p{Cf}­͏ᅟᅠㅤﾠ]/gu, '');
 
+// Lettres cyrilliques et grecques proches d'une lettre latine (« sаlope » avec un a cyrillique).
+// NFKD (appliqué avant) ramène déjà la pleine chasse, les lettres mathématiques et cerclées.
+const HOMOGLYPHS = { 'а': 'a', 'е': 'e', 'о': 'o', 'р': 'p', 'с': 'c', 'х': 'x', 'і': 'i',
+  'α': 'a', 'ε': 'e', 'ο': 'o', 'ρ': 'p', 'ι': 'i' };
+
 /** Texte comparable : minuscules, sans accents, « leet » remplacé, triples lettres ramenées à deux. */
 export function normalizeForFilter(text) {
   return stripInvisible(text)
+    .normalize('NFKD')
     .toLowerCase()
-    .normalize('NFD')
+    .replace(/[аеорсхіαεορι]/g, (c) => HOMOGLYPHS[c] || c)
     .replace(/\p{M}/gu, '')
     .replace(/[013457@$€]/g, (c) => LEET[c] || c)
     .replace(/([a-z])\1{2,}/g, '$1$1')

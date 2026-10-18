@@ -19,6 +19,7 @@ function formatReviewDate(value) {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('fr-FR', { timeZone: 'Europe/Paris' });
 }
 
+const REVIEWS_LIMIT = 200;
 const GOOGLE_PLACE_ID = 'ChIJm6cgTFprjEcRZsuEqhCEPXY';
 const GOOGLE_REVIEW_URL = `https://search.google.com/local/writereview?placeid=${GOOGLE_PLACE_ID}`;
 const GOOGLE_MAPS_URL = `https://www.google.com/maps/place/?q=place_id:${GOOGLE_PLACE_ID}`;
@@ -37,7 +38,7 @@ export default function AdminReviews() {
 
   const { data: reviews = [], isLoading, isError, isPending, fetchStatus, error, refetch, isFetching } = useQuery({
     queryKey: ['allReviews'],
-    queryFn: () => api.entities.Review.list('-created_date', 200),
+    queryFn: () => api.entities.Review.list('-created_date', REVIEWS_LIMIT),
   });
   // Liste en échec : jamais « 0 avis » ni « Aucun avis pour le moment »
   // Échec sans données, ou requête en pause hors connexion : jamais « 0 avis · 0/5 »
@@ -77,9 +78,13 @@ export default function AdminReviews() {
     },
   });
 
-  const avgRating = reviews.length > 0
-    ? (reviews.reduce((sum, r) => sum + (r.rating || 0), 0) / reviews.length).toFixed(1)
+  // Comme la note publique : les avis masqués ne comptent pas
+  const visibleReviews = reviews.filter(r => r.is_visible);
+  const avgRating = visibleReviews.length > 0
+    ? (visibleReviews.reduce((sum, r) => sum + (r.rating || 0), 0) / visibleReviews.length).toFixed(1)
     : '0';
+  const truncated = reviews.length >= REVIEWS_LIMIT;
+  const countLabel = truncated ? `${REVIEWS_LIMIT}+` : `${reviews.length}`;
 
   return (
     <div>
@@ -88,7 +93,7 @@ export default function AdminReviews() {
         <h1 className="font-display text-2xl font-bold">Avis Clients</h1>
         {countKnown ? (
           <p className="text-xs text-muted-foreground mt-1">
-            {reviews.length} avis · Note moyenne : {avgRating}/5
+            {countLabel} avis · Note moyenne : {avgRating}/5{truncated ? ` (sur les ${REVIEWS_LIMIT} plus récents, avis masqués exclus)` : ' (avis masqués exclus)'}
           </p>
         ) : isLoading ? (
           <p className="text-xs text-muted-foreground mt-1">Chargement…</p>
@@ -148,7 +153,7 @@ export default function AdminReviews() {
             tab === 'app' ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground'
           }`}
         >
-          {countKnown ? `Avis App (${reviews.length})` : 'Avis App'}
+          {countKnown ? `Avis App (${countLabel})` : 'Avis App'}
         </button>
         <button
           onClick={() => setTab('google')}

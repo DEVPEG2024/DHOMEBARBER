@@ -12,6 +12,10 @@ import LoadError, { friendlyError } from '@/components/shared/LoadError';
 import { useAuth } from '@/lib/AuthContext';
 import { parisInstant } from '@/lib/calendarLinks';
 import { invalidateAppointmentQueries, isClientPlaceholder } from '@/components/agenda/agendaUtils';
+import { normalizeSearch } from '@/components/admin-activity/activityUi';
+
+// Téléphone comparable : chiffres seuls, indicatif français (+33 / 0033) ramené au 0
+const phoneDigits = (v) => String(v || '').replace(/\D/g, '').replace(/^(?:00)?33(?=\d{9}$)/, '0');
 import { revenueOf, giftPartOf, round2 } from '@/lib/revenue';
 import {
   AlertDialog,
@@ -273,10 +277,16 @@ export default function Clients() {
     [appointments, registeredUsers, employees]
   );
 
-  const filtered = useMemo(() => clients.filter(c =>
-    c.name?.toLowerCase().includes(search.toLowerCase()) ||
-    c.email?.toLowerCase().includes(search.toLowerCase())
-  ), [clients, search]);
+  const filtered = useMemo(() => {
+    const q = normalizeSearch(search);
+    if (!q) return clients;
+    // Saisie qui ressemble à un numéro (au moins 3 chiffres, rien d'autre que + . - espaces)
+    const qd = /^[\d\s.+\-()]+$/.test(q) ? phoneDigits(q) : '';
+    return clients.filter(c =>
+      normalizeSearch(`${c.name || ''} ${c.email || ''}`).includes(q) ||
+      (qd.length >= 3 && phoneDigits(c.phone).includes(qd))
+    );
+  }, [clients, search]);
 
   // Rendez-vous qui seront annulés (aperçu dans les fenêtres de confirmation)
   const clientUpcomingCount = clientToDelete

@@ -83,7 +83,13 @@ export default function AiWriterPanel({ subject, message, audience, onApply }) {
       const [result] = await draftNotification({ mode: 'rewrite', style, subject, message, address, audience });
       if (result) {
         const cur = latest.current;
-        if (cur.subject === sent.subject && cur.message === sent.message) {
+        const tooShort = style === 'fix' && sent.message.length > 0 && result.message.length < sent.message.length * 0.7;
+        if (tooShort) {
+          // Correction d'orthographe qui raccourcit fortement le texte : suspect, pas appliquée d'office
+          setProposals([result]);
+          setChosen(-1);
+          toast.warning('La correction a nettement raccourci le texte : vérifiez la proposition ci-dessous avant de la reprendre.');
+        } else if (cur.subject === sent.subject && cur.message === sent.message) {
           apply(result);
           setChosen(-1);
         } else {

@@ -592,6 +592,7 @@ export default function Booking() {
   // Rendez-vous renvoyé par le serveur à la création (id → UID stable du .ics)
   const [createdAppointment, setCreatedAppointment] = useState(null);
   const [selectedServices, setSelectedServices] = useState([]);
+  const [retiredNotice, setRetiredNotice] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [selectedDate, setSelectedDate] = useState(null);
   const [selectedTime, setSelectedTime] = useState(null);
@@ -823,6 +824,7 @@ export default function Booking() {
     if (preSelectedIds.length > 0 && services.length > 0 && selectedServices.length === 0) {
       const preSelected = services.filter(s => preSelectedIds.includes(String(s.id)));
       if (preSelected.length > 0) setSelectedServices(preSelected);
+      if (preSelected.length < new Set(preSelectedIds).size) setRetiredNotice(true);
     }
   }, [services]);
 
@@ -1077,6 +1079,7 @@ export default function Booking() {
     hapticFeedback();
     const same = (s) => String(s.id) === String(service.id);
     if (!selectedServices.some(same)) scrollToBottomRef.current = true;
+    setRetiredNotice(false);
     setSelectedServices(prev =>
       prev.some(same)
         ? prev.filter(s => !same(s))
@@ -1088,6 +1091,7 @@ export default function Booking() {
   const swapServices = (remove, add) => {
     const removeIds = new Set(remove.map(s => String(s.id)));
     if (add.length > 0) scrollToBottomRef.current = true;
+    setRetiredNotice(false);
     setSelectedServices(prev => {
       const kept = prev.filter(s => !removeIds.has(String(s.id)));
       const known = new Set(kept.map(s => String(s.id)));
@@ -1544,6 +1548,12 @@ export default function Booking() {
               <button type="button" onClick={dropReschedule} className="font-semibold text-primary underline underline-offset-2 whitespace-nowrap">
                 Réserver un nouveau rendez-vous
               </button>
+            </div>
+          )}
+
+          {retiredNotice && !success && (
+            <div role="status" className="mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-3.5 py-3 text-xs leading-relaxed text-amber-300 break-words">
+              Une prestation de votre rendez-vous n'est plus proposée : vérifiez votre sélection.
             </div>
           )}
 

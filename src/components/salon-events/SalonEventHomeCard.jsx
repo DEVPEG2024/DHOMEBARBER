@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { ArrowRight, PartyPopper, Check } from 'lucide-react';
 import { SALON_EVENTS_QUERY_KEY, fetchMySalonEvents, formatEventDate, formatPrice } from '@/lib/salonEventsApi';
-import { eventImages, hasStarted, myResponse, splitSalonEvents } from './salonEventUtils';
+import { eventImages, hasStarted, myResponse, splitSalonEvents, useNow } from './salonEventUtils';
 
 /**
  * Carte autonome pour l'accueil (insérée par Home.jsx) : prochain événement du salon à venir
@@ -14,7 +14,9 @@ import { eventImages, hasStarted, myResponse, splitSalonEvents } from './salonEv
  */
 export default function SalonEventHomeCard() {
   const { data } = useQuery({ queryKey: SALON_EVENTS_QUERY_KEY, queryFn: fetchMySalonEvents, staleTime: 60_000, retry: false });
-  const next = useMemo(() => splitSalonEvents(data).next, [data]);
+  // Horloge à la minute : la phase (à venir / commencé / terminé) suit le temps même si les données ne bougent pas
+  const nowMs = useNow(60_000);
+  const next = useMemo(() => splitSalonEvents(data, nowMs).next, [data, nowMs]);
 
   if (!next) return null;
 
@@ -22,7 +24,7 @@ export default function SalonEventHomeCard() {
   const cover = eventImages(next)[0] || null;
   const isToday = next.phase === 'today';
   // Commencé : les réponses sont closes (règle du serveur), on n'invite plus à répondre
-  const started = hasStarted(next);
+  const started = hasStarted(next, nowMs);
   const needsAnswer = !started && (response === 'invited' || response === 'open');
 
   let eyebrow;

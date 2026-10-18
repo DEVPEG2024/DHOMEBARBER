@@ -44,6 +44,21 @@ const isPublishedLastMinute = (a) =>
 const isCountedConversion = (a) =>
   isConvertedLastMinute(a) && (!isCancelledLike(a) || isRescheduledCancel(a));
 
+// Encaissement d'une conversion Last Minute (« CA Last Minute ») : la ligne elle-même ou, déplacée par
+// le client, le RDV d'arrivée (`rescheduled_to`, posé par le serveur depuis le tour 8 du 18 oct. 2026),
+// déplacements successifs compris. Un RDV d'arrivée qui porte lui-même le repère est une conversion à
+// part, comptée pour elle-même. Anciennes lignes sans lien, ou RDV d'arrivée hors période : 0.
+const MAX_MOVE_HOPS = 5;
+function lastMinuteRevenueOf(conversion, byId, isPaid) {
+  let row = conversion;
+  for (let hop = 0; hop < MAX_MOVE_HOPS && isRescheduledCancel(row) && row.rescheduled_to; hop++) {
+    const next = byId.get(String(row.rescheduled_to));
+    if (!next || next === conversion || isConvertedLastMinute(next)) return 0;
+    row = next;
+  }
+  return isPaid(row) ? revenueOf(row) : 0;
+}
+
 /**
  * Lignes de l'export comptable d'un RDV encaissé (prestations, puis produit vendu), **hors part payée
  * par carte cadeau** : cette part a été comptée à la vente de la carte, comme au tableau de bord. Un
@@ -231,7 +246,8 @@ export default function AdminDashboard() {
   const getTotal = revenueOf;
   // Hors part déjà payée par carte cadeau (débit au comptoir) : c'est ce qui reste à encaisser
   const outsideGift = (a) => revenueOf(a) - giftPartOf(a);
-  const lastMinuteRevenueMonth = round2(lastMinuteCompletedMonth.filter(isPaid).reduce((sum, a) => sum + getTotal(a), 0));
+  const apptById = useMemo(() => new Map(allAppointments.map(a => [String(a.id), a])), [allAppointments]);
+  const lastMinuteRevenueMonth = round2(lastMinuteCompletedMonth.reduce((sum, a) => sum + lastMinuteRevenueOf(a, apptById, isPaid), 0));
 
   // TODAY
   const todayAppts = realAppts.filter(a => a.date === today);

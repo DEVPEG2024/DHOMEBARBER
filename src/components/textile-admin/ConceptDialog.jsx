@@ -94,7 +94,7 @@ function payloadFromForm(form) {
     stock,
     max_per_client: clampInt(form.max_per_client, 1, 10, 2),
     is_active: !!form.is_active,
-    sort_order: clampInt(form.sort_order, -100000, 100000, 0),
+    sort_order: clampInt(form.sort_order, 0, 100000, 0),
   };
 }
 
@@ -384,7 +384,7 @@ export default function ConceptDialog({ open, onOpenChange, concept, drops, defa
                 onChange={(e) => set({ max_per_client: e.target.value })} className={INPUT_CLASS} />
             </Field>
             <Field label="Ordre d'affichage">
-              <Input type="number" value={form.sort_order} onChange={(e) => set({ sort_order: e.target.value })} className={INPUT_CLASS} />
+              <Input type="number" min={0} max={100000} value={form.sort_order} onChange={(e) => set({ sort_order: e.target.value })} className={INPUT_CLASS} />
             </Field>
           </div>
 

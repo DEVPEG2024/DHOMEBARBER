@@ -600,6 +600,7 @@ function PostCard({
         </div>
         <Input
           value={commentText}
+          maxLength={1000}
           onChange={(e) => setCommentText(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmitComment(); } }}
           placeholder="Écrire un commentaire..."
@@ -1095,12 +1096,16 @@ export default function Feed() {
                 <div className="flex-1">
                   <Textarea
                     value={content}
+                    maxLength={5000}
                     onChange={(e) => setContent(e.target.value)}
                     placeholder="Quoi de neuf ? Partagez un moment, une photo..."
                     className="bg-secondary/50 border-border text-sm resize-none min-h-[80px]"
                     rows={3}
                     autoFocus
                   />
+                  {content.length >= 4500 && (
+                    <p className="text-[10px] text-muted-foreground text-right mt-1">{content.length} / 5000</p>
+                  )}
                 </div>
               </div>
 

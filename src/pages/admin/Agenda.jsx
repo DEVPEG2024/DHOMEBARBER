@@ -1134,7 +1134,7 @@ function LastMinuteForm({ open, employees, timeOffs, defaultEmployeeId, defaultD
 
         {pendingLM.length > 0 && !sending && (
           <div className="rounded-xl border border-orange-500/30 bg-orange-500/10 px-3 py-2.5 space-y-2">
-            <p className="text-xs font-semibold text-orange-300">Déjà bloqué, pas encore annoncé ?</p>
+            <p className="text-xs font-semibold text-orange-300">Bloqués dans l'agenda — déjà annoncés aux clients ? Renvoyer enverra un nouveau push à tous.</p>
             <div className="flex flex-wrap gap-2">
               {pendingLM.map((a) => {
                 const st = String(a.start_time).slice(0, 5);
@@ -1143,7 +1143,7 @@ function LastMinuteForm({ open, employees, timeOffs, defaultEmployeeId, defaultD
                   <button
                     key={a.id}
                     type="button"
-                    onClick={() => setCreated({ id: a.id, employee_id: employee.id, employee_name: employee.name || '', date: form.date, start_time: st, end_time: en })}
+                    onClick={() => { setPushUncertain(true); setCreated({ id: a.id, employee_id: employee.id, employee_name: employee.name || '', date: form.date, start_time: st, end_time: en }); }}
                     className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-orange-500 text-white hover:bg-orange-600"
                   >
                     Annoncer {st} – {en}

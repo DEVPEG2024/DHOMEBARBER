@@ -9,6 +9,10 @@ import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import AiWriterPanel from '@/components/notifications/AiWriterPanel';
 import LoadError, { isNetworkError } from '@/components/shared/LoadError';
+import { normalizeSearch } from '@/components/admin-activity/activityUi';
+
+// Téléphone comparable : chiffres seuls, indicatif français (+33 / 0033) ramené au 0
+const phoneDigits = (v) => String(v || '').replace(/\D/g, '').replace(/^(?:00)?33(?=\d{9}$)/, '0');
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 
 // Bornes de la route d'envoi groupé (routes/push.js) : vérifiées AVANT le push, sinon le push
@@ -49,12 +53,12 @@ function buildClients(registeredUsers, appointments) {
   registeredUsers.forEach(u => {
     if (u.email && u.role === 'user') {
       // Refus des offres (Paramètres ou lien d'un email) : le serveur n'envoie plus d'email à ce compte
-      map[u.email.toLowerCase()] = { email: u.email, name: u.full_name || u.email, optedOut: u.marketing_emails === false };
+      map[u.email.toLowerCase()] = { email: u.email, name: u.full_name || u.email, phone: u.phone, optedOut: u.marketing_emails === false };
     }
   });
   appointments.forEach(a => {
     if (a.client_email && !map[a.client_email.toLowerCase()]) {
-      map[a.client_email.toLowerCase()] = { email: a.client_email, name: a.client_name || a.client_email };
+      map[a.client_email.toLowerCase()] = { email: a.client_email, name: a.client_name || a.client_email, phone: a.client_phone };
     }
   });
   return Object.values(map).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
@@ -116,9 +120,11 @@ export default function Notifications() {
   };
 
   const filteredClients = clients.filter(c => {
-    if (!clientSearch) return true;
-    const s = clientSearch.toLowerCase();
-    return c.name?.toLowerCase().includes(s) || c.email?.toLowerCase().includes(s);
+    const q = normalizeSearch(clientSearch);
+    if (!q) return true;
+    if (normalizeSearch(`${c.name || ''} ${c.email || ''}`).includes(q)) return true;
+    const qd = /^[\d\s.+\-()]+$/.test(q) ? phoneDigits(q) : '';
+    return qd.length >= 3 && phoneDigits(c.phone).includes(qd);
   });
 
   const loadSubscribers = useCallback(() => {
@@ -552,6 +558,7 @@ export default function Notifications() {
                     </DialogDescription>
                   </DialogHeader>
                   <p className="text-sm font-semibold break-words">« {subject} »</p>
+                  <p className="text-sm text-muted-foreground whitespace-pre-line break-words max-h-40 overflow-y-auto">{message}</p>
                   <div className="flex gap-2 justify-end pt-1">
                     <Button variant="outline" onClick={() => setConfirmAll(false)} disabled={sending}>Annuler</Button>
                     <Button onClick={() => { setConfirmAll(false); doSend(); }} disabled={sending}>

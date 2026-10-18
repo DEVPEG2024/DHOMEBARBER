@@ -48,7 +48,7 @@ function payloadFromForm(form) {
     starts_at: fromLocalInputValue(form.starts_at),
     ends_at: fromLocalInputValue(form.ends_at),
     reservation_hours: clampInt(form.reservation_hours, 1, 720, 72),
-    sort_order: clampInt(form.sort_order, -100000, 100000, 0),
+    sort_order: clampInt(form.sort_order, 0, 100000, 0),
   };
 }
 
@@ -188,7 +188,7 @@ export default function DropDialog({ open, onOpenChange, drop }) {
                 onChange={(e) => set({ reservation_hours: e.target.value })} className={INPUT_CLASS} />
             </Field>
             <Field label="Ordre d'affichage">
-              <Input type="number" value={form.sort_order} onChange={(e) => set({ sort_order: e.target.value })} className={INPUT_CLASS} />
+              <Input type="number" min={0} max={100000} value={form.sort_order} onChange={(e) => set({ sort_order: e.target.value })} className={INPUT_CLASS} />
             </Field>
           </div>
 
