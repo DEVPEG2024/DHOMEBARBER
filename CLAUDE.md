@@ -131,6 +131,7 @@ src/
 │       ├── AdminGiftCards.jsx # Cartes cadeau : validation (scan QR ou code), débit au comptoir (RDV du jour, prestations, montant libre), historique complet de la fiche, onglet « Historique » (?tab=history, journal de toutes les cartes), suppression définitive — components/giftcards-admin/, lib/giftCardDebit.js
 │       ├── AdminTextile.jsx   # Textile & drops (/admin/textile) : drops, pièces (stock par taille, votes), réservations (payée / retirée), push aux abonnés — composants dans components/textile-admin/
 │       ├── AdminSettings.jsx  # Paramètres du salon
+│       ├── BarberHome.jsx     # « Mon espace » d'un barber (/admin/me, page d'arrivée des barbers, 18 oct. 2026) : carte FUT, ma journée, chiffres, raccourcis selon permissions, avis — composants dans components/barber-home/
 │       ├── BarberSettings.jsx # Paramètres du barber connecté (/admin/my-settings) : photo, vidéo, réalisations (GalleryEditor), compétences
 │       ├── AdminLeave.jsx     # Gestion congés (admin)
 │       ├── BarberLeave.jsx    # Congés (vue barber)
@@ -150,7 +151,7 @@ public/
 ```
 
 Routes client : `/`, `/services`, `/booking`, `/shop`, `/appointments`, `/orders`, `/reviews`, `/settings`, `/notifications`, `/profile`, `/barber/:id`, `/feed`, `/events`, `/gift-cards`, `/textile`, `/partners`, `/favorites`, `/try-on`, `/snap`, `/login`.
-Routes admin : `/admin`, `/admin/activity`, `/admin/agenda`, `/admin/smart-agenda`, `/admin/services`, `/admin/team`, `/admin/clients`, `/admin/products`, `/admin/stock`, `/admin/orders`, `/admin/reviews`, `/admin/stats`, `/admin/settings`, `/admin/my-settings`, `/admin/notifications`, `/admin/cleaning`, `/admin/my-cleaning`, `/admin/barber-accounts`, `/admin/leave`, `/admin/my-leave`, `/admin/feed`, `/admin/events`, `/admin/gift-cards`, `/admin/textile`, `/admin/salon-events`, `/admin/snap`, `/admin/partners`, `/admin/feedback`.
+Routes admin : `/admin`, `/admin/me`, `/admin/activity`, `/admin/agenda`, `/admin/smart-agenda`, `/admin/services`, `/admin/team`, `/admin/clients`, `/admin/products`, `/admin/stock`, `/admin/orders`, `/admin/reviews`, `/admin/stats`, `/admin/settings`, `/admin/my-settings`, `/admin/notifications`, `/admin/cleaning`, `/admin/my-cleaning`, `/admin/barber-accounts`, `/admin/leave`, `/admin/my-leave`, `/admin/feed`, `/admin/events`, `/admin/gift-cards`, `/admin/textile`, `/admin/salon-events`, `/admin/snap`, `/admin/partners`, `/admin/feedback`.
 
 ## Structure Backend
 
@@ -427,6 +428,12 @@ Règle commune : n'animer que `transform` et `opacity`, respecter `useReducedMot
 - **Accueil** : chaque section est dans un `Reveal` (dévoilée en arrivant à l'écran, plus toutes au chargement) ; prestations (8, défilement auto 4,2 s), boutique (8) et avis (6, auto 5,2 s) en `SnapCarousel` avec `TiltCard` ; défilement auto coupé en mode édition
 - **Profil** (`components/profile/`) : `NextVisitCard` (prochain RDV confirmé : compte à rebours « Dans 2 jours / Demain / Aujourd'hui / Dans 45 min / En cours » à l'heure de Paris, barber, prestations, Gérer / Itinéraire ; sinon jauge de fraîcheur = stat `FRA` de la carte Gang, rouge sous 50 avec un « Réserver ma coupe » qui pulse), raccourcis `ShortcutGrid` (**style B animé choisi par le propriétaire** : pastille `.tile-chip` en verre teinté de vert, icône verte fine, une seule couleur — ne pas revenir à une teinte par tuile ; vague de lumière tuile après tuile, halo `.tile-chip-hot` sur une tuile à pastille, rebond au tap ; pastilles : RDV à venir, commandes `pending/confirmed/ready`, notifications non lues de l'appareil), `FavoritesCarousel` (prestations favorites, rien sans favori). L'en-tête garde `pr-10` : le bouton musique (32 px en haut à droite) ne doit pas chevaucher le réglage
 - Vérifié dans Chrome headless à 320, 390 et 430 px (données injectées, aucune écriture) : aucun débordement horizontal, défilement automatique effectif. **Apps natives : seulement avec un nouveau build**
+
+### « Mon espace » des barbers (18 oct. 2026, frontend 97ce30b)
+- **Page d'arrivée de tout barber** : `barberHomePath()` (App.jsx) renvoie `/admin/me` ; entrée « Mon espace » (`barberOnly`, `alwaysShow`) en tête du menu d'`AdminLayout`, donc aussi la cible quand un barber ouvre une page qui lui est refusée. L'admin ne la voit pas
+- Contenu (`pages/admin/BarberHome.jsx`, `components/barber-home/`) : salut + date de Paris, carte FUT du barber (`BarberCard` mise à l'échelle de l'écran, halo `glow-breathe`), « Ma journée » (`TodayCard` : prochain client avec compte à rebours, prestations, note interne sans le repère last minute, Mon agenda — si permission `agenda`, vue Jour du barber — et Appeler ; rendez-vous du jour en carrousel, passés cochés ; sinon prochain RDV de la semaine), chiffres (aujourd'hui, semaine, mois passé), raccourcis `ShortcutGrid` du profil client (style B) filtrés par `user.permissions` + Mes congés (pastille : en attente), Entretien (tâches du jour non faites), Notifications (non lues), Mon profil ; New's Gang et Vue client facultatifs, ajoutés seulement pour compléter des lignes de 3 ; carrousel de ses avis (`employee_name`) avec note moyenne
+- Données : RDV du barber sur le mois + la semaine en une requête (`date: [jours]`, clé `['barberHome','appointments', …]`, rafraîchie chaque minute) ; vrais RDV clients seulement (`isClientAppointment` : ni pause, ni annulé, ni absent, ni last minute) ; `['timeOffs']` et `['cleaningSchedule', lundi]` partagés avec Mes congés et Entretien. Compte sans fiche barber : bandeau « demande à l'admin de relier ton compte »
+- Vérifié dans Chrome headless à 320 et 390 px avec un compte barber fictif (arrivée sur /admin/me, aucun débordement)
 
 ### Accueil : mise en page du haut de page, identique sur toutes les tailles d'écran (règles, 3 sept. 2026)
 - Hero : **deux lignes fixes** sous « Premium BarberShop » (note + Douvaine, puis pastille Ouvert / Fermé), jamais de `flex-wrap` qui replierait différemment selon la largeur
