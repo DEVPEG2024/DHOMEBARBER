@@ -38,7 +38,8 @@ export default function BarberLeave() {
   // Fetch employee info to get name
   const { data: employees = [] } = useQuery({
     queryKey: ['employees'],
-    queryFn: () => api.entities.Employee.filter({ is_active: true }),
+    // Même requête que l'accueil (clé partagée ['employees'] : ordre sort_order)
+    queryFn: () => api.entities.Employee.filter({ is_active: true }, 'sort_order', 50),
   });
 
   const myEmployee = employees.find(e => e.id === employeeId);

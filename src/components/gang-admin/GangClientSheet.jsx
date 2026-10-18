@@ -17,7 +17,7 @@ import {
   removeGangClientFromLeaderboard, allowGangClientInLeaderboard, GANG_LEADERBOARD_QUERY_KEY,
 } from '@/lib/gangCardApi';
 import { hapticFeedback } from '@/lib/capacitor';
-import LoadError from '@/components/shared/LoadError';
+import LoadError, { queryFailed } from '@/components/shared/LoadError';
 import { TierPill, clientLabel, plural, daysSince } from './gangAdminUi';
 
 const FADING_MIN_VISITS = 3;
@@ -381,7 +381,10 @@ export default function GangClientSheet({ entry, onClose }) {
   const queryClient = useQueryClient();
   const open = !!entry;
   const id = entry?.user_id;
-  const { data, isPending, isError, error, refetch, isFetching } = useGangAdminClient(id, { enabled: open });
+  const clientQuery = useGangAdminClient(id, { enabled: open });
+  const { data, isPending, error, refetch, isFetching } = clientQuery;
+  // Requête en pause hors connexion : « Pas de connexion » plutôt qu'un bloc qui clignote sans fin
+  const failed = queryFailed(clientQuery);
   const cardSize = useSheetCardSize();
   const title = clientLabel(entry || {});
 
@@ -406,13 +409,13 @@ export default function GangClientSheet({ entry, onClose }) {
         </DialogHeader>
 
         {/* Pendant le chargement : la carte déjà connue (collection), puis la fiche complète */}
-        {isPending && entry && (
+        {isPending && entry && !failed && (
           <div className="flex flex-col items-center gap-3 py-2 min-w-0">
             <GangCard card={entry.card} size={cardSize} flippable={false} interactive={false} arrival={false} />
             <div className="h-24 w-full rounded-xl bg-secondary/60 animate-pulse" />
           </div>
         )}
-        {!isPending && isError && !data && (
+        {failed && (
           <LoadError what="la fiche du client" error={error} onRetry={refetch} retrying={isFetching} />
         )}
         {data && <SheetBody data={data} cardSize={cardSize} onNudged={onNudged} />}

@@ -1042,7 +1042,7 @@ export default function Feed() {
       {/* Floating publish button */}
       <motion.button
         onClick={() => setShowComposer(true)}
-        className="fixed bottom-24 right-5 z-50 w-14 h-14 rounded-full bg-green-500 text-white shadow-lg shadow-green-500/30 flex items-center justify-center"
+        className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom,0px))] right-5 z-50 w-14 h-14 rounded-full bg-green-500 text-white shadow-lg shadow-green-500/30 flex items-center justify-center"
         animate={{ boxShadow: ['0 0 0 0 rgba(34,197,94,0.4)', '0 0 0 12px rgba(34,197,94,0)', '0 0 0 0 rgba(34,197,94,0.4)'] }}
         transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
         whileTap={{ scale: 0.9 }}
@@ -1066,7 +1066,7 @@ export default function Feed() {
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
               transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-              className="fixed inset-x-0 bottom-0 z-[60] rounded-t-2xl border-t border-border bg-background flex flex-col max-h-[90vh] overflow-hidden"
+              className="fixed inset-x-0 bottom-0 z-[60] rounded-t-2xl border-t border-border bg-background flex flex-col max-h-[90vh] overflow-hidden kb-sheet"
             >
               {/* En-tête fixe : la croix reste visible même clavier ouvert, le corps défile */}
               <div className="shrink-0 px-5 pt-5">
@@ -1081,7 +1081,7 @@ export default function Feed() {
               </div>
               </div>
 
-              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-5">
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-[calc(env(safe-area-inset-bottom)+1.25rem)]">
               <div className="flex gap-3">
                 <div className="w-10 h-10 rounded-full bg-secondary border border-border flex items-center justify-center flex-shrink-0 overflow-hidden">
                   {getAuthorPhoto() ? (
@@ -1246,7 +1246,7 @@ export default function Feed() {
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
               transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-              className="fixed inset-x-0 bottom-0 z-[60] rounded-t-2xl border-t border-border bg-background p-4 pb-8"
+              className="fixed inset-x-0 bottom-0 z-[60] rounded-t-2xl border-t border-border bg-background p-4 pb-[calc(env(safe-area-inset-bottom)+2rem)]"
             >
               <div className="flex justify-center mb-3">
                 <div className="w-10 h-1 rounded-full bg-muted" />
@@ -1292,7 +1292,7 @@ export default function Feed() {
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
               transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-              className="fixed inset-x-0 bottom-0 z-[60] rounded-t-2xl border-t border-border bg-background p-5 pb-8 max-h-[90vh] overflow-y-auto"
+              className="fixed inset-x-0 bottom-0 z-[60] rounded-t-2xl border-t border-border bg-background p-5 pb-[calc(env(safe-area-inset-bottom)+2rem)] max-h-[90vh] overflow-y-auto kb-sheet"
             >
               <div className="flex justify-center mb-3">
                 <div className="w-10 h-1 rounded-full bg-muted" />

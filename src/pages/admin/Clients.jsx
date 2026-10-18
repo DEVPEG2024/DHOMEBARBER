@@ -12,6 +12,7 @@ import LoadError, { friendlyError } from '@/components/shared/LoadError';
 import { useAuth } from '@/lib/AuthContext';
 import { parisInstant } from '@/lib/calendarLinks';
 import { invalidateAppointmentQueries, isClientPlaceholder } from '@/components/agenda/agendaUtils';
+import { revenueOf, giftPartOf, round2 } from '@/lib/revenue';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -104,6 +105,7 @@ function buildClients(registeredUsers, appointments, employees) {
       photo_url: photo,
       role: user.role,
       visits: 0,
+      visitDays: new Set(),
       noShows: 0,
       totalSpent: 0,
       lastVisit: null,
@@ -122,6 +124,7 @@ function buildClients(registeredUsers, appointments, employees) {
         name: apt.client_name,
         phone: apt.client_phone,
         visits: 0,
+        visitDays: new Set(),
         noShows: 0,
         totalSpent: 0,
         lastVisit: null,
@@ -131,15 +134,23 @@ function buildClients(registeredUsers, appointments, employees) {
     // Mettre à jour le nom/téléphone depuis le RDV si manquant
     if (!c.name || c.name === c.email) c.name = apt.client_name || c.name;
     if (!c.phone) c.phone = apt.client_phone || '';
-    if (apt.status === 'completed') {
-      c.visits++;
-      c.totalSpent += apt.total_price || 0;
+    // Visites : même règle que le Profil et la carte Gang (RDV confirmé ou terminé dont l'heure de
+    // fin est passée, une par jour). Dépensé : encaissé seulement, hors pourboire, produit vendu
+    // compris, sans la part réglée par carte cadeau (comme le tableau de bord)
+    if (isPastVisit(apt, now)) c.visitDays.add(String(apt.date).slice(0, 10));
+    if (apt.status === 'completed' || apt.payment_method) {
+      c.totalSpent = round2(c.totalSpent + revenueOf(apt) - giftPartOf(apt));
     }
     if (apt.status === 'no_show') c.noShows++;
     // Dernière visite : jamais un RDV à venir, annulé (fiches Ajouter / Importer comprises) ou absent
     if (isPastVisit(apt, now) && (!c.lastVisit || apt.date > c.lastVisit)) c.lastVisit = apt.date;
   });
-  return Object.values(map).sort((a, b) => (b.lastVisit || b.registeredAt || '').localeCompare(a.lastVisit || a.registeredAt || ''));
+  const list = Object.values(map);
+  for (const c of list) {
+    c.visits = c.visitDays.size;
+    delete c.visitDays;
+  }
+  return list.sort((a, b) => (b.lastVisit || b.registeredAt || '').localeCompare(a.lastVisit || a.registeredAt || ''));
 }
 
 export default function Clients() {
@@ -168,7 +179,8 @@ export default function Clients() {
 
   const { data: employees = [] } = useQuery({
     queryKey: ['employees'],
-    queryFn: () => api.entities.Employee.filter({ is_active: true }),
+    // Même requête que l'accueil (clé partagée ['employees'] : ordre sort_order)
+    queryFn: () => api.entities.Employee.filter({ is_active: true }, 'sort_order', 50),
   });
 
   // Comptes inscrits chargés par lots de 50 (`skip` = OFFSET côté serveur)
@@ -262,7 +274,14 @@ export default function Clients() {
   const clientUpcomingCount = clientToDelete
     ? appointments.filter(a => a.client_email?.toLowerCase() === clientToDelete.email?.toLowerCase() && isUpcomingUnpaid(a)).length
     : 0;
-  const allUpcomingCount = showDeleteAll ? appointments.filter(a => a.client_email && isUpcomingUnpaid(a)).length : 0;
+  // « Supprimer tout » ne touche qu'aux RDV des comptes clients : jamais à ceux d'une personne sans
+  // compte (RDV pris au téléphone avec son email, fiche importée), qui serait sinon prévenue d'une
+  // annulation par le salon
+  const clientAccountEmails = useMemo(() => new Set(registeredUsers.filter(u => u.role === 'user')
+    .map(u => u.email?.toLowerCase()).filter(Boolean)), [registeredUsers]);
+  const allUpcomingCount = showDeleteAll
+    ? appointments.filter(a => a.client_email && clientAccountEmails.has(a.client_email.toLowerCase()) && isUpcomingUnpaid(a)).length
+    : 0;
 
   // Le rendu est lui aussi progressif : 300 fiches animées d'un coup, c'est une page qui rame
   const [visibleCount, setVisibleCount] = useState(ROWS_STEP);
@@ -325,9 +344,12 @@ export default function Clients() {
       const allUsers = await ensureAllUsers();
       const clientUsers = allUsers.filter(u => u.role === 'user');
       const staffEmails = new Set(allUsers.filter(u => isStaffRole(u.role)).map(u => u.email?.toLowerCase()));
+      const accountEmails = new Set(clientUsers.map(u => u.email?.toLowerCase()).filter(Boolean));
       const now = Date.now();
-      // RDV des clients (jamais ceux saisis au nom d'un membre du personnel)
-      const ofClients = appointments.filter(apt => apt.client_email && !staffEmails.has(apt.client_email.toLowerCase()));
+      // RDV des comptes clients seulement : ni ceux saisis au nom d'un membre du personnel, ni ceux
+      // (et fiches importées) d'une personne sans compte
+      const ofClients = appointments.filter(apt => apt.client_email
+        && accountEmails.has(apt.client_email.toLowerCase()) && !staffEmails.has(apt.client_email.toLowerCase()));
       const upcoming = await runInBatches(ofClients.filter(apt => isUpcomingUnpaid(apt, now)), cancelUpcoming);
       const placeholders = await runInBatches(ofClients.filter(isPlaceholderAppointment), deletePlaceholder);
       const accounts = await runInBatches(clientUsers, u => api.entities.User.delete(u.id));
@@ -745,7 +767,8 @@ export default function Clients() {
               Êtes-vous sûr de vouloir supprimer <strong>tous les comptes clients</strong> ? Leurs rendez-vous à venir
               non encaissés ({allUpcomingCount}) seront annulés. Les rendez-vous passés et encaissés sont conservés
               (chiffre d'affaires, statistiques). Leurs publications, commentaires, réactions, avis, envois Bugs et suggestions,
-              votes textile et invitations sont effacés. Les comptes du personnel ne sont pas touchés. Cette action est irréversible.
+              votes textile et invitations sont effacés. Les clients concernés sont prévenus de l'annulation (email). Les comptes du
+              personnel et les contacts sans compte (RDV saisis au téléphone, fiches importées) ne sont pas touchés. Cette action est irréversible.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

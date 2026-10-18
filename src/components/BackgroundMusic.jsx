@@ -51,7 +51,7 @@ export default function BackgroundMusic() {
   return (
     <button
       onClick={toggle}
-      className="fixed bottom-20 right-4 z-50 w-10 h-10 rounded-full bg-black/60 backdrop-blur-sm border border-white/20 flex items-center justify-center text-white shadow-lg transition-transform active:scale-90"
+      className="fixed bottom-[calc(5rem+env(safe-area-inset-bottom,0px))] right-4 z-50 w-10 h-10 rounded-full bg-black/60 backdrop-blur-sm border border-white/20 flex items-center justify-center text-white shadow-lg transition-transform active:scale-90"
       aria-label={playing ? 'Couper la musique' : 'Activer la musique'}
     >
       {playing ? <Volume2 size={18} /> : <VolumeX size={18} />}

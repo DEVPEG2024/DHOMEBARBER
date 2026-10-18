@@ -20,7 +20,7 @@ export default function SelectionBar({ count, totalDuration, totalPrice, ids, on
       animate={{ y: 0, opacity: 1 }}
       exit={reduceMotion ? { opacity: 0 } : { y: 120, opacity: 0 }}
       transition={{ type: 'spring', damping: 22, stiffness: 260 }}
-      className="fixed bottom-24 left-4 right-4 max-w-lg mx-auto z-40"
+      className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom,0px))] left-4 right-4 max-w-lg mx-auto z-40"
       role="region"
       aria-label="Votre sélection"
     >

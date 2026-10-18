@@ -44,7 +44,10 @@ function formFromEvent(event) {
     images: mergeImages(event.cover_image_url, event.images),
     starts_at: toLocalInputValue(event.starts_at),
     ends_at: toLocalInputValue(event.ends_at),
-    location: event.location ?? SALON_ADDRESS,
+    // Lieu vide en base : champ vide (l'adresse du salon n'est que le placeholder). La pré-remplir
+    // faisait voir au serveur un lieu changé au moindre Enregistrer, d'où un push + email
+    // « infos modifiées » à tous les invités sans que l'admin ait rien touché
+    location: event.location ?? '',
     price: event.price == null || Number(event.price) <= 0 ? '' : String(event.price),
     capacity: event.capacity == null ? '' : String(event.capacity),
     dress_code: event.dress_code || '',
@@ -187,9 +190,18 @@ export default function EventDialog({ open, onOpenChange, event }) {
   const eventPrice = Number(event?.price) > 0 ? Number(event.price) : null;
   const infoChanged = wasPublished && form.status === 'published' && !rescheduled && !isPast
     && (form.location.trim() !== String(event?.location ?? '').trim() || parsePrice(form.price) !== eventPrice);
+  // Un événement publié ne repasse jamais en brouillon (il disparaîtrait chez les invités sans
+  // qu'ils soient prévenus : « Annulé » les prévient), et « Terminé » n'est proposé qu'une fois
+  // l'événement passé (le serveur refuse les deux s'il reste des invités qui n'ont pas refusé)
   const statusOptions = event?.id
-    ? SALON_EVENT_STATUSES.filter((s) => !(isPast && s.value === 'cancelled' && event.status !== 'cancelled'))
+    ? SALON_EVENT_STATUSES.filter((s) => s.value === event.status || (
+      !(isPast && s.value === 'cancelled')
+      && !(wasPublished && s.value === 'draft')
+      && !(s.value === 'done' && !isPast)
+    ))
     : SALON_EVENT_STATUSES.filter((s) => s.value === 'draft' || s.value === 'published');
+  // Prix changé en même temps que l'horaire : il part dans l'annonce du nouvel horaire
+  const priceChangedToo = rescheduled && parsePrice(form.price) !== eventPrice;
 
   const busy = saveMutation.isPending || !!upload;
 
@@ -265,7 +277,7 @@ export default function EventDialog({ open, onOpenChange, event }) {
           </div>
           {rescheduled && (
             <Notice icon={CalendarClock}>
-              L'horaire d'un événement publié change : les invités reçoivent un push « 📅 {form.title.trim() || 'Événement'} : nouvel horaire » et un email.
+              L'horaire d'un événement publié change : les invités reçoivent un push « 📅 {form.title.trim() || 'Événement'} : nouvel horaire » et un email{priceChangedToo ? ' (avec le nouveau prix)' : ''}.
             </Notice>
           )}
 

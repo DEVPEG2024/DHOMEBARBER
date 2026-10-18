@@ -236,6 +236,10 @@ self.addEventListener('push', (event) => {
         badge: data.badge || '/icons/icon-96.png',
         data: { url: data.data?.url || '/notifications', title, body },
         vibrate: [200, 100, 200],
+        // Tag envoyé par le serveur (seulement les messages fusionnables, COLLAPSIBLE_TAGS de
+        // pushHelper) : la nouvelle notification remplace l'ancienne du même tag, avec son et
+        // vibration (renotify)
+        ...(typeof data.tag === 'string' && data.tag ? { tag: data.tag.slice(0, 64), renotify: true } : {}),
       }),
       storeAndBadge(entry),
     ])

@@ -56,13 +56,40 @@ export function toLocalDate(dateStr, timeStr = '00:00') {
  * Décalage de Paris (en minutes) à un instant donné.
  * Le salon est à Paris, l'appareil du client peut être n'importe où : les comparaisons à
  * « maintenant » (créneau passé, rendez-vous terminé) se font donc sur l'instant réel.
+ *
+ * Calculé depuis l'heure murale de Paris, pas avec `timeZoneName: 'shortOffset'` : cette option
+ * lève une RangeError sur iOS 15.0–15.3, Safari < 15.4 et les WebView Chrome < 95 (réservation,
+ * Mes rendez-vous et accueil plantaient). En cas d'échec : 0, jamais d'écran d'erreur.
  */
+let parisPartsFmt = null;
+function parisParts(instant) {
+  if (!parisPartsFmt) {
+    // `hour12: false` (connu de tous les moteurs) plutôt que `hourCycle` ; « 24 » à minuit sur
+    // certains moteurs anciens : ramené à 0 plus bas
+    parisPartsFmt = new Intl.DateTimeFormat('en-US', {
+      timeZone: TIMEZONE, hour12: false,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+    });
+  }
+  const o = {};
+  for (const p of parisPartsFmt.formatToParts(instant)) o[p.type] = p.value;
+  return o;
+}
+
 export function parisOffsetMinutes(instant) {
-  const tz = new Intl.DateTimeFormat('en-US', { timeZone: TIMEZONE, timeZoneName: 'shortOffset' })
-    .formatToParts(instant).find(p => p.type === 'timeZoneName')?.value || 'GMT';
-  const m = /GMT([+-])(\d{1,2})(?::(\d{2}))?/.exec(tz);
-  if (!m) return 0;
-  return (m[1] === '-' ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3] || 0));
+  try {
+    const d = instant instanceof Date ? instant : new Date(instant);
+    const ms = d.getTime();
+    if (Number.isNaN(ms)) return 0;
+    const o = parisParts(d);
+    const hour = Number(o.hour) % 24;
+    const wall = Date.UTC(Number(o.year), Number(o.month) - 1, Number(o.day), hour, Number(o.minute), Number(o.second));
+    const offset = Math.round((wall - Math.floor(ms / 1000) * 1000) / 60000);
+    return Number.isFinite(offset) ? offset : 0;
+  } catch {
+    return 0;
+  }
 }
 
 /**

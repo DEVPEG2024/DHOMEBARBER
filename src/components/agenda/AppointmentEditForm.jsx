@@ -82,6 +82,12 @@ export default function AppointmentEditForm({ appointment, employees, onCancel, 
   const servicesChanged = !sameServices(services, original);
   const totalPrice = servicesChanged ? services.reduce((s, x) => s + x.price, 0) : (Number(appointment.total_price) || 0);
   const endTime = validTime ? addMinutesToTime(startTime, duration) : '';
+  // Prestation réglée par carte cadeau : un prix relevé au-delà du débit doit être encaissé en
+  // CB / espèces d'abord (« Corriger l'encaissement ») ; le serveur refuse sinon (409)
+  const giftDebited = Number(appointment.gift_card_amount) || 0;
+  const giftOverrun = appointment.status === 'completed' && appointment.payment_method === 'carte_cadeau'
+    && giftDebited > 0
+    && Math.round((totalPrice + (Number(appointment.product_price) || 0)) * 100) > Math.round(giftDebited * 100);
 
   const updateServices = (next) => {
     setServices(next);
@@ -326,6 +332,13 @@ export default function AppointmentEditForm({ appointment, employees, onCancel, 
             <p key={w} className="text-xs text-amber-300 flex items-start gap-1.5"><AlertTriangle className="w-3.5 h-3.5 mt-px shrink-0" />{w}</p>
           ))}
         </div>
+      )}
+
+      {giftOverrun && (
+        <p role="status" className="rounded-xl px-3 py-2.5 border bg-amber-500/10 border-amber-500/30 text-xs text-amber-300 flex items-start gap-1.5">
+          <AlertTriangle className="w-3.5 h-3.5 mt-px shrink-0" />
+          Le prix dépasse ce que la carte a réglé ({giftDebited}€) : corrigez d'abord l'encaissement en CB / espèces
+        </p>
       )}
 
       {canNotify && (

@@ -468,7 +468,7 @@ export default function ConceptSheet({
 
         {/* Pied : réservation (drop ouvert) */}
         {live && (
-          <div className="border-t border-border px-5 pt-3 pb-6 shrink-0 bg-background space-y-3">
+          <div className="border-t border-border px-5 pt-3 pb-[calc(env(safe-area-inset-bottom)+1.5rem)] shrink-0 bg-background space-y-3">
             <div className="flex items-center justify-between gap-3">
               <p className="text-xs text-muted-foreground flex items-start gap-1.5 min-w-0">
                 <Store className="w-3.5 h-3.5 shrink-0 mt-0.5" />

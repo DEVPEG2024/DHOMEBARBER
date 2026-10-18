@@ -686,6 +686,15 @@ export default function Booking() {
   });
   const { data: services = [], isPending: servicesPending } = servicesQuery;
   const servicesPaused = isPausedQuery(servicesQuery);
+  // Prestations choisies lues dans le catalogue à jour : durée ou prix changés par le salon depuis
+  // la sélection (page ouverte, cache) sont repris ; sinon le serveur, qui recalcule, refusait en
+  // boucle l'heure reproposée ici. Prestation retirée du catalogue : l'objet d'origine reste (le
+  // serveur répond alors « Prestation inconnue ou indisponible »).
+  const servicesData = servicesQuery.data;
+  const liveSelected = useMemo(() => {
+    const list = servicesData || EMPTY_LIST;
+    return selectedServices.map(s => list.find(x => String(x.id) === String(s.id)) || s);
+  }, [selectedServices, servicesData]);
 
   const employeesQuery = useQuery({
     queryKey: ['employees'],
@@ -811,7 +820,7 @@ export default function Booking() {
     if (preSelectedBarber && !selectedEmployee) setSelectedEmployee(preSelectedBarber);
   }, [preSelectedBarber]);
 
-  const catalogDuration = selectedServices.reduce((sum, s) => sum + (s.duration || 0), 0);
+  const catalogDuration = liveSelected.reduce((sum, s) => sum + (s.duration || 0), 0);
   // Déplacement avec les mêmes prestations : la durée allongée par le salon (« prévoir 1 h ») est
   // conservée, comme le fait le serveur ; sinon il refuserait (409) un créneau proposé ici
   const sameServicesAsOld = useMemo(() => {
@@ -821,7 +830,7 @@ export default function Booking() {
     return oldKey !== '' && oldKey === key(selectedServices.map(s => s.id));
   }, [oldApt, selectedServices]);
   const totalDuration = sameServicesAsOld ? Math.max(catalogDuration, appointmentDuration(oldApt)) : catalogDuration;
-  const totalPrice = selectedServices.reduce((sum, s) => sum + (s.price || 0), 0);
+  const totalPrice = liveSelected.reduce((sum, s) => sum + (s.price || 0), 0);
 
   // Produits ajoutés au rendez-vous (même catalogue et même cache que la Boutique). Pas proposés
   // pour un déplacement : les produits de l'ancien RDV suivent le nouveau côté serveur
@@ -861,16 +870,27 @@ export default function Booking() {
     });
   }, [catalog, addonProducts]);
   // Plus courte prestation choisie : sert à dire si c'est la durée qui empêche tout créneau
-  const shortestDuration = selectedServices.reduce((min, s) => Math.min(min, s.duration || 30), 30);
+  const shortestDuration = liveSelected.reduce((min, s) => Math.min(min, s.duration || 30), 30);
 
   // Jour de Paris (et non celui de l'appareil), recalculé au retour au premier plan : l'app
   // laissée ouverte la veille ne propose plus la date d'hier en tête.
   const [todayKey, setTodayKey] = useState(() => parisDay(0).key);
+  // Horloge à la minute : les créneaux du jour (calculés sur Date.now() par analyzeDay) sont
+  // recalculés, une heure passée pendant que la page reste ouverte n'est plus proposée
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowTick(Date.now()), 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState !== 'visible') return;
       const key = parisDay(0).key;
       setTodayKey(prev => (prev === key ? prev : key));
+      // Minuteries suspendues en arrière-plan (iOS) : heure et créneaux relus au retour
+      setNowTick(Date.now());
+      queryClient.invalidateQueries({ queryKey: ['appointments-day'] });
+      queryClient.invalidateQueries({ queryKey: ['privateEvents'] });
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
@@ -938,7 +958,7 @@ export default function Booking() {
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([time, employee]) => ({ time, employee }));
     return { options, reason: options.length > 0 ? null : mergeDayReasons(reasons) };
-  }, [anyBarber, selectedEmployee, selectedDate, slotsReady, appointments, timeOffs, totalDuration, shortestDuration, employees, privateEvents]);
+  }, [anyBarber, selectedEmployee, selectedDate, slotsReady, appointments, timeOffs, totalDuration, shortestDuration, employees, privateEvents, nowTick]);
 
   // L'heure choisie est-elle encore réservable ? (prestation ajoutée après coup, créneau pris entre-
   // temps) null = on ne sait pas encore (chargement) : on ne tranche pas.
@@ -959,7 +979,7 @@ export default function Booking() {
     // premier de l'union, sinon un autre barber « passerait devant » à tort)
     const own = appointments.filter(a => String(a.employee_id) === String(selectedEmployee.id));
     return analyzeDay(selectedEmployee, selectedDate, own, timeOffs, totalDuration, shortestDuration, privateEvents).slots.includes(selectedTime);
-  }, [selectedTime, selectedDate, slotsReady, anyBarber, selectedEmployee, slotOptions, appointments, timeOffs, totalDuration, shortestDuration, privateEvents, uncertainMatch, ownSameBooking]);
+  }, [selectedTime, selectedDate, slotsReady, anyBarber, selectedEmployee, slotOptions, appointments, timeOffs, totalDuration, shortestDuration, privateEvents, uncertainMatch, ownSameBooking, nowTick]);
 
   // RDV qui commence dans moins de `cancelHours` heures : il ne pourra plus être annulé ni déplacé
   // en ligne. Rien tant que les paramètres du salon ne sont pas chargés.
@@ -1160,7 +1180,7 @@ export default function Booking() {
         client_name: user.full_name || user.name || '',
         employee_id: selectedEmployee.id,
         employee_name: selectedEmployee.name,
-        services: selectedServices.map(s => ({ service_id: s.id, name: s.name, duration: s.duration, price: s.price })),
+        services: liveSelected.map(s => ({ service_id: s.id, name: s.name, duration: s.duration, price: s.price })),
         date: format(selectedDate, 'yyyy-MM-dd'),
         start_time: selectedTime,
         end_time: endTime,
@@ -1290,6 +1310,9 @@ export default function Booking() {
         // Privatisation confirmée entre-temps (ou lecture échouée, repli sur une liste vide) :
         // relue aussi, sinon les mêmes heures refusées étaient reproposées en boucle
         queryClient.resetQueries({ queryKey: ['privateEvents'] });
+        // Durée d'une prestation changée par le salon : le catalogue relu met à jour `liveSelected`,
+        // donc l'heure refusée n'est plus reproposée
+        queryClient.invalidateQueries({ queryKey: ['services'] });
         if (slotRefused) {
           // Congé ou horaires changés : barbers et congés relus aussi
           queryClient.invalidateQueries({ queryKey: ['employees'] });
@@ -1367,14 +1390,14 @@ export default function Booking() {
     return appointmentEvent({
       id: created.id,
       employee_name: created.employee_name || selectedEmployee.name,
-      services: created.services || selectedServices,
+      services: created.services || liveSelected,
       date: created.date || format(selectedDate, 'yyyy-MM-dd'),
       start_time: created.start_time || selectedTime,
       end_time: created.end_time,
       total_duration: created.total_duration ?? totalDuration,
       total_price: created.total_price ?? totalPrice,
     });
-  }, [success, createdAppointment, selectedEmployee, selectedDate, selectedTime, selectedServices, totalDuration, totalPrice]);
+  }, [success, createdAppointment, selectedEmployee, selectedDate, selectedTime, liveSelected, totalDuration, totalPrice]);
 
   return (
     <div className="min-h-screen relative overflow-hidden">
@@ -1690,7 +1713,7 @@ export default function Booking() {
                   </div>
                   <div>
                     <p className="text-[11px] uppercase tracking-widest text-muted-foreground mb-1">Prestations</p>
-                    {selectedServices.map(s => (
+                    {liveSelected.map(s => (
                       <p key={s.id} className="text-sm text-foreground">{s.name} <span className="text-primary font-semibold">{s.price}€</span></p>
                     ))}
                   </div>

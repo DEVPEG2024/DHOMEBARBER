@@ -202,8 +202,16 @@ const STATUS_CONFIG = {
   pending: { label: 'En attente', color: 'text-amber-400', bg: 'bg-amber-500/15 border-amber-500/20', icon: Clock },
   validated: { label: 'Validée', color: 'text-green-400', bg: 'bg-green-500/15 border-green-500/20', icon: CheckCircle2 },
   used: { label: 'Utilisée', color: 'text-blue-400', bg: 'bg-blue-500/15 border-blue-500/20', icon: CheckCircle2 },
-  expired: { label: 'Expirée', color: 'text-red-400', bg: 'bg-red-500/15 border-red-500/20', icon: XCircle },
+  // Statut serveur `expired` = carte annulée par le salon (ou demande rejetée) : même mot que la page client
+  expired: { label: 'Annulée', color: 'text-red-400', bg: 'bg-red-500/15 border-red-500/20', icon: XCircle },
 };
+
+/** Libellé et style d'une carte : une demande rejetée (jamais payée) se lit « Rejetée ». */
+function statusConfOf(card) {
+  const conf = STATUS_CONFIG[card.status] || STATUS_CONFIG.pending;
+  if (card.status === 'expired' && !card.validated_at) return { ...conf, label: 'Rejetée' };
+  return conf;
+}
 
 /** Bandeau d'état en tête de fiche quand la carte ne peut pas être débitée. */
 function StateBanner({ tone, children }) {
@@ -340,7 +348,7 @@ function ValidateModal({ card, onClose, onCardChange }) {
     }
   };
 
-  const statusConf = STATUS_CONFIG[card.status] || STATUS_CONFIG.pending;
+  const statusConf = statusConfOf(card);
   const StatusIcon = statusConf.icon;
 
   return (
@@ -966,7 +974,7 @@ export default function AdminGiftCards() {
       ) : (
         <div className="space-y-2">
           {filtered.map(card => {
-            const conf = STATUS_CONFIG[card.status] || STATUS_CONFIG.pending;
+            const conf = statusConfOf(card);
             const ConfIcon = conf.icon;
             return (
               <motion.div

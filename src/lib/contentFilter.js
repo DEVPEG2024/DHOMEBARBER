@@ -35,7 +35,12 @@ const WORDS = [
 const PHRASES = [
   'nique ta mere', 'niquer ta mere', 'ta mere la pute', 'fils de pute', 'fille de pute',
   'va te faire foutre', 'va te faire enculer', 'je vais te tuer', 'je vais te buter',
-  'je vais te defoncer', 'je vais te niquer', 'creve sale', 'va crever sale', 'va donc crever', 'allez crever',
+  'je vais te defoncer', 'je vais te niquer', 'va crever sale', 'va donc crever', 'allez crever',
+  'je vais t egorger', 'je vais te casser la gueule',
+  'nique ta race', 'nique tes morts', 'nique sa mere', 'nik ta mere',
+  // Propos racistes : le mot seul est ordinaire (« un resto chinois », « le noir te va bien »), bloqué dans l'insulte
+  'sale arabe', 'sale juif', 'sale juive', 'sale noir', 'sale feuj', 'sale rebeu', 'sale renoi', 'sale musulman',
+  'sale gitan', 'sale chinois', 'sale singe',
   'kill yourself', 'go die', 'suck my cock', 'suck my dick', 'big cock', 'my cock',
   // Mots ordinaires ou noms de famille hors insulte, bloqués seulement dans ces tournures
   'sale pedale', 'grosse pedale', 'sale tapette', 'grosse tapette', 'sale batard', 'espece de batard',
@@ -48,9 +53,13 @@ const PHRASES = [
 
 const LEET = { 0: 'o', 1: 'i', 3: 'e', 4: 'a', 5: 's', 7: 't', '@': 'a', $: 's', '€': 'e' };
 
+// Caractères invisibles retirés avant tout (espace sans largeur U+200B, tiret conditionnel U+00AD,
+// marques de direction, remplissages Hangul) : « sa​lope » s'affiche comme « salope ».
+const stripInvisible = (s) => String(s || '').replace(/[\p{Cf}­͏ᅟᅠㅤﾠ]/gu, '');
+
 /** Texte comparable : minuscules, sans accents, « leet » remplacé, triples lettres ramenées à deux. */
 export function normalizeForFilter(text) {
-  return String(text || '')
+  return stripInvisible(text)
     .toLowerCase()
     .normalize('NFD')
     .replace(/\p{M}/gu, '')
@@ -109,30 +118,47 @@ const JOINED_WORD = /([\p{L}\d@$€])(?:[-_*]+|\.(?=\p{Ll}))(?=[\p{L}\d@$€])/g
 
 // Menaces à l'impératif (« tue toi », « suicide toi », « va crever ») : bloquées avec un trait d'union,
 // et partout ailleurs dans le texte, sauf tournures sûres contrôlées autour de chaque occurrence :
-// sujet devant (« on va crever », « il va crever », « ça tue toi aussi »), groupe nominal devant
-// (« mon pneu va crever »), « va crever de chaud / de froid / de rire », « crever l'abcès ».
+// sujet devant (« on va crever », « il va crever », « ça tue toi aussi »), pronom complément devant
+// « tue » (« ça me tue toi », indicatif), groupe nominal devant (« mon pneu va crever », « l'app va
+// crever »), « va crever de chaud / de froid / de rire », « crever l'abcès ». « Crève, sale … » n'est
+// bloqué que si « crève » ouvre le segment (« Pneu crevé, sale journée » passe).
 // Le texte brut est découpé sur la ponctuation, virgule comprise (« elle tue, toi tu dors » reste
 // permis), puis les amorces de tête (« mais », « franchement », « ta gueule »…) sont retirées en boucle.
+// Limites connues (refusés à tort) : un nom propre ou un groupe de plus de deux mots devant
+// « va crever » (« Kevin va crever de jalousie », « Mon grand-père va crever », « Mon vieux téléphone
+// va crever ») ; « Crevé, sale journée » en tête de segment (accents retirés : crevé = crève).
 const THREAT_LEADS = ['mais', 'et', 'allez', 'aller', 'alors', 'bon', 'ben', 'bah', 'oh', 'eh', 'hey', 'ouais', 'toi', 'mec', 'frere',
   'franchement', 'serieux', 'serieusement', 'stp', 'ta gueule', 'je te le dis', 'je te dis', 'vas y', 'va y'];
 const THREAT_SUBJECTS = new Set(['il', 'elle', 'on', 'ca', 'ce', 'cela', 'qui', 'ils', 'elles']);
-const THREAT_DETERMINERS = new Set(['mon', 'ma', 'ton', 'ta', 'son', 'sa', 'le', 'la', 'un', 'une', 'ce', 'cette', 'notre', 'votre', 'leur']);
+const THREAT_DETERMINERS = new Set(['mon', 'ma', 'ton', 'ta', 'son', 'sa', 'le', 'la', 'un', 'une', 'ce', 'cette', 'notre', 'votre', 'leur',
+  'l', 'cet', 'du', 'au', 'des', 'les', 'mes', 'tes', 'ses', 'nos', 'vos', 'leurs', 'aux']);
+// Pronom complément devant « tue » : indicatif (« ça me tue toi »), jamais l'impératif (« tue-toi »).
+// Sauf « ferme-la tue toi », « ferme le tue toi » : « la » / « le » y suivent un impératif.
+const THREAT_OBJECTS = new Set(['me', 'm', 'te', 't', 'nous', 'vous', 'le', 'la', 'les', 'l', 'lui']);
 // Seules tournures tolérées derrière « va crever de » (« va crever de faim », « de ta belle mort » : bloqués)
 const CREVER_OK = new Set(['chaud', 'froid', 'rire']);
 function matchesImperativeThreat(text) {
-  const raw = String(text || '');
+  const raw = stripInvisible(text);
   if (/(^|[^\p{L}])(tue|suicide)[-‐–]toi(?![\p{L}])/iu.test(raw.normalize('NFD').replace(/\p{M}/gu, ''))) return true;
-  return raw.split(/[.!?…\n,;:«»"“”()]+/).some((s) => {
-    let n = normalizeForFilter(s);
+  const segments = raw.split(/[.!?…\n,;:«»"“”()]+/).map(normalizeForFilter);
+  return segments.some((s, k) => {
+    let n = s;
     for (let again = true; again;) {
       again = false;
       for (const l of THREAT_LEADS) if (n.startsWith(`${l} `)) { n = n.slice(l.length + 1); again = true; }
+    }
+    // « Crève sale chien », « Crève, sale chien » : « crève » ouvre le segment, « sale » suit
+    if (n === 'creve' || n.startsWith('creve ')) {
+      if (`${n} `.startsWith('creve sale ')) return true;
+      const next = segments.slice(k + 1).find(Boolean);
+      if (n === 'creve' && next && `${next} `.startsWith('sale ')) return true;
     }
     const t = n.split(' ').filter(Boolean);
     for (let i = 0; i < t.length - 1; i++) {
       const prev = t[i - 1];
       if ((t[i] === 'tue' || t[i] === 'suicide') && t[i + 1] === 'toi') {
         if (t[i] === 'tue' && THREAT_SUBJECTS.has(prev)) continue; // « elle tue toi… », « ça tue toi aussi »
+        if (t[i] === 'tue' && THREAT_OBJECTS.has(prev) && !(/^ferm/.test(t[i - 2] || '') && /^l/.test(prev))) continue; // « ça me tue toi »
         return true;
       }
       if (t[i] === 'va' && t[i + 1] === 'crever') {
@@ -149,10 +175,10 @@ function matchesImperativeThreat(text) {
 
 /** Vrai si le texte contient un terme bloqué. */
 export function hasObjectionableContent(text) {
-  if (matchesBlockedTerm(text) || matchesImperativeThreat(text)) return true;
-  const raw = String(text || '');
+  const raw = stripInvisible(text);
+  if (matchesBlockedTerm(raw) || matchesImperativeThreat(raw)) return true;
   const joined = raw.replace(JOINED_WORD, '$1');
-  return joined !== raw && matchesBlockedTerm(joined);
+  return joined !== raw && (matchesBlockedTerm(joined) || matchesImperativeThreat(joined));
 }
 
 export const OBJECTIONABLE_MESSAGE =

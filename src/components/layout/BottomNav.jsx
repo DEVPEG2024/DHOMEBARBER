@@ -20,7 +20,7 @@ export default function BottomNav() {
   if (location.pathname.startsWith('/admin')) return null;
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50">
+    <nav className="fixed bottom-0 left-0 right-0 z-50" style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
       {/* Background */}
       <div className="absolute inset-0 bg-gradient-to-t from-background via-background/95 to-transparent" />
       <div className="absolute inset-0 backdrop-blur-2xl" style={{ WebkitBackdropFilter: 'blur(24px)' }} />

@@ -573,7 +573,15 @@ function showSystemNotification(event) {
     };
     if (navigator.serviceWorker?.getRegistration) {
       navigator.serviceWorker.getRegistration()
-        .then((reg) => (reg ? reg.showNotification(title, options) : fallback()))
+        .then(async (reg) => {
+          // Navigateur abonné au push web : le serveur notifie déjà cette action
+          // (lib/adminAlerts.js), une seconde notification locale ferait doublon. Pas
+          // d'isSubscribed() : son serviceWorker.ready ne se résout jamais sans service worker.
+          let subscribed = false;
+          try { subscribed = !!(reg?.pushManager && await reg.pushManager.getSubscription()); } catch { subscribed = false; }
+          if (subscribed) return undefined;
+          return reg ? reg.showNotification(title, options) : fallback();
+        })
         .catch(fallback);
     } else {
       fallback();

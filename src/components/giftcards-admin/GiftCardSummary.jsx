@@ -6,7 +6,10 @@ import { giftCardBalance, formatEuro, formatDay, isValidityPassed } from '@/lib/
  * le montant initial, validité. Barre de solde en `transform: scaleX` (pas de largeur animée).
  */
 export default function GiftCardSummary({ card }) {
-  const balance = giftCardBalance(card);
+  // Carte annulée ou rejetée : plus rien à dépenser, quel que soit le `remaining_balance` gardé en
+  // base (une demande rejetée, jamais payée, garde son montant initial côté serveur)
+  const rejected = card.status === 'expired' && !card.validated_at;
+  const balance = card.status === 'expired' ? 0 : giftCardBalance(card);
   const amount = Number(card.amount) || 0;
   const ratio = amount > 0 ? Math.max(0, Math.min(1, balance / amount)) : 0;
   const passed = isValidityPassed(card);
@@ -26,9 +29,9 @@ export default function GiftCardSummary({ card }) {
       </div>
       <div className="relative mt-3 flex items-end justify-between gap-3">
         <div>
-          <p className="text-[10px] uppercase tracking-wider text-white/40">Solde restant</p>
+          <p className="text-[10px] uppercase tracking-wider text-white/40">{rejected ? 'Rejetée, jamais payée' : 'Solde restant'}</p>
           <p className="text-2xl font-black text-white leading-tight" data-testid="gc-balance">
-            {formatEuro(balance)} <span className="text-sm font-semibold text-white/40 whitespace-nowrap">/ {formatEuro(amount)}</span>
+            {rejected ? '—' : formatEuro(balance)} <span className="text-sm font-semibold text-white/40 whitespace-nowrap">/ {formatEuro(amount)}</span>
           </p>
         </div>
         <div className="text-right">

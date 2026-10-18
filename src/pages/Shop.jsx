@@ -55,6 +55,37 @@ const NOTES_MAX = 500;
  */
 const cartStorageKey = (userId) => `dhb-cart:${userId || 'guest'}`;
 
+/**
+ * Clé d'essai de la commande en cours, gardée sur l'appareil comme le panier
+ * (`dhb-order-ref:<id>`, valeur `{ key, sig, at }`). Si la réponse du serveur se perd (métro),
+ * le renvoi du même panier, même après avoir quitté la Boutique ou relancé l'app, repart avec la
+ * même clé et retombe sur la commande déjà créée (`client_ref`, index unique côté serveur).
+ * Valable 24 h ; stockage absent ou illisible = pas de clé gardée.
+ */
+const orderRefStorageKey = (userId) => `dhb-order-ref:${userId || 'guest'}`;
+const ORDER_REF_TTL_MS = 24 * 60 * 60 * 1000;
+
+function loadOrderRef(userId) {
+  try {
+    const raw = JSON.parse(localStorage.getItem(orderRefStorageKey(userId)) || 'null');
+    if (!raw || typeof raw !== 'object' || typeof raw.key !== 'string' || !raw.key
+      || typeof raw.sig !== 'string' || !Number.isFinite(raw.at)) return null;
+    if (Date.now() - raw.at >= ORDER_REF_TTL_MS || raw.at > Date.now() + 60_000) return null;
+    return { key: raw.key, sig: raw.sig, at: raw.at };
+  } catch {
+    return null;
+  }
+}
+
+function saveOrderRef(userId, ref) {
+  try {
+    if (!ref) localStorage.removeItem(orderRefStorageKey(userId));
+    else localStorage.setItem(orderRefStorageKey(userId), JSON.stringify(ref));
+  } catch {
+    // stockage indisponible : la clé reste en mémoire pour la durée de la page
+  }
+}
+
 function readCart(key) {
   try {
     const raw = JSON.parse(localStorage.getItem(key) || 'null');
@@ -342,12 +373,16 @@ export default function Shop() {
       });
 
       const sig = JSON.stringify(cartItems.map(([id, qty]) => [String(id), qty]).sort()) + notes.trim();
+      // Page quittée ou app relancée depuis un essai sans réponse : on reprend la clé gardée
+      if (!orderRefKey.current) orderRefKey.current = loadOrderRef(user?.id);
       if (!orderRefKey.current || orderRefKey.current.sig !== sig) {
         const key = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
           ? crypto.randomUUID()
           : Date.now().toString(36) + Math.random().toString(36).slice(2);
-        orderRefKey.current = { key, sig };
+        orderRefKey.current = { key, sig, at: Date.now() };
       }
+      // Écrite AVANT l'envoi : une réponse perdue laisse la clé sur l'appareil pour le renvoi
+      saveOrderRef(user?.id, orderRefKey.current);
 
       const res = await api.entities.Order.create({
         client_email: user?.email || '',
@@ -362,6 +397,7 @@ export default function Shop() {
         client_ref: orderRefKey.current.key,
       });
       orderRefKey.current = null;
+      saveOrderRef(user?.id, null);
       // Même envoi déjà enregistré (réponse perdue puis nouvel essai) : pas un second succès
       if (res?.duplicate) toast.info('Cette commande était déjà enregistrée');
 
@@ -374,9 +410,10 @@ export default function Shop() {
       queryClient.invalidateQueries({ queryKey: ['adminOrders'] });
     } catch (err) {
       // Réseau coupé : la commande est peut-être passée (réponse perdue). Jamais « Failed to fetch » ;
-      // panier gardé, et on invite à vérifier avant de renvoyer (le serveur ne dédoublonne que 60 s)
+      // panier gardé, et la clé d'essai, gardée sur l'appareil avec le panier, couvre le nouvel essai :
+      // le renvoi retombe sur la même commande (rien n'est effacé ici)
       if (isNetworkError(err) || err?.timeout) {
-        toast.error('Pas de connexion internet : vérifiez dans Mes commandes si la commande est passée avant de réessayer.', {
+        toast.error('Pas de connexion : votre panier est gardé. Réessayez quand la connexion revient, la commande ne sera pas passée deux fois.', {
           duration: 8000,
           action: { label: 'Mes commandes', onClick: () => navigate('/orders') },
         });
@@ -384,7 +421,10 @@ export default function Shop() {
         return; // le bloc finally remet quand même submittingRef et ordering à zéro
       }
       // Refus du serveur : rien n'a été créé, le prochain envoi est une nouvelle commande
-      if (err?.status >= 400 && err?.status < 500) orderRefKey.current = null;
+      if (err?.status >= 400 && err?.status < 500) {
+        orderRefKey.current = null;
+        saveOrderRef(user?.id, null);
+      }
       // Message du serveur (ex. 409 « plus que N en stock ») plutôt qu'une erreur générique
       const message = err?.data?.error || err?.message;
       toast.error(message && !/^HTTP \d+$/.test(message) ? message : 'Erreur lors de la commande');
@@ -567,7 +607,7 @@ export default function Shop() {
 
       {/* Cart Footer Button (le conteneur fixe reste non transformé : il sert de repère au vol) */}
       {cartCount > 0 && !showCart && (
-        <div ref={cartAnchorRef} className="fixed bottom-20 left-4 right-4 max-w-lg mx-auto z-40">
+        <div ref={cartAnchorRef} className="fixed bottom-[calc(5rem+env(safe-area-inset-bottom,0px))] left-4 right-4 max-w-lg mx-auto z-40">
           <motion.div
             initial={{ y: 100, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
@@ -776,7 +816,7 @@ export default function Shop() {
 
                   {/* Footer */}
                   {cartItems.length > 0 && (
-                    <div className="border-t border-border px-5 pt-4 pb-6 space-y-3 flex-shrink-0">
+                    <div className="border-t border-border px-5 pt-4 pb-[calc(env(safe-area-inset-bottom)+1.5rem)] space-y-3 flex-shrink-0">
                       <div className="flex items-center justify-between">
                         <span className="text-sm font-semibold">Total</span>
                         <span className="text-lg font-bold text-primary">{formatPrice(cartTotal)}</span>

@@ -8,7 +8,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import AppointmentEditForm from './AppointmentEditForm';
 import { STATUS_META, invalidateAppointmentQueries, withLastMinuteMarker, stripLastMinuteMarker, isConvertedLastMinute, agendaErrorMessage, appointmentEndParis, slotIssues, aptDuration } from './agendaUtils';
-import { foldText } from './ClientAccountPicker';
+import ClientAccountPicker from './ClientAccountPicker';
 import { useAuth } from '@/lib/AuthContext';
 import { parisInstant } from '@/lib/calendarLinks';
 import { formatStaffReason, cancellationActor, cancelledByLabel, cleanReason, isRescheduledCancel, LAST_MINUTE_EXPIRED_REASON, ORDER_STATUSES, normalizeOrderStatus, invalidateOrderQueries } from '@/lib/cancellation';
@@ -88,21 +88,6 @@ function reducer(state, action) {
   }
 }
 
-// Les comptes ne sont chargés que si le barber cherche vraiment un client, et par lots :
-// le serveur renvoie la photo de profil de chaque compte dans la liste.
-const USERS_PAGE_SIZE = 200;
-const USERS_MAX_PAGES = 25; // garde-fou : 5 000 comptes
-
-async function fetchUsersForSearch() {
-  const all = [];
-  for (let i = 0; i < USERS_MAX_PAGES; i++) {
-    const page = await api.entities.User.list('full_name', USERS_PAGE_SIZE, i * USERS_PAGE_SIZE);
-    all.push(...page);
-    if (page.length < USERS_PAGE_SIZE) break;
-  }
-  return all;
-}
-
 /** Une commande liée au RDV a changé : agenda (pastilles), commandes, tableau de bord, stock, activité. */
 function invalidateLinkedOrders(queryClient) {
   queryClient.invalidateQueries({ queryKey: ['agendaOrders'] });
@@ -163,7 +148,6 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
   };
   // Prestation déjà validée : l'encaissement reste corrigeable (moyen de paiement, pourboire, produit)
   const [correcting, setCorrecting] = React.useState(false);
-  const [clientSearch, setClientSearch] = React.useState('');
   const [assignedClient, setAssignedClient] = React.useState(null);
   // Annulation en deux temps : le premier tap ouvre le panneau de confirmation dans la fiche
   const [confirmingCancel, setConfirmingCancel] = React.useState(false);
@@ -201,22 +185,33 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
 
   const [selectedServices, setSelectedServices] = React.useState([]);
 
-  // Chargement à la première recherche seulement (2 caractères) : ouvrir une fiche
-  // ne télécharge plus aucun compte. Le résultat est mis en cache pour la session.
-  const searchActive = clientSearch.trim().length >= 2;
-  const { data: allUsers = [], isFetching: usersFetching } = useQuery({
-    queryKey: ['allUsersForSearch'],
-    queryFn: fetchUsersForSearch,
-    enabled: searchActive && isLastMinute && !appointment.client_email && !isCompleted,
-    staleTime: 5 * 60 * 1000,
-  });
-
-  // Clients seulement (un compte de l'équipe serait refusé par le serveur), accents repliés
-  const searchKey = foldText(clientSearch);
-  const filteredUsers = searchActive
-    ? allUsers.filter((u) => u?.email && (!u.role || u.role === 'user')
-        && (foldText(u.full_name).includes(searchKey) || foldText(u.email).includes(searchKey)))
-    : [];
+  // Compte choisi dans la recherche serveur (`/clients/search`, 10 résultats, comptes clients
+  // seulement, sans date de naissance) : plus aucun téléchargement de la liste des comptes
+  const assignAccount = async (u) => {
+    dispatch({ type: 'SAVING', value: true });
+    try {
+      const updateData = {
+        client_name: u.full_name || u.email,
+        client_email: u.email,
+        client_phone: u.phone || '',
+      };
+      // Last minute pris : confirmé (plus d'expiration automatique) et repéré pour
+      // « Convertis » du tableau de bord, note interne existante conservée
+      if (appointment.status === 'last_minute') {
+        updateData.status = 'confirmed';
+        updateData.internal_notes = withLastMinuteMarker(appointment.internal_notes);
+      }
+      await api.entities.Appointment.update(appointment.id, updateData);
+      setAssignedClient({ name: u.full_name || u.email, email: u.email, phone: u.phone || '' });
+      toast.success(`Client ${u.full_name || u.email} assigné`);
+      // La fiche reste ouverte (encaissement juste après) : l'agenda et le tableau de bord suivent
+      invalidateAppointmentQueries(queryClient);
+    } catch (e) {
+      toast.error(errorMessage(e, 'Assignation impossible'));
+    } finally {
+      dispatch({ type: 'SAVING', value: false });
+    }
+  };
 
   const status = STATUS_META[appointment.status] || STATUS_META.confirmed;
   const tipParsed = locked ? (appointment.tip || 0) : parseAmount(state.tip);
@@ -238,6 +233,10 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
   // Un débit partiel laisse le reste à encaisser en CB / espèces (le serveur refuse sinon).
   const giftCovered = giftPaid > 0 && Math.round((Number(appointment.gift_card_amount) || 0) * 100) >= Math.round((serviceTotal + prodValue) * 100);
   const giftCardNeedsDebit = state.paymentMethod === 'carte_cadeau' && appointment.payment_method !== 'carte_cadeau' && !giftCovered;
+  // « Corriger l'encaissement » d'un RDV déjà réglé par carte : un produit ajouté (ou un prix
+  // relevé) dépasse le débit, le reste doit passer en CB / espèces (le serveur refuse sinon)
+  const giftShortOnCorrection = correcting && state.paymentMethod === 'carte_cadeau'
+    && appointment.payment_method === 'carte_cadeau' && giftPaid > 0 && !giftCovered;
   // Produit saisi à l'encaissement : il n'est enregistré sur le RDV qu'à la clôture, donc Cartes
   // cadeau ne voit que le prix des prestations (moins le débit déjà fait) et ne peut pas le débiter
   const savedProd = Number(appointment.product_price) || 0;
@@ -245,7 +244,7 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
   const giftCapacity = Math.max(0, Math.round((serviceTotal + savedProd - (Number(appointment.gift_card_amount) || 0)) * 100) / 100);
   // 18 : last minute repris sans aucune prestation : pas d'encaissement à 0 €
   const needsService = isLastMinute && !isCompleted && !appointment.services?.length && selectedServices.length === 0;
-  const canValidate = !locked && !tipInvalid && state.paymentMethod && (tipValue === 0 || state.tipMethod) && !giftCardNeedsDebit && !needsService;
+  const canValidate = !locked && !tipInvalid && state.paymentMethod && (tipValue === 0 || state.tipMethod) && !giftCardNeedsDebit && !giftShortOnCorrection && !needsService;
   // 14 : RDV d'un client encore à venir : on l'annule (le client peut être prévenu), on ne le supprime pas
   const upcomingClient = !!appointment.client_email && ['confirmed', 'pending'].includes(appointment.status)
     && parisInstant(String(appointment.date || '').slice(0, 10), String(appointment.start_time || '00:00').slice(0, 5)) > Date.now();
@@ -386,7 +385,7 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
   };
 
   const handleValidate = async () => {
-    if (giftCardNeedsDebit || tipInvalid || needsService) return;
+    if (giftCardNeedsDebit || giftShortOnCorrection || tipInvalid || needsService) return;
     dispatch({ type: 'SAVING', value: true });
     try {
       const updateData = {
@@ -572,61 +571,7 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
           sans email (téléphone, sans rendez-vous) affiche simplement son client. */}
       {isLastMinute && !isCompleted && !appointment.client_email && !assignedClient ? (
         <div className="bg-secondary rounded-xl p-3 space-y-2 relative">
-          <div className="flex items-center gap-2">
-            <User className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-            <input
-              type="text"
-              placeholder="Rechercher un client..."
-              value={clientSearch}
-              onChange={e => setClientSearch(e.target.value)}
-              className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-primary/40"
-            />
-          </div>
-          {filteredUsers.length > 0 && (
-            <div className="max-h-36 overflow-y-auto rounded-lg border border-border bg-card">
-              {filteredUsers.slice(0, 8).map(u => (
-                <button
-                  key={u.id}
-                  onClick={async () => {
-                    dispatch({ type: 'SAVING', value: true });
-                    try {
-                      const updateData = {
-                        client_name: u.full_name || u.email,
-                        client_email: u.email,
-                        client_phone: u.phone || '',
-                      };
-                      // Last minute pris : confirmé (plus d'expiration automatique) et repéré pour
-                      // « Convertis » du tableau de bord, note interne existante conservée
-                      if (appointment.status === 'last_minute') {
-                        updateData.status = 'confirmed';
-                        updateData.internal_notes = withLastMinuteMarker(appointment.internal_notes);
-                      }
-                      await api.entities.Appointment.update(appointment.id, updateData);
-                      setAssignedClient({ name: u.full_name || u.email, email: u.email, phone: u.phone || '' });
-                      toast.success(`Client ${u.full_name || u.email} assigné`);
-                      setClientSearch('');
-                      // La fiche reste ouverte (encaissement juste après) : l'agenda et le tableau de bord suivent
-                      invalidateAppointmentQueries(queryClient);
-                    } catch (e) {
-                      toast.error(errorMessage(e, 'Assignation impossible'));
-                    } finally {
-                      dispatch({ type: 'SAVING', value: false });
-                    }
-                  }}
-                  className="w-full text-left px-3 py-2 text-xs hover:bg-primary/10 transition-colors border-b border-border/50 last:border-0"
-                >
-                  <span className="font-semibold text-foreground">{u.full_name || u.email}</span>
-                  {u.phone && <span className="text-muted-foreground ml-2">{u.phone}</span>}
-                </button>
-              ))}
-            </div>
-          )}
-          {searchActive && usersFetching && (
-            <p className="text-[11px] text-muted-foreground text-center py-1">Recherche...</p>
-          )}
-          {searchActive && !usersFetching && filteredUsers.length === 0 && (
-            <p className="text-[11px] text-muted-foreground text-center py-1">Aucun client trouvé</p>
-          )}
+          <ClientAccountPicker autoFocus={false} onSelect={assignAccount} />
           {/* Walk-in: manual name/phone for last minute */}
           {isLastMinute && (
             <div className="space-y-2 pt-1 border-t border-border/50">
@@ -1053,6 +998,11 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
                     <>Le débit de la carte cadeau se fait au comptoir par l'admin (Cartes cadeau). Laissez ce rendez-vous « À encaisser ».</>
                   )}
                 </div>
+              )}
+              {giftShortOnCorrection && (
+                <p role="status" className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-200">
+                  La carte cadeau n'a réglé que {formatPrice(giftPaid)} : choisissez CB ou Espèces pour encaisser le reste.
+                </p>
               )}
               {state.paymentMethod === 'carte_cadeau' && giftCovered && appointment.payment_method !== 'carte_cadeau' && (
                 <p role="status" className="mt-2 rounded-lg border border-green-500/30 bg-green-500/10 px-3 py-2 text-xs text-green-300">

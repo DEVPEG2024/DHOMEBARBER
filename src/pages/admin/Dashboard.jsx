@@ -21,7 +21,7 @@ import {
 } from '@/components/agenda/agendaUtils';
 import LoadError from '@/components/shared/LoadError';
 import { toast } from 'sonner';
-import { isRescheduledCancel } from '@/lib/cancellation';
+import { isRescheduledCancel, cancellationActor } from '@/lib/cancellation';
 
 // Plafond de `fetchAppointmentsForDates` : au-delà, les chiffres de la période seraient incomplets
 const APPOINTMENTS_LIMIT = 2000;
@@ -127,7 +127,8 @@ export default function AdminDashboard() {
 
   const { data: employees = [] } = useQuery({
     queryKey: ['employees'],
-    queryFn: () => api.entities.Employee.filter({ is_active: true }),
+    // Même requête que l'accueil (clé partagée ['employees'] : ordre sort_order)
+    queryFn: () => api.entities.Employee.filter({ is_active: true }, 'sort_order', 50),
   });
 
   // Hors pauses, créneaux last minute encore libres et last minute que personne n'a pris
@@ -138,8 +139,10 @@ export default function AdminDashboard() {
 
   // Last Minute : créneaux publiés = encore libres + pris par un client (repère dans la note interne)
   // + non pris ; « Convertis » = pris et pas annulés depuis
+  // Un Last Minute déplacé par le client n'est compté qu'une fois : l'ancienne ligne, annulée
+  // « Client : déplacé au … », est écartée (le nouveau RDV porte le créneau)
   const lastMinuteAppts = useMemo(() => allAppointments.filter(a =>
-    a.status === 'last_minute' || isConvertedLastMinute(a) || isUnclaimedLastMinute(a)
+    (a.status === 'last_minute' || isConvertedLastMinute(a) || isUnclaimedLastMinute(a)) && !isRescheduledCancel(a)
   ), [allAppointments]);
   const lastMinuteToday = lastMinuteAppts.filter(a => a.date === today);
   const lastMinuteMonth = lastMinuteAppts.filter(a => a.date?.startsWith(monthPrefix));
@@ -164,6 +167,8 @@ export default function AdminDashboard() {
   // Un déplacement fait par le client n'est pas une annulation (même règle que la carte Gang)
   const cancelledToday = todayAppts.filter(a => a.status === 'cancelled' && !isRescheduledCancel(a));
   const noShowToday = todayAppts.filter(a => a.status === 'no_show');
+  // RDV réels du jour : ni annulés (un déplacé n'est donc compté qu'une fois) ni absents
+  const activeToday = todayAppts.filter(a => !isCancelledLike(a));
 
   // Paid = payment_status 'paid' OR status 'completed'
   const paidToday = todayAppts.filter(isPaid);
@@ -202,7 +207,10 @@ export default function AdminDashboard() {
   const upcomingMonth = thisMonth.filter(a => a.status === 'confirmed' && !isPaid(a) && !needsClosing(a));
   const monthUpcoming = round2(upcomingMonth.reduce((sum, a) => sum + outsideGift(a), 0));
   const noShowsMonth = thisMonth.filter(a => a.status === 'no_show').length;
-  const cancelledMonth = thisMonth.filter(a => a.status === 'cancelled' && !isRescheduledCancel(a)).length;
+  // Annulations des clients seulement : ni déplacement, ni annulation du salon ou du système
+  // (sans auteur connu : comptée, pour ne pas perdre l'historique)
+  const cancelledMonth = thisMonth.filter(a => a.status === 'cancelled' && !isRescheduledCancel(a)
+    && cancellationActor(a) !== 'staff' && cancellationActor(a) !== 'system').length;
 
   // Prestations CB vs Espèces vs Carte cadeau (sans pourboire). La part payée par carte cadeau
   // (débit au comptoir, même partiel) n'est jamais comptée en CB / espèces : seul le reste l'est.
@@ -298,7 +306,10 @@ export default function AdminDashboard() {
     if (!targetAmount || targetAmount <= 0) return;
 
     // Get paid appointments for the selected month
-    const monthAppts = exportSource.filter(a => a.date?.startsWith(exportMonth) && isRealAppt(a) && isPaid(a));
+    // Ordre chronologique (date puis heure) : la cible est atteinte avec les premiers jours du mois
+    const monthAppts = exportSource
+      .filter(a => a.date?.startsWith(exportMonth) && isRealAppt(a) && isPaid(a))
+      .sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.start_time || '').localeCompare(b.start_time || ''));
 
     // Montant au format d'Excel en français (« 25,00 ») : avec un point, la colonne était lue comme du
     // texte (SOMME à 0) et « 10.10 » pouvait devenir une date
@@ -466,8 +477,8 @@ export default function AdminDashboard() {
         />
         <StatCard
           title="RDV Aujourd'hui"
-          value={todayAppts.length}
-          subtitle={`${completedToday.length} terminés${unpaidToday.length ? ` · ${unpaidToday.length} à clôturer` : ''} · ${upcomingToday.length} à venir`}
+          value={activeToday.length}
+          subtitle={`${completedToday.length} terminés${unpaidToday.length ? ` · ${unpaidToday.length} à clôturer` : ''} · ${upcomingToday.length} à venir${noShowToday.length ? ` · ${noShowToday.length} absent${noShowToday.length > 1 ? 's' : ''}` : ''}${cancelledToday.length ? ` · ${cancelledToday.length} annulé${cancelledToday.length > 1 ? 's' : ''}` : ''}`}
           icon={Calendar}
           onClick={canAgenda && confirmedToday.length > 0 ? () => navigate('/admin/agenda') : undefined}
         />
@@ -554,7 +565,7 @@ export default function AdminDashboard() {
         <MiniCard label="Produits vendus aujourd'hui" value={`${todayProducts}€`} icon={ShoppingBag} color="#a78bfa" />
         <MiniCard label="Produits vendus ce mois" value={`${monthProducts}€`} icon={ShoppingBag} color="#a78bfa" />
         <MiniCard label="No-shows (mois)" value={noShowsMonth} icon={AlertTriangle} color="#f87171" />
-        <MiniCard label="Annulations (mois)" value={cancelledMonth} icon={AlertTriangle} color="#facc15" />
+        <MiniCard label="Annulations clients (mois)" value={cancelledMonth} icon={AlertTriangle} color="#facc15" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">

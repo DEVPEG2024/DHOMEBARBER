@@ -13,6 +13,7 @@ import {
   appointmentServicesLabel, closeAppointmentWithGiftCard, fetchGiftCard, newClientRef, runGiftCardUndo,
   appointmentPrice, DEBIT_NETWORK_MESSAGE,
 } from '@/lib/giftCardDebit';
+import { invalidateAppointmentQueries } from '@/components/agenda/agendaUtils';
 
 const lower = (v) => String(v || '').trim().toLowerCase();
 
@@ -241,8 +242,20 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
     if (clientRefRef.current.key !== refKey || !clientRefRef.current.ref) {
       clientRefRef.current = { key: refKey, ref: newClientRef() };
     }
+    // Carte relue après un refus ou une réponse perdue : solde affiché et montant recalculé partent
+    // du solde réel
+    const reloadCard = async () => {
+      invalidateGiftCardQueries(queryClient, card.id);
+      try {
+        const fresh = await fetchGiftCard(card.id);
+        if (fresh) {
+          patchGiftCardCache(queryClient, fresh);
+          onCardChange?.(fresh);
+        }
+      } catch { /* relecture au mieux : le toast suffit */ }
+    };
     try {
-      const { card: fresh, transaction } = await debitGiftCard(card, {
+      const { card: fresh, transaction, replayed } = await debitGiftCard(card, {
         amount: debit,
         appointmentId: apt?.id ?? attachedApt?.id ?? null,
         services: selectedServices.map((s) => ({ id: s.id, name: s.name, price: Number(s.price) || 0 })),
@@ -251,12 +264,23 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
       });
       // Débit fait : le prochain sera un autre débit (nouvelle référence)
       clientRefRef.current = { key: null, ref: null };
+      // Garde-fou (serveur antérieur au refus `ref_undone`) : la référence désigne un débit annulé
+      // depuis ; rien n'a été débité, donc ni écran de succès ni clôture du RDV
+      if (replayed && transaction?.undone_at) {
+        setConfirming(false);
+        toast.error('Débit impossible', { description: 'Ce débit a été annulé depuis : touchez à nouveau « Débiter » pour le refaire.' });
+        await reloadCard();
+        return;
+      }
       // Avant la carte à jour : une carte épuisée n'est plus « débitable », le parent doit garder
       // ce panneau monté pour l'écran de succès (même lot de rendu)
       onResultChange?.(true);
       patchGiftCardCache(queryClient, fresh);
       onCardChange?.(fresh);
       invalidateGiftCardQueries(queryClient, card.id);
+      // Part payée par la carte posée sur le RDV : l'agenda (« Reste à encaisser ») et le tableau
+      // de bord (« À encaisser ») sont relus tout de suite, pas au bout du staleTime
+      if (apt || attachedApt) invalidateAppointmentQueries(queryClient);
 
       let previousApt = null;
       let closeFailed = false;
@@ -308,16 +332,13 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
         setSelectedAptId(null);
         setAttachAptId(undefined);
       }
+      // Débit annulé depuis (même référence) : le prochain « Débiter » est un nouveau débit
+      if (err?.data?.code === 'ref_undone') clientRefRef.current = { key: null, ref: null };
       // Refus (solde changé, carte annulée ou épuisée ailleurs) ou réponse perdue : carte relue
       if (noAnswer || err?.status === 409 || err?.local) {
-        invalidateGiftCardQueries(queryClient, card.id);
-        try {
-          const fresh = await fetchGiftCard(card.id);
-          if (fresh) {
-            patchGiftCardCache(queryClient, fresh);
-            onCardChange?.(fresh);
-          }
-        } catch { /* relecture au mieux : le toast suffit */ }
+        // Réponse perdue alors que le débit a pu poser la part carte sur le RDV
+        if (apt || attachedApt) invalidateAppointmentQueries(queryClient);
+        await reloadCard();
       }
     } finally {
       sendingRef.current = false;

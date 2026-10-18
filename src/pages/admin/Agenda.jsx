@@ -156,7 +156,8 @@ export default function Agenda() {
 
   const { data: rawEmployees = [] } = useQuery({
     queryKey: ['employees'],
-    queryFn: () => api.entities.Employee.filter({ is_active: true }),
+    // Même requête que l'accueil (clé partagée ['employees'] : ordre sort_order)
+    queryFn: () => api.entities.Employee.filter({ is_active: true }, 'sort_order', 50),
   });
 
   const { data: timeOffs = [] } = useQuery({
@@ -511,8 +512,10 @@ export default function Agenda() {
       status: 'no_show',
       cancellation_reason: LAST_MINUTE_EXPIRED_REASON,
     }))).then((results) => {
-      // Rien d'écrit (hors ligne, refus) : pas de rechargement, sinon la boucle recommencerait aussitôt
-      if (results.some((r) => r.status === 'fulfilled')) invalidateAppointmentQueries(queryClient);
+      // Rien d'écrit (hors ligne, refus) : pas de rechargement, sinon la boucle recommencerait aussitôt.
+      // Sauf un 409 : le serveur dit que le créneau a été repris par un client (cache périmé). Le
+      // rechargement apporte la ligne `confirmed`, qui ne passe plus ce filtre : pas de boucle.
+      if (results.some((r) => r.status === 'fulfilled' || r.reason?.status === 409)) invalidateAppointmentQueries(queryClient);
     });
   }, [appointments, queryClient]);
 
@@ -1005,6 +1008,30 @@ function LastMinuteForm({ open, employees, timeOffs, defaultEmployeeId, defaultD
         setCreated(row);
         onCreated?.();
       } catch (e) {
+        // Réponse perdue (réseau, 503 du routeur) : la ligne a pu être créée quand même. On relit la
+        // journée ; si le créneau Last Minute est là, le prochain tap n'envoie que la notification
+        // (sinon un nouvel essai créerait une seconde ligne sur le même créneau)
+        if (lastMinuteUncertain(e)) {
+          let found = null;
+          try {
+            const { data } = await dayQuery.refetch();
+            found = (Array.isArray(data) ? data : []).find((a) => a.status === 'last_minute'
+              && String(a.employee_id) === String(employee.id)
+              && String(a.date).slice(0, 10) === form.date
+              && a.start_time?.slice(0, 5) === startTime
+              && !String(a.client_email || '').trim()) || null;
+          } catch { found = null; }
+          if (found) {
+            setCreated({
+              id: found.id, employee_id: employee.id, employee_name: employee.name || '',
+              date: form.date, start_time: startTime, end_time: found.end_time?.slice(0, 5) || endTime,
+            });
+            onCreated?.();
+            toast.info('Créneau déjà bloqué : touchez Envoyer pour prévenir les clients');
+            setSending(false);
+            return;
+          }
+        }
         toast.error(`Créneau non créé : ${lastMinuteErrorMessage(e)}`);
         setSending(false);
         return;
@@ -1020,8 +1047,20 @@ function LastMinuteForm({ open, employees, timeOffs, defaultEmployeeId, defaultD
         url: lastMinuteBookingUrl(row),
       });
       // Renvoi d'un créneau déjà notifié dans les 15 min : le serveur n'envoie rien une seconde fois
+      // (pas de `force` : ce serait le double push que l'anti-doublon empêche)
       if (result?.already) {
-        toast.info('Notification déjà envoyée pour ce créneau (pas de nouvel envoi)');
+        if (result.pending) {
+          // Le premier envoi tourne encore : on ne sait pas s'il joindra quelqu'un. S'il finit sans
+          // joindre personne, le serveur oublie le créneau et un nouveau tap repart normalement
+          setPushUncertain(true);
+          setPushError("L'envoi précédent est encore en cours");
+          toast.info("L'envoi précédent est encore en cours : réessayez dans une minute pour voir le résultat");
+          return; // fenêtre ouverte ; le `finally` remet `sending` à false
+        }
+        const sentBefore = readCount(result, 'sent');
+        toast.info(sentBefore != null
+          ? `Notification déjà envoyée à ${plural(sentBefore, 'appareil')} (pas de nouvel envoi)`
+          : 'Notification déjà envoyée pour ce créneau (pas de nouvel envoi)');
         onDone();
         return;
       }
@@ -1123,7 +1162,7 @@ function LastMinuteForm({ open, employees, timeOffs, defaultEmployeeId, defaultD
         ))}
         {confirmResend && !sending && (
           <p role="status" className="text-xs leading-relaxed text-amber-300">
-            Renvoyer la notification à tous les clients ? Touchez encore le bouton pour confirmer.
+            Le serveur ne renverra pas une notification déjà partie : touchez encore pour vérifier ou relancer l'envoi.
           </p>
         )}
 
@@ -1136,7 +1175,7 @@ function LastMinuteForm({ open, employees, timeOffs, defaultEmployeeId, defaultD
           {sending ? (
             <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
           ) : created && pushUncertain ? (
-            confirmResend ? 'Confirmer le renvoi' : 'Renvoyer quand même'
+            confirmResend ? 'Confirmer' : 'Vérifier l\'envoi / réessayer'
           ) : created ? (
             'Renvoyer la notification'
           ) : (

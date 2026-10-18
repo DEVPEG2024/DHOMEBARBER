@@ -4,7 +4,7 @@ import { motion, useReducedMotion } from 'framer-motion';
 import { Share2, Loader2, Lock, CalendarPlus, Droplets, Check } from 'lucide-react';
 import { toast } from 'sonner';
 import { Switch } from '@/components/ui/switch';
-import LoadError from '@/components/shared/LoadError';
+import LoadError, { queryFailed } from '@/components/shared/LoadError';
 import GangCard, { GangCardPlaceholder } from '@/components/gang/GangCard';
 import { gangPalette } from '@/components/gang/gangTheme';
 import { gangFxHint } from '@/components/gang/GangFx';
@@ -92,7 +92,9 @@ export default function GangCardPage() {
   const size = useCardSize();
   const query = useGangCard();
   const invalidateGang = useInvalidateGang();
-  const { data, isPending, isError, error, refetch, isFetching } = query;
+  const { data, isPending, error, refetch, isFetching } = query;
+  // Requête en pause hors connexion : « Pas de connexion » plutôt qu'un chargement sans fin
+  const failed = queryFailed(query);
   const card = data?.card || null;
   const { share, busy: sharing, dialog: shareDialog } = useGangStoryShare(card);
   const palette = card ? gangPalette(card) || {} : {};
@@ -145,13 +147,13 @@ export default function GangCardPage() {
           <div className="h-0.5 w-12 mt-2 rounded-full bg-gradient-to-r from-primary to-primary/30" />
         </motion.div>
 
-        {isPending && (
+        {isPending && !failed && (
           <div className="flex flex-col items-center" aria-busy="true">
             <div className="rounded-3xl bg-secondary animate-pulse" style={{ width: 300 * size, height: 440 * size }} />
           </div>
         )}
 
-        {!isPending && isError && !data && (
+        {failed && (
           <LoadError what="ta carte Gang" error={error} onRetry={refetch} retrying={isFetching} />
         )}
 

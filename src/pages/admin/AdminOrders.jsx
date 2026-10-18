@@ -275,7 +275,10 @@ export default function AdminOrders() {
     updateMutation.mutate({
       id: order.id,
       data: { status: 'pending', notify_client: !!order.client_email && notifyRestore },
-      successMessage: order.client_email && notifyRestore ? 'Commande rétablie, client prévenu' : 'Commande rétablie',
+      // Produit rattaché à un RDV : le serveur n'envoie que la notification (pas d'email « rétablie »)
+      successMessage: order.client_email && notifyRestore
+        ? (order.appointment_id ? 'Commande rétablie, client notifié' : 'Commande rétablie, client prévenu')
+        : 'Commande rétablie',
       closeDialog: true,
     });
   };
@@ -497,7 +500,11 @@ export default function AdminOrders() {
                         onChange={(e) => setNotifyRestore(e.target.checked)}
                         className="mt-0.5 w-4 h-4 shrink-0 accent-green-500"
                       />
-                      <span className="min-w-0 break-words">Prévenir le client (notification + email) : sa commande est de nouveau en préparation</span>
+                      <span className="min-w-0 break-words">
+                        {confirmOrder.appointment_id
+                          ? 'Prévenir le client (notification) : son produit sera de nouveau prévu pour son rendez-vous'
+                          : 'Prévenir le client (notification + email) : sa commande est de nouveau en préparation'}
+                      </span>
                     </label>
                   )}
                 </div>

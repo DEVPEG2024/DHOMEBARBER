@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { useQuery } from '@tanstack/react-query';
@@ -143,8 +143,25 @@ export default function TryOn() {
     staleTime: 5 * 60 * 1000,
     queryFn: () => api.entities.Service.filter({ is_active: true }, 'sort_order', 100),
   });
-  const colorServiceIds = services.filter((s) => /colo|m[èe]che|d[ée]colo|blond/i.test(s.name || '')).map((s) => s.id);
-  const bookingHref = colorServiceIds.length > 0 ? `/booking?services=${colorServiceIds.join(',')}` : '/booking';
+  // Une seule prestation par zone essayée (avant : toutes les « Mèches » additionnées, 4 h 40, et
+  // jamais la « Couleur complète ») : cheveux → couleur complète de préférence, sinon mèches /
+  // décoloration ; barbe → teinture de barbe ; « Les deux » → l'une et l'autre. À chaque fois la
+  // plus courte, puis la moins chère.
+  const bookingHref = useMemo(() => {
+    const byLength = (a, b) => ((Number(a.duration) || 0) - (Number(b.duration) || 0))
+      || ((Number(a.price) || 0) - (Number(b.price) || 0));
+    const isBeard = (n) => /barbe|moustache|bouc/i.test(n);
+    const hairPick = (() => {
+      const hair = services.filter((s) => !isBeard(s.name || '') && /colo|coul|m[èe]che|d[ée]colo|blond/i.test(s.name || ''));
+      const full = hair.filter((s) => /colo|coul/i.test(s.name || ''));
+      return [...(full.length ? full : hair)].sort(byLength)[0] || null;
+    })();
+    const beardPick = services
+      .filter((s) => isBeard(s.name || '') && /teint|colo|coul/i.test(s.name || ''))
+      .sort(byLength)[0] || null;
+    const picks = (target === 'hair' ? [hairPick] : target === 'beard' ? [beardPick] : [hairPick, beardPick]).filter(Boolean);
+    return picks.length > 0 ? `/booking?services=${picks.map((s) => s.id).join(',')}` : '/booking';
+  }, [services, target]);
 
   useEffect(() => { hairUltraAvailable().then(setUltraAvailable); snapConfig().then((c) => setSnapAvailable(!!c)); }, []);
 

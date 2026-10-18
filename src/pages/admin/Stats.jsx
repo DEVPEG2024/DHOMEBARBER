@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { api } from '@/api/apiClient';
 import { isUnclaimedLastMinute, isClientPlaceholder } from '@/components/agenda/agendaUtils';
-import { isRescheduledCancel } from '@/lib/cancellation';
+import { isRescheduledCancel, cancellationActor } from '@/lib/cancellation';
 import { useQuery } from '@tanstack/react-query';
 import LoadError from '@/components/shared/LoadError';
 // Même CA par RDV que le tableau de bord (prestations + produit vendu, hors pourboire)
@@ -43,16 +43,19 @@ export default function Stats() {
 
   const { data: employees = [] } = useQuery({
     queryKey: ['employees'],
-    queryFn: () => api.entities.Employee.filter({ is_active: true }),
+    // Même requête que l'accueil (clé partagée ['employees'] : ordre sort_order)
+    queryFn: () => api.entities.Employee.filter({ is_active: true }, 'sort_order', 50),
   });
 
   const stats = useMemo(() => {
     // Taux calculés sur les vrais rendez-vous : ni pauses, ni créneaux last minute (libres ou non pris)
     // ni fiches de contact « Ajouter / Importer » des Clients (RDV annulé sans prestation ni prix)
     // ni ancien RDV d'un déplacement fait par le client (ce n'est pas une annulation : il ne gonfle
-    // ni le taux d'annulation ni son dénominateur)
+    // ni le taux d'annulation ni son dénominateur), ni annulation faite par le salon ou le système
+    // (fermeture, last minute non pris…) : le taux mesure les annulations des clients
+    const salonCancelled = (a) => a.status === 'cancelled' && ['staff', 'system'].includes(cancellationActor(a));
     const real = appointments.filter(a => a.status !== 'break' && a.status !== 'last_minute' && !isUnclaimedLastMinute(a)
-      && !isClientPlaceholder(a) && !isRescheduledCancel(a));
+      && !isClientPlaceholder(a) && !isRescheduledCancel(a) && !salonCancelled(a));
     const completed = real.filter(a => a.status === 'completed');
     const cancelled = real.filter(a => a.status === 'cancelled');
     const noShows = real.filter(a => a.status === 'no_show');
@@ -149,7 +152,7 @@ export default function Stats() {
         <StatBox title="CA Total" value={`${stats.totalRevenue.toFixed(0)}€`} icon={TrendingUp} />
         <StatBox title="RDV Complétés" value={stats.completed} icon={Calendar} />
         <StatBox title="Panier Moyen" value={`${stats.avgTicket.toFixed(0)}€`} icon={Target} />
-        <StatBox title="Taux Annulation" value={`${stats.cancelRate}%`} icon={AlertTriangle} />
+        <StatBox title="Taux annulation clients" value={`${stats.cancelRate}%`} icon={AlertTriangle} />
         <StatBox title="Taux No-show" value={`${stats.noShowRate}%`} icon={AlertTriangle} />
         <StatBox title="Barbers Actifs" value={employees.length} icon={Users} />
       </div>

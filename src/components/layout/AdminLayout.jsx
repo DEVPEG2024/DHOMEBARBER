@@ -108,6 +108,15 @@ function applyOrder(defaultList, savedIds) {
 
 // Determine which category each item belongs to based on position in flat list
 // Items after a header belong to that header's category, until the next header
+/**
+ * L'adresse correspond-elle à l'entrée de menu ? Comparaison par segment de chemin :
+ * `/admin/feed` couvre `/admin/feed` et `/admin/feed/…`, jamais `/admin/feedback`.
+ */
+function matchesPath(pathname, item) {
+  if (item.exact) return pathname === item.path;
+  return pathname === item.path || pathname.startsWith(`${item.path}/`);
+}
+
 function getCategoryForIndex(flatList, index) {
   for (let i = index - 1; i >= 0; i--) {
     if (flatList[i].type === 'header') return flatList[i].name;
@@ -192,10 +201,7 @@ export default function AdminLayout() {
   const isBarber = user?.role === 'barber';
   const allItems = useMemo(() => flatList.filter(e => e.type === 'item'), [flatList]);
 
-  const isActive = (item) => {
-    if (item.exact) return location.pathname === item.path;
-    return location.pathname.startsWith(item.path);
-  };
+  const isActive = (item) => matchesPath(location.pathname, item);
 
   // Determine which items are hidden (inside a collapsed category)
   // We need to figure out current category for each item based on position
@@ -245,10 +251,7 @@ export default function AdminLayout() {
   // ci-dessus changeait leur nombre d'un rendu à l'autre (erreur React « more hooks ») après la redirection
   if (isBarber) {
     const currentPath = location.pathname;
-    const isAllowed = allItems.some(item => {
-      if (item.exact) return currentPath === item.path;
-      return currentPath.startsWith(item.path);
-    });
+    const isAllowed = allItems.some(item => matchesPath(currentPath, item));
     if (!isAllowed) {
       const target = allItems[0]?.path || '/admin/my-cleaning';
       return <Navigate to={target} replace />;
@@ -264,6 +267,7 @@ export default function AdminLayout() {
 
       {/* Sidebar */}
       <aside className={`fixed lg:sticky top-0 left-0 h-screen w-[260px] bg-card border-r border-border z-50
+        pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]
         transform transition-transform duration-300 lg:translate-x-0 flex flex-col
         ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
 
@@ -401,7 +405,7 @@ export default function AdminLayout() {
       {/* Main content */}
       <div className="flex-1 min-h-screen min-w-0 overflow-x-clip">
         {/* Mobile header */}
-        <header className="sticky top-0 z-30 bg-background/80 backdrop-blur-xl border-b border-border px-3 h-14 flex items-center lg:hidden">
+        <header className="sticky top-0 z-30 bg-background/80 backdrop-blur-xl border-b border-border px-3 h-[calc(3.5rem+env(safe-area-inset-top,0px))] pt-[env(safe-area-inset-top,0px)] mt-[calc(env(safe-area-inset-top,0px)*-1)] flex items-center lg:hidden">
           <button className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-secondary transition-colors"
             onClick={() => setSidebarOpen(true)}>
             <Menu className="w-5 h-5" />

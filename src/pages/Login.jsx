@@ -12,8 +12,9 @@ import { apiRequest, apiUrl, getToken } from '@/api/apiClient';
 import { hasObjectionableContent } from '@/lib/contentFilter';
 
 const LOGO_URL = '/logo.png';
-// Délai avant de pouvoir redemander un code de réinitialisation
-const RESEND_DELAY = 30;
+// Délai avant de pouvoir redemander un code de réinitialisation : aligné sur le serveur
+// (RESET_RESEND_GAP_SECONDS = 60), qui ignore en silence un nouvel envoi plus rapproché
+const RESEND_DELAY = 60;
 
 const NETWORK_MESSAGE = 'Pas de connexion internet. Vérifiez votre réseau.';
 
@@ -117,7 +118,8 @@ export default function Login() {
 
   const handleRegister = async (e) => {
     e.preventDefault();
-    if (!email || !password || !fullName) {
+    // Un nom fait seulement d'espaces est refusé (le serveur l'enregistrait vide)
+    if (!email || !password || !fullName.trim()) {
       toast.error('Remplissez les champs obligatoires');
       return;
     }
@@ -137,7 +139,7 @@ export default function Login() {
     setLoading(true);
     try {
       // Ouvre la session et arme l'écran de bienvenue ci-dessous (welcomePending)
-      await register({ email, password, full_name: fullName, phone });
+      await register({ email, password, full_name: fullName.trim(), phone });
       toast.success('Compte créé avec succès !');
     } catch (err) {
       toast.error(authErrorMessage(err, "Erreur lors de l'inscription"));
@@ -217,10 +219,10 @@ export default function Login() {
     } catch (err) {
       const shown = authErrorMessage(err, 'Erreur lors de la réinitialisation');
       toast.error(shown);
-      // Code refusé : champ vidé et « Renvoyer le code » tout de suite disponible
+      // Code refusé : champ vidé ; « Renvoyer le code » se réactive dès que la minute depuis le
+      // dernier envoi est écoulée (`resendAt`), pas avant : le serveur ignorerait la demande
       if (/invalide|expiré/i.test(shown)) {
         setResetCode('');
-        setResendAt(0);
       }
     } finally {
       setLoading(false);

@@ -111,7 +111,7 @@ export default function FeedbackSheet({ type: initialType = 'bug', salonEmail, o
         animate={{ y: 0 }}
         exit={{ y: '100%' }}
         transition={{ type: 'spring', damping: 28, stiffness: 300 }}
-        className="fixed inset-x-0 bottom-0 z-[60] mx-auto max-w-lg max-h-[92vh] rounded-t-3xl border-t border-white/10 bg-background flex flex-col overflow-hidden"
+        className="fixed inset-x-0 bottom-0 z-[60] mx-auto max-w-lg max-h-[92vh] rounded-t-3xl border-t border-white/10 bg-background flex flex-col overflow-hidden kb-sheet-92"
       >
         <button
           type="button"

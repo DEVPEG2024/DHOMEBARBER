@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { MapPin, Clock, Phone, Star, ArrowRight, Scissors, ShoppingBag, Newspaper, Sparkles, Gift, GripVertical, Pencil, Check, X, Volume2, VolumeX, Shirt, Handshake } from 'lucide-react';
 import { motion, useMotionValue, useSpring, useTransform, Reorder, useReducedMotion } from 'framer-motion';
 import { toast } from 'sonner';
-import LoadError, { isNetworkError } from '@/components/shared/LoadError';
+import LoadError, { isNetworkError, queryFailed } from '@/components/shared/LoadError';
 import { isShopProduct } from '@/components/shop/productUtils';
 import { useAndroidBack } from '@/lib/useAndroidBack';
 import SectionHeader from '@/components/shared/SectionHeader';
@@ -410,7 +410,9 @@ export default function Home() {
   const servicesQuery = useQuery({
     queryKey: ['services'],
     staleTime: 5 * 60 * 1000, // catalogue : change rarement
-    queryFn: () => api.entities.Service.filter({ is_active: true }, 'sort_order', 50),
+    // Même requête que la réservation, les Prestations et les favoris (cache ['services'] partagé :
+    // une limite plus basse ici leur cacherait des prestations pendant 5 min)
+    queryFn: () => api.entities.Service.filter({ is_active: true }, 'sort_order', 100),
   });
   const services = servicesQuery.data ?? [];
 
@@ -593,7 +595,7 @@ export default function Home() {
             <SectionHeader title="Le Gang" subtitle="Les Barbers" />
             {employees.length > 0 ? (
               <BarberMarquee employees={employees} />
-            ) : employeesQuery.isError && !employeesQuery.data ? (
+            ) : queryFailed(employeesQuery) ? (
               <LoadError compact what="les barbers" error={employeesQuery.error} onRetry={employeesQuery.refetch} retrying={employeesQuery.isFetching} />
             ) : null}
           </div>
@@ -679,7 +681,7 @@ export default function Home() {
         return (
           <div>
             <SectionHeader title="Nos Prestations" subtitle="Services" linkTo="/services" />
-            {servicesQuery.isError && !servicesQuery.data ? (
+            {queryFailed(servicesQuery) ? (
               <LoadError compact what="les prestations" error={servicesQuery.error} onRetry={servicesQuery.refetch} retrying={servicesQuery.isFetching} />
             ) : (
             <div className="grid grid-cols-2 gap-2.5">
@@ -805,6 +807,9 @@ export default function Home() {
         return (
           <div>
             <SectionHeader title="Avis Clients" subtitle="Témoignages" linkTo="/reviews" />
+            <p className="text-[10px] text-muted-foreground -mt-2 mb-3">
+              Avis de clients connectés, non vérifiés, du plus récent au plus ancien
+            </p>
             <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1 snap-x snap-mandatory scrollbar-hide">
               {reviews.slice(0, 5).map((review, i) => (
                 <motion.div key={review.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.07 }}

@@ -45,7 +45,8 @@ export default function EventCard({ event, stats = EMPTY_STATS, isAdmin, busy, i
   const isPublic = event.visibility === 'public';
   const canPublish = event.status === 'draft';
   const canCancel = event.status === 'published' && phase !== 'past';
-  const canFinish = event.status === 'published';
+  // « Terminer » seulement une fois l'événement passé : avant, les invités voyaient « Terminé · vous y étiez »
+  const canFinish = event.status === 'published' && phase === 'past';
   const sameDayEnd = event.ends_at
     && new Date(event.ends_at).toLocaleDateString('fr-FR', { timeZone: 'Europe/Paris' })
       === new Date(event.starts_at).toLocaleDateString('fr-FR', { timeZone: 'Europe/Paris' });

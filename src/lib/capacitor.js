@@ -48,6 +48,10 @@ export async function syncStatusBarTheme(theme) {
 export async function initCapacitor() {
   if (!isNative) return;
 
+  // Android 15+ en bord à bord : la couleur de barre d'état n'est plus appliquée, src/index.css
+  // pose alors une bande sombre sous les icônes claires en thème clair (html.cap-android)
+  if (platform === 'android') document.documentElement.classList.add('cap-android');
+
   // Status bar : sur iOS, style du thème enregistré (cet appel asynchrone peut arriver après
   // l'effet de ThemeProvider : un Style.Dark fixe remettrait le texte clair sur le thème clair)
   try {

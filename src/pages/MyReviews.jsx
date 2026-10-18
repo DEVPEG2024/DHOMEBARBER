@@ -20,7 +20,8 @@ const readGoogleDone = (userId) => {
 };
 
 /**
- * Après un avis 5 étoiles : « Publiez-le aussi sur Google ». Le commentaire est copié dans le
+ * Après un avis (quelle que soit la note : solliciter seulement les avis positifs est interdit par
+ * le règlement des contenus de Google Maps) : « Publiez-le aussi sur Google ». Le commentaire est copié dans le
  * presse-papiers (à coller sur Google, qui n'accepte pas de texte prérempli), puis la page
  * d'avis Google du salon s'ouvre. Fermeture par la croix ou « Plus tard ».
  */
@@ -52,7 +53,7 @@ function GoogleReviewPrompt({ open, comment, userId, onClose }) {
           <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-2">
             <Star className="w-6 h-6 text-primary fill-primary" />
           </div>
-          <DialogTitle className="font-display text-center">Merci pour vos 5 étoiles !</DialogTitle>
+          <DialogTitle className="font-display text-center">Merci pour votre avis !</DialogTitle>
           <DialogDescription className="text-center">
             Un avis sur Google aide énormément le salon à se faire connaître. Ça prend 30 secondes.
             {comment ? ' Votre commentaire sera copié, il suffira de le coller.' : ''}
@@ -117,6 +118,15 @@ function ReviewCard({ review, index, showAuthor }) {
       </div>
       {review.employee_name && <p className="text-[11px] text-primary/80 mb-1">avec {review.employee_name}</p>}
       {review.comment && <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-line break-words">{review.comment}</p>}
+      {/* Avis masqué par le salon (œil dans Admin → Avis) : son auteur le voit encore dans « Mes avis » */}
+      {review.is_visible === false && (
+        <div className="mt-2.5 rounded-xl border border-amber-500/25 bg-amber-500/8 px-3 py-2">
+          <p className="text-[11px] font-semibold text-amber-400">Masqué par le salon</p>
+          <p className="text-[11px] text-muted-foreground leading-relaxed">
+            Cet avis n'est plus visible publiquement (contraire aux CGU, section 6). Contactez le salon pour en savoir plus.
+          </p>
+        </div>
+      )}
     </motion.div>
   );
 }
@@ -145,7 +155,7 @@ export default function MyReviews() {
   const [comment, setComment] = useState('');
   // Barber concerné (facultatif) : son nom part en `employee_name`, affiché « avec … » sur l'avis
   const [barberId, setBarberId] = useState('');
-  // Fenêtre « aussi sur Google » après un 5 étoiles : null = fermée, sinon le commentaire envoyé
+  // Fenêtre « aussi sur Google » après un avis : null = fermée, sinon le commentaire envoyé
   const [googlePrompt, setGooglePrompt] = useState(null);
 
   // Même requête et même clé que l'accueil (dédupliquée par React Query)
@@ -214,7 +224,8 @@ export default function MyReviews() {
     onSuccess: (_created, sent) => {
       queryClient.invalidateQueries({ queryKey: ['myReviews'] });
       queryClient.invalidateQueries({ queryKey: ['reviews'] });
-      if (Number(sent?.rating) === 5 && !readGoogleDone(user?.id)) {
+      // Proposée après tout avis, pas seulement les 5 étoiles (pas de sollicitation sélective)
+      if (!readGoogleDone(user?.id)) {
         setGooglePrompt({ comment: sent.comment || '' });
       } else {
         toast.success('Merci pour votre avis !');
@@ -255,6 +266,11 @@ export default function MyReviews() {
           <p className="text-[11px] uppercase tracking-[0.3em] text-primary font-semibold mb-1">Témoignages</p>
           <h1 className="font-display text-3xl font-bold text-foreground">Avis clients</h1>
           <div className="h-0.5 w-12 mt-2 rounded-full bg-gradient-to-r from-primary to-primary/30" />
+          <p className="text-[11px] text-muted-foreground mt-3 leading-relaxed">
+            Avis publiés par des clients connectés, sans vérification de visite. Classés du plus récent au plus ancien.
+            Le salon peut retirer un avis contraire aux{' '}
+            <a href="/cgu.html#avis" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-primary">CGU</a>.
+          </p>
         </motion.div>
 
         {stats && (

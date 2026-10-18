@@ -14,7 +14,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { RefreshCw, IdCard } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/lib/AuthContext';
-import LoadError from '@/components/shared/LoadError';
+import LoadError, { queryFailed } from '@/components/shared/LoadError';
 import { useGangAdminOverview, useGangAdminCards, GANG_ADMIN_CARDS_QUERY_KEY } from '@/lib/gangCardApi';
 import GangAdminTotals, { GangAdminTotalsSkeleton } from '@/components/gang-admin/GangAdminTotals';
 import GangFadingList from '@/components/gang-admin/GangFadingList';
@@ -43,8 +43,12 @@ export default function AdminGangCards() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const query = useGangAdminOverview({ enabled: isAdmin });
-  const { data, isPending, isError, error, refetch, isFetching } = query;
+  const { data, isPending, error, refetch, isFetching } = query;
   const cardsQuery = useGangAdminCards({ enabled: isAdmin });
+  // Hors connexion, React Query met la requête en pause (isPending sans erreur) : écran
+  // « Pas de connexion » au lieu d'un chargement sans fin
+  const failed = queryFailed(query);
+  const cardsFailed = queryFailed(cardsQuery);
   const queryClient = useQueryClient();
   const [params, setParams] = useSearchParams();
   const tab = TABS.some((t) => t.key === params.get('tab')) ? params.get('tab') : 'collection';
@@ -77,7 +81,7 @@ export default function AdminGangCards() {
           <p className="text-[11px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Clients</p>
           <h1 className="font-display text-2xl font-bold">Cartes Gang</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            {isPending ? 'Chargement…' : updated ? `Mis à jour à ${updated}` : 'Les cartes de collection de vos clients.'}
+            {isPending && !failed ? 'Chargement…' : updated ? `Mis à jour à ${updated}` : 'Les cartes de collection de vos clients.'}
           </p>
         </div>
         <Button
@@ -92,14 +96,14 @@ export default function AdminGangCards() {
         </Button>
       </div>
 
-      {isPending && (
+      {isPending && !failed && (
         <div className="space-y-4">
           <GangAdminTotalsSkeleton />
           <div className="h-[260px] rounded-2xl border border-border bg-card animate-pulse" />
         </div>
       )}
 
-      {!isPending && isError && !data && (
+      {failed && (
         <LoadError what="les cartes Gang" error={error} onRetry={refetch} retrying={isFetching} />
       )}
 
@@ -141,11 +145,11 @@ export default function AdminGangCards() {
           </div>
 
           {tab === 'collection' && (
-            cardsQuery.isPending ? (
+            cardsQuery.isPending && !cardsFailed ? (
               <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3" aria-hidden="true">
                 {Array.from({ length: 8 }, (_, i) => <div key={i} className="h-[230px] rounded-2xl bg-card animate-pulse" />)}
               </div>
-            ) : cardsQuery.isError && !cardsQuery.data ? (
+            ) : cardsFailed ? (
               <LoadError what="la collection des cartes" error={cardsQuery.error} onRetry={cardsQuery.refetch} retrying={cardsQuery.isFetching} />
             ) : (
               <GangCollection cards={cardsQuery.data?.cards} onOpen={setOpenEntry} />

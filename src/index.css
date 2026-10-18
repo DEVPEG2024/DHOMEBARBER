@@ -159,6 +159,20 @@ body {
   }
 }
 
+/* App Android (classe posée par initCapacitor) : en bord à bord (Android 15 et plus), la barre
+   d'état est transparente et ses icônes restent claires (Style.Dark) : en thème clair, même bande
+   sombre que ci-dessus sous l'heure et la batterie. Android 14 et avant : la barre opaque #1a1a2e
+   la recouvre, rien ne change ; rien en thème sombre */
+html.cap-android:not(.dark) body::before {
+  content: '';
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: env(safe-area-inset-top, 0px);
+  background: #1a1a2e;
+  z-index: 2147483647;
+  pointer-events: none;
+}
+
 /* Clavier ouvert (src/lib/capacitor.js) : le bas de la fenêtre encore recouvert par le clavier
    (--keyboard-overlap, calculé avec visualViewport) est réservé sous le contenu pour que le champ
    actif puisse défiler au-dessus du clavier. Sans recouvrement, le padding de la zone sûre disparaît :
@@ -166,6 +180,18 @@ body {
 :root { --keyboard-overlap: 0px; }
 body.keyboard-open {
   padding-bottom: var(--keyboard-overlap, 0px);
+}
+/* Fenêtres posées en bas d'écran (fixed bottom-0 : le padding du body ne les déplace pas) :
+   remontées au-dessus de la partie recouverte par le clavier quand la fenêtre n'est pas réduite
+   (iPad en mode compatibilité). La variable vaut 0 partout ailleurs : rien ne change. Hors
+   @layer et après @tailwind utilities, donc prioritaire sur bottom-0 / max-h-[…] à spécificité égale */
+.kb-sheet {
+  bottom: var(--keyboard-overlap, 0px);
+  max-height: calc(90vh - var(--keyboard-overlap, 0px));
+}
+.kb-sheet-92 {
+  bottom: var(--keyboard-overlap, 0px);
+  max-height: calc(92vh - var(--keyboard-overlap, 0px));
 }
 /* Page de connexion : le logo se replie quand le clavier est ouvert, le formulaire reste entier
    sur un écran court (iPhone SE, iPad en mode compatibilité) */

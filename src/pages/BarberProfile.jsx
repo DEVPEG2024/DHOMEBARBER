@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeft, ChevronRight, Scissors, Calendar, Clock } from 'lucide-react';
 import { hapticFeedback } from '@/lib/capacitor';
 import { Button } from '@/components/ui/button';
-import LoadError from '@/components/shared/LoadError';
+import LoadError, { queryFailed } from '@/components/shared/LoadError';
 import BarberCard, { buildCardStats, overallRating } from '@/components/shared/BarberCard';
 import BarberGallery from '@/components/barber-gallery/BarberGallery';
 
@@ -175,7 +175,8 @@ const WEEK_DAYS = [
 // Rendu dans un bloc glissable : un swipe gauche / droite passe au barber suivant / précédent.
 function BarberProfileContent({ employee, skillCategories, catsQuery = null }) {
   // Catégories de compétences en échec : jamais une carte « sans stats » sans explication
-  const catsFailed = !!catsQuery && catsQuery.isError && skillCategories.length === 0;
+  // queryFailed couvre aussi la requête en pause hors connexion (sans erreur)
+  const catsFailed = !!catsQuery && queryFailed(catsQuery) && skillCategories.length === 0;
   const employeeSkills = employee.skills || [];
   const allSkills = skillCategories.map(cat => {
     const s = employeeSkills.find(s => String(s.category_id) === String(cat.id));
@@ -318,12 +319,13 @@ export default function BarberProfile() {
   const [direction, setDirection] = useState(0);
 
   // Même requête (et même cache) que le carrousel de l'accueil
-  const { data: employees = [], isLoading, isError, error, refetch, isFetching } = useQuery({
+  const employeesQuery = useQuery({
     queryKey: ['employees'],
     staleTime: 5 * 60 * 1000, // catalogue : change rarement
     queryFn: () => api.entities.Employee.filter({ is_active: true }, 'sort_order', 50),
     retry: 1,
   });
+  const { data: employees = [], isLoading, error, refetch, isFetching } = employeesQuery;
 
   // L'erreur est levée (plus avalée en liste vide mise en cache 5 min) : la carte affichait « – »
   // et aucune stat pour tous les clients après une simple coupure réseau
@@ -379,8 +381,8 @@ export default function BarberProfile() {
     );
   }
 
-  // Liste en échec : ne pas annoncer « Barber introuvable »
-  if (!employee && isError) {
+  // Liste en échec (ou en pause hors connexion, pas encore en cache) : ne pas annoncer « Barber introuvable »
+  if (!employee && queryFailed(employeesQuery)) {
     return (
       <div className="max-w-lg mx-auto px-4 py-10">
         <LoadError what="ce barber" error={error} onRetry={refetch} retrying={isFetching} />

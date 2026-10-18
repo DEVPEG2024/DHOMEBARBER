@@ -5,7 +5,7 @@ import useBreakDrag from './useBreakDrag';
 import useCardDrag from './useCardDrag';
 import {
   START_HOUR, TOTAL_HOURS, minutesToTime, layoutOverlaps, verticalPlacement,
-  workingWindow, isOnLeave, isBreak, isLastMinuteSlot, toDateStr,
+  workingWindow, isOnLeave, isBreak, isLastMinuteSlot, isUnclaimedLastMinute, toDateStr,
 } from './agendaUtils';
 
 const HOUR_HEIGHT = 80;
@@ -156,7 +156,7 @@ export default function DayView({ date, appointments, employees, employeeFilter,
           <div className="flex border-b border-border sticky top-0 z-30 bg-card" style={rowStyle}>
             <div className="w-12 shrink-0 sticky left-0 bg-card z-10" />
             {columns.map(({ key, emp, apts }) => {
-              const count = apts.filter((a) => !isBreak(a) && !isLastMinuteSlot(a) && a.status !== 'cancelled').length;
+              const count = apts.filter((a) => !isBreak(a) && !isLastMinuteSlot(a) && a.status !== 'cancelled' && !isUnclaimedLastMinute(a)).length;
               const clickable = emp.id !== 'other' && !!onFocusBarber;
               return (
                 <button

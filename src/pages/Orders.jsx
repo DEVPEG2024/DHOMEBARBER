@@ -207,12 +207,12 @@ export default function Orders() {
                 ? (withAppointment ? 'Annulée avec votre rendez-vous' : cancelledByLabel(order, 'client'))
                 : null;
               const motive = statusKey === 'cancelled' && !withAppointment ? cleanReason(order.cancellation_reason) : '';
-              // Remise par le barber pendant le RDV, tant qu'elle n'est pas prête au salon — et
-              // seulement si ce RDV a encore lieu. Rien d'affirmé tant que les RDV ne sont pas
-              // chargés (ou en cas d'échec).
+              // Remise par le barber pendant le RDV (préparée ou non : « prête » veut dire préparée pour
+              // le RDV, la notification le dit) — et seulement si ce RDV a encore lieu. Rien d'affirmé
+              // tant que les RDV ne sont pas chargés (ou en cas d'échec).
               // Trois cas : RDV à venir (remise pendant le RDV), RDV commencé ou passé (remise déjà
               // faite en principe : pas d'annulation en ligne), RDV annulé / absent / introuvable.
-              const linkedOpen = linked && (statusKey === 'pending' || statusKey === 'confirmed');
+              const linkedOpen = linked && (statusKey === 'pending' || statusKey === 'confirmed' || statusKey === 'ready');
               const aptCancelled = !!linkedApt && ['cancelled', 'no_show'].includes(linkedApt.status);
               const aptPast = !!linkedApt && !aptCancelled && (linkedApt.status === 'completed' || aptStarted(linkedApt));
               const handedAtAppointment = linkedOpen && appointmentsLoaded && !!linkedApt && !aptCancelled && !aptPast;
@@ -237,7 +237,7 @@ export default function Orders() {
                     </div>
                     <div className="flex flex-col items-end gap-1 shrink-0">
                       <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${status.bg}`}>
-                        {status.label}
+                        {statusKey === 'ready' && handedAtAppointment ? 'Préparée pour votre RDV' : status.label}
                       </span>
                       {byLabel && <span className="text-[10px] text-muted-foreground text-right max-w-[8.5rem] leading-snug">{byLabel}</span>}
                     </div>
@@ -268,7 +268,7 @@ export default function Orders() {
                   )}
                   {appointmentGone && (
                     <p className="mt-3 text-[11px] text-amber-300/90 leading-relaxed">
-                      Ce rendez-vous n'a plus lieu : passez la retirer au salon ou annulez-la.
+                      Ce rendez-vous n'a plus lieu : passez la retirer au salon{canCancelStatus ? ' ou annulez-la' : ''}.
                     </p>
                   )}
                   {appointmentPast && (
@@ -293,7 +293,7 @@ export default function Orders() {
                     </div>
                   ) : isOpen && !appointmentPast && (
                     <p className="mt-3 text-[11px] text-muted-foreground leading-relaxed">
-                      {statusKey === 'ready'
+                      {statusKey === 'ready' && !handedAtAppointment
                         ? 'Votre commande est prête au salon : pour l\'annuler, appelez le '
                         : 'Besoin de modifier ou d\'annuler ? Appelez le salon au '}
                       <a href={SALON_PHONE_HREF} className="inline-flex items-center gap-1 text-primary font-semibold whitespace-nowrap">

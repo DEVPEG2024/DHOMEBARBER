@@ -7,7 +7,7 @@ import useBreakDrag from './useBreakDrag';
 import useCardDrag from './useCardDrag';
 import {
   START_HOUR, TOTAL_HOURS, minutesToTime, timeToMinutes, layoutOverlaps, verticalPlacement,
-  workingWindow, isOnLeave, isBreak, isLastMinuteSlot, toDateStr,
+  workingWindow, isOnLeave, isBreak, isLastMinuteSlot, isUnclaimedLastMinute, toDateStr,
 } from './agendaUtils';
 
 const HOUR_HEIGHT = 72;
@@ -84,7 +84,7 @@ export default function WeekView({ currentDate, appointments, employees, employe
         {days.map((day) => {
           const dateStr = toDateStr(day);
           const isToday = isSameDay(day, new Date());
-          const count = appointments.filter((a) => a.date === dateStr && !isBreak(a) && !isLastMinuteSlot(a) && a.status !== 'cancelled').length;
+          const count = appointments.filter((a) => a.date === dateStr && !isBreak(a) && !isLastMinuteSlot(a) && a.status !== 'cancelled' && !isUnclaimedLastMinute(a)).length;
           const onLeave = single && isOnLeave(timeOffs, single.id, dateStr);
           return (
             <button

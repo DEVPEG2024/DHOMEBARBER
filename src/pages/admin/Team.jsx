@@ -35,6 +35,42 @@ const defaultHours = DAYS.reduce((acc, d) => ({
   [d]: d === 'sunday' ? { start: '09:00', end: '19:00', closed: true } : { start: '09:00', end: '19:00', closed: false }
 }), {});
 
+const HHMM = /^\d{2}:\d{2}$/;
+
+/**
+ * Horaires de départ d'une nouvelle fiche : ceux du salon (`salon_settings.opening_hours`, clés
+ * `open` / `close` / `closed`), sinon `defaultHours`. La réservation ne regarde que les horaires du
+ * barber : partir de 09:00–19:00 du lundi au samedi laissait réserver avant l'ouverture du salon.
+ */
+function hoursFromSalon(openingHours) {
+  const oh = openingHours && typeof openingHours === 'object' ? openingHours : null;
+  if (!oh || !DAYS.some(d => oh[d])) return defaultHours;
+  return DAYS.reduce((acc, d) => ({
+    ...acc,
+    [d]: {
+      start: HHMM.test(oh[d]?.open || '') ? oh[d].open : '09:30',
+      end: HHMM.test(oh[d]?.close || '') ? oh[d].close : '19:00',
+      closed: !!oh[d]?.closed,
+    },
+  }), {});
+}
+
+/**
+ * Écart entre les horaires d'un jour du barber et ceux du salon (avertissement seulement, rien
+ * n'est bloqué : le salon peut vouloir des horaires de barber plus larges). Chaînes HH:MM comparées.
+ */
+function salonHoursWarning(openingHours, day, hours) {
+  const info = openingHours && typeof openingHours === 'object' ? openingHours[day] : null;
+  if (!info || !hours || hours.closed) return null;
+  if (info.closed) return 'Le salon est fermé ce jour-là';
+  const start = hours.start || '09:00';
+  const end = hours.end || '19:00';
+  const parts = [];
+  if (HHMM.test(info.open || '') && start < info.open) parts.push(`ouvre à ${info.open}`);
+  if (HHMM.test(info.close || '') && end > info.close) parts.push(`ferme à ${info.close}`);
+  return parts.length ? `Le salon ${parts.join(' et ')} ce jour-là` : null;
+}
+
 export default function Team() {
   const [editEmployee, setEditEmployee] = useState(null);
   // Ligne d'origine de la fiche ouverte (relue sur le serveur) : base de la comparaison à l'envoi
@@ -62,6 +98,13 @@ export default function Team() {
     queryFn: () => api.entities.Employee.list('sort_order', 50),
   });
   const employees = employeesQuery.data ?? [];
+  // Horaires du salon (même clé et même requête que Paramètres) : base d'une nouvelle fiche et
+  // avertissement quand les horaires du barber en sortent
+  const salonSettingsQuery = useQuery({
+    queryKey: ['salonSettings'],
+    queryFn: () => api.entities.SalonSettings.list('-created_date', 1),
+  });
+  const salonOpeningHours = salonSettingsQuery.data?.[0]?.opening_hours || null;
 
   const saveMutation = useMutation({
     mutationFn: async (data) => {
@@ -106,7 +149,7 @@ export default function Team() {
     openToken.current++;
     setPhotoUploading(false);
     setOriginalEmployee(null);
-    setEditEmployee({ name: '', title: '', bio: '', email: '', phone: '', is_active: true, working_hours: defaultHours, color: nextColor });
+    setEditEmployee({ name: '', title: '', bio: '', email: '', phone: '', is_active: true, working_hours: hoursFromSalon(salonOpeningHours), color: nextColor });
     setShowDialog(true);
   };
 
@@ -308,8 +351,11 @@ export default function Team() {
               <div>
                 <Label className="text-xs mb-2 block">Horaires</Label>
                 <div className="space-y-2">
-                  {DAYS.map(day => (
-                    <div key={day} className="flex items-center gap-2 text-xs min-w-0">
+                  {DAYS.map(day => {
+                    const warning = salonHoursWarning(salonOpeningHours, day, editEmployee.working_hours?.[day]);
+                    return (
+                    <div key={day}>
+                    <div className="flex items-center gap-2 text-xs min-w-0">
                       <span className="w-14 shrink-0 text-muted-foreground">{DAY_LABELS[day]}</span>
                       <Switch
                         checked={!editEmployee.working_hours?.[day]?.closed}
@@ -327,7 +373,12 @@ export default function Team() {
                         </>
                       )}
                     </div>
-                  ))}
+                    {warning && (
+                      <p className="mt-0.5 pl-16 text-[11px] text-amber-400" role="note">{warning}</p>
+                    )}
+                    </div>
+                    );
+                  })}
                 </div>
               </div>
 

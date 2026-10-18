@@ -68,7 +68,8 @@ export default function Cleaning() {
 
   const { data: employees = [] } = useQuery({
     queryKey: ['employees'],
-    queryFn: () => api.entities.Employee.filter({ is_active: true }),
+    // Même requête que l'accueil (clé partagée ['employees'] : ordre sort_order)
+    queryFn: () => api.entities.Employee.filter({ is_active: true }, 'sort_order', 50),
   });
 
   // Présence réelle de chaque barber par jour : horaires moins les pauses de l'agenda, repos et
@@ -122,6 +123,9 @@ export default function Cleaning() {
     mutationFn: (id) => api.entities.CleaningTask.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['cleaningTasks'] });
+      // Ses affectations à venir sont retirées par le serveur ; l'historique reste
+      queryClient.invalidateQueries({ queryKey: ['cleaningSchedule'] });
+      queryClient.invalidateQueries({ queryKey: ['cleaningHistory'] });
       setConfirmDeleteId(null);
       toast.success('Tâche supprimée');
     },
@@ -232,10 +236,15 @@ export default function Cleaning() {
         ) : (
           <div className="space-y-1.5">
             {tasks.map(task => (
-              <div key={task.id} className={`flex items-center justify-between bg-card border border-border rounded-xl px-4 py-3 ${!task.is_active ? 'opacity-50' : ''}`}>
-                <div>
+              <div key={task.id} className={`flex items-center justify-between gap-3 bg-card border border-border rounded-xl px-4 py-3 ${!task.is_active ? 'opacity-50' : ''}`}>
+                <div className="min-w-0">
                   <p className="text-sm font-semibold">{task.name}</p>
                   {task.description && <p className="text-[11px] text-muted-foreground">{task.description}</p>}
+                  {confirmDeleteId === task.id && (
+                    <p role="status" className="text-[11px] text-amber-300 mt-1 leading-snug">
+                      Les affectations à venir seront retirées ; l'historique des tâches faites est conservé. Pour la mettre en pause, désactivez-la plutôt.
+                    </p>
+                  )}
                 </div>
                 {confirmDeleteId === task.id ? (
                   <div className="flex shrink-0 items-center gap-1.5">
