@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Pencil, Trash2, Mail, Upload, Images } from 'lucide-react';
 import ImageCropDialog from '@/components/shared/ImageCropDialog';
 import GalleryEditor from '@/components/barber-gallery/GalleryEditor';
+import TesterAccounts from '@/components/team/TesterAccounts';
 import { BARBER_PHOTO_ASPECT, BARBER_PHOTO_BG, BARBER_PHOTO_RATIO } from '@/lib/barberPhoto';
 import { Button } from '@/components/ui/button';
 
@@ -318,6 +319,9 @@ export default function Team() {
         ))}
       </div>
       )}
+
+      {/* Fiche de test : les comptes clients qui la voient et peuvent la réserver */}
+      {employees.some(emp => emp.is_hidden) && <TesterAccounts />}
 
       <Dialog open={showDialog} onOpenChange={(o) => { if (!o) { openToken.current++; setPhotoUploading(false); } setShowDialog(o); }}>
         <DialogContent className="bg-card border-border max-w-md max-h-[90vh] overflow-y-auto overflow-x-hidden grid-cols-[minmax(0,1fr)]">
