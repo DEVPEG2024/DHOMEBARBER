@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import AiWriterPanel from '@/components/notifications/AiWriterPanel';
 import LoadError, { isNetworkError } from '@/components/shared/LoadError';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 
 // Bornes de la route d'envoi groupé (routes/push.js) : vérifiées AVANT le push, sinon le push
 // partirait puis les emails seraient refusés
@@ -47,7 +48,8 @@ function buildClients(registeredUsers, appointments) {
   const map = {};
   registeredUsers.forEach(u => {
     if (u.email && u.role === 'user') {
-      map[u.email.toLowerCase()] = { email: u.email, name: u.full_name || u.email };
+      // Refus des offres (Paramètres ou lien d'un email) : le serveur n'envoie plus d'email à ce compte
+      map[u.email.toLowerCase()] = { email: u.email, name: u.full_name || u.email, optedOut: u.marketing_emails === false };
     }
   });
   appointments.forEach(a => {
@@ -60,6 +62,8 @@ function buildClients(registeredUsers, appointments) {
 
 export default function Notifications() {
   const [target, setTarget] = useState('all');
+  // Envoi à « Tous les clients » : une confirmation avant de partir (fenêtre avec croix)
+  const [confirmAll, setConfirmAll] = useState(false);
   const [clientEmail, setClientEmail] = useState('');
   const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
@@ -133,7 +137,8 @@ export default function Notifications() {
   const subsUnknown = subsError || pushSubCount === null;
 
   const templates = [
-    { label: 'Rappel RDV', subject: 'Rappel de votre rendez-vous demain', body: "Nous vous rappelons votre rendez-vous demain. À très bientôt chez D'Home Barber !" },
+    // Visé à un client : ce texte n'a de sens que pour celui qui a un rendez-vous demain
+    { label: 'Rappel RDV', target: 'one', subject: 'Rappel de votre rendez-vous demain', body: "Nous vous rappelons votre rendez-vous demain. À très bientôt chez D'Home Barber !" },
     { label: 'Promotion', subject: 'Offre spéciale cette semaine', body: 'Profitez de -20% sur toutes nos prestations cette semaine uniquement. Réservez vite !' },
     { label: 'Fermeture', subject: 'Fermeture exceptionnelle', body: 'Le salon sera fermé exceptionnellement. Nous vous remercions de votre compréhension.' },
     { label: 'Nouveauté', subject: 'Nouvelles prestations', body: 'Nous avons le plaisir de vous présenter nos nouvelles prestations. Venez les découvrir !' },
@@ -147,8 +152,15 @@ export default function Notifications() {
     let sentCount = 0;
     let failed = 0;
     let lastError = null;
+    let optedOut = false;
     for (let i = 0; i < targets.length; i++) {
       const client = targets[i];
+      // Désinscrit des offres : le serveur refuserait (409), ce n'est pas un échec à relancer
+      if (client.optedOut) {
+        optedOut = true;
+        if (targets.length === 1) lastError = "ce client a refusé les emails d'offres (le push peut partir)";
+        continue;
+      }
       try {
         await api.integrations.Core.SendEmail({
           to: client.email,
@@ -157,6 +169,11 @@ export default function Notifications() {
         });
         sentCount++;
       } catch (err) {
+        if (err?.status === 409 && err?.data?.code === 'opted_out') {
+          optedOut = true;
+          if (targets.length === 1) lastError = errorText(err, "ce client a refusé les emails d'offres");
+          continue;
+        }
         failed++;
         if (err?.status === 429) {
           const left = targets.length - i;
@@ -165,7 +182,7 @@ export default function Notifications() {
         lastError = errorText(err, "échec de l'envoi");
       }
     }
-    return { sent: sentCount, failed, error: lastError };
+    return { sent: sentCount, failed, error: lastError, optedOut };
   };
 
   /**
@@ -257,6 +274,25 @@ export default function Notifications() {
       toast.error('Sélectionnez un client');
       return;
     }
+    // Tous les clients : confirmation d'abord (un modèle touché par erreur partait à tout le monde)
+    if (target === 'all' && !confirmAll) {
+      setConfirmAll(true);
+      return;
+    }
+    setConfirmAll(false);
+    await doSend();
+  };
+
+  const doSend = async () => {
+    if (emailRetry) return;
+    if (!subject || !message) {
+      toast.error('Objet et message requis');
+      return;
+    }
+    if (target === 'one' && !clientEmail) {
+      toast.error('Sélectionnez un client');
+      return;
+    }
     if (target === 'all' && (subject.length > BROADCAST_SUBJECT_MAX || message.length > BROADCAST_MESSAGE_MAX)) {
       toast.error(`Titre limité à ${BROADCAST_SUBJECT_MAX} caractères et message à ${BROADCAST_MESSAGE_MAX} pour un envoi à tous`);
       return;
@@ -274,7 +310,7 @@ export default function Notifications() {
         return;
       }
       const targets = target === 'all'
-        ? allClients
+        ? allClients.filter(c => !c.optedOut)
         : allClients.filter(c => c.email.toLowerCase() === clientEmail.toLowerCase());
 
       // 2) Push, dans son propre essai : les emails partent même s'il échoue
@@ -295,7 +331,8 @@ export default function Notifications() {
 
       // Push parti, aucun email parti (ni en file ni incertain) : proposer de relancer les emails
       // seuls. `sent === 0` : un envoi un par un partiellement réussi n'est jamais relancé (doublons)
-      if (pushResult && !pushError && !email.queued && !email.uncertain && email.sent === 0
+      // Client désinscrit des offres : rien à relancer, le serveur refuserait encore
+      if (pushResult && !pushError && !email.queued && !email.uncertain && !email.optedOut && email.sent === 0
         && (email.failed > 0 || email.error) && (email.total > 0 || targets.length > 0)) {
         setEmailRetry({ subject, message, target, clientEmail, targets });
       } else {
@@ -389,7 +426,11 @@ export default function Notifications() {
               <Label className="text-xs mb-2 block">Modèles rapides</Label>
               <div className="flex flex-wrap gap-2">
                 {templates.map(t => (
-                  <button key={t.label} onClick={() => { setSubject(t.subject); setMessage(t.body); }}
+                  <button key={t.label} onClick={() => {
+                    setSubject(t.subject);
+                    setMessage(t.body);
+                    if (t.target === 'one') { setTarget('one'); setClientsNeeded(true); }
+                  }}
                     className="text-xs px-3 py-1.5 rounded-full border border-border hover:border-primary hover:text-primary transition-colors bg-secondary">
                     {t.label}
                   </button>
@@ -408,7 +449,7 @@ export default function Notifications() {
                       target === 'all' ? 'bg-primary text-primary-foreground shadow' : 'text-muted-foreground'
                     }`}
                   >
-                    <Users className="w-3.5 h-3.5" /> Tous les clients{clientsLoaded ? ` (${clients.length})` : ''}
+                    <Users className="w-3.5 h-3.5" /> Tous les clients{clientsLoaded ? ` (${clients.filter(c => !c.optedOut).length})` : ''}
                   </button>
                   <button
                     onClick={() => { setTarget('one'); setClientsNeeded(true); }}
@@ -447,13 +488,19 @@ export default function Notifications() {
                         }`}
                       >
                         <span className="font-medium">{c.name}</span>
-                        <span className="text-muted-foreground ml-2">{c.email}</span>
+                        <span className="text-muted-foreground ml-2 break-all">{c.email}</span>
+                        {c.optedOut && <span className="ml-2 text-[10px] text-amber-400">désinscrit des offres</span>}
                       </button>
                     ))}
                   </div>
                   {clientEmail && (
-                    <p className="text-xs text-primary mt-1.5 font-medium">
+                    <p className="text-xs text-primary mt-1.5 font-medium break-all">
                       Sélectionné : {clientEmail}
+                    </p>
+                  )}
+                  {clientEmail && clients.some(c => c.optedOut && c.email.toLowerCase() === clientEmail.toLowerCase()) && (
+                    <p className="text-[11px] text-amber-400 mt-1">
+                      Ce client a refusé les emails d'offres : l'email ne partira pas (la notification push, si.)
                     </p>
                   )}
                 </div>
@@ -484,7 +531,7 @@ export default function Notifications() {
                   ? 'abonnés indisponibles'
                   : pushSubCount === null ? '…' : `${pushSubCount} abonné${pushSubCount > 1 ? 's' : ''}`})</p>
                 <p>• <strong>Email</strong> — envoi par email ({target === 'all'
-                  ? (clientsLoaded ? `${clients.length} destinataire${clients.length > 1 ? 's' : ''}` : 'tous les clients')
+                  ? (clientsLoaded ? `${clients.filter(c => !c.optedOut).length} destinataire${clients.filter(c => !c.optedOut).length > 1 ? 's' : ''}` : 'tous les clients')
                   : `${clientEmail ? 1 : 0} destinataire`})</p>
               </div>
 
@@ -493,6 +540,26 @@ export default function Notifications() {
                 <Send className="w-4 h-4 mr-2" />
                 {sending ? 'Envoi en cours...' : 'Envoyer (Push + Email)'}
               </Button>
+
+              {/* Confirmation d'un envoi à tous (croix et « Annuler » visibles) */}
+              <Dialog open={confirmAll} onOpenChange={(o) => { if (!o) setConfirmAll(false); }}>
+                <DialogContent className="max-w-sm">
+                  <DialogHeader>
+                    <DialogTitle>Envoyer à tous les clients ?</DialogTitle>
+                    <DialogDescription>
+                      Push : {subsError || pushSubCount === null ? 'abonnés inconnus' : `${pushSubCount} abonné${pushSubCount > 1 ? 's' : ''}`}
+                      {' · '}Email : {clientsLoaded ? `${clients.filter(c => !c.optedOut).length} destinataire${clients.filter(c => !c.optedOut).length > 1 ? 's' : ''}` : 'tous les clients'}
+                    </DialogDescription>
+                  </DialogHeader>
+                  <p className="text-sm font-semibold break-words">« {subject} »</p>
+                  <div className="flex gap-2 justify-end pt-1">
+                    <Button variant="outline" onClick={() => setConfirmAll(false)} disabled={sending}>Annuler</Button>
+                    <Button onClick={() => { setConfirmAll(false); doSend(); }} disabled={sending}>
+                      Envoyer à tous
+                    </Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
 
               {emailRetry && (
                 <div role="alert" className="relative rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 pr-10 text-xs">

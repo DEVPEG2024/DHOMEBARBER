@@ -151,7 +151,7 @@ export default function MyReviews() {
   // Même requête et même clé que l'accueil (dédupliquée par React Query)
   const {
     data: allReviews = [], isLoading: allLoading, isError: allFailed, error: allError,
-    refetch: refetchAll, isFetching: allFetching,
+    refetch: refetchAll, isFetching: allFetching, isPending: allPending, fetchStatus: allFetchStatus,
   } = useQuery({
     queryKey: ['reviews'],
     queryFn: () => api.entities.Review.filter({ is_visible: true }, '-created_date', 500),
@@ -165,7 +165,7 @@ export default function MyReviews() {
 
   const {
     data: myReviewsData, isLoading, isError: mineFailed, error: mineError,
-    refetch: refetchMine, isFetching: mineFetching,
+    refetch: refetchMine, isFetching: mineFetching, isPending: minePending, fetchStatus: mineFetchStatus,
   } = useQuery({
     queryKey: ['myReviews', user?.email],
     queryFn: () => api.entities.Review.filter({ client_email: user?.email }, '-created_date', 50),
@@ -174,6 +174,10 @@ export default function MyReviews() {
   const reviews = myReviewsData || [];
   // Liste reçue au moins une fois (un rechargement en échec garde les données, donc le plafond)
   const reviewsLoaded = myReviewsData !== undefined;
+  // Hors connexion, une requête jamais chargée se met en pause (ni erreur ni chargement) : échec,
+  // pas « Pas encore d'avis ». Une requête désactivée (sans email) reste « idle ».
+  const allLoadFailed = (allFailed && allReviews.length === 0) || (allPending && allFetchStatus === 'paused');
+  const mineLoadFailed = (mineFailed && !reviewsLoaded) || (minePending && mineFetchStatus === 'paused');
   // Plafond atteint seulement quand la liste est réellement chargée (une erreur ne bloque pas l'envoi)
   const limitReached = reviewsLoaded && reviews.length >= MAX_REVIEWS;
 
@@ -282,7 +286,7 @@ export default function MyReviews() {
             <div className="space-y-3">
               {[1, 2, 3].map(i => <div key={i} className="h-24 rounded-2xl bg-white/5 animate-pulse" />)}
             </div>
-          ) : allFailed && allReviews.length === 0 ? (
+          ) : allLoadFailed ? (
             <LoadError what="les avis" error={allError} onRetry={refetchAll} retrying={allFetching} />
           ) : allReviews.length === 0 ? (
             <div className="text-center py-16">
@@ -402,7 +406,7 @@ export default function MyReviews() {
           <div className="space-y-3">
             {[1, 2].map(i => <div key={i} className="h-24 rounded-2xl bg-white/5 animate-pulse" />)}
           </div>
-        ) : mineFailed && !reviewsLoaded ? (
+        ) : mineLoadFailed ? (
           <LoadError what="vos avis" error={mineError} onRetry={refetchMine} retrying={mineFetching} />
         ) : reviews.length === 0 ? (
           <div className="text-center py-16">

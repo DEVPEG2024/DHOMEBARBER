@@ -377,12 +377,17 @@ export default function GangCardPage() {
                 <p className="text-[11px] leading-snug text-muted-foreground mt-1">
                   Les 5 clients les plus réguliers des 90 derniers jours (au moins 2 visites) sont affichés dans le fil. Seuls ceux qui l’acceptent y figurent.
                 </p>
+                {data?.leaderboard_banned && (
+                  <p className="text-[11px] leading-snug text-amber-400 mt-1">
+                    Le salon t’a retiré du classement. Contacte-le si tu penses que c’est une erreur.
+                  </p>
+                )}
               </div>
               <Switch
                 id="gang-optin"
                 checked={optInValue}
                 onCheckedChange={toggleOptIn}
-                disabled={savingOptIn}
+                disabled={savingOptIn || (!!data?.leaderboard_banned && !optInValue)}
                 className="mt-0.5"
               />
             </div>

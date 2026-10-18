@@ -374,7 +374,7 @@ export default function Events() {
           ))}
         </div>
       )}
-      {myEventsQuery.isError && !myEventsQuery.data && (
+      {((myEventsQuery.isError && !myEventsQuery.data) || (myEventsQuery.isPending && myEventsQuery.fetchStatus === 'paused')) && (
         <LoadError
           what="vos demandes"
           error={myEventsQuery.error}

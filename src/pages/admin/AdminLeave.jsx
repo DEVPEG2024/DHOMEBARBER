@@ -14,7 +14,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import LoadError from '@/components/shared/LoadError';
+import LoadError, { queryFailed } from '@/components/shared/LoadError';
 import { fetchLeaveConflicts, agendaErrorMessage } from '@/components/agenda/agendaUtils';
 
 const STATUS_CONFIG = {
@@ -153,7 +153,7 @@ export default function AdminLeave() {
       {/* Leave requests list */}
       {isLoading ? (
         <div className="text-center py-16 text-muted-foreground text-sm">Chargement...</div>
-      ) : timeOffsQuery.isError && !timeOffsQuery.data ? (
+      ) : queryFailed(timeOffsQuery) ? (
         <LoadError what="les demandes de congé" error={timeOffsQuery.error} onRetry={timeOffsQuery.refetch} retrying={timeOffsQuery.isFetching} />
       ) : filtered.length === 0 ? (
         <div className="text-center py-16 text-muted-foreground text-sm">

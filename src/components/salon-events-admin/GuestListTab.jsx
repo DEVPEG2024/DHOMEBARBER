@@ -5,7 +5,7 @@
  * = audience `accepted`, message facultatif ≤ 200), retrait d'une invitation (admin, deux taps) et
  * export CSV (utils/exportCSV.js).
  */
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Phone, Mail, Users, UserCheck, UserX, Clock, Armchair, BellRing, Download, Trash2, AlertTriangle, Bell,
@@ -16,7 +16,7 @@ import { api } from '@/api/apiClient';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { remindSalonEvent } from '@/lib/salonEventsApi';
-import { newSendKey } from '@/lib/textileApi';
+import { sendKeyFor, settleSendKey, isSendUncertain } from '@/lib/textileApi';
 import LoadError from '@/components/shared/LoadError';
 import { exportToCSV } from '@/utils/exportCSV';
 import {
@@ -49,11 +49,13 @@ export default function GuestListTab({ event, invites, isLoading, error, isAdmin
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState('all');
   const [remindMessage, setRemindMessage] = useState('');
-  // Clé d'envoi par audience : gardée après une réponse perdue (pas de second push), renouvelée
-  // après un succès ou un changement de message
-  const sendKeys = useRef({});
-  const keyFor = (audience) => { if (!sendKeys.current[audience]) sendKeys.current[audience] = newSendKey(); return sendKeys.current[audience]; };
-  const [uncertainAudience, setUncertainAudience] = useState(null);
+  // Clé d'envoi par (événement, audience, message) gardée au niveau du module (textileApi.sendKeyFor) :
+  // après une réponse perdue, le nouvel essai — même après un changement d'onglet ou la fermeture
+  // de la liste — ne renvoie pas le rappel. `uncertainTick` relit l'état après un envoi.
+  const [uncertainTick, setUncertainTick] = useState(0);
+  const uncertainAudience = uncertainTick >= 0
+    ? (['accepted', 'pending', 'all'].find((a) => isSendUncertain('remind', event.id, a, remindMessage.trim())) || null)
+    : null;
 
   const rows = useMemo(() => {
     const list = Array.isArray(invites) ? [...invites] : [];
@@ -71,11 +73,11 @@ export default function GuestListTab({ event, invites, isLoading, error, isAdmin
   const capacity = Number(event.capacity) || 0;
 
   const remindMutation = useMutation({
-    mutationFn: (audience) => remindSalonEvent(event.id, { audience, message: remindMessage.trim(), sendKey: keyFor(audience) }),
+    mutationFn: (audience) => remindSalonEvent(event.id, { audience, message: remindMessage.trim(), sendKey: sendKeyFor('remind', event.id, audience, remindMessage.trim()) }),
     onSuccess: (data, audience) => {
       invalidateSalonEvents(queryClient, event.id);
-      delete sendKeys.current[audience];
-      setUncertainAudience(null);
+      settleSendKey('remind', event.id, audience, remindMessage.trim(), 'ok');
+      setUncertainTick((t) => t + 1);
       const sent = Number(data?.sent) || 0;
       const recipients = Number(data?.recipients) || 0;
       const who = audience === 'pending' ? 'sans réponse' : 'participants';
@@ -87,11 +89,14 @@ export default function GuestListTab({ event, invites, isLoading, error, isAdmin
     // Coupure réseau : l'envoi est peut-être parti, avertir sans inviter à renvoyer
     onError: (err, audience) => {
       if (isUncertainSend(err)) {
-        setUncertainAudience(audience);
+        settleSendKey('remind', event.id, audience, remindMessage.trim(), 'uncertain');
+        setUncertainTick((t) => t + 1);
         invalidateSalonEvents(queryClient, event.id);
         toast.warning("Réponse non reçue : un nouvel essai ne renverra pas le rappel s'il est déjà parti.", { duration: 10000 });
         return;
       }
+      settleSendKey('remind', event.id, audience, remindMessage.trim(), 'error');
+      setUncertainTick((t) => t + 1);
       toast.error(adminErrorMessage(err, "Erreur lors de l'envoi du rappel"), { duration: 10000 });
     },
   });
@@ -157,7 +162,7 @@ export default function GuestListTab({ event, invites, isLoading, error, isAdmin
         </div>
         <Textarea
           value={remindMessage}
-          onChange={(e) => { setRemindMessage(e.target.value.slice(0, REMIND_MESSAGE_MAX)); sendKeys.current = {}; setUncertainAudience(null); }}
+          onChange={(e) => { setRemindMessage(e.target.value.slice(0, REMIND_MESSAGE_MAX)); }}
           placeholder={`Message facultatif, sinon « ⏰ Rappel : ${event.title} »`}
           rows={2}
           maxLength={REMIND_MESSAGE_MAX}

@@ -35,12 +35,13 @@ export default function AdminReviews() {
     return () => clearTimeout(t);
   }, [confirmDeleteId]);
 
-  const { data: reviews = [], isLoading, isError, error, refetch, isFetching } = useQuery({
+  const { data: reviews = [], isLoading, isError, isPending, fetchStatus, error, refetch, isFetching } = useQuery({
     queryKey: ['allReviews'],
     queryFn: () => api.entities.Review.list('-created_date', 200),
   });
   // Liste en échec : jamais « 0 avis » ni « Aucun avis pour le moment »
-  const loadFailed = isError && reviews.length === 0;
+  // Échec sans données, ou requête en pause hors connexion : jamais « 0 avis · 0/5 »
+  const loadFailed = (isError && reviews.length === 0) || (isPending && fetchStatus === 'paused');
   const countKnown = !isLoading && !loadFailed;
 
   // Accueil, /reviews et Mes avis lisent leurs propres clés : toutes rafraîchies
@@ -223,7 +224,7 @@ export default function AdminReviews() {
             ))}
           </div>
 
-          {!isLoading && !isError && reviews.length === 0 && (
+          {!isPending && !loadFailed && !isError && reviews.length === 0 && (
             <div className="text-center py-16">
               <MessageSquare className="w-12 h-12 text-muted-foreground/30 mx-auto mb-3" />
               <p className="text-sm text-muted-foreground">Aucun avis pour le moment</p>

@@ -7,8 +7,8 @@ import { api } from '@/api/apiClient';
 import { useFavorites } from '@/lib/favorites';
 import FavoriteButton from '@/components/shared/FavoriteButton';
 import { formatDuration, formatPrice } from '@/components/services/serviceUtils';
-import LoadError from '@/components/shared/LoadError';
-import { isShopProduct } from '@/components/shop/productUtils';
+import LoadError, { queryFailed } from '@/components/shared/LoadError';
+import { isShopProduct, stockInfo } from '@/components/shop/productUtils';
 
 /**
  * « Mes favoris » (/favorites) : les prestations et produits marqués d'un cœur. Une prestation
@@ -44,13 +44,14 @@ export default function Favorites() {
     favorites.services.size > 0 && servicesQuery,
     favorites.products.size > 0 && productsQuery,
   ].filter(Boolean);
-  const loading = neededQueries.some(q => q.isPending);
-  // Un catalogue n'a pas pu se charger (et rien en cache) : erreur plutôt qu'un faux « Aucun favori »
-  const failedQuery = neededQueries.find(q => q.isError && !q.data);
-  const failed = !loading && !!failedQuery;
+  // Un catalogue n'a pas pu se charger (et rien en cache), ou sa requête est en pause hors
+  // connexion : erreur plutôt qu'un faux « Aucun favori » ou un squelette sans fin
+  const failedQuery = neededQueries.find(queryFailed);
+  const failed = !!failedQuery;
+  const loading = !failed && neededQueries.some(q => q.isPending);
   const retry = () => {
-    if (servicesQuery.isError) servicesQuery.refetch();
-    if (productsQuery.isError) productsQuery.refetch();
+    if (queryFailed(servicesQuery) || servicesQuery.isError) servicesQuery.refetch();
+    if (queryFailed(productsQuery) || productsQuery.isError) productsQuery.refetch();
   };
   const empty = !loading && !failed && favServices.length === 0 && favProducts.length === 0;
   const allServicesHref = `/booking?services=${favServices.map(s => encodeURIComponent(String(s.id))).join(',')}`;
@@ -147,7 +148,7 @@ export default function Favorites() {
                     <p className="text-sm font-semibold text-foreground truncate">{p.name}</p>
                     <p className="text-[11px] mt-0.5">
                       <span className="font-semibold text-primary">{formatPrice(p.price)}</span>
-                      {Number(p.stock) === 0 && <span className="text-red-400"> · Rupture</span>}
+                      {stockInfo(p).soldOut && <span className="text-red-400"> · Rupture</span>}
                     </p>
                   </div>
                   <FavoriteButton active onToggle={() => favorites.toggle('products', p.id)} />

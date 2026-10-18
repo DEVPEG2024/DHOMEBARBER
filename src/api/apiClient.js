@@ -228,11 +228,17 @@ const auth = {
    * POST /auth/logout avec le jeton en cours : le serveur coupe le jeton d'un barber ou d'un
    * admin (un client n'est jamais déconnecté, rien n'est fait pour lui). Le jeton local n'est
    * pas effacé ici : c'est le rôle d'AuthContext.logout. Un 401 n'émet pas `dhb:unauthorized`
-   * (route `/auth/`).
+   * (route `/auth/`). `token` permet de révoquer un jeton déjà retiré du stockage local, et
+   * `keepalive` laisse la requête aboutir même si la page change juste après (déconnexion).
    */
-  async logout() {
-    if (!getToken()) return null;
-    return request('POST', `${API_BASE}/auth/logout`);
+  async logout(token = getToken()) {
+    if (!token) return null;
+    const res = await fetch(`${API_BASE}/auth/logout`, {
+      method: 'POST',
+      headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
+      keepalive: true,
+    });
+    return res.json().catch(() => null);
   },
 
   /** POST /auth/register */

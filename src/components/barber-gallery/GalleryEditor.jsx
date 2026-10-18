@@ -6,8 +6,8 @@ import { api } from '@/api/apiClient';
 import { Button } from '@/components/ui/button';
 import { GALLERY_CAPTION_MAX, GALLERY_MAX, galleryOf } from '@/lib/barberGallery';
 
-// Photos envoyées par lot : le serveur limite les envois à 20 par quart d'heure et par adresse
-// IP, quota partagé avec tous les téléphones du salon (même Wi-Fi). Un lot de 10 laisse de la marge.
+// Photos envoyées par lot : le serveur limite les envois du staff à 60 par quart d'heure et par
+// compte (routes/upload.js). Un lot de 10 laisse de la marge pour les autres écrans.
 const BATCH_MAX = 10;
 
 const errorText = (err, fallback) => {
@@ -20,6 +20,10 @@ const errorText = (err, fallback) => {
  * Chaque geste est enregistré tout de suite (`Employee.update({ gallery })`), sans passer
  * par le bouton « Sauvegarder » de la page : ajout de photos (plusieurs à la fois, envoyées
  * une par une), légende (à la sortie du champ), ordre (flèches), suppression en deux taps.
+ *
+ * Chaque geste est appliqué à la galerie relue sur le serveur juste avant l'écriture, pas à la
+ * liste affichée : la même galerie s'édite depuis Mes paramètres (le barber) et depuis Équipe
+ * (l'admin), et renvoyer une liste périmée effaçait les photos ajoutées ailleurs entre-temps.
  */
 export default function GalleryEditor({ employee }) {
   const queryClient = useQueryClient();
@@ -40,13 +44,40 @@ export default function GalleryEditor({ employee }) {
     if (!busy) setItems(JSON.parse(serverKey));
   }, [serverKey]);
 
-  const save = async (next, { success } = {}) => {
+  // Galerie telle qu'elle est en base (lecture publique des barbers, `gallery` comprise)
+  const fetchServerGallery = async () => {
+    const rows = await api.entities.Employee.filter({ id: employee.id }, undefined, 1);
+    if (!rows?.[0]) throw new Error('Fiche introuvable, rechargez la page');
+    return galleryOf(rows[0]);
+  };
+
+  /**
+   * Enregistre un geste. `apply(galerie)` renvoie la nouvelle galerie, ou null si le geste ne
+   * s'applique plus (photo retirée ailleurs). Il sert deux fois : sur la liste affichée pour
+   * l'aperçu immédiat, puis sur la galerie relue sur le serveur pour l'écriture.
+   */
+  const save = async (apply, { success } = {}) => {
     const previous = itemsRef.current;
-    itemsRef.current = next;
-    setItems(next);
+    const preview = apply(previous);
+    if (preview) {
+      itemsRef.current = preview;
+      setItems(preview);
+    }
     setSaving(true);
     try {
+      const base = await fetchServerGallery();
+      const next = apply(base);
+      if (!next) {
+        itemsRef.current = base;
+        setItems(base);
+        toast.error('La photo a déjà été retirée ou modifiée ailleurs');
+        queryClient.invalidateQueries({ queryKey: ['employees'] });
+        return false;
+      }
       await api.entities.Employee.update(employee.id, { gallery: next });
+      // Liste du serveur fusionnée : les photos ajoutées ailleurs apparaissent tout de suite
+      itemsRef.current = next;
+      setItems(next);
       queryClient.invalidateQueries({ queryKey: ['employees'] });
       if (success) toast.success(success);
       return true;
@@ -54,6 +85,7 @@ export default function GalleryEditor({ employee }) {
       itemsRef.current = previous;
       setItems(previous);
       toast.error(errorText(err, 'Galerie non enregistrée, réessayez'));
+      queryClient.invalidateQueries({ queryKey: ['employees'] });
       return false;
     } finally {
       setSaving(false);
@@ -93,21 +125,32 @@ export default function GalleryEditor({ employee }) {
     }
     if (added.length) {
       // Les plus récentes en tête : c'est ce que les clients voient d'abord
-      await save([...added, ...itemsRef.current], { success: added.length > 1 ? `${added.length} photos ajoutées` : 'Photo ajoutée' });
+      await save(
+        (base) => [...added, ...base.filter((it) => !added.some((a) => a.url === it.url))].slice(0, GALLERY_MAX),
+        { success: added.length > 1 ? `${added.length} photos ajoutées` : 'Photo ajoutée' },
+      );
     }
   };
 
   const move = (index, dir) => {
     const target = index + dir;
     if (target < 0 || target >= items.length) return;
-    const next = [...items];
-    [next[index], next[target]] = [next[target], next[index]];
-    save(next);
+    // Gestes exprimés par URL : la galerie du serveur peut compter d'autres photos
+    const a = items[index].url;
+    const b = items[target].url;
+    save((base) => {
+      const i = base.findIndex((it) => it.url === a);
+      const j = base.findIndex((it) => it.url === b);
+      if (i < 0 || j < 0) return null;
+      const next = [...base];
+      [next[i], next[j]] = [next[j], next[i]];
+      return next;
+    });
   };
 
   const remove = (url) => {
     setConfirmDelete(null);
-    save(items.filter((it) => it.url !== url), { success: 'Photo retirée' });
+    save((base) => base.filter((it) => it.url !== url), { success: 'Photo retirée' });
   };
 
   const setCaption = (url, caption) => {
@@ -117,7 +160,13 @@ export default function GalleryEditor({ employee }) {
     const server = galleryOf(employee).find((it) => it.url === url);
     const local = items.find((it) => it.url === url);
     if (!local || (server && server.caption === local.caption.trim())) return;
-    save(items.map((it) => (it.url === url ? { ...it, caption: it.caption.trim() } : it)), { success: 'Légende enregistrée' });
+    const caption = local.caption.trim();
+    save(
+      (base) => (base.some((it) => it.url === url)
+        ? base.map((it) => (it.url === url ? { ...it, caption } : it))
+        : null),
+      { success: 'Légende enregistrée' },
+    );
   };
 
   return (

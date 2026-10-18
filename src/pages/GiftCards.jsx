@@ -471,8 +471,11 @@ function GiftCardDetailModal({ card, onClose }) {
 
   const handleShare = async () => {
     if (!canShare) return;
+    // Carte entamée : annoncer le solde restant, sinon le bénéficiaire croit disposer du montant initial
+    const amount = Number(card.amount) || 0;
+    const partly = balance < amount - 0.004;
     const text = [
-      `${card.sender_name || 'Quelqu’un'} vous offre une carte cadeau de ${formatPrice(card.amount)} chez D'Home Barber ! Code : ${card.code}.`,
+      `${card.sender_name || 'Quelqu’un'} vous offre une carte cadeau ${partly ? `D'Home Barber (solde : ${formatPrice(balance)} sur ${formatPrice(amount)})` : `de ${formatPrice(amount)} chez D'Home Barber`} ! Code : ${card.code}.`,
       validDate ? `Valable jusqu'au ${validDate}.` : '',
       'À présenter au salon.',
     ].filter(Boolean).join(' ') + (card.recipient_message ? `\n\nMessage : ${card.recipient_message}` : '');

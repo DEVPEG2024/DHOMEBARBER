@@ -63,7 +63,7 @@ export default function Partners() {
 
   // fetchPartners renvoie déjà [] quand le serveur ne connaît pas l'entité (400 / 404) : une erreur
   // ici est donc une vraie panne (réseau, serveur), à ne pas confondre avec « aucun partenaire ».
-  const { data, isLoading, isError, error, refetch, isFetching } = useQuery({ queryKey: PARTNERS_QUERY_KEY, queryFn: fetchPartners, staleTime: 5 * 60 * 1000 });
+  const { data, isLoading, isError, error, refetch, isFetching, isPending, fetchStatus } = useQuery({ queryKey: PARTNERS_QUERY_KEY, queryFn: fetchPartners, staleTime: 5 * 60 * 1000 });
   const partners = useMemo(() => visiblePartners(data), [data]);
 
   // Fiche ouverte = paramètre d'URL `p` (lien depuis l'accueil, bouton retour du téléphone)
@@ -139,7 +139,7 @@ export default function Partners() {
           <div className="space-y-3">
             {[0, 1, 2].map(i => <div key={i} className="h-24 rounded-2xl bg-card border border-border animate-pulse" />)}
           </div>
-        ) : isError && !data ? (
+        ) : (isError && !data) || (isPending && fetchStatus === 'paused') ? (
           <LoadError what="les bons plans" error={error} onRetry={refetch} retrying={isFetching} />
         ) : partners.length === 0 ? (
           <div className="rounded-3xl border border-dashed border-border bg-card/50 p-8 text-center">

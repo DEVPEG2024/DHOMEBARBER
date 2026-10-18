@@ -11,8 +11,16 @@ import {
   debitGiftCard, friendlyGiftCardError, invalidateGiftCardQueries, patchGiftCardCache,
   fetchTodayAppointmentsToCash, giftCardTodayAppointmentsKey, closestAppointmentId, appointmentDue, appointmentGiftPaid,
   appointmentServicesLabel, closeAppointmentWithGiftCard, fetchGiftCard, newClientRef, runGiftCardUndo,
-  DEBIT_NETWORK_MESSAGE,
+  appointmentPrice, DEBIT_NETWORK_MESSAGE,
 } from '@/lib/giftCardDebit';
+
+const lower = (v) => String(v || '').trim().toLowerCase();
+
+/** Le RDV est-il celui du titulaire de la carte ? (même règle que l'historique) */
+function makeIsOwner(card) {
+  const owner = [lower(card?.recipient_email), lower(card?.sender_email), lower(card?.recipient_name), lower(card?.sender_name)].filter(Boolean);
+  return (a) => owner.includes(lower(a?.client_email)) || owner.includes(lower(a?.client_name));
+}
 
 const MODES = [
   { key: 'appointments', label: 'RDV du jour', icon: CalendarClock },
@@ -57,7 +65,9 @@ function AppointmentRow({ apt, selected, highlighted, onSelect }) {
           </p>
         </div>
         <div className="text-right shrink-0">
-          <p className="text-sm font-bold text-foreground whitespace-nowrap">{formatEuro(appointmentDue(apt))}</p>
+          {appointmentPrice(apt) > 0
+            ? <p className="text-sm font-bold text-foreground whitespace-nowrap">{formatEuro(appointmentDue(apt))}</p>
+            : <p className="text-[11px] font-semibold text-amber-300 whitespace-nowrap">sans prestation</p>}
         </div>
       </div>
       {appointmentGiftPaid(apt) > 0 && (
@@ -81,9 +91,11 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
   const today = parisToday();
   const [mode, setMode] = useState('appointments');
   const [selectedAptId, setSelectedAptId] = useState(null);
-  // « Prestations » / « Montant libre » : RDV du jour auquel rattacher le débit (facultatif). Sans
-  // rattachement, la somme compterait deux fois si le RDV était ensuite encaissé en CB / espèces.
-  const [attachAptId, setAttachAptId] = useState(null);
+  // « Prestations » / « Montant libre » : RDV du jour auquel rattacher le débit. Sans rattachement,
+  // la somme compterait deux fois si le RDV était ensuite encaissé en CB / espèces. Trois états :
+  // `undefined` = pas encore choisi (débit bloqué s'il y a des RDV du jour), `null` = « Pas de RDV
+  // aujourd'hui » choisi volontairement, un id = ce RDV.
+  const [attachAptId, setAttachAptId] = useState(undefined);
   const [selectedServiceIds, setSelectedServiceIds] = useState(() => new Set());
   const [freeAmount, setFreeAmount] = useState('');
   const [confirming, setConfirming] = useState(false);
@@ -138,10 +150,39 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
 
   const resetConfirm = () => setConfirming(false);
 
-  const pickMode = (key) => { setMode(key); setAttachAptId(null); resetConfirm(); };
+  const pickMode = (key) => { setMode(key); setAttachAptId(undefined); resetConfirm(); };
   const attachedApt = mode !== 'appointments' && attachAptId
     ? appointments.find((a) => String(a.id) === String(attachAptId)) || null
     : null;
+
+  const isOwner = useMemo(() => makeIsOwner(card), [card]);
+  const attachMode = mode === 'services' || mode === 'free';
+  // Le titulaire de la carte a un seul RDV aujourd'hui : présélectionné (l'admin peut changer)
+  useEffect(() => {
+    if (!attachMode) return;
+    // RDV choisi disparu de la liste relue (encaissé entre-temps) : le choix est à refaire
+    if (attachAptId && !aptQuery.isPending && !appointments.some((a) => String(a.id) === String(attachAptId))) {
+      setAttachAptId(undefined);
+      return;
+    }
+    if (attachAptId !== undefined) return;
+    const mine = appointments.filter(isOwner);
+    if (mine.length === 1) setAttachAptId(mine[0].id);
+  }, [attachMode, attachAptId, appointments, isOwner, aptQuery.isPending]);
+  // Choix obligatoire tant que des RDV du jour existent ; liste encore en chargement : on attend
+  const attachRequired = attachMode && appointments.length > 0 && attachAptId === undefined;
+  const attachPending = attachMode && aptQuery.isPending;
+  const attachNoPrice = !!attachedApt && appointmentPrice(attachedApt) <= 0;
+  const attachOver = !!attachedApt && (attachNoPrice || debit > appointmentDue(attachedApt) + 0.005);
+  const selectedNoPrice = !!selectedApt && appointmentPrice(selectedApt) <= 0;
+  const blockReason = !(debit > 0) ? null
+    : attachPending ? 'Chargement des RDV du jour…'
+      : attachRequired ? 'Rattachez ce débit à un RDV ou choisissez “Pas de RDV aujourd\'hui”'
+        : attachNoPrice ? 'Ce RDV n\'a pas encore de prestation'
+          : attachOver ? 'Le débit dépasse le reste dû du RDV'
+            : null;
+  // Un blocage apparu pendant la confirmation (liste relue, RDV encaissé ailleurs) la referme
+  useEffect(() => { if (blockReason) setConfirming(false); }, [blockReason]);
 
   const toggleService = (id) => {
     resetConfirm();
@@ -183,7 +224,7 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
   };
 
   const handleConfirm = async () => {
-    if (sendingRef.current || !(debit > 0)) return;
+    if (sendingRef.current || !(debit > 0) || blockReason) return;
     sendingRef.current = true;
     setSending(true);
     const apt = selectedApt;
@@ -234,7 +275,12 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
         amount: debit,
         balance: newBalance,
         rest,
-        apt,
+        apt: apt || attachedApt,
+        // Débit hors RDV rattaché à un RDV du jour (reste dû du RDV après ce débit)
+        attached: !apt && !!attachedApt,
+        aptRest: !apt && attachedApt ? round2(Math.max(0, appointmentDue(attachedApt) - debit)) : 0,
+        // Débit hors RDV alors que des RDV du jour existaient : rappel du rattachement après coup
+        unattached: !apt && !attachedApt && attachMode && appointments.length > 0,
         closed: !!previousApt,
         closeFailed,
         snapshot,
@@ -250,10 +296,10 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
       else toast.error('Débit impossible', { description: friendlyGiftCardError(err) });
       // RDV déjà encaissé ou déjà réglé par une autre carte : la liste du jour est relue, le RDV
       // désélectionné (son reste dû a changé)
-      if (['appointment_already_paid', 'appointment_closed'].includes(err?.data?.code)) {
+      if (['appointment_already_paid', 'appointment_closed', 'appointment_no_price'].includes(err?.data?.code)) {
         queryClient.invalidateQueries({ queryKey: giftCardTodayAppointmentsKey(today) });
         setSelectedAptId(null);
-        setAttachAptId(null);
+        setAttachAptId(undefined);
       }
       // Refus (solde changé, carte annulée ou épuisée ailleurs) ou réponse perdue : carte relue
       if (noAnswer || err?.status === 409 || err?.local) {
@@ -277,6 +323,7 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
     setConfirmUndo(false);
     clientRefRef.current = { key: null, ref: null };
     setSelectedAptId(null);
+    setAttachAptId(undefined);
     setSelectedServiceIds(new Set());
     setFreeAmount('');
     setCloseApt(true);
@@ -317,7 +364,24 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
             {result.apt && result.closed && (
               <p className="mt-2 text-xs text-green-300">RDV de {result.apt.client_name || 'ce client'} clôturé (payé par carte cadeau).</p>
             )}
-            {result.apt && !result.closed && (
+            {result.apt && result.attached && (
+              <div className="mt-2 text-xs text-muted-foreground" data-testid="gc-success-attached">
+                Débit rattaché au RDV de {result.apt.client_name || 'ce client'}
+                {result.apt.start_time ? ` (${String(result.apt.start_time).slice(0, 5)})` : ''}.{' '}
+                {result.aptRest > 0
+                  ? <>Clôturez-le dans l'agenda : seuls les {formatEuro(result.aptRest)} restants compteront en CB / espèces.</>
+                  : <>Il est entièrement payé par carte : clôturez-le dans l'agenda avec « Carte cadeau ».</>}
+                <Link to={agendaLink(result.apt)} className="mt-1 flex items-center justify-center gap-1 font-semibold text-primary">
+                  Ouvrir l'agenda <ArrowRight className="w-3 h-3" />
+                </Link>
+              </div>
+            )}
+            {result.unattached && (
+              <p className="mt-2 text-xs text-amber-300" data-testid="gc-success-unattached">
+                Débit non rattaché : historique de la carte → « Rattacher à un RDV » si ce client est encaissé dans l'agenda.
+              </p>
+            )}
+            {result.apt && !result.attached && !result.closed && (
               <div className="mt-2 text-xs text-muted-foreground">
                 {result.rest > 0
                   ? <>Reste {formatEuro(result.rest)} : clôturez le RDV dans l'agenda avec le moyen de paiement du reste ; seuls ces {formatEuro(result.rest)} compteront en CB / espèces.</>
@@ -409,30 +473,56 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
                   onSelect={() => { setSelectedAptId(apt.id); resetConfirm(); }}
                 />
               ))}
+              {selectedNoPrice && (
+                <p className="text-[11px] text-amber-300 rounded-xl bg-amber-500/10 border border-amber-500/25 px-3 py-2" data-testid="gc-apt-noprice">
+                  Ce RDV n'a pas encore de prestation : choisissez-la dans l'agenda (Modifier) avant de le payer par carte.{' '}
+                  <Link to={agendaLink(selectedApt)} className="font-semibold text-primary whitespace-nowrap">Ouvrir l'agenda</Link>
+                </p>
+              )}
             </>
           )}
         </div>
       )}
 
-      {/* Débit hors RDV alors qu'un client a rendez-vous aujourd'hui : rattachement facultatif au
-          RDV (la part carte y est portée ; sans lui, le tableau de bord la compterait deux fois) */}
-      {(mode === 'services' || mode === 'free') && appointments.length > 0 && (
-        <div className="rounded-xl border border-white/10 bg-white/5 p-2.5 space-y-1.5 min-w-0" data-testid="gc-attach-today">
-          <p className="text-[11px] font-semibold text-foreground">Rattacher à un RDV du jour <span className="font-normal text-muted-foreground">(facultatif)</span></p>
+      {/* Débit hors RDV alors que des clients ont rendez-vous aujourd'hui : choix obligatoire
+          (la part carte est portée sur le RDV ; sans lui, le tableau de bord la compterait deux fois) */}
+      {attachMode && appointments.length > 0 && (
+        <div className={`rounded-xl border p-2.5 space-y-1.5 min-w-0 ${attachRequired ? 'border-amber-500/40 bg-amber-500/5' : 'border-white/10 bg-white/5'}`} data-testid="gc-attach-today">
+          <p className="text-[11px] font-semibold text-foreground">Ce débit paie-t-il un RDV du jour ?</p>
           <div className="flex flex-wrap gap-1.5">
+            {appointments.map((a) => {
+              const mine = isOwner(a);
+              const noPrice = appointmentPrice(a) <= 0;
+              return (
+                <button key={a.id} type="button" onClick={() => { setAttachAptId(a.id); resetConfirm(); }}
+                  data-testid="gc-attach-apt"
+                  aria-pressed={String(attachAptId) === String(a.id)}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] border text-left break-words max-w-full ${String(attachAptId) === String(a.id) ? 'bg-primary/15 border-primary/50 text-foreground' : 'bg-white/5 border-white/10 text-muted-foreground'}`}>
+                  {String(a.start_time || '').slice(0, 5)} · {a.client_name || 'Client'} · {noPrice ? 'sans prestation' : `reste ${formatEuro(appointmentDue(a))}`}
+                  {mine && <span className="ml-1 font-semibold text-primary">· titulaire de la carte</span>}
+                </button>
+              );
+            })}
             <button type="button" onClick={() => { setAttachAptId(null); resetConfirm(); }}
-              className={`px-2.5 py-1 rounded-lg text-[11px] border ${!attachAptId ? 'bg-primary/15 border-primary/50 text-foreground' : 'bg-white/5 border-white/10 text-muted-foreground'}`}>
-              Aucun
+              data-testid="gc-attach-none"
+              aria-pressed={attachAptId === null}
+              className={`px-2.5 py-1 rounded-lg text-[11px] border ${attachAptId === null ? 'bg-primary/15 border-primary/50 text-foreground' : 'bg-white/5 border-white/10 text-muted-foreground'}`}>
+              Pas de RDV aujourd'hui
             </button>
-            {appointments.map((a) => (
-              <button key={a.id} type="button" onClick={() => { setAttachAptId(a.id); resetConfirm(); }}
-                className={`px-2.5 py-1 rounded-lg text-[11px] border text-left break-words max-w-full ${String(attachAptId) === String(a.id) ? 'bg-primary/15 border-primary/50 text-foreground' : 'bg-white/5 border-white/10 text-muted-foreground'}`}>
-                {String(a.start_time || '').slice(0, 5)} · {a.client_name || 'Client'} · reste {formatEuro(appointmentDue(a))}
-              </button>
-            ))}
           </div>
-          {attachedApt && debit > appointmentDue(attachedApt) + 0.005 && (
-            <p className="text-[11px] text-amber-300">Le débit dépasse le reste dû de ce RDV ({formatEuro(appointmentDue(attachedApt))}) : il sera refusé.</p>
+          {attachNoPrice && (
+            <p className="text-[11px] text-amber-300" data-testid="gc-attach-noprice">
+              Ce RDV n'a pas encore de prestation : choisissez-la dans l'agenda (Modifier) avant de le payer par carte.{' '}
+              <Link to={agendaLink(attachedApt)} className="font-semibold text-primary whitespace-nowrap">Ouvrir l'agenda</Link>
+            </p>
+          )}
+          {attachedApt && !attachNoPrice && debit > appointmentDue(attachedApt) + 0.005 && (
+            <p className="text-[11px] text-amber-300">Le débit dépasse le reste dû de ce RDV ({formatEuro(appointmentDue(attachedApt))}) : le serveur le refuserait. Réduisez le montant ou choisissez un autre RDV.</p>
+          )}
+          {attachAptId === null && (
+            <p className="text-[11px] text-amber-300" data-testid="gc-attach-warning">
+              Sans rattachement, si ce client est ensuite encaissé en CB ou en espèces pour son RDV, le tableau de bord comptera {debit > 0 ? `ces ${formatEuro(debit)}` : 'cette somme'} deux fois.
+            </p>
           )}
         </div>
       )}
@@ -528,12 +618,19 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
         <button
           type="button"
           onClick={() => setConfirming(true)}
-          disabled={!(debit > 0)}
+          disabled={!(debit > 0) || !!blockReason}
           data-testid="gc-debit"
-          className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50"
+          className="w-full flex items-center justify-center gap-2 px-3 py-3 rounded-2xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50"
         >
           <Minus className="w-4 h-4 shrink-0" />
-          <span className="truncate">{debit > 0 ? `Débiter ${formatEuro(debit)} de la carte ${card.code}` : 'Choisissez ce que paie la carte'}</span>
+          {blockReason
+            ? <span className="min-w-0 text-center text-xs leading-snug">{blockReason}</span>
+            : (
+              <span className="truncate">
+                {debit > 0 ? `Débiter ${formatEuro(debit)} de la carte ${card.code}`
+                  : selectedNoPrice ? 'Ajoutez d\'abord une prestation au RDV' : 'Choisissez ce que paie la carte'}
+              </span>
+            )}
         </button>
       ) : (
         <div className="flex gap-2">

@@ -23,10 +23,10 @@ const WORDS = [
   'trouduc', 'pd',
   // Propos haineux
   'pede', 'gouine', 'bougnoule', 'bicot', 'youpin',
-  'chinetoque', 'bamboula', 'nigger', 'nigga', 'faggot', 'tranny',
+  'chinetoque', 'nigger', 'nigga', 'faggot', 'tranny',
   // Sexuel explicite
   'branlette', 'branleur', 'porno', 'porn', 'nudes', 'sodomie',
-  'fuck', 'fucking', 'motherfucker', 'bitch', 'cunt', 'whore', 'slut', 'pussy',
+  'fuck', 'fucking', 'motherfucker', 'bitch', 'cunt', 'whore', 'slut', 'pussy', 'cock',
   // Menaces
   'kys',
 ];
@@ -35,13 +35,14 @@ const WORDS = [
 const PHRASES = [
   'nique ta mere', 'niquer ta mere', 'ta mere la pute', 'fils de pute', 'fille de pute',
   'va te faire foutre', 'va te faire enculer', 'je vais te tuer', 'je vais te buter',
-  'je vais te defoncer', 'je vais te niquer', 'tue toi', 'suicide toi', 'va crever', 'creve sale',
+  'je vais te defoncer', 'je vais te niquer', 'creve sale', 'va crever sale', 'va donc crever', 'allez crever',
   'kill yourself', 'go die', 'suck my cock', 'suck my dick', 'big cock', 'my cock',
   // Mots ordinaires ou noms de famille hors insulte, bloqués seulement dans ces tournures
   'sale pedale', 'grosse pedale', 'sale tapette', 'grosse tapette', 'sale batard', 'espece de batard',
   'espece de salaud', 'sale salaud', 'gros salaud', 'espece de conard', 'suce ma bite', 'grosse bite',
   'sale enfoire', 'sale enfoiree', 'espece d enfoire', 'espece d enfoiree', 'gros enfoire', 'pauvre enfoire',
   'bande d enfoires', 't es un enfoire', 'tu es un enfoire',
+  'sale bamboula', 'gros bamboula', 'espece de bamboula',
   'sale negre', 'sale negro', 'sale negresse', 'gros negre', 'sale race de negre',
 ];
 
@@ -69,8 +70,9 @@ const WORD_SET = new Set(WORDS.map(normalizeForFilter));
 // « connnard » ou « fagggot » restent bloqués : la normalisation les ramène à « connard », « faggot »)
 const SQUEEZED_SET = new Set([...WORD_SET].map(squeeze).filter((w) => !['niger', 'conard', 'fagot', 'petase', 'pute'].includes(w)));
 // Expressions autorisées, retirées du texte avant la recherche (le groupe Suprême NTM, le groupe
-// Pussy Riot) : « ntm » seul ou « Suprême NTM fdp » restent refusés.
-const ALLOWED_PHRASES = ['supreme ntm', 'pussy riot'];
+// Pussy Riot, le nom de famille De Cock) : « ntm » seul, « Suprême NTM fdp » ou « De Cock cock »
+// restent refusés.
+const ALLOWED_PHRASES = ['supreme ntm', 'pussy riot', 'de cock'];
 const PHRASE_LIST = PHRASES.map(normalizeForFilter);
 // Mots assez longs pour être cherchés aussi lettres collées (« c.o.n.n.a.r.d », « s a l o p e »)
 const SPELLED = [...WORD_SET].filter((w) => w.length >= 6);
@@ -105,9 +107,21 @@ function matchesBlockedTerm(text) {
 // d'une majuscule (fin de phrase sans espace).
 const JOINED_WORD = /([\p{L}\d@$€])(?:[-_*]+|\.(?=\p{Ll}))(?=[\p{L}\d@$€])/gu;
 
+// Menaces à l'impératif : bloquées écrites avec un trait d'union, ou en tête de phrase (le texte brut est découpé sur . ! ? … et les retours à la ligne).
+// Ailleurs, « on va crever de chaud », « mon pneu va crever » ou « elle tue, toi… » passent.
+const IMPERATIVE_THREATS = ['va crever', 'tue toi', 'suicide toi'];
+function matchesImperativeThreat(text) {
+  const raw = String(text || '');
+  if (/(^|[^\p{L}])(tue|suicide)[-‐–]toi(?![\p{L}])/iu.test(raw.normalize('NFD').replace(/\p{M}/gu, ''))) return true;
+  return raw.split(/[.!?…\n]+/).some((s) => {
+    const n = normalizeForFilter(s);
+    return IMPERATIVE_THREATS.some((p) => n === p || (n.startsWith(`${p} `) && !n.startsWith(`${p} de `)));
+  });
+}
+
 /** Vrai si le texte contient un terme bloqué. */
 export function hasObjectionableContent(text) {
-  if (matchesBlockedTerm(text)) return true;
+  if (matchesBlockedTerm(text) || matchesImperativeThreat(text)) return true;
   const raw = String(text || '');
   const joined = raw.replace(JOINED_WORD, '$1');
   return joined !== raw && matchesBlockedTerm(joined);

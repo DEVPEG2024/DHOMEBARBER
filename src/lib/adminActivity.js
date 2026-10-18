@@ -50,8 +50,10 @@ export const ACTIVITY_TYPES = {
   appointment_cancelled: { label: 'Rendez-vous annulé', emoji: '❌', adminPath: '/admin/agenda', tone: 'red' },
   // Déplacement fait par le client (l'ancien RDV porte « Client : déplacé au … ») : pas une annulation
   appointment_moved: { label: 'Rendez-vous déplacé', emoji: '📅', adminPath: '/admin/agenda', tone: 'amber' },
-  // Réglage d'alerte seulement (push « Tâche ménage effectuée ») : action de l'équipe, jamais dans le fil
-  cleaning_done: { label: 'Ménage effectué', emoji: '🧹', adminPath: '/admin/cleaning', tone: 'green' },
+  // Réglages d'alerte seulement (push « Tâche ménage effectuée », « Demande de congé ») : actions de
+  // l'équipe, jamais dans le fil (`feed: false`, la fenêtre des réglages dit où les retrouver)
+  cleaning_done: { label: 'Ménage effectué', emoji: '🧹', adminPath: '/admin/cleaning', tone: 'green', feed: false, seeIn: 'Entretien' },
+  leave_request: { label: 'Demande de congé', emoji: '🌴', adminPath: '/admin/leave', tone: 'amber', feed: false, seeIn: 'Congés' },
   order_new: { label: 'Nouvelle commande', emoji: '🛍️', adminPath: '/admin/orders', tone: 'blue' },
   order_cancelled: { label: 'Commande annulée', emoji: '❌', adminPath: '/admin/orders', tone: 'red' },
   review_new: { label: 'Nouvel avis', emoji: '⭐', adminPath: '/admin/reviews', tone: 'amber' },
@@ -180,16 +182,19 @@ export async function fetchAdminActivity({ days = DEFAULT_DAYS } = {}) {
     E.Appointment.filter({ status: 'cancelled', cancelled_by: 'client' }, '-cancelled_at', 200));
 
   const [
-    staffUsers, newAppointments, cancelledAppointments, orders, reviews, giftCards,
+    staffUsers, newAppointments, cancelledAppointments, cancelledBookings, orders, reviews, giftCards,
     events, eventAnswers, reservations, invites, salonEvents, feedbacks, users, reports,
   ] = await Promise.all([
     staffPromise,
     // Pauses et last minute exclus par le serveur : ils n'entrent plus dans la limite de 300 (une
     // pause récurrente en créait 27 d'un coup et faisait sortir des réservations du fil). Annulés
-    // exclus aussi : un import de clients crée des centaines de fiches « annulées » d'un coup ; les
-    // réservations annulées ensuite par le client sont reprises de `cancelledAppointments`.
+    // exclus aussi : un import de clients crée des centaines de fiches « annulées » d'un coup. Les
+    // réservations annulées depuis, QUEL QU'EN SOIT L'AUTEUR (client, salon, ancienne annulation sans
+    // auteur), sont reprises de la requête dédiée `cancelledBookings` (plus celles de
+    // `cancelledAppointments`, annulées par le client).
     safe('Rendez-vous', failed, () => E.Appointment.filter({ status: ['confirmed', 'completed', 'no_show'] }, '-created_date', 300)),
     cancelledPromise,
+    safe('Réservations annulées', failed, () => E.Appointment.filter({ status: 'cancelled' }, '-created_date', 300)),
     safe('Commandes', failed, () => E.Order.list('-created_date', 200)),
     safe('Avis', failed, () => E.Review.list('-created_date', 200)),
     safe('Cartes cadeau', failed, () => E.GiftCard.list('-created_at', 200)),
@@ -249,9 +254,17 @@ export async function fetchAdminActivity({ days = DEFAULT_DAYS } = {}) {
     });
   }
 
-  // Réservations faites puis annulées par le client : la réservation a bien eu lieu (une ligne
-  // annulée n'est plus dans `newAppointments`, donc jamais en double)
-  for (const apt of cancelledAppointments) {
+  if (cancelledBookings.length >= 300) {
+    const last = cancelledBookings[cancelledBookings.length - 1];
+    if (inWindow(toIso(last.created_date || last.created_at))) failed.push('Réservations annulées (plus de 300 sur la période : les plus anciennes manquent)');
+  }
+
+  // Réservations faites puis annulées (par le client ou le salon) : la réservation a bien eu lieu
+  // (une ligne annulée n'est plus dans `newAppointments`, donc jamais en double). Union par id des
+  // deux requêtes : une annulation du client sortie de la limite de 300 reste comptée.
+  const cancelledById = new Map();
+  for (const apt of [...cancelledBookings, ...cancelledAppointments]) if (apt?.id != null) cancelledById.set(String(apt.id), apt);
+  for (const apt of cancelledById.values()) {
     if (!isClientAppointment(apt, staffEmails) || isClientPlaceholder(apt)) continue;
     push('appointment_new', apt, toIso(apt.created_date || apt.created_at), {
       ...who(apt),
@@ -289,6 +302,24 @@ export async function fetchAdminActivity({ days = DEFAULT_DAYS } = {}) {
       amount: toNumber(apt.grand_total) ?? toNumber(apt.total_price),
       link: appointmentLink(apt),
     });
+  }
+
+  // Déplacement par le client : le nouveau RDV est créé quelques secondes avant l'annulation de
+  // l'ancien. Un seul geste = un seul événement (« Rendez-vous déplacé »), qui mène au nouveau RDV :
+  // un toast, une notification système, +1 non lu (le serveur n'envoie déjà qu'une alerte).
+  const MOVE_PAIR_MS = 3 * 60_000;
+  for (const moved of out.filter((e) => e.type === 'appointment_moved')) {
+    const tMoved = Date.parse(moved.at);
+    const email = lower(moved.clientEmail);
+    if (!email || !Number.isFinite(tMoved)) continue;
+    const idx = out.findIndex((e) => e.type === 'appointment_new'
+      && lower(e.clientEmail) === email
+      && e.entityId !== moved.entityId
+      && Math.abs(tMoved - Date.parse(e.at)) <= MOVE_PAIR_MS);
+    if (idx === -1) continue;
+    const [fresh] = out.splice(idx, 1);
+    moved.link = fresh.link; // ouvre le nouvel horaire dans l'agenda
+    moved.amount = fresh.amount ?? moved.amount;
   }
 
   for (const o of orders) {
@@ -331,10 +362,13 @@ export async function fetchAdminActivity({ days = DEFAULT_DAYS } = {}) {
 
   for (const g of giftCards) {
     if (isStaffEmail(g.sender_email)) continue;
+    // Rejetée (jamais validée donc jamais payée) : reste au fil, hors du montant du jour
+    const rejected = g.status === 'expired' && !g.validated_at;
     push('giftcard_new', g, toIso(g.created_at || g.created_date), {
       ...who(g, 'sender_name', 'sender_email'),
-      detail: join(g.recipient_name ? `Pour ${g.recipient_name}` : '', g.code || '', g.status === 'pending' ? 'à valider' : ''),
+      detail: join(g.recipient_name ? `Pour ${g.recipient_name}` : '', g.code || '', g.status === 'pending' ? 'à valider' : '', rejected ? 'rejetée' : ''),
       amount: toNumber(g.amount),
+      cancelled: rejected,
     });
   }
 

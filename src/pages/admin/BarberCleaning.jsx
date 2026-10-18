@@ -8,10 +8,12 @@ import { Button } from '@/components/ui/button';
 import { format, startOfWeek, addDays } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { toast } from 'sonner';
-import LoadError, { isNetworkError } from '@/components/shared/LoadError';
+import LoadError, { isNetworkError, queryFailed } from '@/components/shared/LoadError';
 
 
 const DAY_LABELS = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
+// « Lundi 19 octobre » : majuscule au jour seulement (comme AgendaToolbar.jsx)
+const upperFirst = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 
 export default function BarberCleaning() {
   const { user } = useAuth();
@@ -30,7 +32,8 @@ export default function BarberCleaning() {
     queryFn: () => api.entities.CleaningSchedule.filter({ week_start: weekStart }, 'date', 500),
   });
   const allSchedule = scheduleQuery.data ?? [];
-  const scheduleFailed = scheduleQuery.isError && !scheduleQuery.data;
+  // Échec sans données, ou requête en pause hors connexion : jamais « Aucune tâche cette semaine »
+  const scheduleFailed = queryFailed(scheduleQuery);
 
   // Filter only this barber's tasks
   const mySchedule = useMemo(() => {
@@ -54,7 +57,7 @@ export default function BarberCleaning() {
       grouped[dateStr] = {
         label: DAY_LABELS[i],
         date: dateStr,
-        fullLabel: format(addDays(mondayDate, i), 'EEEE d MMMM', { locale: fr }),
+        fullLabel: upperFirst(format(addDays(mondayDate, i), 'EEEE d MMMM', { locale: fr })),
         tasks: mySchedule.filter(s => s.date === dateStr),
       };
     }
@@ -133,7 +136,7 @@ export default function BarberCleaning() {
             <motion.div key={date} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
               className={`rounded-xl border p-4 ${isToday ? 'border-primary/30 bg-primary/5' : 'border-border bg-card'}`}>
               <div className="flex items-center justify-between mb-2">
-                <p className="text-sm font-semibold capitalize">{fullLabel}</p>
+                <p className="text-sm font-semibold">{fullLabel}</p>
                 <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
                   done === tasks.length ? 'bg-green-500/10 text-green-400' : 'bg-secondary text-muted-foreground'
                 }`}>
@@ -167,7 +170,11 @@ export default function BarberCleaning() {
           <LoadError what="vos tâches" error={scheduleQuery.error} onRetry={scheduleQuery.refetch} retrying={scheduleQuery.isFetching} />
         )}
 
-        {!scheduleFailed && mySchedule.length === 0 && (
+        {!scheduleFailed && scheduleQuery.isPending && (
+          <div className="text-center py-16 text-sm text-muted-foreground">Chargement…</div>
+        )}
+
+        {!scheduleFailed && !scheduleQuery.isPending && mySchedule.length === 0 && (
           <div className="text-center py-16">
             <Sparkles className="w-10 h-10 text-muted-foreground/20 mx-auto mb-3" />
             <p className="text-sm text-muted-foreground">Aucune tâche cette semaine</p>

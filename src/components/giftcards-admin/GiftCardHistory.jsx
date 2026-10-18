@@ -2,12 +2,13 @@ import React, { useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { History, Link2, X } from 'lucide-react';
 import { toast } from 'sonner';
-import LoadError from '@/components/shared/LoadError';
+import LoadError, { isNetworkError } from '@/components/shared/LoadError';
 import {
   fetchGiftCardTransactions, giftCardTransactionsKey, formatEuro, formatParisDateTime,
   canUndoTransaction, runGiftCardUndo, attachGiftCardDebit, fetchRecentAppointmentsToCash,
-  giftCardRecentAppointmentsKey, parisToday, appointmentDue, appointmentServicesLabel, formatDay,
-  closeAppointmentWithGiftCard, friendlyGiftCardError, round2,
+  giftCardRecentAppointmentsKey, parisToday, appointmentDue, appointmentPrice, appointmentServicesLabel, formatDay,
+  closeAppointmentWithGiftCard, friendlyGiftCardError, round2, fetchAppointmentById,
+  invalidateGiftCardQueries, ATTACH_NETWORK_MESSAGE,
 } from '@/lib/giftCardDebit';
 
 const lower = (v) => String(v || '').trim().toLowerCase();
@@ -37,12 +38,37 @@ function AttachPanel({ card, tx, onClose, onDone }) {
     if (sendingId) return;
     setSendingId(apt.id);
     try {
-      await attachGiftCardDebit(card, tx.id, apt.id, queryClient);
+      const data = await attachGiftCardDebit(card, tx.id, apt.id, queryClient);
+      if (data?.already) {
+        // Déjà rattaché à ce RDV (première réponse perdue) : la part carte du RDV est relue, la
+        // liste chargée pouvant la compter ou non
+        toast.success(`Débit déjà rattaché au RDV de ${apt.client_name || 'ce client'}`);
+        let fresh = null;
+        try { fresh = await fetchAppointmentById(apt.id); } catch { /* relecture au mieux */ }
+        const open = fresh && !fresh.payment_method && fresh.status === 'confirmed' && fresh.payment_status !== 'paid';
+        if (open && appointmentPrice(fresh) > 0 && appointmentDue(fresh) <= 0) setAttached(fresh);
+        else { onDone?.(); onClose(); }
+        return;
+      }
       toast.success(`${formatEuro(tx.amount)} rattachés au RDV de ${apt.client_name || 'ce client'}`);
       if (round2(appointmentDue(apt) - Number(tx.amount)) <= 0) setAttached({ ...apt, gift_card_amount: round2((Number(apt.gift_card_amount) || 0) + Number(tx.amount)) });
       else { onDone?.(); onClose(); }
     } catch (err) {
-      toast.error('Rattachement impossible', { description: friendlyGiftCardError(err) });
+      const noAnswer = isNetworkError(err) || (!err?.status && err?.name === 'TypeError');
+      if (err?.data?.code === 'already_attached') {
+        // Ancien serveur, ou rattaché ailleurs entre-temps : l'historique montre l'état réel
+        toast.error('Ce débit est déjà rattaché', { description: 'Vérifiez le RDV dans l\'agenda.' });
+        onDone?.();
+        onClose();
+        return;
+      }
+      if (noAnswer) {
+        toast.error('Rattachement incertain', { description: ATTACH_NETWORK_MESSAGE, duration: 12000 });
+        invalidateGiftCardQueries(queryClient, card.id);
+        onDone?.();
+      } else {
+        toast.error('Rattachement impossible', { description: friendlyGiftCardError(err) });
+      }
       q.refetch();
     } finally {
       setSendingId(null);

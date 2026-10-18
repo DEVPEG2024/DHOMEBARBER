@@ -4,6 +4,7 @@ import { Shirt, Flame, RefreshCw, ChevronDown, ChevronUp, Bell, BellRing, Clock,
 import { dropPhase, msUntilOpen, formatDropDate } from '@/lib/textileApi';
 import { useTextileOverview, useTextileActions } from '@/components/textile/textileHooks';
 import { splitOverview, useNow, needsPolling, isOpening, myActiveQuantity, EASE } from '@/components/textile/textileUtils';
+import { isNetworkError } from '@/components/shared/LoadError';
 import DropHero from '@/components/textile/DropHero';
 import ConceptCard from '@/components/textile/ConceptCard';
 import ConceptSheet from '@/components/textile/ConceptSheet';
@@ -86,7 +87,7 @@ export default function Textile() {
   const reduceMotion = useReducedMotion();
   const clientNow = useNow(1000);
   const [polling, setPolling] = useState(false);
-  const { data, isLoading, isError, error, refetch, isFetching, dataUpdatedAt } = useTextileOverview({
+  const { data, isLoading, isError, error, refetch, isFetching, dataUpdatedAt, isPending, fetchStatus } = useTextileOverview({
     refetchInterval: polling ? 5000 : false,
   });
 
@@ -160,7 +161,7 @@ export default function Textile() {
         <div className="flex justify-center py-20">
           <div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
         </div>
-      ) : isError && !data ? (
+      ) : (isError && !data) || (isPending && fetchStatus === 'paused') ? (
         // Écran d'erreur seulement si rien n'a jamais été chargé : un rechargement raté (compte à
         // rebours qui interroge le serveur toutes les 5 s) ne remplace pas la page déjà affichée
         <div className="text-center py-16 px-4">
@@ -168,7 +169,9 @@ export default function Textile() {
             <AlertTriangle className="w-7 h-7 text-destructive" />
           </div>
           <p className="text-sm font-semibold text-foreground mb-1">Le vestiaire ne répond pas</p>
-          <p className="text-xs text-muted-foreground mb-5">{error?.message && !/^HTTP \d+$/.test(error.message) ? error.message : 'Vérifie ta connexion et réessaie.'}</p>
+          <p className="text-xs text-muted-foreground mb-5">{isNetworkError(error) || (!error && typeof navigator !== 'undefined' && navigator.onLine === false)
+            ? 'Pas de connexion internet. Vérifie ton réseau, puis réessaie.'
+            : (error?.status && error?.message && !/^HTTP \d+$/.test(error.message) ? error.message : 'Vérifie ta connexion et réessaie.')}</p>
           <motion.button
             type="button"
             whileTap={{ scale: 0.97 }}

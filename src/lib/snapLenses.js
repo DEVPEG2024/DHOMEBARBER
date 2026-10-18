@@ -106,8 +106,23 @@ export async function getCameraKit(apiToken) {
 export async function loadSnapLenses(apiToken, lensGroupId) {
   const cameraKit = await getCameraKit(apiToken);
   const groupIds = String(lensGroupId || '').split(',').map((g) => g.trim()).filter(Boolean);
-  const { lenses, errors } = await cameraKit.lensRepository.loadLensGroups(groupIds);
-  return { cameraKit, lenses: lenses || [], errors: errors || [] };
+  // Un appel par groupe : les erreurs du SDK ne disent pas quel groupe a échoué. Chaque erreur
+  // est rendue sous la forme { groupId, error } pour que l'admin sache lequel est en cause.
+  const results = await Promise.all(groupIds.map(async (groupId) => {
+    try {
+      const r = await cameraKit.lensRepository.loadLensGroups([groupId]);
+      return { groupId, lenses: r?.lenses || [], error: (r?.errors || [])[0] || null, thrown: false };
+    } catch (error) {
+      return { groupId, lenses: [], error, thrown: true };
+    }
+  }));
+  // Tous les groupes en échec par exception (jeton refusé, pas de réseau) : même comportement
+  // qu'avant, l'échec global est traduit par snapLensesError
+  if (results.length > 0 && results.every((r) => r.thrown)) throw results[0].error;
+  const lenses = results.flatMap((r) => r.lenses);
+  const errors = results.filter((r) => r.error).map((r) => ({ groupId: r.groupId, error: r.error }));
+  for (const e of errors) console.warn('[Snap] groupe de lentilles illisible', e.groupId, e.error);
+  return { cameraKit, lenses, errors };
 }
 
 // ─── Catalogue : réglages de l'admin appliqués aux lentilles du groupe ───

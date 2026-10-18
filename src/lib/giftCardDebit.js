@@ -117,6 +117,10 @@ export function friendlyGiftCardError(err, fallback = 'Opération impossible pou
 
 /** Pas de réponse du serveur pendant un débit : il est peut-être passé (jamais « réessayez »). */
 export const DEBIT_NETWORK_MESSAGE = 'Pas de réponse du serveur : le débit est peut-être passé. Vérifiez le solde et l\'historique avant de réessayer.';
+/** Pas de réponse pendant une annulation : elle est peut-être passée (un nouvel essai la termine sans risque). */
+export const UNDO_NETWORK_MESSAGE = 'Pas de réponse du serveur : l\'annulation est peut-être passée. Vérifiez l\'historique avant de réessayer.';
+/** Pas de réponse pendant un rattachement : il est peut-être passé. */
+export const ATTACH_NETWORK_MESSAGE = 'Pas de réponse du serveur : le rattachement est peut-être passé. Vérifiez l\'historique avant de réessayer.';
 
 /** Référence d'un débit (`client_ref`) : la même tant que l'admin retente le même débit. */
 export function newClientRef() {
@@ -385,6 +389,12 @@ export async function closeAppointmentWithGiftCard(apt, card, amount, queryClien
   return previous;
 }
 
+/** Relit un RDV (compte de l'équipe : `gift_card_amount` compris) ; `null` s'il n'existe plus. */
+export async function fetchAppointmentById(id) {
+  const rows = await api.entities.Appointment.filter({ id }, null, 1);
+  return (Array.isArray(rows) ? rows : []).find((a) => String(a.id) === String(id)) || null;
+}
+
 /** Remet un RDV clôturé par la carte dans son état d'avant (annulation du débit). */
 export async function reopenAppointment(previous, queryClient) {
   const { id, ...fields } = previous;
@@ -407,13 +417,19 @@ export async function reopenAppointmentAfterUndo(appointmentId, card, amount, qu
   const notes = String(apt.internal_notes || '');
   const cashed = !!apt.payment_method || apt.status === 'completed' || apt.payment_status === 'paid';
   if (!cashed) return 'open';
-  if (apt.payment_method !== 'carte_cadeau' || !notes.includes(tag)) return { state: 'closed_other', apt };
+  const hasTag = notes.includes(tag);
+  // Clôture « Carte cadeau » faite dans l'agenda (giftCovered) : pas de repère, mais la part carte
+  // relue (déjà diminuée par le serveur) ne couvre plus le prix : c'était bien ce débit, on rouvre.
+  // Clôturé par une autre carte : son débit garde la part au niveau du prix → « closed_other ».
+  const giftLeft = Math.round((Number(apt.gift_card_amount) || 0) * 100);
+  const uncovered = apt.payment_method === 'carte_cadeau' && giftLeft < Math.round(appointmentPrice(apt) * 100);
+  if (apt.payment_method !== 'carte_cadeau' || (!hasTag && !uncovered)) return { state: 'closed_other', apt };
   await api.entities.Appointment.update(apt.id, {
     status: 'confirmed',
     payment_method: null,
     payment_status: null,
     grand_total: null,
-    internal_notes: notes.replace(tag, '').replace(/\s{2,}/g, ' ').trim(),
+    internal_notes: hasTag ? notes.replace(tag, '').replace(/\s{2,}/g, ' ').trim() : notes,
   });
   if (queryClient) invalidateAppointmentQueries(queryClient);
   return 'reopened';
@@ -428,8 +444,39 @@ const PAYMENT_LABEL = { cb: 'en CB', especes: 'en espèces', carte_cadeau: 'par 
  * Résout vrai si l'annulation a réussi.
  */
 export async function runGiftCardUndo({ card, transaction, previousApt = null, queryClient, onCardChange }) {
+  let data;
+  let alreadyUndone = false;
   try {
-    const data = await undoGiftCardDebitRaw(card, transaction);
+    data = await undoGiftCardDebitRaw(card, transaction);
+  } catch (err) {
+    if (err?.status === 409 && err?.data?.code === 'already_undone') {
+      // Déjà annulé (première réponse perdue : réseau coupé) : le serveur a rendu le solde, mais
+      // le RDV n'a jamais été rouvert. On relit la carte et on finit le travail ci-dessous.
+      alreadyUndone = true;
+      let fresh = null;
+      try { fresh = await fetchGiftCard(card.id); } catch { /* relecture au mieux */ }
+      data = { card: fresh, returned: transaction?.amount };
+    } else {
+      const noAnswer = isNetworkError(err) || (!err?.status && err?.name === 'TypeError');
+      toast.error("Impossible d'annuler le débit", {
+        description: noAnswer ? UNDO_NETWORK_MESSAGE : friendlyGiftCardError(err),
+        ...(noAnswer ? { duration: 12000 } : {}),
+      });
+      if (noAnswer) {
+        // L'annulation est peut-être passée : solde et historique relus (jamais « réessayez »)
+        try {
+          const fresh = await fetchGiftCard(card.id);
+          if (fresh) {
+            patchGiftCardCache(queryClient, fresh);
+            onCardChange?.(fresh);
+          }
+        } catch { /* relecture au mieux : le toast suffit */ }
+        queryClient.invalidateQueries({ queryKey: giftCardTransactionsKey(card.id) });
+      }
+      return false;
+    }
+  }
+  try {
     const fresh = data?.card || null;
     // Montant réellement rendu (plafonné au montant initial de la carte)
     const returned = data?.returned != null ? round2(data.returned)
@@ -437,7 +484,9 @@ export async function runGiftCardUndo({ card, transaction, previousApt = null, q
     let reopenFailed = false;
     let closedOther = null;
     try {
-      if (previousApt) await reopenAppointment(previousApt, queryClient);
+      // Après « déjà annulé », jamais l'état d'avant écrit à l'aveugle (une correction faite
+      // entre-temps serait écrasée) : la réouverture vérifie le repère / la part carte du RDV
+      if (previousApt && !alreadyUndone) await reopenAppointment(previousApt, queryClient);
       else if (transaction?.appointment_id) {
         const state = await reopenAppointmentAfterUndo(transaction.appointment_id, card, transaction.amount, queryClient);
         if (state && typeof state === 'object' && state.state === 'closed_other') closedOther = state.apt;
@@ -454,7 +503,11 @@ export async function runGiftCardUndo({ card, transaction, previousApt = null, q
     }
     invalidateGiftCardQueries(queryClient, card.id);
     queryClient.invalidateQueries({ queryKey: giftCardTodayAppointmentsKey(parisToday()) });
-    toast.success('Débit annulé', { description: fresh ? `Solde remis à ${formatEuro(giftCardBalance(fresh))}` : undefined });
+    if (alreadyUndone) {
+      toast.success('Débit déjà annulé : solde et RDV remis à jour', { description: fresh ? `Solde : ${formatEuro(giftCardBalance(fresh))}` : undefined });
+    } else {
+      toast.success('Débit annulé', { description: fresh ? `Solde remis à ${formatEuro(giftCardBalance(fresh))}` : undefined });
+    }
     if (reopenFailed === true) {
       toast.warning('Solde remis, mais le RDV n\'a pas pu être rouvert : corrigez son encaissement dans l\'agenda (« Corriger l\'encaissement »).', { duration: 10000 });
     } else if (closedOther) {
@@ -471,8 +524,9 @@ export async function runGiftCardUndo({ card, transaction, previousApt = null, q
       );
     }
     return true;
-  } catch (err) {
-    toast.error("Impossible d'annuler le débit", { description: friendlyGiftCardError(err) });
-    return false;
+  } catch {
+    // L'annulation est faite côté serveur : seule la mise à jour de l'affichage a échoué
+    toast.warning('Débit annulé, mais l\'affichage n\'a pas pu être mis à jour : rechargez la page.');
+    return true;
   }
 }

@@ -16,7 +16,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { exportToCSV } from '@/utils/exportCSV';
 import SalesOverview from '@/components/admin/SalesOverview';
 import {
-  needsClosing, datesBetween, fetchAppointmentsForDates, isCancelledLike, isConvertedLastMinute, isUnclaimedLastMinute,
+  needsClosing, appointmentEndParis, datesBetween, fetchAppointmentsForDates, isCancelledLike, isConvertedLastMinute, isUnclaimedLastMinute,
   isClientPlaceholder,
 } from '@/components/agenda/agendaUtils';
 import LoadError from '@/components/shared/LoadError';
@@ -170,6 +170,11 @@ export default function AdminDashboard() {
   // Non encaissés : seulement les RDV du jour terminés (heure de fin passée, heure de Paris), même
   // règle que la pastille € de l'agenda et « À encaisser » ; les RDV à venir n'y entrent pas
   const unpaidToday = confirmedToday.filter(a => !isPaid(a) && needsClosing(a));
+  // À venir : heure de fin pas encore passée (heure de Paris) ; un RDV terminé non clôturé n'y est plus
+  const upcomingToday = confirmedToday.filter(a => {
+    const end = appointmentEndParis(a);
+    return end == null || end > Date.now();
+  });
   const todayRevenue = round2(paidToday.reduce((sum, a) => sum + getTotal(a), 0));
   const todayUnpaid = round2(unpaidToday.reduce((sum, a) => sum + outsideGift(a), 0));
 
@@ -295,9 +300,15 @@ export default function AdminDashboard() {
     // Get paid appointments for the selected month
     const monthAppts = exportSource.filter(a => a.date?.startsWith(exportMonth) && isRealAppt(a) && isPaid(a));
 
+    // Montant au format d'Excel en français (« 25,00 ») : avec un point, la colonne était lue comme du
+    // texte (SOMME à 0) et « 10.10 » pouvait devenir une date
+    const euro = (n) => (Math.round(n * 100) / 100).toFixed(2).replace('.', ',');
+
     // Build rows: prestations + products until we reach targetAmount
     const rows = [];
     let remaining = targetAmount;
+    // Total calculé sur les nombres (parseFloat('12,50') renverrait 12)
+    let totalExported = 0;
 
     for (const apt of monthAppts) {
       if (remaining <= 0) break;
@@ -315,9 +326,10 @@ export default function AdminDashboard() {
               client: apt.client_name || '',
               barber: apt.employee_name || '',
               paiement: PAYMENT_LABELS[apt.payment_method] || '',
-              montant: price.toFixed(2),
+              montant: euro(price),
             });
             remaining -= price;
+            totalExported += price;
           }
         }
       } else {
@@ -331,9 +343,10 @@ export default function AdminDashboard() {
             client: apt.client_name || '',
             barber: apt.employee_name || '',
             paiement: PAYMENT_LABELS[apt.payment_method] || '',
-            montant: price.toFixed(2),
+            montant: euro(price),
           });
           remaining -= price;
+          totalExported += price;
         }
       }
 
@@ -347,9 +360,10 @@ export default function AdminDashboard() {
           client: apt.client_name || '',
           barber: apt.employee_name || '',
           paiement: PAYMENT_LABELS[apt.payment_method] || '',
-          montant: price.toFixed(2),
+          montant: euro(price),
         });
         remaining -= price;
+        totalExported += price;
       }
     }
 
@@ -359,8 +373,7 @@ export default function AdminDashboard() {
     }
 
     // Add total row
-    const totalExported = rows.reduce((s, r) => s + parseFloat(r.montant), 0);
-    rows.push({ date: '', type: '', designation: 'TOTAL', client: '', barber: '', paiement: '', montant: totalExported.toFixed(2) });
+    rows.push({ date: '', type: '', designation: 'TOTAL', client: '', barber: '', paiement: '', montant: euro(totalExported) });
 
     // Apps natives : enregistrement par la feuille de partage (la fenêtre ne se ferme qu'une fois
     // le fichier produit, sinon l'export semblait réussi sans rien produire)
@@ -454,7 +467,7 @@ export default function AdminDashboard() {
         <StatCard
           title="RDV Aujourd'hui"
           value={todayAppts.length}
-          subtitle={`${completedToday.length} terminés · ${confirmedToday.length} à venir`}
+          subtitle={`${completedToday.length} terminés${unpaidToday.length ? ` · ${unpaidToday.length} à clôturer` : ''} · ${upcomingToday.length} à venir`}
           icon={Calendar}
           onClick={canAgenda && confirmedToday.length > 0 ? () => navigate('/admin/agenda') : undefined}
         />

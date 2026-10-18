@@ -78,6 +78,9 @@ export async function getPushPermission() {
       return 'unsupported';
     }
   }
+  // Désactivées dans Paramètres (marque posée par unsubscribeFromPush) : « denied » garde la
+  // priorité, pour que Paramètres affiche toujours l'aide aux réglages du navigateur
+  if (readLocal(PUSH_OPTOUT_KEY) === '1' && Notification.permission !== 'denied') return 'optout';
   if (Notification.permission === 'granted') return 'granted';
   if (Notification.permission === 'denied') return 'denied';
   return 'prompt';
@@ -214,6 +217,8 @@ async function doSyncPushSubscription() {
 async function subscribeWebPush() {
   const permission = await Notification.requestPermission();
   if (permission !== 'granted') throw new Error('Permission refusée');
+  // Réactivées : la marque du refus (Paramètres) est levée, comme sur les apps
+  writeLocal(PUSH_OPTOUT_KEY, null);
 
   const registration = await navigator.serviceWorker.register('/sw.js');
   await navigator.serviceWorker.ready;
@@ -287,6 +292,8 @@ export async function unsubscribeFromPush() {
   }
 
   if (!isPushSupported()) return;
+  // Le web garde aussi la trace du refus : « Me prévenir » (textile) ne réabonne pas en silence
+  writeLocal(PUSH_OPTOUT_KEY, '1');
   const reg = await navigator.serviceWorker.ready;
   const subscription = await reg.pushManager.getSubscription();
 

@@ -14,7 +14,7 @@ import ProductSheet from '@/components/shop/ProductSheet';
 import FavoriteButton from '@/components/shared/FavoriteButton';
 import { useFavorites } from '@/lib/favorites';
 import { formatPrice, productCategoryLabel, productImages, stockInfo, isShopProduct, MAX_PER_PRODUCT, PER_PRODUCT_LIMIT_MESSAGE } from '@/components/shop/productUtils';
-import LoadError, { isNetworkError } from '@/components/shared/LoadError';
+import LoadError, { isNetworkError, queryFailed } from '@/components/shared/LoadError';
 import { useAndroidBack } from '@/lib/useAndroidBack';
 
 /** Vol de la vignette produit vers le panier : taille du disque (px) et durée (s). */
@@ -177,7 +177,8 @@ export default function Shop() {
   const products = useMemo(() => (productsQuery.data || []).filter(isShopProduct), [productsQuery.data]);
   // Catalogue disponible (y compris en cache quand un rechargement échoue)
   const productsReady = productsQuery.data !== undefined;
-  const productsFailed = productsQuery.isError && !productsReady;
+  // Échec sans données, ou requête en pause hors connexion (jamais un squelette sans fin)
+  const productsFailed = (productsQuery.isError && !productsReady) || queryFailed(productsQuery);
 
   // `/shop?product=<id>` (page Mes favoris) : la fiche du produit s'ouvre une fois le catalogue
   // chargé, puis le paramètre est retiré (retour arrière ou rechargement ne la rouvrent pas)
@@ -427,7 +428,7 @@ export default function Shop() {
       </div>
 
       {/* Chargement : squelettes ; échec sans rien en cache : erreur (pas un faux « Aucun produit ») */}
-      {productsQuery.isPending && (
+      {productsQuery.isPending && !productsFailed && (
         <div className="grid grid-cols-2 gap-4" aria-busy="true">
           {[0, 1, 2, 3].map(i => (
             <div key={i} className="bg-card border border-border rounded-xl overflow-hidden">

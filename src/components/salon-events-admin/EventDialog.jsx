@@ -18,7 +18,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { SALON_EVENT_STATUSES, SALON_EVENT_VISIBILITIES } from '@/lib/salonEventsApi';
+import { SALON_EVENT_STATUSES, SALON_EVENT_VISIBILITIES, eventPhase } from '@/lib/salonEventsApi';
 import {
   Field, INPUT_CLASS, invalidateSalonEvents, toLocalInputValue, fromLocalInputValue, clampInt, uploadImageFile,
   SALON_ADDRESS, MAX_IMAGES, mergeImages, eventStatusHint,
@@ -175,11 +175,16 @@ export default function EventDialog({ open, onOpenChange, event }) {
 
   // ─── Avertissements (hooks serveur) ───
   const wasPublished = event?.status === 'published';
-  const cancelsNow = form.status === 'cancelled' && event?.status !== 'cancelled' && wasPublished;
+  // Événement terminé ou passé : « Annulé » n'est plus proposé (le serveur ne préviendrait plus
+  // personne, mais l'admin le rangeait en croyant prévenir), et aucun avertissement d'annulation
+  const isPast = !!event?.id && eventPhase(event) === 'past';
+  const cancelsNow = form.status === 'cancelled' && event?.status !== 'cancelled' && wasPublished && !isPast;
   const publishesNow = form.status === 'published' && event?.status !== 'published';
   const rescheduled = wasPublished && form.status === 'published' && !!event?.starts_at && !!form.starts_at
     && toLocalInputValue(event.starts_at) !== form.starts_at;
-  const statusOptions = event?.id ? SALON_EVENT_STATUSES : SALON_EVENT_STATUSES.filter((s) => s.value === 'draft' || s.value === 'published');
+  const statusOptions = event?.id
+    ? SALON_EVENT_STATUSES.filter((s) => !(isPast && s.value === 'cancelled' && event.status !== 'cancelled'))
+    : SALON_EVENT_STATUSES.filter((s) => s.value === 'draft' || s.value === 'published');
 
   const busy = saveMutation.isPending || !!upload;
 

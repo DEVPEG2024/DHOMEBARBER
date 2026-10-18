@@ -295,13 +295,26 @@ export const AuthProvider = ({ children }) => {
       // (barber, admin ; sans effet pour un client) — dans cet ordre, le détachement a encore
       // besoin d'un jeton valable. Jamais bloquant, jamais d'erreur affichée. Pas d'appel pour un
       // compte supprimé (`detachPush: false`).
+      // Jeton lu avant la course : s'il faut le révoquer après coup, il est déjà effacé du stockage.
+      const token = localStorage.getItem('base44_access_token') || localStorage.getItem('token') || '';
+      let revokeSent = false;
       await Promise.race([
         (async () => {
           await detachPushFromAccount().catch(() => {});
-          await api.auth.logout().catch(() => {});
+          if (!revokeSent) {
+            revokeSent = true;
+            await api.auth.logout(token).catch(() => {});
+          }
         })(),
         new Promise((resolve) => setTimeout(resolve, LOGOUT_PUSH_TIMEOUT)),
       ]);
+      // Détachement trop lent (réseau faible) : la révocation part quand même, sans attendre.
+      // `keepalive` la laisse aboutir malgré le changement de page. Compromis assumé : elle peut
+      // alors arriver avant le détachement (qui sera refusé), mais le jeton ne reste pas valable.
+      if (!revokeSent && token) {
+        revokeSent = true;
+        api.auth.logout(token).catch(() => {});
+      }
     }
     localStorage.removeItem('base44_access_token');
     localStorage.removeItem('token');

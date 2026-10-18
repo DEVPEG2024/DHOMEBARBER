@@ -121,7 +121,8 @@ export default function AdminSalonEvents() {
   const busy = statusMutation.isPending || deleteMutation.isPending;
   const loading = events.length === 0 && eventsQ.isLoading;
   // Échec sans donnée : LoadError à la place de « Aucun événement » (le bandeau ne sert qu'avec un cache)
-  const loadFailed = eventsQ.isError && !eventsQ.data;
+  // Échec sans données, ou requête en pause hors connexion : jamais « Aucun événement à venir »
+  const loadFailed = (eventsQ.isError && !eventsQ.data) || (eventsQ.isPending && eventsQ.fetchStatus === 'paused');
 
   return (
     <div>
@@ -132,7 +133,7 @@ export default function AdminSalonEvents() {
           <h1 className="font-display text-2xl font-bold">Événements du salon</h1>
         </div>
         {isAdmin ? (
-          <Button onClick={openNew} className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg shrink-0">
+          <Button onClick={openNew} disabled={loadFailed} className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg shrink-0">
             <Plus className="w-4 h-4 mr-1.5" /> Nouvel événement
           </Button>
         ) : (

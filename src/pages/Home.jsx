@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { MapPin, Clock, Phone, Star, ArrowRight, Scissors, ShoppingBag, Newspaper, Sparkles, Gift, GripVertical, Pencil, Check, X, Volume2, VolumeX, Shirt, Handshake } from 'lucide-react';
 import { motion, useMotionValue, useSpring, useTransform, Reorder, useReducedMotion } from 'framer-motion';
 import { toast } from 'sonner';
-import LoadError from '@/components/shared/LoadError';
+import LoadError, { isNetworkError } from '@/components/shared/LoadError';
 import { isShopProduct } from '@/components/shop/productUtils';
 import { useAndroidBack } from '@/lib/useAndroidBack';
 import SectionHeader from '@/components/shared/SectionHeader';
@@ -528,9 +528,12 @@ export default function Home() {
       console.error('Save order error:', err);
       // Session expirée : déjà gérée par AuthContext (retour à la connexion)
       if (err?.status !== 401) {
-        toast.error(err?.message && !/^HTTP \d+$/.test(err.message)
-          ? `Accueil non enregistré : ${err.message}`
-          : 'Accueil non enregistré. Vérifie ta connexion et réessaie.');
+        // Message repris seulement s'il vient du serveur (status) : jamais « Failed to fetch »
+        toast.error(isNetworkError(err) || err?.timeout || (!err?.status && err?.name === 'TypeError')
+          ? 'Accueil non enregistré : pas de connexion internet. Vérifie ta connexion et réessaie.'
+          : (err?.status && err?.message && !/^HTTP \d+$/.test(err.message)
+            ? `Accueil non enregistré : ${err.message}`
+            : 'Accueil non enregistré. Vérifie ta connexion et réessaie.'));
       }
       return false;
     } finally {

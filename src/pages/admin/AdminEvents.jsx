@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '@/api/apiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
@@ -46,6 +47,8 @@ const STATUS_CONFIG = {
 export default function AdminEvents() {
   const [filter, setFilter] = useState('all');
   const [editingId, setEditingId] = useState(null);
+  // Confirmation refusée : rendez-vous clients sur la fenêtre de la privatisation ({ id, message })
+  const [conflict, setConflict] = useState(null);
   const [editNotes, setEditNotes] = useState('');
   const [editPrice, setEditPrice] = useState('');
   // Refus en deux taps : le refus envoie tout de suite un email définitif au client
@@ -59,7 +62,7 @@ export default function AdminEvents() {
   const [confirmRequoteId, setConfirmRequoteId] = useState(null);
   const queryClient = useQueryClient();
 
-  const { data, isError, error, refetch, isFetching } = useQuery({
+  const { data, isError, error, refetch, isFetching, isPending, fetchStatus } = useQuery({
     queryKey: ['adminEvents'],
     queryFn: () => api.entities.Event.list('-created_at', 200),
   });
@@ -79,8 +82,22 @@ export default function AdminEvents() {
       toast.success(vars?.successMsg || 'Statut mis à jour');
       queryClient.invalidateQueries({ queryKey: ['adminEvents'] });
       setEditingId(null);
+      setConflict(null);
     },
-    onError: (err) => toast.error(saveErrorMessage(err)),
+    onError: (err, vars) => {
+      // RDV clients sur le créneau : bandeau avec « Confirmer quand même » (second tap), pas un toast
+      if (err?.status === 409 && err?.data?.code === 'appointment_conflicts' && vars?.data?.status === 'confirmed') {
+        setConflict({ id: vars.id, message: saveErrorMessage(err) });
+        return;
+      }
+      toast.error(saveErrorMessage(err));
+      // Devis accepté entre-temps (liste restée ouverte) : la liste est relue, l'éditeur fermé
+      if (err?.status === 409) {
+        queryClient.invalidateQueries({ queryKey: ['adminEvents'] });
+        setEditingId(null);
+        setConfirmRequoteId(null);
+      }
+    },
   });
 
   const deleteMutation = useMutation({
@@ -95,7 +112,7 @@ export default function AdminEvents() {
 
   const busy = updateMutation.isPending;
 
-  const handleStatus = (event, status) => {
+  const handleStatus = (event, status, force = false) => {
     if (busy) return;
     const messages = { confirmed: 'Événement confirmé', declined: 'Événement refusé', quoted: 'Devis envoyé au client' };
     setConfirmDeclineId(null);
@@ -105,6 +122,7 @@ export default function AdminEvents() {
         status,
         admin_notes: editingId === event.id ? editNotes : event.admin_notes,
         price: editingId === event.id ? (parseFloat(editPrice) || null) : event.price,
+        ...(force ? { force_conflicts: true } : {}),
       },
       successMsg: messages[status] || 'Statut mis à jour',
     });
@@ -141,12 +159,11 @@ export default function AdminEvents() {
       });
       return;
     }
+    // Prix modifiable seulement sur une demande en attente : un devis accepté garde son prix (une
+    // liste rechargée sous un panneau ouvert ne le change plus en silence)
     updateMutation.mutate({
       id: event.id,
-      data: {
-        admin_notes: editNotes,
-        price,
-      },
+      data: event.status === 'pending' ? { admin_notes: editNotes, price } : { admin_notes: editNotes },
       successMsg: 'Notes sauvegardées',
     });
   };
@@ -200,7 +217,7 @@ export default function AdminEvents() {
       </div>
 
       {/* Liste en échec sans données : erreur à la place de la liste et de l'état vide */}
-      {isError && !data ? (
+      {(isError && !data) || (isPending && fetchStatus === 'paused') ? (
         <LoadError what="les demandes de privatisation" error={error} onRetry={refetch} retrying={isFetching} />
       ) : (
       <>
@@ -278,8 +295,8 @@ export default function AdminEvents() {
                       className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm" />
                   </div>
                   <div>
-                    <label className="text-[11px] text-muted-foreground mb-1 block">Notes admin</label>
-                    <textarea rows={2} placeholder="Notes internes..."
+                    <label className="text-[11px] text-muted-foreground mb-1 block">Message joint au devis (visible par le client)</label>
+                    <textarea rows={2} placeholder="Ex. : boissons comprises, installation à 19h…"
                       value={editNotes}
                       onChange={e => setEditNotes(e.target.value)}
                       className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm resize-none" />
@@ -304,7 +321,10 @@ export default function AdminEvents() {
                           </p>
                         )}
                         {event.admin_notes && (
-                          <p className="text-xs text-muted-foreground mt-0.5">{event.admin_notes}</p>
+                          <p className="text-xs text-muted-foreground mt-0.5 break-words">
+                            <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70">Visible par le client : </span>
+                            {event.admin_notes}
+                          </p>
                         )}
                       </div>
                     </div>
@@ -358,6 +378,26 @@ export default function AdminEvents() {
                     onClick={() => handleStatus(event, 'confirmed')}>
                     <CheckCircle className="w-3.5 h-3.5" /> Confirmer (payé au salon)
                   </Button>
+                )}
+                {/* Rendez-vous clients sur la fenêtre : confirmer quand même (second tap) ou annuler */}
+                {event.status === 'accepted' && conflict?.id === event.id && (
+                  <div role="alert" className="basis-full rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 space-y-2 text-xs text-amber-200 min-w-0">
+                    <p className="break-words">{conflict.message}</p>
+                    {event.date && (
+                      <Link to={`/admin/agenda?view=day&date=${String(event.date).slice(0, 10)}`} className="inline-block font-semibold text-primary underline underline-offset-2">
+                        Voir l'agenda de ce jour
+                      </Link>
+                    )}
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="outline" className="flex-1" disabled={busy} onClick={() => setConflict(null)}>
+                        Annuler
+                      </Button>
+                      <Button size="sm" className="flex-1 bg-amber-500 text-black hover:bg-amber-400" disabled={busy}
+                        onClick={() => handleStatus(event, 'confirmed', true)}>
+                        Confirmer quand même
+                      </Button>
+                    </div>
+                  </div>
                 )}
                 {/* Cancelled : annulée par le salon, ou par la suppression du compte du client */}
                 {event.status === 'cancelled' && (

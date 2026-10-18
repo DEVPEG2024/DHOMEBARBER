@@ -10,7 +10,7 @@ import { useAuth } from '@/lib/AuthContext';
 import { RefreshCw } from 'lucide-react';
 import { LAST_MINUTE_EXPIRED_REASON } from '@/lib/cancellation';
 import { useAppointmentOrders } from '@/lib/appointmentProducts';
-import { generateTimeSlots, isOnLeave, parisDay, workingHoursOf } from '@/lib/slots';
+import { generateTimeSlots, isOnLeave, parisDay, privateWindow, workingHoursOf } from '@/lib/slots';
 import { parisInstant } from '@/lib/calendarLinks';
 import { isNetworkError } from '@/components/shared/LoadError';
 
@@ -122,12 +122,16 @@ export default function Agenda() {
   }, [view, dateKey]);
   const dateSet = useMemo(() => new Set(dates), [dates]);
 
-  const { data: appointments = [], isFetching, isError, isPlaceholderData, refetch } = useQuery({
+  const { data: appointments = [], isFetching, isError, isPending, isPlaceholderData, fetchStatus, error: agendaError, refetch } = useQuery({
     queryKey: agendaQueryKey(dates),
     queryFn: () => fetchAppointmentsForDates(dates),
     placeholderData: keepPreviousData, // la grille ne clignote pas à vide pendant le chargement
     refetchInterval: 60000, // une réservation client apparaît sans recharger la page
   });
+  // Hors connexion, une période pas encore chargée met la requête en pause (ni erreur ni chargement) :
+  // la grille montrerait la période précédente filtrée, donc vide. C'est un échec, pas une journée libre.
+  const agendaPaused = fetchStatus === 'paused' && (isPending || isPlaceholderData);
+  const agendaFailed = isError || agendaPaused;
 
   // Privatisations confirmées de la période : le salon est réservé (le serveur refuse les RDV
   // clients sur leur fenêtre) ; l'équipe le voit d'un coup d'œil, sans blocage pour elle
@@ -485,7 +489,7 @@ export default function Agenda() {
   // RDV d'un barber ce jour-là déjà dans le cache de l'agenda (jour affiché, données de la période
   // en cours et non celles de la précédente), sinon `null` : la fenêtre les charge elle-même.
   const lastMinuteCachedDay = (employeeId, date) => {
-    if (!dateSet.has(date) || isPlaceholderData || isError) return null;
+    if (!dateSet.has(date) || isPlaceholderData || agendaFailed) return null;
     return appointments.filter((a) => String(a.employee_id) === String(employeeId) && String(a.date).slice(0, 10) === date);
   };
 
@@ -607,7 +611,7 @@ export default function Agenda() {
         >
           Annulés{cancelledCount ? ` (${cancelledCount})` : ''}
         </button>
-        <span className="shrink-0 text-xs text-muted-foreground ml-auto pl-2">{realAppointmentCount} rdv</span>
+        <span className="shrink-0 text-xs text-muted-foreground ml-auto pl-2">{agendaFailed ? '–' : realAppointmentCount} rdv</span>
         <button
           type="button"
           onClick={() => setLastMinute((s) => ({ open: true, key: s.key + 1 }))}
@@ -628,9 +632,13 @@ export default function Agenda() {
         </div>
       )}
 
-      {isError && (
-        <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2">
-          <p className="text-xs text-red-400">Impossible de charger l'agenda (connexion ?).</p>
+      {agendaFailed && (
+        <div role="alert" className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2">
+          <p className="text-xs text-red-400">
+            {agendaPaused || isNetworkError(agendaError)
+              ? 'Pas de connexion internet : l\'agenda de ces jours n\'a pas pu être chargé.'
+              : 'Impossible de charger l\'agenda (connexion ?).'}
+          </p>
           <button type="button" onClick={() => refetch()} className="text-xs font-semibold text-red-300 flex items-center gap-1">
             <RefreshCw className="w-3.5 h-3.5" /> Réessayer
           </button>
@@ -870,6 +878,17 @@ function LastMinuteForm({ open, employees, timeOffs, defaultEmployeeId, defaultD
     staleTime: 0,
   });
   const dayApts = dayQuery.data ?? cached;
+  // Privatisations confirmées du jour choisi (il peut sortir de la période affichée) : le salon est
+  // réservé sur leur fenêtre, aucun client ne pourrait y prendre un Last Minute
+  const privQuery = useQuery({
+    queryKey: ['lastMinutePrivate', form.date],
+    queryFn: () => api.entities.Event.filter({ date: form.date, status: 'confirmed' }, 'date', 20),
+    enabled: open && !created && validDate && form.date >= todayKey,
+    staleTime: 60000,
+  });
+  const privWindows = (Array.isArray(privQuery.data) ? privQuery.data : [])
+    .filter((ev) => String(ev.date || '').slice(0, 10) === form.date && ev.status === 'confirmed')
+    .map((ev) => ({ window: privateWindow(ev.time_slot), label: PRIVATE_SLOTS[ev.time_slot] || PRIVATE_SLOTS.full_day }));
 
   // Heures proposées : la grille de la réservation client, sans le passé (heure de Paris) ni les
   // heures où un RDV / une pause du barber commence ou chevauche
@@ -881,6 +900,7 @@ function LastMinuteForm({ open, employees, timeOffs, defaultEmployeeId, defaultD
     const hours = workingHoursOf(employee, lastMinuteDayDate(form.date));
     if (!hours) return { state: 'off' };
     if (!dayApts) return { state: dayQuery.isError ? 'error' : 'loading' };
+    if (privQuery.isPending && privQuery.fetchStatus !== 'idle') return { state: 'loading' };
     const openAt = hours.start || '09:00';
     const closeAt = hours.end || '19:00';
     const close = timeToMinutes(closeAt);
@@ -892,6 +912,7 @@ function LastMinuteForm({ open, employees, timeOffs, defaultEmployeeId, defaultD
         // Ancien Last Minute sans fin (durée nulle) : il occupe au moins sa minute de départ
         return [s, Math.max(timeToMinutes(a.end_time || a.start_time), s + 1)];
       });
+    busy.push(...privWindows.map((p) => p.window));
     const free = (s, e) => !busy.some(([bs, be]) => s < be && e > bs);
     const now = Date.now();
     const starts = generateTimeSlots(openAt, closeAt, LAST_MINUTE_STEP)
@@ -912,6 +933,7 @@ function LastMinuteForm({ open, employees, timeOffs, defaultEmployeeId, defaultD
       }
       return out;
     };
+    if (!starts.length && privWindows.length) return { state: 'private', openAt, closeAt };
     return { state: starts.length ? 'ok' : 'full', starts, endsFor, openAt, closeAt };
   })();
 
@@ -931,6 +953,7 @@ function LastMinuteForm({ open, employees, timeOffs, defaultEmployeeId, defaultD
     past: 'Cette date est passée.',
     leave: `${employee?.name || 'Ce barber'} est en congé ce jour-là : aucun client ne pourrait réserver ce créneau.`,
     off: `${employee?.name || 'Ce barber'} ne travaille pas ce jour-là : aucun client ne pourrait réserver ce créneau.`,
+    private: `Salon privatisé ce jour-là (${privWindows.map((p) => p.label).join(', ')}) : aucun client ne pourrait réserver ce créneau.`,
     full: `Plus aucune demi-heure libre ${form.date === todayKey ? 'aujourd\'hui' : 'ce jour-là'} pour ${employee?.name || 'ce barber'}${plan.openAt ? ` (horaires ${plan.openAt} – ${plan.closeAt})` : ''}.`,
   }[plan.state];
 

@@ -181,6 +181,11 @@ function BarberProfileContent({ employee, skillCategories, catsQuery = null }) {
     const s = employeeSkills.find(s => String(s.category_id) === String(cat.id));
     return { category: cat, level: s?.level || 0 };
   });
+  // Niveau d'expérience recalculé sur les catégories actuelles (la colonne, enregistrée quand il y
+  // avait moins de catégories, restait figée) ; la colonne ne sert que de repli sans catégories
+  const experience = skillCategories.length > 0
+    ? Math.min(100, Math.round(allSkills.reduce((sum, x) => sum + (Number(x.level) || 0), 0) / (skillCategories.length * 5) * 100))
+    : (Number(employee.experience_level) || 0);
 
   // Extract video URL from bio marker
   const VIDEO_MARKER = '\n%%VIDEO%%';
@@ -190,7 +195,7 @@ function BarberProfileContent({ employee, skillCategories, catsQuery = null }) {
   const videoUrl = markerIdx >= 0 ? rawBio.slice(markerIdx + VIDEO_MARKER.length) : null;
   const photoUrl = employee.photo_url;
   // La description est au dos de la carte (double tap) ; le bloc À propos garde expérience et compétences
-  const hasAboutContent = allSkills.length > 0 || (employee.experience_level > 0);
+  const hasAboutContent = allSkills.length > 0 || (experience > 0);
 
   // Carte FUT : stats depuis les compétences saisies, note globale = moyenne
   const cardStats = buildCardStats(skillCategories, employeeSkills);
@@ -226,14 +231,14 @@ function BarberProfileContent({ employee, skillCategories, catsQuery = null }) {
           <h3 className="text-[10px] uppercase tracking-[0.2em] text-primary/60 font-semibold">À propos</h3>
 
           {/* Experience gauge */}
-          {employee.experience_level > 0 && (
-            <ExperienceBar value={employee.experience_level} delay={0.15} />
+          {experience > 0 && (
+            <ExperienceBar value={experience} delay={0.15} />
           )}
 
           {/* Skills */}
           {allSkills.length > 0 && (
             <>
-              {employee.experience_level > 0 && (
+              {experience > 0 && (
                 <div className="border-t border-white/[0.06]" />
               )}
               <div>

@@ -128,9 +128,13 @@ export default function Appointments() {
     refetchInterval: 30000, // Auto-refresh toutes les 30s
   });
   const appointments = appointmentsQuery.data || NO_APPOINTMENTS;
+  // Requête mise en pause hors connexion (réseau tombé en cours d'usage) : ni chargement, ni
+  // erreur pour React Query, mais aucune donnée non plus
+  const appointmentsPaused = appointmentsQuery.isPending && appointmentsQuery.fetchStatus === 'paused';
   const isLoading = appointmentsQuery.isLoading;
-  // Échec sans données : « Aucun rendez-vous » serait faux (le client en réserverait un second)
-  const appointmentsFailed = appointmentsQuery.isError && !appointmentsQuery.data;
+  // Échec sans données, ou requête en pause hors connexion : « Aucun rendez-vous » serait faux
+  // (le client en réserverait un second). LoadError affiche alors « Pas de connexion internet ».
+  const appointmentsFailed = (appointmentsQuery.isError && !appointmentsQuery.data) || appointmentsPaused;
 
   // Produits ajoutés aux rendez-vous : mêmes clé et requête que Mes commandes (cache partagé).
   // Simple bonus : si la requête échoue, rien n'est affiché. Rechargée à chaque arrivée sur la

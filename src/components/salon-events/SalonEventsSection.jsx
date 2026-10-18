@@ -20,7 +20,7 @@ import SalonEventSheet from './SalonEventSheet';
  */
 export default function SalonEventsSection() {
   const reduceMotion = useReducedMotion();
-  const { data, isError, error, refetch, isFetching } = useMySalonEvents();
+  const { data, isError, error, refetch, isFetching, isPending, fetchStatus } = useMySalonEvents();
   const nowMs = useNow(60_000);
   const view = useMemo(() => splitSalonEvents(data, nowMs), [data, nowMs]);
   const { rsvp, pendingEventId } = useSalonEventRsvp();
@@ -44,6 +44,10 @@ export default function SalonEventsSection() {
   if (!data) {
     if (isError && (error?.status ?? error?.response?.status) !== 404) {
       return <LoadError what="vos invitations" error={error} onRetry={refetch} retrying={isFetching} compact className="mb-6" />;
+    }
+    // Hors connexion, la requête se met en pause sans erreur : pas de disparition silencieuse
+    if (isPending && fetchStatus === 'paused') {
+      return <LoadError what="vos invitations" onRetry={refetch} retrying={isFetching} compact className="mb-6" />;
     }
     return null;
   }

@@ -166,9 +166,13 @@ export default function EventCard({ event, stats = EMPTY_STATS, isAdmin, busy, i
                   armedClassName="border-blue-500 bg-blue-500 text-white animate-pulse"
                   onConfirm={() => onDone(event)} />
               )}
-              <TwoTapButton icon={Trash2} label="Supprimer" confirmLabel="Supprimer définitivement ?" disabled={busy}
-                title={stats.total > 0 ? `Supprime aussi ${countLabel(stats.total, 'invitation', 'invitations')} (sans prévenir)` : undefined}
-                onConfirm={() => onDelete(event)} />
+              {/* Publié, à venir, avec des invités qui n'ont pas refusé : on annule d'abord (les invités
+                  sont prévenus), la suppression vient ensuite (le serveur refuse aussi, 409) */}
+              {!(canCancel && stats.total - stats.declined > 0) && (
+                <TwoTapButton icon={Trash2} label="Supprimer" confirmLabel="Supprimer définitivement ?" disabled={busy}
+                  title={stats.total > 0 ? `Supprime aussi ${countLabel(stats.total, 'invitation', 'invitations')} (sans prévenir)` : undefined}
+                  onConfirm={() => onDelete(event)} />
+              )}
             </>
           )}
         </div>

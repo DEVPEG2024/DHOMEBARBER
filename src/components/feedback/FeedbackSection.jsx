@@ -67,7 +67,7 @@ export default function FeedbackSection({ user }) {
 
         {isError && !data && (
           <div className="border-t border-white/5 px-4 pt-3 pb-4">
-            <LoadError compact what="tes envois" error={error} onRetry={refetch} retrying={isFetching} />
+            <LoadError compact what="vos envois" error={error} onRetry={refetch} retrying={isFetching} />
           </div>
         )}
 

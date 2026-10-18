@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { X, ChevronLeft, ChevronRight, Flame, Check, Store, Clock, Minus, Plus, Lock, Sparkles, Timer, Ruler } from 'lucide-react';
-import { categoryLabel, categoryEmoji, conceptAvailability, formatDropDate, formatPrice, msUntilOpen } from '@/lib/textileApi';
+import { categoryLabel, categoryEmoji, conceptAvailability, formatDropDate, formatPrice, msUntilOpen, newSendKey } from '@/lib/textileApi';
 import { hapticFeedback } from '@/lib/capacitor';
 import EmojiBurst from './EmojiBurst';
 import { ColorSwatches } from './ConceptCard';
@@ -221,6 +221,10 @@ export default function ConceptSheet({
   const [quantity, setQuantity] = useState(1);
   const [burst, setBurst] = useState(null);
   const [success, setSuccess] = useState(null);
+  // Clé d'essai de la précommande : la même à un nouvel essai après une réponse perdue (pas de
+  // doublon), une neuve après un succès ou quand la taille / la quantité change (autre pièce voulue)
+  const requestKeyRef = useRef(newSendKey());
+  useEffect(() => { requestKeyRef.current = newSendKey(); }, [selectedSize, quantity]);
 
   const voted = Boolean(myVote);
   const live = phase === 'live';
@@ -269,8 +273,14 @@ export default function ConceptSheet({
     if (!canReserve) return;
     hapticFeedback();
     try {
-      const res = await onReserve(concept.id, { size: selectedSize ?? null, quantity });
-      setSuccess({ reservation: res?.reservation || null, size: selectedSize, quantity });
+      const res = await onReserve(concept.id, { size: selectedSize ?? null, quantity, requestKey: requestKeyRef.current });
+      requestKeyRef.current = newSendKey();
+      // Valeurs du serveur (une précommande retrouvée après une coupure garde les siennes)
+      setSuccess({
+        reservation: res?.reservation || null,
+        size: res?.reservation?.size ?? selectedSize,
+        quantity: Number(res?.reservation?.quantity) || quantity,
+      });
     } catch {
       // Le message du serveur est déjà affiché en toast par le hook ; sur 409 le restant est rechargé.
     }

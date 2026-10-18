@@ -15,7 +15,7 @@ import {
   reserveConcept,
   cancelReservation,
 } from '@/lib/textileApi';
-import { isPushSupported, isSubscribed, subscribeToPush } from '@/lib/pushNotifications';
+import { getPushPermission, isPushSupported, isSubscribed, subscribeToPush } from '@/lib/pushNotifications';
 import { hapticFeedback } from '@/lib/capacitor';
 import { errorMessage } from './textileUtils';
 
@@ -38,6 +38,9 @@ async function ensurePushSubscription(timeoutMs = 8000) {
   const check = (async () => {
     try {
       if (!isPushSupported()) return false;
+      // Désactivées volontairement dans Paramètres : jamais de réabonnement silencieux à toutes les
+      // notifications (rappels, Last Minute…) pour une simple alerte de drop
+      if ((await getPushPermission()) === 'optout') return 'optout';
       if (await isSubscribed()) return true;
       await subscribeToPush();
       return true;
@@ -123,7 +126,9 @@ export function useTextileActions() {
       toast.success('Alerte activée : tu seras prévenu à l\'ouverture');
       // Sans attendre : la mutation ne doit pas rester « en cours » le temps de la permission push
       ensurePushSubscription().then(ok => {
-        if (ok === false) {
+        if (ok === 'optout') {
+          toast.info('Notifications coupées', { description: 'Tu les as désactivées : réactive-les dans Paramètres pour recevoir l\'alerte sur ton téléphone.' });
+        } else if (ok === false) {
           toast.info('Notifications désactivées', { description: 'Autorise-les dans Paramètres pour recevoir l\'alerte sur ton téléphone.' });
         }
       });
@@ -137,9 +142,11 @@ export function useTextileActions() {
 
   // ─── Réservation d'une pièce (drop ouvert) ───
   const reserve = useMutation({
-    mutationFn: ({ conceptId, size, quantity }) => reserveConcept(conceptId, { size, quantity }),
-    onSuccess: () => {
+    mutationFn: ({ conceptId, size, quantity, requestKey }) => reserveConcept(conceptId, { size, quantity, requestKey }),
+    onSuccess: (data) => {
       hapticFeedback();
+      // Nouvel essai après une coupure : c'est bien la précommande du client, retrouvée
+      if (data?.duplicate) toast.info('Cette précommande était déjà enregistrée');
       invalidate();
     },
     onError: (err) => {
@@ -183,7 +190,7 @@ export function useTextileActions() {
       hapticFeedback();
       return alertMutation.mutate({ dropId, remove: subscribed });
     },
-    reserve: (conceptId, { size, quantity }) => reserve.mutateAsync({ conceptId, size, quantity }),
+    reserve: (conceptId, { size, quantity, requestKey }) => reserve.mutateAsync({ conceptId, size, quantity, requestKey }),
     cancel: (reservationId) => cancel.mutateAsync(reservationId),
     pending: {
       vote: vote.isPending,

@@ -25,6 +25,172 @@ function oneYearFromToday() {
 import LoadError from '@/components/shared/LoadError';
 import { useAndroidBack } from '@/lib/useAndroidBack';
 
+/**
+ * AAAA-MM-JJ + N mois, jour ramené au dernier du mois (31 août + 6 mois = 28 févr.). Calcul sur
+ * les composantes du jour, comme oneYearFromToday : aucun « aujourd'hui » lu en UTC.
+ */
+function addMonthsYmd(ymd, months) {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const lastDay = new Date(Date.UTC(y, m - 1 + months + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(y, m - 1 + months, Math.min(d, lastDay))).toISOString().slice(0, 10);
+}
+function addDaysYmd(ymd, days) {
+  const [y, m, d] = ymd.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
+}
+
+const EXTEND_PRESETS = [3, 6, 12];
+
+/**
+ * Prolonger la validité d'une carte validée (geste commercial sur une carte arrivée à échéance,
+ * ou prolongation anticipée). Les raccourcis partent de l'ancienne date si elle est encore à venir,
+ * sinon du jour de Paris. Deux taps : « Prolonger jusqu'au … » puis « Confirmer ».
+ */
+function ExtendValidity({ card, outdated, onCardChange }) {
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(outdated);
+  const [target, setTarget] = useState('');
+  const [confirming, setConfirming] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const today = parisToday();
+  const minDate = addDaysYmd(today, 1);
+  const maxDate = addMonthsYmd(today, 60);
+  const current = card.valid_until ? String(card.valid_until).slice(0, 10) : '';
+  const from = current && !isValidityPassed(card, today) ? current : today;
+  const targetOk = /^\d{4}-\d{2}-\d{2}$/.test(target) && target >= minDate && target <= maxDate;
+
+  const pick = (value) => {
+    setTarget(value);
+    setConfirming(false);
+  };
+
+  const handleExtend = async () => {
+    if (!targetOk) return;
+    const ymd = target;
+    setSaving(true);
+    try {
+      const saved = await api.entities.GiftCard.update(card.id, { valid_until: ymd });
+      onCardChange?.(saved && saved.id ? saved : { ...card, valid_until: ymd });
+      invalidateGiftCardQueries(queryClient, card.id);
+      toast.success(`Validité prolongée jusqu'au ${formatDay(ymd)}`, { description: `${card.code} - ${card.recipient_name}` });
+      setTarget('');
+      setConfirming(false);
+      setOpen(outdated);
+    } catch (err) {
+      toast.error('Erreur', { description: friendlyGiftCardError(err) });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-white/5 transition-colors"
+      >
+        <Clock className="w-3.5 h-3.5" /> Prolonger la validité
+      </button>
+    );
+  }
+
+  return (
+    <div data-testid="gc-extend" className={`rounded-2xl border p-3 space-y-3 ${outdated ? 'border-primary/40 bg-primary/5 mb-4' : 'border-border bg-white/5'}`}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold text-foreground">Prolonger la validité</p>
+          <p className="text-[11px] text-muted-foreground">
+            {outdated
+              ? `Dépassée depuis le ${formatDay(current)} : choisissez une nouvelle date pour honorer le solde de ${formatEuro(giftCardBalance(card))}.`
+              : current ? `Valable jusqu'au ${formatDay(current)}.` : 'Aucune date de fin enregistrée.'}
+          </p>
+        </div>
+        {!outdated && (
+          <button
+            type="button"
+            onClick={() => { setOpen(false); pick(''); }}
+            aria-label="Fermer la prolongation"
+            className="w-7 h-7 shrink-0 rounded-full flex items-center justify-center bg-white/5 hover:bg-white/10"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        {EXTEND_PRESETS.map(months => {
+          const value = addMonthsYmd(from, months);
+          const active = target === value;
+          return (
+            <button
+              key={months}
+              type="button"
+              onClick={() => pick(value)}
+              disabled={saving}
+              className={`py-2 rounded-xl text-xs font-semibold transition-colors disabled:opacity-50 ${
+                active ? 'bg-primary text-primary-foreground' : 'bg-white/5 border border-white/10 text-foreground hover:bg-white/10'
+              }`}
+            >
+              +{months} mois
+            </button>
+          );
+        })}
+      </div>
+      <label className="block">
+        <span className="text-[11px] text-muted-foreground">Ou une date précise</span>
+        <input
+          type="date"
+          value={target}
+          min={minDate}
+          max={maxDate}
+          onChange={e => pick(e.target.value)}
+          disabled={saving}
+          className="mt-1 w-full min-w-0 rounded-xl bg-white/5 border border-white/10 px-3 py-2 text-sm text-foreground"
+        />
+      </label>
+      {target && !targetOk && (
+        <p className="text-[11px] text-red-400">Choisissez une date entre le {formatDay(minDate)} et le {formatDay(maxDate)}.</p>
+      )}
+      {!confirming ? (
+        <button
+          type="button"
+          onClick={() => setConfirming(true)}
+          disabled={!targetOk || saving}
+          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-semibold bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-40"
+        >
+          <Clock className="w-3.5 h-3.5" />
+          {targetOk ? `Prolonger jusqu'au ${formatDay(target)}` : 'Prolonger'}
+        </button>
+      ) : (
+        <div className="space-y-2">
+          <p className="text-[11px] text-muted-foreground text-center">
+            Nouvelle validité : {formatDay(target)}. Le solde de {formatEuro(giftCardBalance(card))} reste inchangé.
+          </p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setConfirming(false)}
+              disabled={saving}
+              className="flex-1 py-2.5 rounded-xl text-xs font-medium text-muted-foreground bg-white/5 hover:bg-white/10 transition-colors"
+            >
+              Annuler
+            </button>
+            <button
+              type="button"
+              onClick={handleExtend}
+              disabled={saving || !targetOk}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold text-primary-foreground bg-primary hover:opacity-90 transition-opacity disabled:opacity-50"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" /> {saving ? 'Enregistrement…' : 'Confirmer'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const STATUS_CONFIG = {
   pending: { label: 'En attente', color: 'text-amber-400', bg: 'bg-amber-500/15 border-amber-500/20', icon: Clock },
   validated: { label: 'Validée', color: 'text-green-400', bg: 'bg-green-500/15 border-green-500/20', icon: CheckCircle2 },
@@ -207,6 +373,10 @@ function ValidateModal({ card, onClose, onCardChange }) {
             Date de validité dépassée ({formatDay(card.valid_until)}) : aucun débit possible.
           </StateBanner>
         )}
+        {/* Geste commercial : une fois la date repoussée, la carte redevient débitable */}
+        {!showDebit && state === 'outdated' && card.status === 'validated' && (
+          <ExtendValidity key={`outdated-${card.id}`} card={card} outdated onCardChange={onCardChange} />
+        )}
 
         {/* Débit */}
         {showDebit && (
@@ -321,6 +491,12 @@ function ValidateModal({ card, onClose, onCardChange }) {
         {/* Annuler la carte (validée, solde restant) */}
         {card.status === 'validated' && !debitResultShown && (
           <div className="pt-3">
+            {/* Prolongation anticipée (la carte dépassée a son bloc sous le bandeau rouge) */}
+            {state === 'debitable' && (
+              <div className="mb-1">
+                <ExtendValidity key={`debitable-${card.id}`} card={card} outdated={false} onCardChange={onCardChange} />
+              </div>
+            )}
             {!confirmCancel ? (
               <button
                 onClick={() => setConfirmCancel(true)}
@@ -785,12 +961,10 @@ export default function AdminGiftCards() {
                       <ConfIcon className={`w-5 h-5 ${conf.color}`} />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm font-semibold text-foreground truncate">{card.recipient_name}</p>
-                        <span className="text-[10px] font-mono text-muted-foreground shrink-0">{card.code}</span>
-                      </div>
+                      {/* Nom sur toute la largeur (à 320 px le code le réduisait à 4 lettres), code en tête de la 2e ligne */}
+                      <p className="text-sm font-semibold text-foreground truncate">{card.recipient_name}</p>
                       <p className="text-xs text-muted-foreground truncate">
-                        De {card.sender_name} · {formatDay(card.created_at)}
+                        <span className="font-mono text-[10px]">{card.code}</span> · De {card.sender_name} · {formatDay(card.created_at)}
                       </p>
                     </div>
                   </div>

@@ -56,7 +56,7 @@ function FeedbackItem({ item, onUpdate, onDelete, busy }) {
   const replyChanged = reply.trim() !== (item.admin_reply || '').trim();
 
   return (
-    <div className="rounded-2xl border border-border bg-card p-4 space-y-3">
+    <div className="rounded-2xl border border-border bg-card p-4 space-y-3 min-w-0">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-[11px] text-muted-foreground">
@@ -151,7 +151,9 @@ export default function AdminFeedback() {
   const all = useMemo(() => (Array.isArray(feedbackQ.data) ? feedbackQ.data : []), [feedbackQ.data]);
   const backendMissing = feedbackQ.isError && isBackendMissing(feedbackQ.error);
   // Liste en échec (hors serveur trop ancien) : LoadError, jamais « Aucun message »
-  const loadFailed = feedbackQ.isError && !backendMissing && !Array.isArray(feedbackQ.data);
+  // Échec sans données, ou requête en pause hors connexion : jamais « Rien à traiter »
+  const loadFailed = (feedbackQ.isError && !backendMissing && !Array.isArray(feedbackQ.data))
+    || (feedbackQ.isPending && feedbackQ.fetchStatus === 'paused');
 
   const items = useMemo(() => all.filter(f => {
     if (typeFilter !== 'all' && f.type !== typeFilter) return false;

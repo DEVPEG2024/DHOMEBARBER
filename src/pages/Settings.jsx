@@ -11,6 +11,7 @@ import { isNative, platform, openExternalUrl } from '@/lib/capacitor';
 import FeedbackSection from '@/components/feedback/FeedbackSection';
 import { hasObjectionableContent } from '@/lib/contentFilter';
 import LoadError, { friendlyError } from '@/components/shared/LoadError';
+import { GANG_LEADERBOARD_QUERY_KEY } from '@/lib/gangCardApi';
 import { parisDay } from '@/lib/slots';
 
 // Mêmes limites que l'inscription (routes/auth.js côté serveur)
@@ -178,6 +179,8 @@ export default function Settings() {
       queryClient.invalidateQueries({ queryKey: ['userBlocks'] });
       queryClient.invalidateQueries({ queryKey: ['posts'] });
       queryClient.invalidateQueries({ queryKey: ['postComments'] });
+      // Team of the Season : le membre débloqué y réapparaît sans attendre 5 min
+      queryClient.invalidateQueries({ queryKey: GANG_LEADERBOARD_QUERY_KEY });
       toast.success(`${blockedLabel(b)} débloqué`);
     } catch (err) {
       toast.error(friendlyError(err, 'Erreur lors du déblocage'));
@@ -550,6 +553,14 @@ export default function Settings() {
                       // Le serveur a déjà effacé les abonnements push du compte : pas de désinscription
                       await logout({ detachPush: false });
                     } catch (err) {
+                      // 401 : le jeton ne correspond plus à aucun compte. Cas typique : nouvel essai
+                      // après une réponse perdue, le compte est déjà supprimé. Plus de page « connectée »
+                      // avec « Token invalide ou expiré » : retour à la connexion avec un message.
+                      if (err?.status === 401) {
+                        try { sessionStorage.setItem('dhb-flash', 'Votre compte a été supprimé (ou votre session avait expiré : reconnectez-vous pour vérifier).'); } catch { /* stockage indisponible */ }
+                        await logout({ detachPush: false });
+                        return;
+                      }
                       toast.error(friendlyError(err, 'Erreur lors de la suppression'));
                     } finally {
                       setDeleteLoading(false);

@@ -19,7 +19,7 @@ import {
   cancelledByLabel, cleanReason, CANCEL_REASON_MAX, CANCEL_FEATURES_QUERY_KEY,
   SALON_PHONE, SALON_PHONE_HREF,
 } from '@/lib/cancellation';
-import LoadError from '@/components/shared/LoadError';
+import LoadError, { queryFailed } from '@/components/shared/LoadError';
 import { parisInstant } from '@/lib/calendarLinks';
 
 /**
@@ -90,6 +90,9 @@ export default function Orders() {
     refetchInterval: 30000, // Auto-refresh toutes les 30s
   });
   const { data: orders = [], isLoading } = ordersQuery;
+  // Hors connexion, React Query met la requête en pause (ni erreur ni chargement) : c'est un échec,
+  // pas « Aucune commande » (le client croirait sa commande perdue et la repasserait)
+  const ordersFailed = queryFailed(ordersQuery);
 
   // Commandes ajoutées à un rendez-vous : on retrouve le RDV avec les mêmes clé et requête que
   // Mes rendez-vous (cache partagé). Échec sans conséquence : « Pour votre rendez-vous » seul.
@@ -175,12 +178,12 @@ export default function Orders() {
           <div className="h-0.5 w-12 mt-2 rounded-full bg-gradient-to-r from-primary to-primary/30" />
         </motion.div>
 
-        {isLoading ? (
+        {ordersFailed ? (
+          <LoadError what="vos commandes" error={ordersQuery.error} onRetry={ordersQuery.refetch} retrying={ordersQuery.isFetching} />
+        ) : isLoading ? (
           <div className="space-y-3">
             {[1, 2].map(i => <div key={i} className="h-28 rounded-2xl bg-white/5 animate-pulse" />)}
           </div>
-        ) : ordersQuery.isError && !ordersQuery.data ? (
-          <LoadError what="vos commandes" error={ordersQuery.error} onRetry={ordersQuery.refetch} retrying={ordersQuery.isFetching} />
         ) : orders.length === 0 ? (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-20">
             <div className="w-20 h-20 rounded-3xl bg-white/5 border border-white/8 flex items-center justify-center mx-auto mb-5">

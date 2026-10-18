@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { toast } from 'sonner';
 import { format, startOfWeek, addDays } from 'date-fns';
 import { fr } from 'date-fns/locale';
-import LoadError, { isNetworkError } from '@/components/shared/LoadError';
+import LoadError, { isNetworkError, queryFailed } from '@/components/shared/LoadError';
 
 /** Message d'une action qui échoue (jamais « Load failed » ni « HTTP 500 »). */
 const actionError = (e) => toast.error(isNetworkError(e)
@@ -97,7 +97,7 @@ export default function Cleaning() {
   const history = Array.isArray(historyQuery.data) ? historyQuery.data : [];
   // Hors connexion : requête en pause (pending + paused) = échec, pas « Aucune tâche effectuée »
   // (repliée : fetchStatus 'idle', rien à signaler)
-  const historyFailed = (historyQuery.isError && !historyQuery.data) || (historyQuery.isPending && historyQuery.fetchStatus === 'paused');
+  const historyFailed = queryFailed(historyQuery);
   // Suppression d'une tâche en deux taps (la boîte native était en anglais sur iPhone)
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
@@ -223,8 +223,10 @@ export default function Cleaning() {
       {/* Task list */}
       <div className="mb-6">
         <h2 className="text-sm font-semibold mb-3">Tâches ménagères</h2>
-        {tasksQuery.isError && !tasksQuery.data ? (
+        {queryFailed(tasksQuery) ? (
           <LoadError compact what="les tâches" error={tasksQuery.error} onRetry={tasksQuery.refetch} retrying={tasksQuery.isFetching} />
+        ) : tasksQuery.isLoading ? (
+          <p className="text-xs text-muted-foreground py-4">Chargement…</p>
         ) : tasks.length === 0 ? (
           <p className="text-xs text-muted-foreground py-4">Aucune tâche. Ajoutez des tâches pour commencer.</p>
         ) : (
@@ -294,8 +296,10 @@ export default function Cleaning() {
       )}
 
       {/* Schedule grid */}
-      {scheduleQuery.isError && !scheduleQuery.data ? (
+      {queryFailed(scheduleQuery) ? (
         <LoadError what="le planning" error={scheduleQuery.error} onRetry={scheduleQuery.refetch} retrying={scheduleQuery.isFetching} className="mb-4" />
+      ) : scheduleQuery.isLoading ? (
+        <div className="text-center py-12 text-sm text-muted-foreground">Chargement…</div>
       ) : Object.keys(scheduleGrid).length === 0 ? (
         <div className="text-center py-12 bg-card border border-border rounded-xl">
           <Sparkles className="w-10 h-10 text-muted-foreground/20 mx-auto mb-3" />

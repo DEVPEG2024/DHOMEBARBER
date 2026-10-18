@@ -441,6 +441,30 @@ export function SuccessOverlay({ barberName, detail, calendarEvent = null, durat
 /** Liste vide stable (dépendance des `useMemo` tant qu'une requête n'a rien renvoyé). */
 const EMPTY_LIST = [];
 
+/**
+ * Requête mise en pause hors connexion (réseau tombé en cours d'usage) : ni chargement ni erreur
+ * pour React Query, mais aucune donnée. Traitée comme un échec : écran « Pas de connexion ».
+ */
+const isPausedQuery = (q) => q.isPending && q.fetchStatus === 'paused';
+/** Erreur passée aux écrans d'erreur pour une requête en pause (`isNetworkError` la reconnaît). */
+const OFFLINE_ERROR = new Error('Network offline');
+
+/**
+ * Clé des prestations d'un rendez-vous : exactement `serviceIdSet` du serveur (routes/entities.js),
+ * qui reconnaît le même envoi (même compte, barber, jour, heure et prestations) et rend le RDV
+ * existant au lieu d'en créer un second.
+ */
+function serviceKey(services) {
+  let list = services;
+  if (typeof list === 'string') {
+    try { list = JSON.parse(list); } catch { list = []; }
+  }
+  return (Array.isArray(list) ? list : [])
+    .map(s => (s && (s.service_id || s.id) ? String(s.service_id || s.id) : ''))
+    .sort()
+    .join('|');
+}
+
 /** Message d'erreur lisible du serveur (sans « HTTP 409 » ni message réseau en anglais), sans point final. */
 function serverMessage(err, fallback) {
   const raw = err?.data?.error || err?.message || '';
@@ -576,6 +600,12 @@ export default function Booking() {
   const [anyBarber, setAnyBarber] = useState(false);
   // Produits de la boutique ajoutés au rendez-vous : `{ [productId]: quantité }`
   const [addonSelection, setAddonSelection] = useState({});
+  // Dernier envoi dont la réponse s'est perdue (réseau coupé à la confirmation) : le rendez-vous a
+  // peut-être été créé. Tant que la sélection est la même, l'heure reste choisie et « Confirmer »
+  // reste affiché : le nouvel essai rend le RDV existant (doublon reconnu par le serveur).
+  const [uncertainSend, setUncertainSend] = useState(null);
+  // Sélection figée au moment de l'envoi (lue par onError)
+  const sendRef = useRef(null);
 
   const urlParams = new URLSearchParams(window.location.search);
   const preSelectedIds = urlParams.get('services')?.split(',') || [];
@@ -618,6 +648,14 @@ export default function Booking() {
     if (!apt || apt.status !== 'confirmed' || !apt.date) return null;
     return parisInstant(apt.date, apt.start_time || '00:00') > Date.now() ? apt : null;
   }, [myAppointments, rescheduleId]);
+  // « Choisir une autre date » : la note laissée au barber sur l'ancien RDV est reprise une fois
+  // (modifiable), comme dans le déplacement rapide de Mes rendez-vous ; une note déjà saisie reste
+  const notesPrefilled = useRef(false);
+  useEffect(() => {
+    if (notesPrefilled.current || !oldApt) return;
+    notesPrefilled.current = true;
+    if (oldApt.notes) setNotes(prev => prev || String(oldApt.notes).slice(0, NOTES_MAX));
+  }, [oldApt]);
   const oldAptLabel = oldApt
     ? `${format(new Date(`${oldApt.date}T12:00:00`), 'EEE d MMM', { locale: fr })} à ${oldApt.start_time}`
     : '';
@@ -647,6 +685,7 @@ export default function Booking() {
     queryFn: () => api.entities.Service.filter({ is_active: true }, 'sort_order', 100),
   });
   const { data: services = [], isPending: servicesPending } = servicesQuery;
+  const servicesPaused = isPausedQuery(servicesQuery);
 
   const employeesQuery = useQuery({
     queryKey: ['employees'],
@@ -654,6 +693,7 @@ export default function Booking() {
     queryFn: () => api.entities.Employee.filter({ is_active: true }, 'sort_order', 50),
   });
   const { data: employees = EMPTY_LIST, isPending: employeesPending } = employeesQuery;
+  const employeesPaused = isPausedQuery(employeesQuery);
 
   // Barber passé dans l'URL (« Comme la dernière fois », relance « il est temps de revenir ») :
   // on ne saute l'étape 2 que s'il figure parmi les barbers actifs. Introuvable (parti du salon,
@@ -680,6 +720,13 @@ export default function Booking() {
   // à un client) ; ne charger que confirmés et pauses proposait des heures qu'il refusait (409).
   // Le client ne reçoit que les colonnes de créneau (employee_id, date, start_time, end_time, status).
   const selectedDateStr = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : null;
+  const selectedServiceKey = useMemo(() => serviceKey(selectedServices), [selectedServices]);
+  // Même sélection que l'envoi dont la réponse s'est perdue (barber, jour, heure, prestations)
+  const uncertainMatch = !!uncertainSend && !!selectedEmployee
+    && uncertainSend.employeeId === String(selectedEmployee.id)
+    && uncertainSend.date === selectedDateStr
+    && uncertainSend.time === selectedTime
+    && uncertainSend.services === selectedServiceKey;
   const slotScope = anyBarber ? 'all' : (selectedEmployee?.id ?? null);
   const slotsEnabled = !!selectedDate && (anyBarber || !!selectedEmployee);
   const fetchDayAppointments = () => {
@@ -709,16 +756,43 @@ export default function Booking() {
   });
   const privateEvents = privateEventsQuery.data || EMPTY_LIST;
 
+  // Après une réponse perdue : ses propres RDV du jour, relus (et repris automatiquement au retour
+  // du réseau) pour savoir si l'envoi a bien été enregistré
+  const uncertainCheckQuery = useQuery({
+    queryKey: ['uncertainBooking', user?.email, uncertainSend?.date],
+    queryFn: () => api.entities.Appointment.filter({ client_email: user.email, date: uncertainSend.date }, 'start_time', 50),
+    enabled: uncertainMatch && !!user?.email,
+  });
+  const uncertainRows = uncertainMatch ? uncertainCheckQuery.data : null;
+
+  /**
+   * Rendez-vous du client lui-même identique à la sélection (même règle que le doublon du serveur :
+   * barber, jour, heure, prestations, confirmé). Il occupe l'heure choisie dans les créneaux relus,
+   * mais « Confirmer » le rend tel quel : il ne doit pas faire retirer l'heure.
+   */
+  const ownSameBooking = useMemo(() => {
+    if (!user?.email || !selectedEmployee || !selectedTime || !selectedDateStr) return null;
+    const email = String(user.email).toLowerCase();
+    const rows = [...(dayRows || []), ...(uncertainRows || [])];
+    return rows.find(r => !!r && !!r.client_email && String(r.client_email).toLowerCase() === email
+      && String(r.employee_id) === String(selectedEmployee.id)
+      && (!r.date || String(r.date).slice(0, 10) === selectedDateStr)
+      && String(r.start_time || '').slice(0, 5) === selectedTime
+      && r.status === 'confirmed'
+      && serviceKey(r.services) === selectedServiceKey) || null;
+  }, [dayRows, uncertainRows, user?.email, selectedEmployee, selectedTime, selectedDateStr, selectedServiceKey]);
+
   // Créneaux calculables seulement quand RDV, pauses et congés sont là : sans eux, toute la
   // journée paraîtrait libre. Chargement → squelette ; échec (sans données) → écran d'erreur.
   // « Peu importe » : la liste des barbers fait aussi partie du calcul
   const slotQueries = anyBarber
     ? [dayQuery, timeOffsQuery, employeesQuery]
     : [dayQuery, timeOffsQuery];
-  const slotsLoading = slotsEnabled && (slotQueries.some(q => q.isPending)
+  // Requête en pause hors connexion : pas un chargement (squelette sans fin) mais un échec
+  const slotsLoading = slotsEnabled && (slotQueries.some(q => q.isPending && !isPausedQuery(q))
     || (privateEventsQuery.isPending && privateEventsQuery.fetchStatus !== 'paused'));
   const slotsFailedQuery = slotsEnabled && !slotsLoading
-    ? slotQueries.find(q => q.isError && q.data === undefined) || null
+    ? slotQueries.find(q => (q.isError && q.data === undefined) || isPausedQuery(q)) || null
     : null;
   const slotsReady = slotsEnabled && !slotsLoading && !slotsFailedQuery;
   const retrySlots = () => {
@@ -745,7 +819,9 @@ export default function Booking() {
   // (`reschedule_of`). Tant qu'on ne sait pas si c'est un déplacement, le bloc reste masqué.
   const productsQuery = useQuery(addonProductsQuery);
   const catalog = productsQuery.data;
-  const addonsEnabled = !rescheduleId || rescheduleUnavailable;
+  // Déplacement dont la réponse s'est perdue : l'ancien RDV, déjà annulé par le serveur, n'est plus
+  // trouvé, mais ce n'est pas devenu une nouvelle réservation (pas de produits proposés)
+  const addonsEnabled = !rescheduleId || (rescheduleUnavailable && !(uncertainMatch && uncertainSend?.previous));
   const addonProducts = useMemo(
     () => (catalog ? suggestAddonProducts(catalog, selectedServices) : EMPTY_LIST),
     [catalog, selectedServices],
@@ -859,13 +935,22 @@ export default function Booking() {
   // temps) null = on ne sait pas encore (chargement) : on ne tranche pas.
   const selectedSlotValid = useMemo(() => {
     if (!selectedTime || !selectedDate || !slotsReady) return null;
-    if (!anyBarber) return slotOptions.some(o => o.time === selectedTime);
+    // Réponse perdue sur cette même sélection : l'heure reste choisie, le nouvel essai rend le RDV
+    // existant (ou reçoit un vrai refus du serveur, traité par onError)
+    if (uncertainMatch) return true;
     if (!selectedEmployee) return false;
+    if (ownSameBooking) {
+      // Son propre RDV identique, déjà enregistré : écarté du contrôle (barber précis comme « peu importe »)
+      const own = appointments.filter(a => String(a.id) !== String(ownSameBooking.id)
+        && String(a.employee_id) === String(selectedEmployee.id));
+      return analyzeDay(selectedEmployee, selectedDate, own, timeOffs, totalDuration, shortestDuration, privateEvents).slots.includes(selectedTime);
+    }
+    if (!anyBarber) return slotOptions.some(o => o.time === selectedTime);
     // « Peu importe » : le barber retenu doit encore être libre à cette heure (pas forcément le
     // premier de l'union, sinon un autre barber « passerait devant » à tort)
     const own = appointments.filter(a => String(a.employee_id) === String(selectedEmployee.id));
     return analyzeDay(selectedEmployee, selectedDate, own, timeOffs, totalDuration, shortestDuration, privateEvents).slots.includes(selectedTime);
-  }, [selectedTime, selectedDate, slotsReady, anyBarber, selectedEmployee, slotOptions, appointments, timeOffs, totalDuration, shortestDuration, privateEvents]);
+  }, [selectedTime, selectedDate, slotsReady, anyBarber, selectedEmployee, slotOptions, appointments, timeOffs, totalDuration, shortestDuration, privateEvents, uncertainMatch, ownSameBooking]);
 
   // RDV qui commence dans moins de `cancelHours` heures : il ne pourra plus être annulé ni déplacé
   // en ligne. Rien tant que les paramètres du salon ne sont pas chargés.
@@ -1045,10 +1130,22 @@ export default function Booking() {
       const endTime = `${String(Math.floor(endMin / 60)).padStart(2, '0')}:${String(endMin % 60).padStart(2, '0')}`;
       // RDV à déplacer figé au moment de l'envoi ; délai d'annulation revérifié maintenant (pas
       // sur la valeur calculée à l'affichage : la page a pu rester ouverte plusieurs minutes)
-      const previous = oldApt;
-      if (previous && withinCancelDelay(previous, Date.now())) {
+      // Nouvel essai après une réponse perdue sur un déplacement : l'ancien RDV a pu être annulé
+      // par le serveur entre-temps (il n'est plus trouvé) ; on renvoie quand même `reschedule_of`,
+      // le serveur rend le RDV existant. Le délai ne se revérifie pas sur un envoi déjà passé.
+      sendRef.current = null;
+      const fromUncertain = !oldApt && uncertainMatch && uncertainSend?.previous ? uncertainSend.previous : null;
+      const previous = oldApt || fromUncertain;
+      if (previous && !fromUncertain && withinCancelDelay(previous, Date.now())) {
         throw Object.assign(new Error(`Ce rendez-vous est dans moins de ${cancelHours} h : pour le déplacer, appelez le salon au ${SALON_PHONE}.`), { tooLate: true });
       }
+      sendRef.current = {
+        employeeId: String(selectedEmployee.id),
+        date: format(selectedDate, 'yyyy-MM-dd'),
+        time: selectedTime,
+        services: selectedServiceKey,
+        previous,
+      };
       const created = await api.entities.Appointment.create({
         client_email: user.email,
         client_name: user.full_name || user.name || '',
@@ -1095,6 +1192,7 @@ export default function Booking() {
       return { created, previous, addon };
     },
     onSuccess: ({ created, previous, addon }) => {
+      setUncertainSend(null);
       queryClient.invalidateQueries({ queryKey: ['appointments-day'] });
       queryClient.invalidateQueries({ queryKey: ['myAppointments'] });
       queryClient.invalidateQueries({ queryKey: ['appointments'] }); // « Comme la dernière fois » / prochain RDV de l'accueil
@@ -1139,12 +1237,15 @@ export default function Booking() {
       // Réseau coupé pendant l'envoi : le rendez-vous a peut-être été créé (réponse perdue). Le
       // serveur reconnaît le même envoi (même compte, barber, jour, heure et prestations, quel
       // que soit le délai) et ne le crée pas deux fois : on reste sur la confirmation, l'heure gardée.
+      // Les créneaux du jour ne sont pas relus ici : ils contiendraient son propre RDV et l'heure
+      // serait retirée (« n'est plus disponible »), poussant à en réserver une autre (second RDV).
       if (isNetworkError(err)) {
         toast.error('Connexion perdue : votre rendez-vous a peut-être été enregistré. Vérifiez Mes rendez-vous ou touchez de nouveau « Confirmer » (il ne sera pas créé deux fois).', { duration: 10000 });
+        if (sendRef.current) setUncertainSend(sendRef.current);
         queryClient.invalidateQueries({ queryKey: ['myAppointments'] });
-        queryClient.invalidateQueries({ queryKey: ['appointments-day'] });
         return;
       }
+      setUncertainSend(null);
       // Le serveur vérifie la disponibilité et refuse pour des raisons précises (créneau passé,
       // hors horaires, congé, chevauchement, plafond de rendez-vous) : son message est affiché.
       const shown = serverMessage(err, 'Erreur lors de la création du rendez-vous');
@@ -1177,6 +1278,9 @@ export default function Booking() {
         // heure et un bouton actif. Les créneaux sont vidés puis rechargés (squelette pendant ce
         // temps) : l'heure refusée ne peut pas être reprise avant d'avoir les données à jour.
         queryClient.resetQueries({ queryKey: ['appointments-day'] });
+        // Privatisation confirmée entre-temps (ou lecture échouée, repli sur une liste vide) :
+        // relue aussi, sinon les mêmes heures refusées étaient reproposées en boucle
+        queryClient.resetQueries({ queryKey: ['privateEvents'] });
         if (slotRefused) {
           // Congé ou horaires changés : barbers et congés relus aussi
           queryClient.invalidateQueries({ queryKey: ['employees'] });
@@ -1203,7 +1307,7 @@ export default function Booking() {
   // Heure choisie devenue impossible (prestation ajoutée après coup, créneau pris entre-temps) :
   // retirée dès que les créneaux à jour sont là, avec un mot ; retour au choix de l'heure
   useEffect(() => {
-    if (selectedSlotValid !== false || createAppointment.isPending || success) return;
+    if (selectedSlotValid !== false || createAppointment.isPending || success || uncertainMatch) return;
     const old = selectedTime;
     setSelectedTime(null);
     if (anyBarber) setSelectedEmployee(null);
@@ -1347,7 +1451,7 @@ export default function Booking() {
           )}
 
           {/* Lien « Déplacer » inutilisable : la réservation sera un nouveau rendez-vous */}
-          {rescheduleUnavailable && !success && (
+          {rescheduleUnavailable && !success && !uncertainMatch && (
             <div role="status" className="mt-4 rounded-2xl border border-amber-500/25 bg-amber-500/10 px-3.5 py-3 text-xs leading-relaxed text-amber-200/90 break-words">
               {rescheduleCheckFailed
                 ? 'Impossible de vérifier le rendez-vous à déplacer : si vous confirmez, celui-ci sera un nouveau rendez-vous et l\'ancien restera prévu.'
@@ -1401,12 +1505,12 @@ export default function Booking() {
           {/* Step 1: Services */}
           {step === 0 && (
             <motion.div key="services" custom={direction} variants={stepVariants} initial="enter" animate="center" exit="exit" transition={stepTransition}>
-              <p className="text-xs text-muted-foreground mb-4">Choisis une ou plusieurs prestations : le total et la durée se calculent tout seuls.</p>
+              <p className="text-xs text-muted-foreground mb-4">Choisissez une ou plusieurs prestations : le total et la durée se calculent tout seuls.</p>
               {/* Même sélecteur que la page Prestations (catégories, formules, recherche) + suggestions selon la sélection */}
               <ServicePicker
                 services={services}
-                loading={servicesPending}
-                error={servicesQuery.isError && !servicesQuery.data ? servicesQuery.error : null}
+                loading={servicesPending && !servicesPaused}
+                error={servicesQuery.isError && !servicesQuery.data ? servicesQuery.error : servicesPaused ? OFFLINE_ERROR : null}
                 onRetry={servicesQuery.refetch}
                 retrying={servicesQuery.isFetching}
                 selectedIds={selectedServices.map(s => String(s.id))}
@@ -1436,12 +1540,12 @@ export default function Booking() {
                   </motion.div>
                 ))}
                 {/* Barbers en cours de chargement : cases d'attente plutôt qu'une liste qui paraît vide */}
-                {employeesPending && [0, 1, 2].map(i => (
+                {employeesPending && !employeesPaused && [0, 1, 2].map(i => (
                   <div key={`barber-skeleton-${i}`} aria-hidden="true" className="rounded-2xl bg-white/5 border border-white/10 animate-pulse" style={{ aspectRatio: BARBER_PHOTO_ASPECT }} />
                 ))}
               </div>
               {/* Barbers impossibles à charger : seule « Peu importe » resterait, sans explication */}
-              {employeesQuery.isError && !employeesQuery.data && (
+              {((employeesQuery.isError && !employeesQuery.data) || employeesPaused) && (
                 <LoadError
                   what="les barbers"
                   error={employeesQuery.error}
@@ -1688,6 +1792,15 @@ export default function Booking() {
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* Réponse perdue, mais le rendez-vous est bien enregistré : « Confirmer » le rend tel quel */}
+        {step === 3 && uncertainMatch && ownSameBooking && !success && (
+          <div role="status" className="mt-6 p-3 rounded-2xl border border-primary/30 bg-primary/10 text-xs text-foreground/90 leading-relaxed break-words">
+            <span className="font-semibold">Votre rendez-vous est bien enregistré.</span>{' '}
+            Touchez « Confirmer » pour terminer, ou retrouvez-le dans{' '}
+            <Link to="/appointments" className="font-semibold text-primary underline underline-offset-2 whitespace-nowrap">Mes rendez-vous</Link>.
+          </div>
+        )}
 
         {step === 3 && lateBooking && !rescheduleTooLate && (
           <div role="status" className="mt-6 p-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 text-xs text-amber-200 leading-relaxed">

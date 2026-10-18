@@ -182,7 +182,8 @@ export default function AdminPartners() {
   );
   const backendMissing = partnersQ.isError && (partnersQ.error?.status === 400 || partnersQ.error?.status === 404);
   // Liste en échec : LoadError, et pas d'« Ajouter » (sort_order calculé sur une liste vide = doublon)
-  const loadFailed = partnersQ.isError && !backendMissing && !partnersQ.data;
+  // Échec sans données, ou requête en pause hors connexion (l'ordre ne se calcule jamais sur une liste vide)
+  const loadFailed = !backendMissing && ((partnersQ.isError && !partnersQ.data) || (partnersQ.isPending && partnersQ.fetchStatus === 'paused'));
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: PARTNERS_QUERY_KEY });
 

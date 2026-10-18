@@ -15,7 +15,7 @@ import { toast } from 'sonner';
 import {
   toDateStr, parseDateParam, datesBetween, fetchAppointmentsForDates, isOnLeave, fetchLeaveConflicts, agendaErrorMessage,
 } from '@/components/agenda/agendaUtils';
-import LoadError from '@/components/shared/LoadError';
+import LoadError, { queryFailed } from '@/components/shared/LoadError';
 import { revenueOf } from '@/lib/revenue';
 
 const DAY_NAMES_FR = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
@@ -63,7 +63,7 @@ export default function SmartAgenda() {
   // Échec sans données : jamais de faux « 0 RDV / 0 € » (règle LoadError)
   // Hors connexion, React Query met la requête en pause (pending + paused, sans erreur) : c'est un
   // échec aussi, sinon « 0 RDV » et « ✓ » s'affichaient sur toute la semaine
-  const apptsFailed = (apptsQuery.isError && !apptsQuery.data) || (apptsQuery.isPending && apptsQuery.fetchStatus === 'paused');
+  const apptsFailed = queryFailed(apptsQuery);
 
   const { data: employees = [] } = useQuery({
     queryKey: ['employees'],
@@ -408,7 +408,7 @@ export default function SmartAgenda() {
         <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
           <Coffee className="w-4 h-4 text-primary" /> Congés à venir
         </h2>
-        {timeOffsQuery.isError && !timeOffsQuery.data ? (
+        {queryFailed(timeOffsQuery) ? (
           <LoadError compact what="les congés" error={timeOffsQuery.error} onRetry={timeOffsQuery.refetch} retrying={timeOffsQuery.isFetching} />
         ) : upcomingTimeOffs.length === 0 ? (
           <p className="text-xs text-muted-foreground">Aucun congé planifié</p>

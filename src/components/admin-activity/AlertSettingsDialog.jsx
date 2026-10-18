@@ -9,10 +9,14 @@ import { ALERT_GROUPS, useAdminAlertPrefs } from '@/lib/adminAlerts';
 import LoadError, { friendlyError } from '@/components/shared/LoadError';
 
 /**
- * Réglages des alertes de l'admin : pour chaque type d'action client, « Notifier » (push sur le
- * téléphone + toast dans l'app) ou seulement « Noté dans le fil ». Toutes les actions restent
- * dans Activité clients quel que soit le réglage. Fermeture par la croix ou « Annuler ».
+ * Réglages des alertes de l'admin : pour chaque type d'action, « Notifier » (push sur le téléphone
+ * + toast dans l'app) ou non. Les actions des clients restent dans Activité clients quel que soit
+ * le réglage ; le ménage et les demandes de congé de l'équipe (`feed: false`) restent visibles dans
+ * Entretien et Congés. Fermeture par la croix ou « Annuler ».
  */
+// Libellés propres aux réglages (le fil garde « Rendez-vous annulé ») : couper l'annulation coupe
+// aussi l'alerte « Rendez-vous déplacé » (même réglage côté serveur)
+const SETTING_LABELS = { appointment_cancelled: 'Rendez-vous annulé ou déplacé' };
 export default function AlertSettingsDialog({ open, onOpenChange }) {
   const { prefs, isLoading, isError, error, refetch, isFetching, settings, save, saving } = useAdminAlertPrefs();
   const [draft, setDraft] = useState({});
@@ -47,8 +51,8 @@ export default function AlertSettingsDialog({ open, onOpenChange }) {
         <DialogHeader>
           <DialogTitle>Réglages des alertes</DialogTitle>
           <DialogDescription>
-            Choisissez les actions des clients qui vous envoient une notification. Les autres sont
-            seulement notées dans Activité clients, sans vous déranger.
+            Choisissez les actions des clients et de l’équipe qui vous envoient une notification.
+            Les actions des clients coupées restent notées dans Activité clients, sans vous déranger.
           </DialogDescription>
         </DialogHeader>
 
@@ -77,20 +81,23 @@ export default function AlertSettingsDialog({ open, onOpenChange }) {
                   <div className="rounded-xl border border-border divide-y divide-border">
                     {group.types.map(type => {
                       const meta = ACTIVITY_TYPES[type] || { label: type, emoji: '🔔' };
+                      const label = SETTING_LABELS[type] || meta.label;
                       const on = draft[type] !== false;
                       const id = `alert-${type}`;
                       return (
                         <div key={type} className="flex items-center gap-3 px-3 py-2.5 min-w-0">
                           <span className="text-lg shrink-0" aria-hidden="true">{meta.emoji}</span>
                           <label htmlFor={id} className="flex-1 min-w-0 cursor-pointer">
-                            <span className="block text-sm font-medium text-foreground">{meta.label}</span>
+                            <span className="block text-sm font-medium text-foreground">{label}</span>
                             <span className={`flex items-center gap-1 text-[11px] ${on ? 'text-primary' : 'text-muted-foreground'}`}>
                               {on
                                 ? <><BellRing className="w-3 h-3" aria-hidden="true" /> Notification</>
-                                : <><BellOff className="w-3 h-3" aria-hidden="true" /> Noté dans le fil, sans notification</>}
+                                : <><BellOff className="w-3 h-3" aria-hidden="true" /> {meta.feed === false
+                                  ? `Sans notification (visible dans ${meta.seeIn || 'l’app'})`
+                                  : 'Noté dans le fil, sans notification'}</>}
                             </span>
                           </label>
-                          <Switch id={id} checked={on} onCheckedChange={(v) => setType(type, v)} aria-label={`Notification : ${meta.label}`} />
+                          <Switch id={id} checked={on} onCheckedChange={(v) => setType(type, v)} aria-label={`Notification : ${label}`} />
                         </div>
                       );
                     })}
@@ -101,7 +108,8 @@ export default function AlertSettingsDialog({ open, onOpenChange }) {
 
             <p className="text-[11px] text-muted-foreground">
               S’applique aux notifications sur votre téléphone et aux messages qui s’affichent dans l’app.
-              Les actions faites par vous ou un barber ne notifient jamais.
+              Vos propres actions ne notifient jamais ; celles d’un barber seulement pour le ménage et
+              les demandes de congé (groupe Équipe).
             </p>
           </>
         )}

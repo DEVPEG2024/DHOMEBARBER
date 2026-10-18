@@ -44,7 +44,7 @@ export default function FeedbackSheet({ type: initialType = 'bug', salonEmail, o
     } catch (err) {
       // « Load failed » / « Failed to fetch » traduits ; le message HEIC d'UploadFile reste affiché
       toast.error(isNetworkError(err)
-        ? 'Pas de connexion internet. Vérifie ton réseau puis réessaie.'
+        ? 'Pas de connexion internet. Vérifiez votre réseau puis réessayez.'
         : (err?.message && !/^HTTP \d+$/.test(err.message) ? err.message : "Impossible d'ajouter la capture"));
     } finally {
       setUploading(false);
@@ -60,7 +60,7 @@ export default function FeedbackSheet({ type: initialType = 'bug', salonEmail, o
 
   const submit = async () => {
     if (trimmed.length < MIN_LENGTH) {
-      toast.error('Dis-nous en un peu plus (10 caractères minimum).');
+      toast.error('Dites-nous-en un peu plus (10 caractères minimum).');
       return;
     }
     setSending(true);
@@ -74,19 +74,19 @@ export default function FeedbackSheet({ type: initialType = 'bug', salonEmail, o
         screenshot_url: screenshot || null,
         context,
       });
-      toast.success(type === 'bug' ? 'Merci, le bug est signalé 🙏' : 'Merci pour ton idée 💡');
+      toast.success(type === 'bug' ? 'Merci, le bug est signalé 🙏' : 'Merci pour votre idée 💡');
       onSent?.();
       onClose?.();
     } catch (err) {
       if (isBackendMissing(err) && salonEmail) {
         setFallback(true);
       } else if (isNetworkError(err)) {
-        toast.error('Pas de connexion internet. Vérifie ton réseau puis réessaie.');
+        toast.error('Pas de connexion internet. Vérifiez votre réseau puis réessayez.');
       } else {
         // Message du serveur (trop d'envois, message refusé…), sinon un texte lisible
         const serverMessage = err?.data?.error || err?.data?.message;
         toast.error(serverMessage || (err?.status >= 500
-          ? 'Le serveur ne répond pas. Réessaie dans un instant.'
+          ? 'Le serveur ne répond pas. Réessayez dans un instant.'
           : "Erreur lors de l'envoi"));
       }
     } finally {
@@ -131,7 +131,7 @@ export default function FeedbackSheet({ type: initialType = 'bug', salonEmail, o
           {fallback ? (
             <div className="mt-5 space-y-4">
               <p className="text-sm text-muted-foreground">
-                L’envoi depuis l’app arrive très bientôt. En attendant, ton message part par email au salon : il est déjà rédigé.
+                L’envoi depuis l’app arrive très bientôt. En attendant, votre message part par email au salon : il est déjà rédigé.
               </p>
               <a
                 href={mailtoHref()}
@@ -160,7 +160,7 @@ export default function FeedbackSheet({ type: initialType = 'bug', salonEmail, o
 
               <div>
                 <label htmlFor="feedback-message" className="block text-xs font-semibold text-muted-foreground mb-1.5">
-                  {type === 'bug' ? 'Décris le problème' : 'Ton idée'}
+                  {type === 'bug' ? 'Décrivez le problème' : 'Votre idée'}
                 </label>
                 <textarea
                   id="feedback-message"
@@ -214,7 +214,7 @@ export default function FeedbackSheet({ type: initialType = 'bug', salonEmail, o
               </div>
 
               <p className="text-[11px] text-muted-foreground">
-                On joint ton nom et quelques infos techniques (téléphone, version de l’app) pour reproduire le souci. Tu suis la réponse ici, dans Paramètres.
+                On joint votre nom et quelques infos techniques (téléphone, version de l’app) pour reproduire le souci. Vous suivez la réponse ici, dans Paramètres.
               </p>
 
               <motion.button

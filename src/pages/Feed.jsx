@@ -14,6 +14,7 @@ import { hapticFeedback } from '@/lib/capacitor';
 import { useAndroidBack } from '@/lib/useAndroidBack';
 import LoadError, { isNetworkError } from '@/components/shared/LoadError';
 import GangLeaderboard from '@/components/gang/GangLeaderboard';
+import { GANG_LEADERBOARD_QUERY_KEY } from '@/lib/gangCardApi';
 import { contentFilterError } from '@/lib/contentFilter';
 
 function timeAgo(dateStr) {
@@ -625,6 +626,9 @@ export default function Feed() {
   const [imageUrl, setImageUrl] = useState('');
   const [uploading, setUploading] = useState(false);
   const [posting, setPosting] = useState(false);
+  // Numéro de l'envoi de photo en cours : une photo arrivée après la publication (ou après la
+  // croix de la miniature) est ignorée, sinon elle réapparaissait dans le composeur suivant
+  const uploadSeqRef = useRef(0);
   const [showComposer, setShowComposer] = useState(false);
   const fileInputRef = useRef(null);
 
@@ -659,6 +663,7 @@ export default function Feed() {
     isLoading,
     isError: postsError,
     error: postsErrorObj,
+    fetchStatus: postsFetchStatus,
     refetch: refetchPosts,
     isFetching: postsFetching,
     fetchNextPage,
@@ -791,7 +796,8 @@ export default function Feed() {
 
   // Renvoie `true` si la publication est partie (le composeur ne se ferme qu'à ce moment-là)
   const createPost = async () => {
-    if ((!content.trim() && !imageUrl) || posting) return false;
+    // Photo encore en envoi : la publication partirait sans elle
+    if (uploading || posting || (!content.trim() && !imageUrl)) return false;
     const filtered = contentFilterError(content);
     if (filtered) { toast.error(filtered); return false; }
     setPosting(true);
@@ -806,6 +812,7 @@ export default function Feed() {
       });
       setContent('');
       setImageUrl('');
+      uploadSeqRef.current++;
       queryClient.invalidateQueries({ queryKey: ['posts'] });
       toast.success('Publication envoyée 🎉');
       return true;
@@ -822,9 +829,10 @@ export default function Feed() {
     const file = input.files?.[0];
     if (!file) return;
     setUploading(true);
+    const seq = ++uploadSeqRef.current;
     try {
       const { file_url } = await api.integrations.Core.UploadFile({ file });
-      setImageUrl(file_url);
+      if (seq === uploadSeqRef.current) setImageUrl(file_url);
     } catch (err) {
       // Garde le message d'apiClient (photo HEIC : réglage iPhone à changer)
       toast.error(errorText(err, "Erreur lors de l'envoi de la photo"));
@@ -966,6 +974,8 @@ export default function Feed() {
       queryClient.invalidateQueries({ queryKey: ['userBlocks'] });
       queryClient.invalidateQueries({ queryKey: ['posts'] });
       queryClient.invalidateQueries({ queryKey: ['postComments'] });
+      // Team of the Season en tête du fil : le membre bloqué en disparaît tout de suite
+      queryClient.invalidateQueries({ queryKey: GANG_LEADERBOARD_QUERY_KEY });
       toast.success(`${blockTarget.name || 'Utilisateur'} bloqué. Vous ne verrez plus ses publications.`);
       setBlockTarget(null);
     } catch (err) {
@@ -1101,7 +1111,7 @@ export default function Feed() {
                     <img src={imageUrl} alt="" className="w-full h-full object-cover" />
                   </div>
                   <button
-                    onClick={() => setImageUrl('')}
+                    onClick={() => { uploadSeqRef.current++; setImageUrl(''); }}
                     className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-black/60 flex items-center justify-center text-white text-xs"
                   >
                     ×
@@ -1123,7 +1133,7 @@ export default function Feed() {
                 </div>
                 <Button
                   onClick={async () => { if (await createPost()) setShowComposer(false); }}
-                  disabled={posting || (!content.trim() && !imageUrl)}
+                  disabled={posting || uploading || (!content.trim() && !imageUrl)}
                   size="sm"
                   className="bg-primary text-primary-foreground text-xs rounded-full px-4"
                 >
@@ -1381,7 +1391,8 @@ export default function Feed() {
         <div className="flex justify-center py-12">
           <Loader2 className="w-6 h-6 animate-spin text-primary" />
         </div>
-      ) : postsError && !postsPages ? (
+      ) : !postsPages && (postsError || postsFetchStatus === 'paused') ? (
+        // Hors connexion, la requête se met en pause sans erreur : même écran que l'échec
         // Fil en échec : ne pas annoncer « Aucune publication »
         <LoadError what="le fil" error={postsErrorObj} onRetry={refetchPosts} retrying={postsFetching} />
       ) : visiblePosts.length === 0 && !hasNextPage ? (

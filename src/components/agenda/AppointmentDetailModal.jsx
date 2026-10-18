@@ -170,6 +170,8 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
   const [cancelReason, setCancelReason] = React.useState('');
   // Case « Prévenir le client » de l'annulation (cochée par défaut)
   const [notifyOnCancel, setNotifyOnCancel] = React.useState(true);
+  // « Prévenir le client » du rétablissement (cochée par défaut) : il a reçu l'annulation, ou avait annulé lui-même
+  const [notifyOnRestore, setNotifyOnRestore] = React.useState(true);
   // Suppression en deux temps, sur le même modèle (plus de window.confirm)
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
   // Parcours last minute : créneau encore libre, ou pris par un client mais pas encore encaissé (la fiche
@@ -236,6 +238,11 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
   // Un débit partiel laisse le reste à encaisser en CB / espèces (le serveur refuse sinon).
   const giftCovered = giftPaid > 0 && Math.round((Number(appointment.gift_card_amount) || 0) * 100) >= Math.round((serviceTotal + prodValue) * 100);
   const giftCardNeedsDebit = state.paymentMethod === 'carte_cadeau' && appointment.payment_method !== 'carte_cadeau' && !giftCovered;
+  // Produit saisi à l'encaissement : il n'est enregistré sur le RDV qu'à la clôture, donc Cartes
+  // cadeau ne voit que le prix des prestations (moins le débit déjà fait) et ne peut pas le débiter
+  const savedProd = Number(appointment.product_price) || 0;
+  const productUnsaved = !locked && Math.round(prodValue * 100) !== Math.round(savedProd * 100);
+  const giftCapacity = Math.max(0, Math.round((serviceTotal + savedProd - (Number(appointment.gift_card_amount) || 0)) * 100) / 100);
   // 18 : last minute repris sans aucune prestation : pas d'encaissement à 0 €
   const needsService = isLastMinute && !isCompleted && !appointment.services?.length && selectedServices.length === 0;
   const canValidate = !locked && !tipInvalid && state.paymentMethod && (tipValue === 0 || state.tipMethod) && !giftCardNeedsDebit && !needsService;
@@ -258,6 +265,10 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
   const wasLastMinute = !appointment.client_email && appointment.client_name === 'Last Minute';
   const lmEnd = appointmentEndParis(appointment);
   const lastMinuteOver = isClosedOut && wasLastMinute && lmEnd != null && lmEnd + 15 * 60000 <= Date.now();
+  // Rétablir un RDV client annulé et encore à venir : le client est prévenu (push + email), sinon il
+  // croit le RDV annulé, ne vient pas et finit « Absent ». Pas pour un absent ni un last minute.
+  const canNotifyRestore = !wasLastMinute && !!appointment.client_email && appointment.status === 'cancelled'
+    && parisInstant(String(appointment.date || '').slice(0, 10), String(appointment.start_time || '00:00').slice(0, 5)) > Date.now();
 
   // Motif d'annulation affiché sur un RDV annulé / absent
   const cancelActor = isClosedOut ? cancellationActor(appointment) : null;
@@ -307,15 +318,19 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
   const doRestore = async () => {
     dispatch({ type: 'SAVING', value: true });
     try {
+      const notified = canNotifyRestore && notifyOnRestore;
       const saved = await api.entities.Appointment.update(appointment.id, {
         status: wasLastMinute ? 'last_minute' : 'confirmed',
         cancellation_reason: null,
+        ...(canNotifyRestore && !notifyOnRestore ? { notify_client: false } : {}),
       });
       const restored = Number(saved?.linked_orders_restored) || 0;
       const failed = Number(saved?.linked_orders_failed) || 0;
+      const base = notified ? 'Rendez-vous rétabli, client prévenu' : 'Rendez-vous rétabli';
       toast.success(restored > 0
-        ? `Rendez-vous rétabli, et ${restored} produit${restored > 1 ? 's' : ''} remis en commande`
-        : 'Rendez-vous rétabli');
+        ? `${base}, et ${restored} produit${restored > 1 ? 's' : ''} remis en commande`
+        : base);
+      setNotifyOnRestore(true);
       if (failed > 0) {
         toast.warning(`${failed} produit${failed > 1 ? 's' : ''} annulé${failed > 1 ? 's' : ''} avec ce RDV n'${failed > 1 ? 'ont' : 'a'} pas pu être rétabli${failed > 1 ? 's' : ''} (stock) : à reprendre dans Commandes.`, { duration: 10000 });
       }
@@ -358,7 +373,8 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
       return;
     }
     dispatch({ type: 'SAVING', value: false });
-    if (issues.clash || issues.warnings.length > 0) {
+    // RDV client à venir : toujours une confirmation, avec la case « Prévenir le client »
+    if (issues.clash || issues.warnings.length > 0 || canNotifyRestore) {
       setRestoreCheck(issues);
       return;
     }
@@ -496,25 +512,47 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
           {restoreCheck.clash ? (
             <p className="break-words">{restoreCheck.clash} : déplacez ce rendez-vous (« Modifier / déplacer ») pour le rétablir.</p>
           ) : (
+            restoreCheck.warnings.length > 0 ? (
+              <>
+                <p className="font-semibold">Avant de rétablir ce rendez-vous :</p>
+                <ul className="list-disc pl-4 space-y-0.5">
+                  {restoreCheck.warnings.map((w) => <li key={w} className="break-words">{w}</li>)}
+                </ul>
+              </>
+            ) : (
+              <p className="font-semibold">Rétablir ce rendez-vous ?</p>
+            )
+          )}
+          {!restoreCheck.clash && canNotifyRestore && (
             <>
-              <p className="font-semibold">Avant de rétablir ce rendez-vous :</p>
-              <ul className="list-disc pl-4 space-y-0.5">
-                {restoreCheck.warnings.map((w) => <li key={w} className="break-words">{w}</li>)}
-              </ul>
+              {cancelActor === 'client' && (
+                <p className="break-words">Annulé par le client : il ne s'attend plus à venir.</p>
+              )}
+              <label className="flex items-start gap-2 text-foreground cursor-pointer min-w-0">
+                <input
+                  type="checkbox"
+                  checked={notifyOnRestore}
+                  onChange={(e) => setNotifyOnRestore(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 shrink-0 accent-green-500"
+                />
+                <span className="min-w-0 break-words">
+                  Prévenir le client (notification + email) : {cancelActor === 'client' ? 'son rendez-vous est maintenu' : 'il a été prévenu de l\'annulation, il saura que le rendez-vous est maintenu'}
+                </span>
+              </label>
             </>
           )}
           {linkedOrders.length === 0 && (
             <p className="text-[11px] opacity-80">Les produits annulés avec ce rendez-vous sont remis en commande s'il reste du stock.</p>
           )}
           <div className="flex gap-2">
-            <button type="button" onClick={() => setRestoreCheck(null)} disabled={state.saving}
+            <button type="button" onClick={() => { setRestoreCheck(null); setNotifyOnRestore(true); }} disabled={state.saving}
               className="flex-1 py-2 rounded-lg bg-white/5 border border-white/10 text-foreground disabled:opacity-60">
               {restoreCheck.clash ? 'Fermer' : 'Annuler'}
             </button>
             {!restoreCheck.clash && (
               <button type="button" onClick={doRestore} disabled={state.saving}
                 className="flex-1 py-2 rounded-lg bg-amber-500 text-black font-semibold disabled:opacity-60">
-                {state.saving ? 'Rétablissement…' : 'Rétablir quand même'}
+                {state.saving ? 'Rétablissement…' : restoreCheck.warnings.length > 0 ? 'Rétablir quand même' : 'Rétablir le rendez-vous'}
               </button>
             )}
           </div>
@@ -984,7 +1022,18 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
               </div>
               {giftCardNeedsDebit && (
                 <div role="status" className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs leading-relaxed text-amber-200 break-words min-w-0">
-                  {isAdmin ? (
+                  {productUnsaved ? (
+                    <>
+                      Le produit saisi ({formatPrice(prodValue)}) n'est enregistré sur ce rendez-vous qu'à la clôture : la carte cadeau ne peut débiter que les prestations ({giftCapacity > 0 ? `${formatPrice(giftCapacity)} restants` : 'déjà réglées par la carte'}). Réglez le produit en CB ou en espèces, ou retirez-le pour débiter la carte.
+                      {isAdmin && giftCapacity > 0 && (
+                        <>{' '}
+                          <Link to="/admin/gift-cards" className="font-semibold text-primary underline underline-offset-2 whitespace-nowrap">
+                            Débiter la carte
+                          </Link>
+                        </>
+                      )}
+                    </>
+                  ) : isAdmin ? (
                     <>
                       La carte cadeau se débite depuis Cartes cadeau : scannez le QR ou saisissez le code, puis choisissez ce rendez-vous (ou rattachez-y un débit déjà fait : historique de la carte → « Rattacher à un RDV »). Il sera clôturé automatiquement.{' '}
                       <Link to="/admin/gift-cards" className="font-semibold text-primary underline underline-offset-2 whitespace-nowrap">

@@ -1,7 +1,15 @@
 import React, { useState } from 'react';
 import { api, apiRequest, apiUrl } from '@/api/apiClient';
 import { useAuth } from '@/lib/AuthContext';
-import LoadError, { friendlyError } from '@/components/shared/LoadError';
+import LoadError, { friendlyError, queryFailed } from '@/components/shared/LoadError';
+
+// Stock saisi : vide / null = non suivi (vente libre, comme Admin → Produits), sinon entier ≥ 0
+const toStock = (v) => {
+  if (v === null || v === undefined || v === '') return null;
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) ? Math.max(0, n) : null;
+};
+const isNegative = (v) => v !== null && v !== undefined && v !== '' && parseInt(v, 10) < 0;
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Package, AlertTriangle, Save, Search, Plus, Trash2, ShoppingBag, Scissors, Upload, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -38,6 +46,9 @@ export default function AdminStock() {
   const [newProduct, setNewProduct] = useState({ name: '', ref: '', stock: 0, critical_stock: 3, brand: '', category: 'other', price: 0, stock_type: 'boutique', image_url: '' });
   const [productToDelete, setProductToDelete] = useState(null);
   const [uploading, setUploading] = useState(false);
+  // Ajout en cours : un double tap ne crée pas deux produits
+  const [adding, setAdding] = useState(false);
+  const addingRef = React.useRef(false);
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const editsRef = React.useRef(edits);
@@ -53,7 +64,7 @@ export default function AdminStock() {
   });
   const products = productsQuery.data ?? [];
   // Liste impossible à charger : jamais « Aucun produit… Ajouter » (doublons créés à la reprise)
-  const productsFailed = productsQuery.isError && !productsQuery.data;
+  const productsFailed = queryFailed(productsQuery);
 
   const activeProducts = products.filter(p => p.is_active);
   const tabProducts = activeProducts.filter(p => (p.stock_type || 'boutique') === tab);
@@ -74,7 +85,9 @@ export default function AdminStock() {
   };
 
   const isCritical = (product) => {
-    const stock = getVal(product, 'stock') ?? 0;
+    // Stock non suivi : jamais « Critique » (vente libre)
+    const stock = toStock(getVal(product, 'stock'));
+    if (stock === null) return false;
     const threshold = getVal(product, 'critical_stock') ?? 3;
     return stock <= threshold;
   };
@@ -105,10 +118,17 @@ export default function AdminStock() {
       const entries = [];
       let conflicts = 0;
       let otherError = null;
+      let negative = false;
       for (const [id, data] of all) {
+        // Faute de frappe « -2 » : gardée à l'écran, jamais envoyée
+        if (isNegative(data.stock) || isNegative(data.critical_stock)) {
+          negative = true;
+          kept[id] = data;
+          continue;
+        }
         const update = {};
         if (data.stock !== undefined) {
-          update.stock = parseInt(data.stock) || 0;
+          update.stock = toStock(data.stock);
           update.expected_stock = 'base_stock' in data
             ? data.base_stock
             : (products.find(p => String(p.id) === String(id))?.stock ?? null);
@@ -136,14 +156,15 @@ export default function AdminStock() {
       setEdits(kept);
       if (entries.length > 0) toast.success(`${entries.length} produit(s) mis à jour`);
       if (otherError) toast.error(friendlyError(otherError, 'Erreur lors de la sauvegarde'));
-      if (conflicts === 0 && !otherError && entries.length === 0) toast.info('Rien à enregistrer');
+      if (negative) toast.error('Le stock et le seuil ne peuvent pas être négatifs');
+      if (conflicts === 0 && !otherError && !negative && entries.length === 0) toast.info('Rien à enregistrer');
 
       // Alerte « Stock critique » aux admins seulement (jamais aux clients : `audience: 'staff'`),
       // et seulement pour les produits modifiés qui viennent de passer sous leur seuil
       if (user?.role === 'admin') {
         const original = new Map(activeProducts.map(p => [String(p.id), p]));
         const level = (p, e = {}) => ({
-          stock: e.stock !== undefined ? (parseInt(e.stock, 10) || 0) : (p.stock ?? 0),
+          stock: e.stock !== undefined ? toStock(e.stock) : (p.stock ?? null),
           threshold: e.critical_stock !== undefined ? (parseInt(e.critical_stock, 10) || 0) : (p.critical_stock ?? 3),
         });
         const newlyCritical = entries
@@ -152,7 +173,8 @@ export default function AdminStock() {
             if (!p) return null;
             const before = level(p);
             const after = level(p, e);
-            return after.stock <= after.threshold && !(before.stock <= before.threshold) ? p : null;
+            return after.stock !== null && after.stock <= after.threshold
+              && !(before.stock !== null && before.stock <= before.threshold) ? p : null;
           })
           .filter(Boolean);
         if (newlyCritical.length > 0) {
@@ -177,6 +199,13 @@ export default function AdminStock() {
       toast.error('Le nom est obligatoire');
       return;
     }
+    if (addingRef.current || uploading) return;
+    if (isNegative(newProduct.stock) || isNegative(newProduct.critical_stock)) {
+      toast.error('Le stock et le seuil ne peuvent pas être négatifs');
+      return;
+    }
+    addingRef.current = true;
+    setAdding(true);
     try {
       await api.entities.Product.create({
         ...newProduct,
@@ -190,8 +219,11 @@ export default function AdminStock() {
       setShowAddDialog(false);
       setNewProduct({ name: '', ref: '', stock: 0, critical_stock: 3, brand: '', category: 'other', price: 0, stock_type: 'boutique', image_url: '' });
       toast.success('Produit ajouté');
-    } catch {
-      toast.error("Erreur lors de l'ajout");
+    } catch (err) {
+      toast.error(friendlyError(err, "Erreur lors de l'ajout"));
+    } finally {
+      addingRef.current = false;
+      setAdding(false);
     }
   };
 
@@ -358,7 +390,11 @@ export default function AdminStock() {
                     <Label className="text-[9px] text-muted-foreground uppercase">Stock</Label>
                     <Input
                       type="number"
-                      value={getVal(product, 'stock') ?? 0}
+                      min="0"
+                      step="1"
+                      inputMode="numeric"
+                      placeholder="non suivi"
+                      value={getVal(product, 'stock') ?? ''}
                       onChange={e => setVal(product, 'stock', e.target.value)}
                       className={`border-border h-8 text-xs mt-0.5 font-bold text-center ${critical ? 'bg-red-500/10 text-red-400' : 'bg-secondary'}`}
                     />
@@ -367,6 +403,9 @@ export default function AdminStock() {
                     <Label className="text-[9px] text-muted-foreground uppercase">Seuil</Label>
                     <Input
                       type="number"
+                      min="0"
+                      step="1"
+                      inputMode="numeric"
                       value={getVal(product, 'critical_stock') ?? 3}
                       onChange={e => setVal(product, 'critical_stock', e.target.value)}
                       className="bg-secondary border-border h-8 text-xs mt-0.5 text-center"
@@ -425,7 +464,7 @@ export default function AdminStock() {
                 </div>
                 <div className="flex flex-col gap-2">
                   <label className="cursor-pointer">
-                    <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} disabled={uploading} />
+                    <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} disabled={uploading || adding} />
                     <span className="flex items-center gap-1.5 text-xs text-primary border border-primary/30 bg-primary/5 hover:bg-primary/10 px-3 py-1.5 rounded-lg transition-all cursor-pointer">
                       <Upload className="w-3 h-3" />
                       {uploading ? 'Upload...' : 'Photo'}
@@ -488,8 +527,8 @@ export default function AdminStock() {
                 </SelectContent>
               </Select>
             </div>
-            <Button className="w-full bg-primary text-primary-foreground hover:bg-primary/90" onClick={handleAddProduct}>
-              Ajouter le produit
+            <Button className="w-full bg-primary text-primary-foreground hover:bg-primary/90" onClick={handleAddProduct} disabled={adding || uploading}>
+              {adding ? 'Ajout…' : uploading ? 'Photo en cours…' : 'Ajouter le produit'}
             </Button>
           </div>
         </DialogContent>

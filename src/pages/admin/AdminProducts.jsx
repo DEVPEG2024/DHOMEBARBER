@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
-import LoadError, { isNetworkError } from '@/components/shared/LoadError';
+import LoadError, { isNetworkError, queryFailed } from '@/components/shared/LoadError';
 import { isShopProduct, formatPrice } from '@/components/shop/productUtils';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -74,7 +74,8 @@ export default function AdminProducts() {
   // complète, partagée avec AdminStock.
   const shopProducts = products.filter(isShopProduct);
   const supplyCount = products.length - shopProducts.length;
-  const productsFailed = productsQuery.isError && !productsQuery.data;
+  // Échec sans données, ou requête en pause hors connexion (jamais un squelette sans fin)
+  const productsFailed = queryFailed(productsQuery);
 
   const saveMutation = useMutation({
     mutationFn: (data) => {
@@ -227,7 +228,8 @@ export default function AdminProducts() {
           return { ...prev, images: [...images, file_url] };
         });
       } catch (err) {
-        toast.error(err?.message || `Échec de l'envoi de ${file.name}`);
+        // Message d'UploadFile gardé (HEIC…), erreur réseau traduite (jamais « Load failed »)
+        toast.error(errorText(err, `Échec de l'envoi de ${file.name}`));
       }
       setUpload(p => (p ? { ...p, done: p.done + 1 } : p));
     }

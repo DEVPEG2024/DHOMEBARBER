@@ -40,9 +40,9 @@ const cheapest = (list) => [...list].sort((a, b) => (Number(a.price) || 0) - (Nu
  * Sélecteur de prestations partagé (étape 1 de la réservation) : mêmes cartes, chips et formules
  * que la page Prestations, plus une rangée de **suggestions** qui suit la sélection :
  * - rien de sélectionné → les prestations les plus demandées, en un tap ;
- * - une coupe sans barbe → « Ajoute la barbe » (la moins chère), et inversement ;
+ * - une coupe sans barbe → « Ajoutez la barbe » (la moins chère), et inversement ;
  * - coupe ou barbe sans soin → « Un soin en plus ? » ;
- * - coupe + barbe choisies séparément alors qu'une formule les réunit moins cher → « Passe à la
+ * - coupe + barbe choisies séparément alors qu'une formule les réunit moins cher → « Passez à la
  *   formule », qui remplace les deux par la formule (économie affichée).
  * Tout est calculé côté client depuis le catalogue : rien à configurer.
  *
@@ -175,7 +175,7 @@ export default function ServicePicker({ services = [], selectedIds, onToggle, on
     const swap = findFormulaSwap(selectedServices, notSelected);
     if (swap) {
       const { formula, remove, saving } = swap;
-      out.push({ key: `formula-${formula.id}`, label: `Passe à « ${formula.name} »`, sub: `${formatPrice(formula.price)} · tu économises ${formatPrice(saving)}`, icon: 'gift', add: [formula], remove, accent: true });
+      out.push({ key: `formula-${formula.id}`, label: `Passez à « ${formula.name} »`, sub: `${formatPrice(formula.price)} · vous économisez ${formatPrice(saving)}`, icon: 'gift', add: [formula], remove, accent: true });
     }
     // Coupe / barbe d'après le nom, pas d'après l'icône : « Barbe à la tondeuse » a l'icône tondeuse
     // mais reste une barbe, et une prestation sans mot-clé (« Epilation nez ») retombe sur l'icône
@@ -185,11 +185,11 @@ export default function ServicePicker({ services = [], selectedIds, onToggle, on
     const hasBeard = selectedServices.some(isPlainBeard);
     if (hasCut && !hasBeard && !kinds.has('formula')) {
       const s = cheapest(notSelected.filter(isPlainBeard));
-      if (s) out.push({ key: `beard-${s.id}`, label: 'Ajoute la barbe', sub: `${s.name} · +${formatPrice(s.price)} · +${formatDuration(s.duration)}`, icon: 'plus', add: [s], remove: [] });
+      if (s) out.push({ key: `beard-${s.id}`, label: 'Ajoutez la barbe', sub: `${s.name} · +${formatPrice(s.price)} · +${formatDuration(s.duration)}`, icon: 'plus', add: [s], remove: [] });
     }
     if (hasBeard && !hasCut && !kinds.has('formula')) {
       const s = cheapest(notSelected.filter(isAdultCut));
-      if (s) out.push({ key: `cut-${s.id}`, label: 'Ajoute la coupe', sub: `${s.name} · +${formatPrice(s.price)} · +${formatDuration(s.duration)}`, icon: 'plus', add: [s], remove: [] });
+      if (s) out.push({ key: `cut-${s.id}`, label: 'Ajoutez la coupe', sub: `${s.name} · +${formatPrice(s.price)} · +${formatDuration(s.duration)}`, icon: 'plus', add: [s], remove: [] });
     }
     if ((hasCut || hasBeard || kinds.has('formula')) && !kinds.has('care')) {
       const s = cheapest(notSelected.filter(x => kindOf(x) === 'care'));
@@ -295,7 +295,7 @@ export default function ServicePicker({ services = [], selectedIds, onToggle, on
           >
             <p className="text-[11px] uppercase tracking-[0.2em] text-primary font-semibold mb-2 flex items-center gap-1.5">
               <Sparkles className="w-3 h-3" aria-hidden="true" />
-              {selectedServices.length === 0 ? 'Les plus demandées' : 'Suggestions pour toi'}
+              {selectedServices.length === 0 ? 'Les plus demandées' : 'Suggestions pour vous'}
             </p>
             <div className="flex gap-2 overflow-x-auto scrollbar-hide -mx-4 px-4 pb-1">
               <AnimatePresence initial={false}>

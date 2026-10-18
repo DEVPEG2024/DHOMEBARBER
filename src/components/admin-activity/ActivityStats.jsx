@@ -34,7 +34,8 @@ export default function ActivityStats({ events }) {
         if (hasAmount && !ev.cancelled) s.revenue += amount;
       } else if (ev.type === 'giftcard_new') {
         s.giftcards += 1;
-        if (hasAmount) s.revenue += amount;
+        // Carte rejetée (jamais payée) : hors du montant, comme une commande annulée
+        if (hasAmount && !ev.cancelled) s.revenue += amount;
       } else if (ev.type === 'user_new') s.users += 1;
     }
     return s;

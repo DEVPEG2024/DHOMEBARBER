@@ -139,10 +139,11 @@ export default function SnapLensesTab({ config, lensesQuery, onSave, saving }) {
         )}
         {groupErrors.length > 0 && (
           <div className="mb-3 space-y-1">
+            {/* Message fixe en français : l'erreur du SDK (anglais, « Failed to fetch »…) ne s'affiche jamais */}
             {groupErrors.map((e, i) => (
-              <p key={i} className="flex items-start gap-2 text-[11px] text-amber-300">
+              <p key={e?.groupId || i} className="flex items-start gap-2 text-[11px] text-amber-300">
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
-                {e?.lensGroupId || e?.groupId ? `${groupLabel(e.lensGroupId || e.groupId)} : ` : ''}groupe illisible ({e?.message || e?.name || 'erreur Snap'}).
+                {e?.groupId ? `${groupLabel(e.groupId)} : ` : ''}lentilles illisibles chez Snap (groupe détaché de l'application Camera Kit, ou coupure réseau). Réessayez plus tard.
               </p>
             ))}
           </div>

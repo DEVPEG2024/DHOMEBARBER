@@ -21,8 +21,12 @@ export const subscribeDropAlert = (dropId) =>
 export const unsubscribeDropAlert = (dropId) =>
   apiRequest('DELETE', apiUrl(`/textile/drops/${dropId}/alert`));
 
-export const reserveConcept = (conceptId, { size, quantity }) =>
-  apiRequest('POST', apiUrl(`/textile/concepts/${conceptId}/reserve`), { size, quantity });
+// `requestKey` : tirée à l'ouverture de la fiche, renvoyée telle quelle à un nouvel essai après une
+// réponse perdue (le serveur rend la précommande déjà faite) ; une autre clé = une autre pièce voulue
+export const reserveConcept = (conceptId, { size, quantity, requestKey = null }) =>
+  apiRequest('POST', apiUrl(`/textile/concepts/${conceptId}/reserve`), {
+    size, quantity, ...(requestKey ? { request_key: requestKey } : {}),
+  });
 export const cancelReservation = (reservationId) =>
   apiRequest('POST', apiUrl(`/textile/reservations/${reservationId}/cancel`));
 
@@ -46,6 +50,46 @@ export const notifyDrop = (dropId, { audience = 'subscribers', everyone = false,
 export function newSendKey() {
   try { if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID(); } catch { /* repli */ }
   return `k${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/**
+ * Clés d'envoi gardées le temps de l'onglet (la mémoire du serveur dure 10 min) : fermer la
+ * fenêtre ou changer d'onglet après une réponse perdue ne tire plus une nouvelle clé, donc le
+ * nouvel essai ne renvoie pas le push. Une clé par (envoi, cible, audience, message) : un autre
+ * message ou une autre audience = un autre envoi.
+ *   sendKeyFor('notify', drop.id, audience, message) → clé
+ *   settleSendKey(…, 'ok' | 'uncertain' | 'error')    → oubliée, ou gardée et marquée incertaine
+ */
+const pendingSendKeys = new Map();
+const SEND_KEY_TTL_MS = 10 * 60 * 1000;
+const sendKeyId = (scope, id, audience, message) => `${scope}:${id}:${audience}:${message || ''}`;
+function purgeSendKeys() {
+  const now = Date.now();
+  for (const [k, v] of pendingSendKeys) if (now - v.at > SEND_KEY_TTL_MS) pendingSendKeys.delete(k);
+}
+export function sendKeyFor(scope, id, audience, message) {
+  purgeSendKeys();
+  const k = sendKeyId(scope, id, audience, message);
+  let entry = pendingSendKeys.get(k);
+  if (!entry) {
+    entry = { key: newSendKey(), at: Date.now(), uncertain: false };
+    pendingSendKeys.set(k, entry);
+  }
+  return entry.key;
+}
+export function settleSendKey(scope, id, audience, message, outcome) {
+  const k = sendKeyId(scope, id, audience, message);
+  if (outcome === 'uncertain') {
+    const entry = pendingSendKeys.get(k);
+    if (entry) { entry.uncertain = true; entry.at = Date.now(); }
+    return;
+  }
+  // Succès, ou refus franc du serveur (qui a déjà oublié la clé) : un prochain envoi est neuf
+  pendingSendKeys.delete(k);
+}
+export function isSendUncertain(scope, id, audience, message) {
+  purgeSendKeys();
+  return !!pendingSendKeys.get(sendKeyId(scope, id, audience, message))?.uncertain;
 }
 
 // ─── Constantes partagées ───

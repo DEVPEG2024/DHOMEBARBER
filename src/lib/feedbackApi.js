@@ -12,8 +12,8 @@ export const FEEDBACK_ADMIN_QUERY_KEY = ['feedback', 'all'];
 export const MESSAGE_MAX = 2000;
 
 export const FEEDBACK_TYPES = {
-  bug: { label: 'Bug', title: 'Signaler un bug', emoji: '🐞', placeholder: 'Que s’est-il passé ? Qu’attendais-tu à la place ?' },
-  idea: { label: 'Suggestion', title: 'Proposer une amélioration', emoji: '💡', placeholder: 'Ton idée pour rendre l’app encore meilleure…' },
+  bug: { label: 'Bug', title: 'Signaler un bug', emoji: '🐞', placeholder: 'Que s’est-il passé ? Qu’attendiez-vous à la place ?' },
+  idea: { label: 'Suggestion', title: 'Proposer une amélioration', emoji: '💡', placeholder: 'Votre idée pour rendre l’app encore meilleure…' },
 };
 
 export const FEEDBACK_STATUSES = {

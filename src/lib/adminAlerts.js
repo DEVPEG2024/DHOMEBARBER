@@ -1,8 +1,9 @@
 /**
  * Alertes de l'admin, type par type (« Activité clients » → Réglages des alertes).
  * Rangées dans `salon_settings.admin_alerts` (backend v102, `lib/adminAlerts.js` côté serveur) :
- * clé absente ou `null` = **activé** ; `false` = l'action est seulement notée dans le fil
- * Activité clients, sans push sur le téléphone ni toast dans l'app.
+ * clé absente ou `null` = **activé** ; `false` = pas de push sur le téléphone ni de toast dans
+ * l'app. Une action client coupée reste notée dans le fil Activité clients ; le ménage et les
+ * congés de l'équipe restent visibles dans Entretien et Congés.
  * On n'envoie que les types coupés (`{ user_new: false }`) : tout réactiver = `{}`.
  */
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
@@ -19,7 +20,8 @@ export const ALERT_GROUPS = [
   { title: 'Boutique et ventes', types: ['order_new', 'order_cancelled', 'giftcard_new', 'textile_reservation'] },
   { title: 'Événements', types: ['event_request', 'event_answer', 'salon_event_rsvp'] },
   { title: 'Clients', types: ['review_new', 'user_new', 'feedback_new', 'report_new'] },
-  { title: 'Équipe', types: ['cleaning_done'] },
+  // Actions de l'équipe (ménage coché, demande de congé d'un barber) : réglables, jamais dans le fil
+  { title: 'Équipe', types: ['cleaning_done', 'leave_request'] },
 ];
 
 /** Préférences normalisées `{ type: false }` (seulement les types coupés). */

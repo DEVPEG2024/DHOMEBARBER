@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import { formatPrice } from '@/components/shop/productUtils';
-import LoadError, { isNetworkError } from '@/components/shared/LoadError';
+import LoadError, { isNetworkError, queryFailed } from '@/components/shared/LoadError';
 import {
   CANCEL_REASON_MAX,
   ORDER_STATUSES,
@@ -271,7 +271,7 @@ export default function AdminOrders() {
           <h1 className="font-display text-2xl font-bold">Commandes</h1>
         </div>
         <div className="text-right">
-          <p className="text-2xl font-bold text-primary">{counts.pending}</p>
+          <p className="text-2xl font-bold text-primary">{ordersQuery.data === undefined ? '—' : counts.pending}</p>
           <p className="text-[11px] text-muted-foreground">en attente</p>
         </div>
       </div>
@@ -392,11 +392,12 @@ export default function AdminOrders() {
                     Annuler
                   </Button>
                 )}
-                {/* Retirée il y a moins de 24 h : retour à « prête » (tap par erreur sur « Marquer retirée ») */}
+                {/* Retirée il y a moins de 24 h : retour à « prête », ou à « en attente » si elle n'a jamais été
+                    préparée (produit d'un RDV remis depuis l'agenda) : elle redevient annulable avec le RDV */}
                 {st === 'delivered' && order.delivered_at && Date.now() - new Date(order.delivered_at).getTime() < 24 * 3600 * 1000 && (
                   <Button size="sm" variant="outline" disabled={busy}
                     className="gap-1.5 border-border"
-                    onClick={() => updateMutation.mutate({ id: order.id, data: { status: 'ready' }, successMessage: 'Retrait annulé' })}>
+                    onClick={() => updateMutation.mutate({ id: order.id, data: { status: order.ready_notified_at ? 'ready' : 'pending' }, successMessage: 'Retrait annulé' })}>
                     <RotateCcw className="w-3.5 h-3.5" />
                     Pas encore retirée
                   </Button>
@@ -425,7 +426,7 @@ export default function AdminOrders() {
         })}
       </div>
 
-      {ordersQuery.isError && !ordersQuery.data ? (
+      {queryFailed(ordersQuery) ? (
         <LoadError what="les commandes" error={ordersQuery.error} onRetry={ordersQuery.refetch} retrying={ordersQuery.isFetching} />
       ) : ordersQuery.isPending ? (
         <div className="space-y-2" aria-busy="true">

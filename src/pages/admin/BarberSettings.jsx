@@ -365,8 +365,11 @@ export default function BarberSettings() {
   const computedExperience = (() => {
     if (!skills || skills.length === 0 || skillCategories.length === 0) return 0;
     const totalPossible = skillCategories.length * 5;
-    const totalPoints = skills.reduce((sum, s) => sum + (s.level || 0), 0);
-    return Math.round((totalPoints / totalPossible) * 100);
+    // Seulement les compétences dont la catégorie existe encore : une catégorie supprimée par
+    // l'admin laissait ses points (120 %, sauvegarde refusée par le serveur)
+    const known = new Set(skillCategories.map(c => String(c.id)));
+    const totalPoints = skills.filter(s => known.has(String(s.category_id))).reduce((sum, s) => sum + (s.level || 0), 0);
+    return Math.min(100, Math.round((totalPoints / totalPossible) * 100));
   })();
 
   const updateMutation = useMutation({

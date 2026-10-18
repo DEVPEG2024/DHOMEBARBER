@@ -15,6 +15,15 @@ const MIN_CARD = 18; // px = 15 min (voir DayView)
 const MIN_CARD_MINUTES = Math.ceil((MIN_CARD / HOUR_HEIGHT) * 60);
 // En deçà, une pause se range avec les RDV (vue « Tous ») ; au-delà, c'est une journée bloquée
 const SHORT_BREAK_MINUTES = 180;
+// Vue « Tous » : bande (px) laissée libre à droite des cartes posées sur la pause longue d'un autre
+// barber, pour que la pause reste touchable (ouvrir, glisser, étirer) sous une journée de RDV
+const LONG_BREAK_LANE = 14;
+
+// Placement horizontal commun : `reserve` px gardés libres à droite de la colonne
+const place = (col, cols, reserve = 0) => ({
+  left: `calc((100% - ${reserve}px) * ${col} / ${cols} + 1px)`,
+  width: `calc((100% - ${reserve}px) / ${cols} - 2px)`,
+});
 
 function DragPreview({ startMin, endMin }) {
   const top = ((startMin - START_HOUR * 60) / 60) * HOUR_HEIGHT;
@@ -135,6 +144,55 @@ export default function WeekView({ currentDate, appointments, employees, employe
             const meta = layoutOverlaps([...bookings, ...lastMinutes, ...shortBreaks], MIN_CARD_MINUTES);
             const breakMeta = single ? {} : layoutOverlaps(longBreaks, MIN_CARD_MINUTES);
             const shortIds = new Set(shortBreaks.map((b) => b.id));
+            // Bande des pauses longues (vue « Tous ») : les cartes posées sur la pause longue d'un AUTRE
+            // barber laissent libres les LONG_BREAK_LANE px de droite, où la pause affleure et reste
+            // touchable (ouvrir, glisser, étirer). La pause courte de Dom sur sa propre journée bloquée
+            // n'est pas concernée. Seule, une pause longue reste en pleine largeur ; côte à côte et
+            // recouvertes, chacune prend sa part de la bande (2 × LONG_BREAK_LANE au plus), sinon seule
+            // la dernière colonne serait touchable
+            const spanOf = (a) => {
+              const start = timeToMinutes(a.start_time);
+              return [start, Math.max(timeToMinutes(a.end_time || a.start_time), start + MIN_CARD_MINUTES)];
+            };
+            const crosses = (a, b) => {
+              const [s0, e0] = spanOf(a);
+              const [s1, e1] = spanOf(b);
+              return s0 < e1 && s1 < e0;
+            };
+            const cards = [...bookings, ...lastMinutes, ...shortBreaks];
+            const coveredBy = (b, apt) => String(b.employee_id) !== String(apt.employee_id) && crosses(b, apt);
+            const bandedIds = new Set();
+            const laneOf = (b) => {
+              const cols = breakMeta[b.id]?.cols || 1;
+              return cols > 1 && bandedIds.has(b.id) ? LONG_BREAK_LANE * Math.min(cols, 2) : LONG_BREAK_LANE;
+            };
+            const reserveOf = {};
+            if (!single && longBreaks.length) {
+              // Groupes côte à côte (mêmes groupes que layoutOverlaps) : une décision par groupe,
+              // sinon une carte réduite et sa voisine pleine largeur se chevaucheraient
+              const groupsOf = (list) => {
+                const items = list.map((a) => ({ a, span: spanOf(a) }))
+                  .sort((x, y) => x.span[0] - y.span[0] || y.span[1] - x.span[1]);
+                const groups = [];
+                let groupEnd = -1;
+                for (const it of items) {
+                  if (!groups.length || it.span[0] >= groupEnd) { groups.push([]); groupEnd = -1; }
+                  groups[groups.length - 1].push(it.a);
+                  groupEnd = Math.max(groupEnd, it.span[1]);
+                }
+                return groups;
+              };
+              for (const group of groupsOf(longBreaks)) {
+                if (group.some((b) => cards.some((apt) => coveredBy(b, apt)))) group.forEach((b) => bandedIds.add(b.id));
+              }
+              for (const group of groupsOf(cards)) {
+                let r = 0;
+                for (const apt of group) {
+                  for (const b of longBreaks) if (coveredBy(b, apt)) r = Math.max(r, laneOf(b));
+                }
+                for (const apt of group) reserveOf[apt.id] = r;
+              }
+            }
             const onLeaveEmps = employees.filter((emp) => isOnLeave(timeOffs, emp.id, dateStr));
             const singleOnLeave = single && onLeaveEmps.some((e) => String(e.id) === String(single.id));
             const preview = drag.previewFor(dateStr);
@@ -173,7 +231,12 @@ export default function WeekView({ currentDate, appointments, employees, employe
                 {/* Longues d'abord : une pause courte posée sur une journée bloquée reste au-dessus, donc ouvrable */}
                 {(single ? breaks : [...longBreaks, ...shortBreaks]).map((apt) => {
                   const { col, cols } = (shortIds.has(apt.id) ? meta : breakMeta)[apt.id] || { col: 0, cols: 1 };
-                  const width = 100 / cols;
+                  const isLong = !single && !shortIds.has(apt.id);
+                  const lane = isLong ? laneOf(apt) : 0;
+                  // Pauses longues côte à côte : chacune dans sa part de la bande de droite
+                  const horizontal = isLong && cols > 1 && bandedIds.has(apt.id)
+                    ? { left: `calc(100% - ${lane}px + ${(col * lane) / cols}px)`, width: `${lane / cols}px` }
+                    : place(col, cols, reserveOf[apt.id] || 0);
                   return (
                     <BreakCard key={apt.id} apt={apt} onSelect={selectBreak} dragProps={dragProps(apt)} ghosted={moving?.apt.id === apt.id}
                       resizeProps={onResizeRequest ? cardDrag.bindResize(apt) : null}
@@ -183,29 +246,25 @@ export default function WeekView({ currentDate, appointments, employees, employe
                       color={single ? undefined : colorOf(apt.employee_id)}
                       style={{
                         ...verticalPlacement(apt.start_time, apt.end_time, HOUR_HEIGHT, 18),
-                        left: `calc(${col * width}% + 1px)`,
-                        width: `calc(${width}% - 2px)`,
+                        ...horizontal,
                       }} />
                   );
                 })}
 
                 {lastMinutes.map((apt) => {
                   const { col, cols } = meta[apt.id] || { col: 0, cols: 1 };
-                  const width = 100 / cols;
                   return (
                     <LastMinuteCard key={apt.id} apt={apt} onSelect={selectCard} dragProps={dragProps(apt)} ghosted={moving?.apt.id === apt.id}
                       style={{
                         // Hauteur minimale MIN_CARD : cohérente avec MIN_CARD_MINUTES de layoutOverlaps
                         ...verticalPlacement(apt.start_time, apt.end_time, HOUR_HEIGHT, MIN_CARD),
-                        left: `calc(${col * width}% + 1px)`,
-                        width: `calc(${width}% - 2px)`,
+                        ...place(col, cols, reserveOf[apt.id] || 0),
                       }} />
                   );
                 })}
 
                 {bookings.map((apt) => {
                   const { col, cols } = meta[apt.id] || { col: 0, cols: 1 };
-                  const width = 100 / cols;
                   return (
                     <AppointmentCard
                       key={apt.id}
@@ -219,8 +278,7 @@ export default function WeekView({ currentDate, appointments, employees, employe
                       ghosted={moving?.apt.id === apt.id}
                       style={{
                         ...verticalPlacement(apt.start_time, apt.end_time, HOUR_HEIGHT, MIN_CARD),
-                        left: `calc(${col * width}% + 1px)`,
-                        width: `calc(${width}% - 2px)`,
+                        ...place(col, cols, reserveOf[apt.id] || 0),
                       }}
                     />
                   );

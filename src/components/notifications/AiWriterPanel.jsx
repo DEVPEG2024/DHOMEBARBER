@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Sparkles, Loader2, Check, Undo2, Wand2 } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
@@ -33,6 +33,10 @@ export default function AiWriterPanel({ subject, message, audience, onApply }) {
   const [proposals, setProposals] = useState([]);
   const [chosen, setChosen] = useState(-1);
   const [previous, setPrevious] = useState(null);
+  // Texte courant du composeur : une réponse de l'IA arrive après 3 à 8 s, pendant lesquelles
+  // l'admin a pu retoucher le titre ou le message (les champs ne sont pas bloqués).
+  const latest = useRef({ subject, message });
+  latest.current = { subject, message };
 
   useEffect(() => {
     let alive = true;
@@ -53,9 +57,10 @@ export default function AiWriterPanel({ subject, message, audience, onApply }) {
     try { localStorage.setItem(ADDRESS_KEY, value); } catch { /* préférence non mémorisée */ }
   };
 
-  /** Applique un texte en gardant le précédent pour « Annuler » */
+  /** Applique un texte en gardant le précédent (celui du moment, pas celui du rendu) pour « Annuler » */
   const apply = (next) => {
-    if (subject || message) setPrevious({ subject, message });
+    const cur = latest.current;
+    if (cur.subject || cur.message) setPrevious(cur);
     onApply(next);
   };
 
@@ -73,11 +78,20 @@ export default function AiWriterPanel({ subject, message, audience, onApply }) {
 
   const rewrite = async (style) => {
     setBusy(style);
+    const sent = { subject, message };
     try {
       const [result] = await draftNotification({ mode: 'rewrite', style, subject, message, address, audience });
       if (result) {
-        apply(result);
-        setChosen(-1);
+        const cur = latest.current;
+        if (cur.subject === sent.subject && cur.message === sent.message) {
+          apply(result);
+          setChosen(-1);
+        } else {
+          // Texte modifié pendant l'attente : on ne l'écrase pas, la proposition reste à reprendre
+          setProposals([result]);
+          setChosen(-1);
+          toast.info('Vous avez modifié le texte pendant la retouche : la proposition est ci-dessous, touchez-la pour la reprendre.');
+        }
       }
     } catch (err) {
       toast.error(friendlyError(err, "L'assistant IA n'a pas répondu"));

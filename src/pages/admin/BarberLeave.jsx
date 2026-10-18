@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
-import LoadError from '@/components/shared/LoadError';
+import LoadError, { queryFailed } from '@/components/shared/LoadError';
 import { agendaErrorMessage } from '@/components/agenda/agendaUtils';
 
 const LEAVE_TYPES = [
@@ -188,7 +188,7 @@ export default function BarberLeave() {
       {/* Leave list */}
       {timeOffsQuery.isLoading ? (
         <div className="text-center py-16 text-muted-foreground text-sm">Chargement...</div>
-      ) : timeOffsQuery.isError && !timeOffsQuery.data ? (
+      ) : queryFailed(timeOffsQuery) ? (
         <LoadError what="vos demandes de congé" error={timeOffsQuery.error} onRetry={timeOffsQuery.refetch} retrying={timeOffsQuery.isFetching} />
       ) : myLeaves.length === 0 ? (
         <div className="text-center py-16 text-muted-foreground text-sm">

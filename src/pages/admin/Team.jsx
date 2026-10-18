@@ -13,11 +13,13 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import LoadError from '@/components/shared/LoadError';
+import LoadError, { friendlyError } from '@/components/shared/LoadError';
 
-/** Message du serveur (409 « a N rendez-vous à venir… », photo refusée…), sinon le repli. */
-const serverText = (err, fallback) =>
-  (err?.message && !/^HTTP \d+$/.test(err.message) ? err.message : fallback);
+/**
+ * Message du serveur (409 « a N rendez-vous à venir… », photo refusée…), message levé par l'app
+ * (HEIC), coupure réseau traduite (jamais « Failed to fetch » / « Load failed »), sinon le repli.
+ */
+const serverText = (err, fallback) => friendlyError(err, fallback);
 
 const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 const DAY_LABELS = { monday: 'Lundi', tuesday: 'Mardi', wednesday: 'Mercredi', thursday: 'Jeudi', friday: 'Vendredi', saturday: 'Samedi', sunday: 'Dimanche' };
@@ -277,6 +279,9 @@ export default function Team() {
                 <Label className="text-xs">Nom complet</Label>
                 <Input value={editEmployee.name} onChange={e => setEditEmployee({ ...editEmployee, name: e.target.value })}
                   className="bg-secondary border-border mt-1" />
+                {!editEmployee.name?.trim() && (
+                  <p className="text-[11px] text-amber-400 mt-1">Le nom est obligatoire</p>
+                )}
               </div>
               <div>
                 <Label className="text-xs">Titre</Label>
@@ -342,8 +347,8 @@ export default function Team() {
                 </p>
               )}
               <Button className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
-                disabled={saveMutation.isPending || photoUploading}
-                onClick={() => { if (saveMutation.isPending || photoUploading) return; saveMutation.mutate(editEmployee); }}>
+                disabled={saveMutation.isPending || photoUploading || !editEmployee.name?.trim()}
+                onClick={() => { if (saveMutation.isPending || photoUploading || !editEmployee.name?.trim()) return; saveMutation.mutate(editEmployee); }}>
                 {photoUploading ? 'Envoi de la photo…' : saveMutation.isPending ? 'Enregistrement…' : 'Sauvegarder'}
               </Button>
             </div>

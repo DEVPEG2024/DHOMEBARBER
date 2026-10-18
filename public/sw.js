@@ -2,7 +2,18 @@
 
 // v2 : le cache v1 contenait des réponses authentifiées (dont /me) ; changer le nom le
 // fait supprimer à l'activation (voir « activate »).
-const CACHE_NAME = 'dhome-v2';
+// v3 : l'index en cache est rafraîchi à chaque ouverture réussie et les images /api/media
+// ne sont plus gardées ici (le cache HTTP d'un an du serveur suffit) ; le changement de nom
+// purge l'ancien cache, images accumulées comprises.
+const CACHE_NAME = 'dhome-v3';
+
+// Fichiers du build (/assets/, noms à empreinte donc immuables) : sans eux, l'app installée
+// ouverte hors ligne restait sur une page vide au lieu de l'écran « Pas de connexion
+// internet ». Cache séparé, conservé d'une version du service worker à l'autre, plafonné
+// pour ne pas grossir sans fin d'un déploiement à l'autre (les plus anciens partent).
+const ASSET_CACHE = 'dhome-assets-v1';
+const ASSET_MAX = 160; // un build compte ~80 fichiers : de quoi garder le précédent
+const KEPT_CACHES = [CACHE_NAME, ASSET_CACHE];
 
 // Centre de notifications : chaque push reçu est rangé ici (IndexedDB, le service worker n'a
 // pas accès au localStorage), même app fermée. L'app le rattache au compte connecté à
@@ -31,10 +42,66 @@ function isPublicApiRequest(request, url) {
   return true;
 }
 
+function isBuildAsset(request, url) {
+  return request.method === 'GET'
+    && url.origin === self.location.origin
+    && url.pathname.startsWith('/assets/');
+}
+
+// Fichiers /assets/ cités par un index (script principal, feuille de style)
+function entryAssetPaths(html) {
+  return [...new Set(String(html || '').match(/\/assets\/[^"'\s<>)]+/g) || [])];
+}
+
+// Garde les ASSET_MAX entrées les plus récentes (cache.keys() suit l'ordre d'insertion),
+// sans jamais retirer les fichiers d'entrée de l'index en cache : ce sont eux qui démarrent
+// l'app hors ligne
+function trimAssetCache(cache) {
+  return cache.keys().then((keys) => {
+    if (keys.length <= ASSET_MAX) return undefined;
+    return caches.match('/index.html', { cacheName: CACHE_NAME })
+      .then((index) => (index ? index.text() : ''))
+      .catch(() => '')
+      .then((html) => {
+        const keep = new Set(entryAssetPaths(html));
+        const removable = keys.filter((key) => !keep.has(new URL(key.url).pathname));
+        const extra = keys.length - ASSET_MAX;
+        return Promise.all(removable.slice(0, extra).map((key) => cache.delete(key)));
+      });
+  }).catch(() => {});
+}
+
+// Fichiers d'entrée cités par l'index (script principal, feuille de style) : sans eux la
+// première ouverture hors ligne après l'installation échouerait encore. Seuls les fichiers
+// absents du cache sont téléchargés. Jamais bloquant.
+function precacheEntryAssets(indexResponse) {
+  if (!indexResponse) return Promise.resolve();
+  return indexResponse.text()
+    .then((html) => {
+      const paths = entryAssetPaths(html);
+      if (paths.length === 0) return undefined;
+      return caches.open(ASSET_CACHE).then((cache) =>
+        Promise.all(paths.map((path) => cache.match(path).then((hit) => (hit ? null : path))))
+          .then((missing) => missing.filter(Boolean))
+          .then((missing) => (missing.length ? cache.addAll(missing).then(() => trimAssetCache(cache)) : undefined))
+      );
+    })
+    .catch(() => {});
+}
+
+// Prolonge la vie du service worker le temps d'un rangement en cache, sans jamais faire
+// échouer la réponse si le navigateur refuse (événement déjà terminé)
+function keepAlive(event, promise) {
+  const safe = Promise.resolve(promise).catch(() => {});
+  try { event.waitUntil(safe); } catch { /* rangement laissé en tâche de fond */ }
+}
+
 // ─── Install: cache app shell ────────────────────────────────────────
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL))
+    caches.open(CACHE_NAME)
+      .then((cache) => cache.addAll(APP_SHELL).then(() => cache.match('/index.html')))
+      .then(precacheEntryAssets)
   );
   self.skipWaiting();
 });
@@ -43,7 +110,7 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
+      Promise.all(keys.filter((k) => !KEPT_CACHES.includes(k)).map((k) => caches.delete(k)))
     )
   );
   self.clients.claim();
@@ -56,6 +123,9 @@ self.addEventListener('fetch', (event) => {
 
   // Only handle same-origin requests
   if (url.origin !== self.location.origin && !url.hostname.includes('herokuapp.com')) return;
+
+  // Images servies par l'API : le cache HTTP du navigateur suffit (Cache-Control d'un an, ETag)
+  if (url.pathname.includes('/api/media/')) return;
 
   // API requests: network-first with cache fallback, public responses only
   if (url.pathname.includes('/api/')) {
@@ -77,9 +147,47 @@ self.addEventListener('fetch', (event) => {
   }
 
   // App navigation: network-first, fallback to cached index.html (SPA)
+  // L'index gardé est remplacé à chaque ouverture réussie : celui figé à l'installation citait,
+  // après un déploiement, des fichiers /assets/ qui n'existent plus. Seul l'index de l'app est
+  // rangé : /cgu.html, /privacy.html (vrais fichiers, avec extension) ou une redirection, jamais.
   if (request.mode === 'navigate') {
     event.respondWith(
-      fetch(request).catch(() => caches.match('/index.html'))
+      fetch(request)
+        .then((response) => {
+          const isAppIndex = response.ok
+            && !response.redirected
+            && !/\.[a-z0-9]+$/i.test(url.pathname.replace(/\/index\.html$/, '/'))
+            && (response.headers.get('content-type') || '').includes('text/html');
+          if (isAppIndex) {
+            const clone = response.clone();
+            keepAlive(event,
+              caches.open(CACHE_NAME)
+                .then((cache) => cache.put('/index.html', clone.clone()).then(() => clone))
+                .then(precacheEntryAssets)
+            );
+          }
+          return response;
+        })
+        .catch(() => caches.match('/index.html'))
+    );
+    return;
+  }
+
+  // Fichiers du build : cache d'abord (noms à empreinte), sinon réseau puis rangement
+  if (isBuildAsset(request, url)) {
+    event.respondWith(
+      caches.open(ASSET_CACHE).then((cache) =>
+        cache.match(request).then((cached) => {
+          if (cached) return cached;
+          return fetch(request).then((response) => {
+            if (response.ok) {
+              const clone = response.clone();
+              keepAlive(event, cache.put(request, clone).then(() => trimAssetCache(cache)));
+            }
+            return response;
+          });
+        })
+      )
     );
     return;
   }

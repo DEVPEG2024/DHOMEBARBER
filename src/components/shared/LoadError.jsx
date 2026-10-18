@@ -31,6 +31,19 @@ export function friendlyError(err, fallback, { foreign } = {}) {
 }
 
 /**
+ * Vrai quand une requête React Query n'a rien pu montrer : échec sans données, ou requête mise en
+ * pause hors connexion (React Query 5 : `fetchStatus === 'paused'`, ni isError ni isLoading) alors
+ * qu'elle n'a encore rien chargé (ou n'affiche que les données d'une autre période,
+ * `keepPreviousData`). Une requête désactivée reste `idle` : jamais considérée en échec.
+ *
+ *   if (queryFailed(query)) return <LoadError what="vos commandes" error={query.error} onRetry={query.refetch} />;
+ */
+export function queryFailed(q) {
+  if (!q) return false;
+  return (q.isError && !q.data) || (q.fetchStatus === 'paused' && (q.isPending || q.isPlaceholderData));
+}
+
+/**
  * État d'erreur d'une liste qui n'a pas pu se charger : à afficher À LA PLACE de l'état vide
  * (« Aucune commande »…), sinon le client croit que ses données ont disparu.
  *
