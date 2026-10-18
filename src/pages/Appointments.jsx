@@ -12,7 +12,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import { hapticFeedback, isNative } from '@/lib/capacitor';
-import LoadError, { isNetworkError } from '@/components/shared/LoadError';
+import LoadError, { isNetworkError, queryFailed } from '@/components/shared/LoadError';
 import { appointmentEvent, openCalendar, parisInstant } from '@/lib/calendarLinks';
 import {
   SALON_PHONE, SALON_PHONE_HREF, CANCEL_REASON_MAX, APPOINTMENT_CANCEL_REASONS,
@@ -192,11 +192,15 @@ export default function Appointments() {
   );
   // Une prestation de ce RDV n'est plus proposée : aucun créneau, seulement « Choisir une autre date »
   const serviceRetired = !!cancelApt && !!catalog && currentServices(cancelApt, catalog).missing;
+  // RDV sans prestation (Last Minute attribué à un compte, prestations retirées par le salon) :
+  // aucun créneau rapide (le serveur refuserait « Aucune prestation sélectionnée »), seulement
+  // « Choisir une autre date », qui démarre la réservation à l'étape des prestations
+  const noServices = !!cancelApt && !(Array.isArray(cancelApt.services) && cancelApt.services.length > 0);
   // Prochains créneaux libres avec le même barber et les mêmes prestations
   const slotsQuery = useQuery({
     queryKey: ['rescheduleSlots', cancelApt?.id, moveBarber?.id],
     queryFn: () => findRescheduleSlots({ appointment: cancelApt, employee: moveBarber, timeOffs, catalog }),
-    enabled: !!cancelApt && dialogMode === 'move' && !!moveBarber && timeOffsQuery.isSuccess && catalogSettled && !serviceRetired,
+    enabled: !!cancelApt && dialogMode === 'move' && !!moveBarber && timeOffsQuery.isSuccess && catalogSettled && !serviceRetired && !noServices,
     staleTime: 30 * 1000,
     retry: false,
   });
@@ -212,10 +216,16 @@ export default function Appointments() {
   }, [suggestions]);
   // Barbers ou congés impossibles à charger : jamais « ne prend plus de rendez-vous » ni des
   // créneaux sur un jour de congé, mais l'écran d'erreur avec « Réessayer »
-  const suggestionsLoadFailed = !!cancelApt
-    && ((employeesQuery.isError && !employeesQuery.data) || (timeOffsQuery.isError && !timeOffsQuery.data));
+  // Hors connexion, React Query met les requêtes en pause (ni erreur ni données) : c'est un échec,
+  // pas un chargement (sinon « Recherche des créneaux libres… » tournerait sans fin). Le catalogue
+  // en échec reste non bloquant (repli sur les prestations du RDV) : seule sa pause bloque.
+  const suggestionsLoadFailed = !!cancelApt && (
+    queryFailed(employeesQuery) || queryFailed(timeOffsQuery)
+    || (servicesQuery.fetchStatus === 'paused' && servicesQuery.isPending)
+    || (slotsQuery.fetchStatus === 'paused' && slotsQuery.isPending)
+  );
   const barberGone = !!cancelApt && employeesQuery.isSuccess && !moveBarber;
-  const loadingSuggestions = !!cancelApt && !barberGone && !suggestionsLoadFailed && !serviceRetired
+  const loadingSuggestions = !!cancelApt && !barberGone && !suggestionsLoadFailed && !serviceRetired && !noServices
     && (employeesPending || timeOffsQuery.isPending || !catalogSettled || slotsQuery.isPending);
 
   // Horloge à la minute : un rendez-vous passe dans l'historique dès que son heure de fin est passée
@@ -761,11 +771,17 @@ export default function Appointments() {
                         what="les créneaux libres"
                         error={employeesQuery.error || timeOffsQuery.error}
                         onRetry={() => {
-                          if (employeesQuery.isError) employeesQuery.refetch();
-                          if (timeOffsQuery.isError) timeOffsQuery.refetch();
+                          for (const q of [employeesQuery, timeOffsQuery, servicesQuery, slotsQuery]) {
+                            if (q.isError || q.fetchStatus === 'paused') q.refetch();
+                          }
                         }}
-                        retrying={employeesQuery.isFetching || timeOffsQuery.isFetching}
+                        // Une requête en pause n'est pas « fetching » : le bouton reste actif
+                        retrying={employeesQuery.fetchStatus === 'fetching' || timeOffsQuery.fetchStatus === 'fetching' || servicesQuery.fetchStatus === 'fetching'}
                       />
+                    ) : noServices ? (
+                      <p className="text-xs text-muted-foreground">
+                        Ce rendez-vous n'a pas encore de prestation : choisissez vos prestations et une nouvelle date.
+                      </p>
                     ) : serviceRetired ? (
                       <p className="text-xs text-muted-foreground">
                         Une prestation de ce rendez-vous n'est plus proposée : choisissez une autre date.

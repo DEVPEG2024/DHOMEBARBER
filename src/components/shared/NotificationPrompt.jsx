@@ -6,6 +6,8 @@ import { toast } from 'sonner';
 import { useAuth } from '@/lib/AuthContext';
 import { isNative, platform, hapticFeedback } from '@/lib/capacitor';
 import { getPushPermission, subscribeToPush } from '@/lib/pushNotifications';
+import { friendlyError } from '@/components/shared/LoadError';
+import { useAndroidBack } from '@/lib/useAndroidBack';
 
 /**
  * Fenêtre d'activation des notifications, à la première ouverture de l'app une fois connecté :
@@ -78,6 +80,10 @@ export default function NotificationPrompt() {
   const reduceMotion = useReducedMotion();
   const [mode, setMode] = useState(null); // null | 'prompt' | 'denied'
   const [busy, setBusy] = useState(false);
+  // Activation échouée après « Autoriser » (réseau coupé à l'enregistrement) : la fenêtre reste
+  // ouverte avec le message et « Réessayer », sinon la personne se croit abonnée et l'autorisation
+  // accordée empêche tout nouvel affichage
+  const [failed, setFailed] = useState(null);
 
   const blocked = BLOCKED_PATHS.some((p) => location.pathname.startsWith(p));
 
@@ -96,13 +102,17 @@ export default function NotificationPrompt() {
       // Pas par-dessus une fenêtre de la carte Gang : on repasse plus tard, sans compter d'affichage
       if (gangOverlayOpen()) { timer = setTimeout(attempt, RETRY_DELAY); return; }
       writeState({ ...state, [status]: { count: entry.count + 1, last: Date.now() } });
+      setFailed(null);
       setMode(status);
     };
     timer = setTimeout(attempt, SHOW_DELAY);
     return () => { cancelled = true; clearTimeout(timer); };
   }, [user, blocked, mode]);
 
-  const close = () => setMode(null);
+  const close = () => { setMode(null); setFailed(null); };
+  // Bouton retour d'Android = la croix (sinon il quittait l'app ou changeait la page dessous) ; pas
+  // pendant l'activation, la fenêtre système du téléphone capte alors le retour
+  useAndroidBack(!!mode, () => { if (!busy) close(); });
 
   const enable = async () => {
     setBusy(true);
@@ -111,11 +121,14 @@ export default function NotificationPrompt() {
       await subscribeToPush();
       toast.success('Notifications activées ✅');
       close();
-    } catch {
+    } catch (err) {
       // Refus dans la fenêtre du téléphone : on explique comment revenir en arrière
-      const status = await getPushPermission();
-      if (status === 'denied') setMode('denied');
-      else close();
+      const status = await getPushPermission().catch(() => null);
+      if (status === 'denied') { setFailed(null); setMode('denied'); return; }
+      // Autre échec (réseau, enregistrement) : message et « Réessayer », la fenêtre reste ouverte
+      const msg = friendlyError(err, 'Activation impossible', { foreign: "Impossible d'activer les notifications sur cet appareil. Réessayez." });
+      setFailed(msg);
+      toast.error(msg);
     } finally {
       setBusy(false);
     }
@@ -202,6 +215,9 @@ export default function NotificationPrompt() {
                     </li>
                   ))}
                 </ul>
+                {failed && (
+                  <p className="mt-4 text-center text-sm text-destructive" role="alert">{failed}</p>
+                )}
                 <motion.button
                   type="button"
                   whileTap={{ scale: 0.97 }}
@@ -209,7 +225,7 @@ export default function NotificationPrompt() {
                   disabled={busy}
                   className="mt-6 w-full py-3.5 rounded-2xl bg-primary text-primary-foreground font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-60"
                 >
-                  <Bell className="w-4 h-4" /> {busy ? 'Activation…' : 'Activer les notifications'}
+                  <Bell className="w-4 h-4" /> {busy ? 'Activation…' : failed ? 'Réessayer' : 'Activer les notifications'}
                 </motion.button>
               </>
             ) : (

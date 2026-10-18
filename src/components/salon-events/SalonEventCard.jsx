@@ -150,7 +150,7 @@ export default function SalonEventCard({ event, onOpen, index = 0, reduceMotion 
         {inactive && (
           <p className={`text-[11px] font-semibold ${isCancelled ? 'text-red-400' : 'text-muted-foreground'}`}>
             {isCancelled ? 'Annulé par le salon' : phaseLabel(phase)}
-            {response === 'accepted' && !isCancelled ? ' · tu y étais' : ''}
+            {response === 'accepted' && !isCancelled ? ' · vous y étiez' : ''}
           </p>
         )}
       </div>

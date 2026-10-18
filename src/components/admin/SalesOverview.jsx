@@ -130,9 +130,12 @@ export default function SalesOverview({ appointments }) {
     queryKey: ['dashboard', 'giftCards'],
     queryFn: () => api.entities.GiftCard.list('-created_at', 500),
   });
+  // Privatisations : page et données réservées à l'admin (le serveur ne renvoie à un barber que les
+  // créneaux, sans prix) : ni requête ni canal pour un barber
   const eventsQ = useQuery({
     queryKey: ['dashboard', 'events'],
     queryFn: () => api.entities.Event.list('-created_at', 300),
+    enabled: canEvents,
   });
   const textileQ = useQuery({ queryKey: TEXTILE_QUERY_KEY, queryFn: fetchTextileOverview });
   const resQ = useQuery({
@@ -150,7 +153,7 @@ export default function SalesOverview({ appointments }) {
   const failed = {
     boutique: off(ordersQ),
     cartes: off(giftCardsQ),
-    privatisations: off(eventsQ),
+    privatisations: canEvents && off(eventsQ),
     textile: off(textileQ) || off(resQ),
   };
   const failedLabels = [
@@ -158,11 +161,11 @@ export default function SalesOverview({ appointments }) {
     failed.privatisations && 'Privatisations', failed.textile && 'Textile',
   ].filter(Boolean);
   const incomplete = failedLabels.length > 0;
-  const retryFailed = () => Promise.all([ordersQ, giftCardsQ, eventsQ, textileQ, resQ]
+  const retryFailed = () => Promise.all([ordersQ, giftCardsQ, ...(canEvents ? [eventsQ] : []), textileQ, resQ]
     .filter(off).map((q) => q.refetch()));
   // Premier chargement en ligne : « … » plutôt que « 0 € »
   const loadingKey = {
-    boutique: ordersQ.isPending, cartes: giftCardsQ.isPending, privatisations: eventsQ.isPending,
+    boutique: ordersQ.isPending, cartes: giftCardsQ.isPending, privatisations: canEvents && eventsQ.isPending,
     textile: textileQ.isPending || resQ.isPending,
   };
   const money = (key, value) => (failed[key] ? '—' : loadingKey[key] ? '…' : eur(value));
@@ -255,7 +258,7 @@ export default function SalesOverview({ appointments }) {
         note: giftMonth > 0 ? `hors ${eur(giftMonth)} réglés par carte cadeau ce mois (comptés à la vente de la carte)` : '' },
       { key: 'boutique', label: 'Boutique (commandes retirées)', today: boutique.today, month: boutique.month, color: CHANNEL_COLORS.boutique, icon: ShoppingBag },
       { key: 'cartes', label: 'Cartes cadeau validées', today: cartes.today, month: cartes.month, color: CHANNEL_COLORS.cartes, icon: Gift },
-      { key: 'privatisations', label: 'Privatisations', today: privatisations.today, month: privatisations.month, color: CHANNEL_COLORS.privatisations, icon: PartyPopper },
+      ...(canEvents ? [{ key: 'privatisations', label: 'Privatisations', today: privatisations.today, month: privatisations.month, color: CHANNEL_COLORS.privatisations, icon: PartyPopper }] : []),
       { key: 'textile', label: 'Textile (précommandes payées)', today: textileStats.today, month: textileStats.month, color: CHANNEL_COLORS.textile, icon: Shirt },
     ];
     const totalToday = sum(channels, (c) => c.today);
@@ -273,7 +276,7 @@ export default function SalesOverview({ appointments }) {
       boutique, cartes, privatisations, textile: textileStats, channels, totalToday, totalMonth, pending,
       rdvToday, rdvMonth, giftToday, giftMonth,
     };
-  }, [ordersQ.data, giftCardsQ.data, eventsQ.data, textileQ.data, resQ.data, appointments, today, monthPrefix]);
+  }, [ordersQ.data, giftCardsQ.data, eventsQ.data, textileQ.data, resQ.data, appointments, today, monthPrefix, canEvents]);
 
   const { boutique, cartes, privatisations, textile: tx, channels, totalToday, totalMonth, pending, giftToday, giftMonth } = stats;
   const otherToday = totalToday - stats.rdvToday;
@@ -395,6 +398,7 @@ export default function SalesOverview({ appointments }) {
           )}
         </ChannelPanel>
 
+        {canEvents && (
         <ChannelPanel title="Privatisations" icon={PartyPopper} color={CHANNEL_COLORS.privatisations} to={canEvents ? '/admin/events' : null} failed={failed.privatisations}
           badge={!failed.privatisations && privatisations.openCount > 0 && <span className="ml-1 px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 text-[10px]">{privatisations.openCount} demande{privatisations.openCount > 1 ? 's' : ''}</span>}>
           <Mini label="Événements du mois" value={money('privatisations', privatisations.month)} icon={Euro} color={CHANNEL_COLORS.privatisations} hint={failed.privatisations ? '' : `${privatisations.monthCount} confirmé${privatisations.monthCount > 1 ? 's' : ''} (payé${privatisations.monthCount > 1 ? 's' : ''})`} />
@@ -402,6 +406,7 @@ export default function SalesOverview({ appointments }) {
           <Mini label="Devis en attente" value={money('privatisations', privatisations.quotedAmount)} icon={Clock} color="#f59e0b" hint="réponse du client attendue" />
           <Mini label="Devis acceptés à encaisser" value={money('privatisations', privatisations.acceptedAmount)} icon={Users} color="#f59e0b" hint={failed.privatisations ? '' : `${privatisations.acceptedCount} privatisation${privatisations.acceptedCount > 1 ? 's' : ''} à confirmer au paiement`} />
         </ChannelPanel>
+        )}
 
         <ChannelPanel title="Textile · drops" icon={Shirt} color={CHANNEL_COLORS.textile} to={canTextile ? '/admin/textile?tab=reservations' : null} failed={failed.textile}
           badge={!failed.textile && tx.toPayCount > 0 && <span className="ml-1 px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 text-[10px]">{tx.toPayCount} à payer</span>}>

@@ -144,6 +144,21 @@ body {
   padding-right: env(safe-area-inset-right);
 }
 
+/* App web installée sur iOS (black-translucent = texte blanc) : en thème clair, bande sombre
+   sous l'heure et la batterie, sinon elles disparaissent sur le fond clair. Hauteur nulle hors
+   encoche (Android, ordinateur) ; rien en thème sombre */
+@media (display-mode: standalone) {
+  html:not(.dark) body::before {
+    content: '';
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: env(safe-area-inset-top, 0px);
+    background: #0f1115;
+    z-index: 2147483647;
+    pointer-events: none;
+  }
+}
+
 /* Clavier ouvert (src/lib/capacitor.js) : le bas de la fenêtre encore recouvert par le clavier
    (--keyboard-overlap, calculé avec visualViewport) est réservé sous le contenu pour que le champ
    actif puisse défiler au-dessus du clavier. Sans recouvrement, le padding de la zone sûre disparaît :

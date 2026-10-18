@@ -33,9 +33,11 @@ export default function ActivityStats({ events }) {
         // Une commande annulée depuis reste comptée comme commande passée, mais pas dans le chiffre
         if (hasAmount && !ev.cancelled) s.revenue += amount;
       } else if (ev.type === 'giftcard_new') {
-        s.giftcards += 1;
-        // Carte rejetée (jamais payée) : hors du montant, comme une commande annulée
-        if (hasAmount && !ev.cancelled) s.revenue += amount;
+        // Carte rejetée (jamais payée) : ni dans le montant, ni dans « dont N cartes cadeau »
+        if (!ev.cancelled) {
+          s.giftcards += 1;
+          if (hasAmount) s.revenue += amount;
+        }
       } else if (ev.type === 'user_new') s.users += 1;
     }
     return s;

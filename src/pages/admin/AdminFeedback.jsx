@@ -100,7 +100,7 @@ function FeedbackItem({ item, onUpdate, onDelete, busy }) {
         <Textarea
           value={reply}
           onChange={e => setReply(e.target.value.slice(0, 1000))}
-          placeholder="Répondre au client (il la reçoit en notification et la voit dans Paramètres)"
+          placeholder="Répondre au client (il est prévenu par email et notification, et la voit dans Paramètres)"
           rows={2}
           className="text-sm"
         />
@@ -170,7 +170,7 @@ export default function AdminFeedback() {
     onMutate: ({ id }) => setBusyId(id),
     onSuccess: (_, { patch }) => {
       invalidate();
-      if (patch.admin_reply) toast.success('Réponse envoyée au client');
+      if (patch.admin_reply) toast.success('Réponse enregistrée : le client est prévenu par email et notification');
     },
     onError: (err) => toast.error(errText(err, 'Erreur lors de la mise à jour')),
     onSettled: () => setBusyId(null),

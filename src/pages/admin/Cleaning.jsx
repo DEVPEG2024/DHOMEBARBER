@@ -203,12 +203,12 @@ export default function Cleaning() {
 
   return (
     <div>
-      <div className="flex items-start justify-between mb-6 gap-3">
-        <div className="shrink-0">
+      <div className="flex flex-wrap items-start justify-between mb-6 gap-3">
+        <div className="min-w-0">
           <p className="text-[11px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Organisation</p>
           <h1 className="font-display text-2xl font-bold">Entretien du salon</h1>
         </div>
-        <div className="flex flex-wrap gap-2 justify-end">
+        <div className="flex flex-wrap gap-2 justify-end ml-auto">
           <Button size="sm" variant="outline" className="border-border gap-1.5"
             onClick={() => { setEditTask({ name: '', description: '', frequency: 'daily', is_active: true }); setShowDialog(true); }}>
             <Plus className="w-3.5 h-3.5" /> Tâche

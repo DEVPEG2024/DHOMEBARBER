@@ -43,9 +43,10 @@ function Counter({ icon: Icon, value, label, className = '' }) {
  * @param {Array} props.invites
  * @param {boolean} props.isLoading
  * @param {Error|null} props.error
+ * @param {boolean} [props.failed]  Requête en échec ou en pause hors connexion (sans erreur)
  * @param {boolean} props.isAdmin   Retrait d'une invitation réservé à l'admin (DELETE entité)
  */
-export default function GuestListTab({ event, invites, isLoading, error, isAdmin, onRetry, retrying = false }) {
+export default function GuestListTab({ event, invites, isLoading, error, failed = false, isAdmin, onRetry, retrying = false }) {
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState('all');
   const [remindMessage, setRemindMessage] = useState('');
@@ -211,7 +212,7 @@ export default function GuestListTab({ event, invites, isLoading, error, isAdmin
           <span>Impossible de recharger les invités : {adminErrorMessage(error, 'le serveur ne répond pas')}</span>
         </div>
       )}
-      {error && rows.length === 0 ? (
+      {(error || failed) && rows.length === 0 ? (
         <LoadError compact what="les invités" error={error} onRetry={onRetry} retrying={retrying} />
       ) : isLoading ? (
         <Spinner />

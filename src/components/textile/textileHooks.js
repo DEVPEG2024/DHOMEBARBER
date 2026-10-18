@@ -16,7 +16,7 @@ import {
   cancelReservation,
 } from '@/lib/textileApi';
 import { getPushPermission, isPushSupported, isSubscribed, subscribeToPush } from '@/lib/pushNotifications';
-import { hapticFeedback } from '@/lib/capacitor';
+import { hapticFeedback, isNative } from '@/lib/capacitor';
 import { errorMessage } from './textileUtils';
 
 export function useTextileOverview(options = {}) {
@@ -42,6 +42,10 @@ async function ensurePushSubscription(timeoutMs = 8000) {
       // notifications (rappels, Last Minute…) pour une simple alerte de drop
       if ((await getPushPermission()) === 'optout') return 'optout';
       if (await isSubscribed()) return true;
+      // Web, autorisation déjà accordée mais aucun abonnement : le client a pu couper ses
+      // notifications avant le 18 oct. 2026 (la marque optout n'était alors posée qu'en natif).
+      // requestPermission() réabonnerait sans rien afficher : on demande un geste explicite
+      if (!isNative && typeof Notification !== 'undefined' && Notification.permission === 'granted') return 'confirm';
       await subscribeToPush();
       return true;
     } catch {
@@ -128,6 +132,20 @@ export function useTextileActions() {
       ensurePushSubscription().then(ok => {
         if (ok === 'optout') {
           toast.info('Notifications coupées', { description: 'Tu les as désactivées : réactive-les dans Paramètres pour recevoir l\'alerte sur ton téléphone.' });
+        } else if (ok === 'confirm') {
+          // Le tap sur « Activer » est le geste explicite : subscribeWebPush lève la marque
+          // optout et enregistre l'abonnement, comme dans Paramètres
+          toast.info('Recevoir l\'alerte sur ce téléphone ?', {
+            description: 'Tes notifications ne sont pas actives sur cet appareil.',
+            action: {
+              label: 'Activer',
+              onClick: () => {
+                subscribeToPush()
+                  .then(() => toast.success('Notifications activées'))
+                  .catch(() => toast.error('Impossible d\'activer les notifications'));
+              },
+            },
+          });
         } else if (ok === false) {
           toast.info('Notifications désactivées', { description: 'Autorise-les dans Paramètres pour recevoir l\'alerte sur ton téléphone.' });
         }

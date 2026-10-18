@@ -10,6 +10,7 @@ import { fr } from 'date-fns/locale';
 import SalonEventsSection from '@/components/salon-events/SalonEventsSection';
 import LoadError from '@/components/shared/LoadError';
 import { formatPrice } from '@/components/services/serviceUtils';
+import { parisDay } from '@/lib/slots';
 
 // Le salon reçoit exclusivement une clientèle masculine : pas d'EVJF dans les formules.
 const EVENT_TYPES = [
@@ -395,6 +396,8 @@ export default function Events() {
               const status = STATUS_CONFIG[event.status] || STATUS_CONFIG.pending;
               const slot = TIME_SLOTS.find(s => s.id === event.time_slot);
               const isQuoted = event.status === 'quoted';
+              // Devis d'une date passée (jour de Paris) : plus d'acceptation en ligne, le refus reste
+              const quotePast = isQuoted && !!event.date && String(event.date).slice(0, 10) < parisDay().key;
               return (
                 <motion.div key={event.id}
                   initial={{ opacity: 0, y: 8 }}
@@ -491,6 +494,14 @@ export default function Events() {
                     }
                     return (
                       <div className="grid grid-cols-2 gap-2 mt-3">
+                        {quotePast ? (
+                          <a
+                            href="tel:0666083605"
+                            className="flex items-center justify-center text-center px-2 py-3 rounded-xl bg-white/5 border border-white/10 text-xs font-medium text-foreground"
+                          >
+                            Date passée : contactez le salon
+                          </a>
+                        ) : (
                         <motion.button
                           type="button"
                           whileTap={answerQuote.isPending ? undefined : { scale: 0.97 }}
@@ -502,6 +513,7 @@ export default function Events() {
                             ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                             : <><ThumbsUp className="w-4 h-4" />Accepter</>}
                         </motion.button>
+                        )}
                         <motion.button
                           type="button"
                           whileTap={answerQuote.isPending ? undefined : { scale: 0.97 }}

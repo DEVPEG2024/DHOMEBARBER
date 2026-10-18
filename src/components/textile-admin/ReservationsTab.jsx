@@ -295,8 +295,10 @@ export default function ReservationsTab({ reservations, isLoading, error = null,
                       <ActionButton icon={RotateCcw} label="Revenir à Payée" disabled={busy}
                         onClick={() => setStatus(r, 'paid', 'Statut rétabli : payée')} />
                     )}
-                    <TwoTapButton icon={Ban} label="Annuler" confirmLabel="Confirmer l'annulation ?" disabled={busy}
-                      onConfirm={() => setStatus(r, 'cancelled', 'Réservation annulée, le stock est libéré')} />
+                    <TwoTapButton icon={Ban} label="Annuler" confirmLabel="Annuler et prévenir le client ?" disabled={busy}
+                      onConfirm={() => setStatus(r, 'cancelled', ['paid', 'ready'].includes(r.status)
+                        ? 'Réservation annulée, stock libéré, le client est prévenu : pensez à le rembourser'
+                        : 'Réservation annulée, stock libéré, le client est prévenu')} />
                   </div>
                 )}
                 {/* Retirée par erreur : retour à « payée » (sans notification ; « Prête » la renverrait) */}

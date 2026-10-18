@@ -807,6 +807,16 @@ function lastMinuteErrorMessage(e) {
   return serverText || 'Le serveur n\'a pas répondu';
 }
 
+/**
+ * Erreur après laquelle on ne sait pas si le push est parti : réseau coupé pendant l'attente, ou
+ * réponse 5xx sans message du serveur (503 du routeur Heroku alors que l'envoi continue). Un refus
+ * net (400 / 401 / 403 / 429, ou 500 avec le message du serveur) garantit qu'il n'est pas parti.
+ */
+function lastMinuteUncertain(e) {
+  if (isNetworkError(e) || !e?.status) return true;
+  return e.status >= 500 && !(e.data?.error || e.data?.message);
+}
+
 /** Compteur numérique de la réponse du serveur (lu défensivement : les noms peuvent varier). */
 function readCount(result, ...keys) {
   for (const k of keys) {
@@ -858,6 +868,9 @@ function LastMinuteForm({ open, employees, timeOffs, defaultEmployeeId, defaultD
   // Ligne `last_minute` déjà créée : un nouvel essai ne renvoie que la notification
   const [created, setCreated] = useState(null);
   const [pushError, setPushError] = useState(null);
+  // Réponse perdue : le push est peut-être parti, un renvoi demande une confirmation en deux taps
+  const [pushUncertain, setPushUncertain] = useState(false);
+  const [confirmResend, setConfirmResend] = useState(false);
 
   // Barbers chargés après l'ouverture : le premier est proposé
   useEffect(() => {
@@ -961,8 +974,14 @@ function LastMinuteForm({ open, employees, timeOffs, defaultEmployeeId, defaultD
 
   const handleSendLastMinute = async () => {
     if (!canSend) return;
+    // Après une réponse perdue : premier tap = demande de confirmation, second = renvoi
+    if (created && pushUncertain && !confirmResend) {
+      setConfirmResend(true);
+      return;
+    }
     setSending(true);
     setPushError(null);
+    setConfirmResend(false);
     let row = created;
     if (!row) {
       const payload = {
@@ -1000,11 +1019,18 @@ function LastMinuteForm({ open, employees, timeOffs, defaultEmployeeId, defaultD
         employee_name: row.employee_name,
         url: lastMinuteBookingUrl(row),
       });
+      // Renvoi d'un créneau déjà notifié dans les 15 min : le serveur n'envoie rien une seconde fois
+      if (result?.already) {
+        toast.info('Notification déjà envoyée pour ce créneau (pas de nouvel envoi)');
+        onDone();
+        return;
+      }
       const report = lastMinuteReport(result);
       toast[report.level](report.title, { description: report.description, duration: report.level === 'warning' ? 12000 : 6000 });
       onDone();
     } catch (e) {
       // La ligne existe : la fenêtre reste ouverte, « Renvoyer » ne la recrée pas
+      setPushUncertain(lastMinuteUncertain(e));
       setPushError(lastMinuteErrorMessage(e));
     } finally {
       setSending(false);
@@ -1086,10 +1112,19 @@ function LastMinuteForm({ open, employees, timeOffs, defaultEmployeeId, defaultD
           </div>
         )}
 
-        {pushError && (
+        {pushError && (pushUncertain ? (
+          <div role="alert" className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-300">
+            Créneau bloqué. La notification est peut-être partie (la réponse du serveur n'est pas arrivée) : vérifiez auprès d'un client avant de la renvoyer.
+          </div>
+        ) : (
           <div role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs leading-relaxed text-red-300">
             Créneau bloqué, mais la notification n'est pas partie : {pushError}
           </div>
+        ))}
+        {confirmResend && !sending && (
+          <p role="status" className="text-xs leading-relaxed text-amber-300">
+            Renvoyer la notification à tous les clients ? Touchez encore le bouton pour confirmer.
+          </p>
         )}
 
         <button
@@ -1100,6 +1135,8 @@ function LastMinuteForm({ open, employees, timeOffs, defaultEmployeeId, defaultD
         >
           {sending ? (
             <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+          ) : created && pushUncertain ? (
+            confirmResend ? 'Confirmer le renvoi' : 'Renvoyer quand même'
           ) : created ? (
             'Renvoyer la notification'
           ) : (

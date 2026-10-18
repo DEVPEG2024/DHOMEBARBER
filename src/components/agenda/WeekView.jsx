@@ -147,9 +147,9 @@ export default function WeekView({ currentDate, appointments, employees, employe
             // Bande des pauses longues (vue « Tous ») : les cartes posées sur la pause longue d'un AUTRE
             // barber laissent libres les LONG_BREAK_LANE px de droite, où la pause affleure et reste
             // touchable (ouvrir, glisser, étirer). La pause courte de Dom sur sa propre journée bloquée
-            // n'est pas concernée. Seule, une pause longue reste en pleine largeur ; côte à côte et
-            // recouvertes, chacune prend sa part de la bande (2 × LONG_BREAK_LANE au plus), sinon seule
-            // la dernière colonne serait touchable
+            // n'est pas concernée. La réserve ne dépasse jamais LONG_BREAK_LANE, quel que soit le nombre
+            // de pauses longues : chacune garde sa part de la colonne (100 / cols %), visible et
+            // touchable hors des créneaux couverts par des RDV
             const spanOf = (a) => {
               const start = timeToMinutes(a.start_time);
               return [start, Math.max(timeToMinutes(a.end_time || a.start_time), start + MIN_CARD_MINUTES)];
@@ -161,11 +161,6 @@ export default function WeekView({ currentDate, appointments, employees, employe
             };
             const cards = [...bookings, ...lastMinutes, ...shortBreaks];
             const coveredBy = (b, apt) => String(b.employee_id) !== String(apt.employee_id) && crosses(b, apt);
-            const bandedIds = new Set();
-            const laneOf = (b) => {
-              const cols = breakMeta[b.id]?.cols || 1;
-              return cols > 1 && bandedIds.has(b.id) ? LONG_BREAK_LANE * Math.min(cols, 2) : LONG_BREAK_LANE;
-            };
             const reserveOf = {};
             if (!single && longBreaks.length) {
               // Groupes côte à côte (mêmes groupes que layoutOverlaps) : une décision par groupe,
@@ -182,15 +177,9 @@ export default function WeekView({ currentDate, appointments, employees, employe
                 }
                 return groups;
               };
-              for (const group of groupsOf(longBreaks)) {
-                if (group.some((b) => cards.some((apt) => coveredBy(b, apt)))) group.forEach((b) => bandedIds.add(b.id));
-              }
               for (const group of groupsOf(cards)) {
-                let r = 0;
-                for (const apt of group) {
-                  for (const b of longBreaks) if (coveredBy(b, apt)) r = Math.max(r, laneOf(b));
-                }
-                for (const apt of group) reserveOf[apt.id] = r;
+                const covered = group.some((apt) => longBreaks.some((b) => coveredBy(b, apt)));
+                for (const apt of group) reserveOf[apt.id] = covered ? LONG_BREAK_LANE : 0;
               }
             }
             const onLeaveEmps = employees.filter((emp) => isOnLeave(timeOffs, emp.id, dateStr));
@@ -231,12 +220,8 @@ export default function WeekView({ currentDate, appointments, employees, employe
                 {/* Longues d'abord : une pause courte posée sur une journée bloquée reste au-dessus, donc ouvrable */}
                 {(single ? breaks : [...longBreaks, ...shortBreaks]).map((apt) => {
                   const { col, cols } = (shortIds.has(apt.id) ? meta : breakMeta)[apt.id] || { col: 0, cols: 1 };
-                  const isLong = !single && !shortIds.has(apt.id);
-                  const lane = isLong ? laneOf(apt) : 0;
-                  // Pauses longues côte à côte : chacune dans sa part de la bande de droite
-                  const horizontal = isLong && cols > 1 && bandedIds.has(apt.id)
-                    ? { left: `calc(100% - ${lane}px + ${(col * lane) / cols}px)`, width: `${lane / cols}px` }
-                    : place(col, cols, reserveOf[apt.id] || 0);
+                  // Pauses longues : chacune sa part de la colonne (100 / cols %), sans réserve
+                  const horizontal = place(col, cols, shortIds.has(apt.id) ? (reserveOf[apt.id] || 0) : 0);
                   return (
                     <BreakCard key={apt.id} apt={apt} onSelect={selectBreak} dragProps={dragProps(apt)} ghosted={moving?.apt.id === apt.id}
                       resizeProps={onResizeRequest ? cardDrag.bindResize(apt) : null}

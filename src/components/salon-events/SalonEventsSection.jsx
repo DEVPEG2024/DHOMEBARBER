@@ -86,7 +86,7 @@ export default function SalonEventsSection() {
       ) : (
         <div className="glass rounded-2xl p-4 text-center">
           <p className="text-xs text-muted-foreground">
-            Aucun événement à venir pour le moment. On te prévient dès que le salon organise quelque chose.
+            Aucun événement à venir pour le moment. Nous vous préviendrons dès que le salon organise quelque chose.
           </p>
         </div>
       )}

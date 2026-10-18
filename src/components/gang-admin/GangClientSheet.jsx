@@ -165,8 +165,8 @@ function NudgeButton({ account, card, upcoming, onDone }) {
     try {
       const res = await nudgeGangClient(account.email);
       const devices = Number(res?.devices) || 0;
-      if (devices === 0) toast.warning('Ce client n’a pas activé les notifications : appelle-le');
-      else if (res?.sent === false) toast.warning('La notification n’a pas pu être livrée sur son téléphone : appelle-le');
+      if (devices === 0) toast.warning('Ce client n’a pas activé les notifications : appelez-le');
+      else if (res?.sent === false) toast.warning('La notification n’a pas pu être livrée sur son téléphone : appelez-le');
       else toast.success(`Relance envoyée sur ${devices} appareil${devices > 1 ? 's' : ''}`);
     } catch (err) {
       toast.error(err?.data?.error || (!err?.status ? 'Pas de connexion : la relance n’est pas partie.' : 'La relance n’a pas pu être envoyée.'));
@@ -207,7 +207,7 @@ function SheetBody({ data, cardSize, onNudged }) {
       <div className="grid grid-cols-1 sm:grid-cols-[auto_minmax(0,1fr)] gap-5 items-start">
         <div className="flex flex-col items-center gap-2 justify-self-center">
           {card && <GangCard card={card} size={cardSize} flippable interactive />}
-          <p className="text-[11px] text-muted-foreground">Touche la carte pour voir le verso</p>
+          <p className="text-[11px] text-muted-foreground">Touchez la carte pour voir le verso</p>
         </div>
         <div className="min-w-0 space-y-3">
           <div className="grid grid-cols-2 gap-2">

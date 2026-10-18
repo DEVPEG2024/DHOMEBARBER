@@ -93,29 +93,29 @@ export default function AgendaToolbar({ view, onViewChange, currentDate, onDateC
       )}
       </div>
 
-      <div className="flex items-center gap-2 order-2 flex-1 sm:flex-none">
+      <div className="flex items-center gap-1.5 sm:gap-2 order-2 flex-1 sm:flex-none min-w-0">
         <Button
           variant="outline"
           size="sm"
-          className="h-8 text-xs border-border"
+          className="h-8 text-xs border-border shrink-0 px-2 sm:px-3"
           disabled={isCurrent}
           onClick={() => onDateChange(new Date())}
         >
           Aujourd'hui
         </Button>
-        <div className="flex bg-secondary rounded-lg p-0.5 flex-1 sm:flex-none">
+        <div className="flex bg-secondary rounded-lg p-0.5 flex-1 sm:flex-none min-w-0">
           {VIEWS.map((v) => (
             <button
               key={v.value}
               type="button"
               onClick={() => onViewChange(v.value)}
-              className={`flex-1 sm:flex-none px-3 py-1 text-xs rounded-md transition-all ${view === v.value ? 'bg-primary text-primary-foreground font-semibold' : 'text-muted-foreground hover:text-foreground'}`}
+              className={`flex-1 sm:flex-none px-2 sm:px-3 py-1 text-xs rounded-md transition-all ${view === v.value ? 'bg-primary text-primary-foreground font-semibold' : 'text-muted-foreground hover:text-foreground'}`}
             >
               {v.label}
             </button>
           ))}
         </div>
-        <Button variant="outline" size="sm" className="h-8 border-border gap-1.5 px-2.5" onClick={onExport} aria-label="Exporter en CSV">
+        <Button variant="outline" size="sm" className="h-8 border-border gap-1.5 px-2.5 shrink-0" onClick={onExport} aria-label="Exporter en CSV">
           <Download className="w-3.5 h-3.5" /> <span className="hidden sm:inline">CSV</span>
         </Button>
       </div>

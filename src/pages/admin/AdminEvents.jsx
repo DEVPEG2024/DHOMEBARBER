@@ -10,6 +10,7 @@ import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import LoadError, { isNetworkError } from '@/components/shared/LoadError';
 import { formatPrice } from '@/components/services/serviceUtils';
+import { parisDay } from '@/lib/slots';
 
 // Doit rester aligné sur EVENT_TYPES de src/pages/Events.jsx (pas d'EVJF : clientèle masculine).
 const EVENT_TYPES = {
@@ -160,7 +161,16 @@ export default function AdminEvents() {
       return;
     }
     // Prix modifiable seulement sur une demande en attente : un devis accepté garde son prix (une
-    // liste rechargée sous un panneau ouvert ne le change plus en silence)
+    // liste rechargée sous un panneau ouvert ne le change plus en silence). Prix retapé dans
+    // l'éditeur resté ouvert après l'acceptation : refusé, jamais ignoré sans le dire.
+    if (event.status !== 'pending') {
+      const before = event.price == null || event.price === '' ? null : Number(event.price);
+      if (price !== before) {
+        toast.error(`Le client a déjà accepté ce devis : son prix (${before == null ? '—' : formatPrice(before)}) ne peut plus changer.`);
+        setEditPrice(event.price ?? '');
+        return;
+      }
+    }
     updateMutation.mutate({
       id: event.id,
       data: event.status === 'pending' ? { admin_notes: editNotes, price } : { admin_notes: editNotes },
@@ -230,6 +240,10 @@ export default function AdminEvents() {
             || { label: event.status || 'Inconnu', color: 'bg-muted text-muted-foreground border-border', icon: Clock };
           const StatusIcon = status.icon;
           const isEditing = editingId === event.id;
+          // Prix figé dès que le client a répondu (l'éditeur a pu rester ouvert pendant la relecture)
+          const priceLocked = !(event.status === 'pending' || event.status === 'quoted');
+          // Date passée (jour de Paris) : une privatisation confirmée a eu lieu, elle ne s'annule plus
+          const isPast = !!event.date && String(event.date).slice(0, 10) < parisDay().key;
 
           return (
             <motion.div key={event.id}
@@ -291,8 +305,10 @@ export default function AdminEvents() {
                     <label className="text-[11px] text-muted-foreground mb-1 block">Devis (€)</label>
                     <input type="number" step="0.01" placeholder="Ex: 350"
                       value={editPrice}
+                      disabled={priceLocked}
                       onChange={e => setEditPrice(e.target.value)}
-                      className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm" />
+                      className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm disabled:opacity-60" />
+                    {priceLocked && <p className="text-[10px] text-muted-foreground mt-1">Devis accepté : prix figé</p>}
                   </div>
                   <div>
                     <label className="text-[11px] text-muted-foreground mb-1 block">Message joint au devis (visible par le client)</label>
@@ -410,7 +426,12 @@ export default function AdminEvents() {
                   </div>
                 )}
                 {/* Acceptée ou confirmée : annulation (email + push au client), jamais de suppression */}
-                {(event.status === 'accepted' || event.status === 'confirmed') && (cancelId === event.id ? (
+                {event.status === 'confirmed' && isPast && (
+                  <span className="inline-flex items-center px-2.5 py-1.5 rounded-lg bg-muted/50 border border-border text-[11px] font-medium text-muted-foreground">
+                    Événement passé
+                  </span>
+                )}
+                {(event.status === 'accepted' || (event.status === 'confirmed' && !isPast)) && (cancelId === event.id ? (
                   <div className="w-full rounded-lg border border-red-500/25 bg-red-500/5 p-2.5 space-y-2">
                     <p className="text-xs font-semibold text-red-400">Annuler cette privatisation ? Le client reçoit un email.</p>
                     <input type="text" value={cancelReason} maxLength={300} onChange={(e) => setCancelReason(e.target.value)}

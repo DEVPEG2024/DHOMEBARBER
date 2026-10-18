@@ -193,5 +193,7 @@ export function cancelledByLabel(row, viewer, noun = 'commande') {
 /** Motif sans son préfixe « Client : » / « Salon : » ; « Salon » seul → ''. */
 export function cleanReason(reason) {
   // « Client : « … » » : motif libre que le serveur a mis entre guillemets (il commençait par « déplacé au »)
-  return String(reason || '').replace(/^(client|salon)\b\s*:?\s*/i, '').trim().replace(/^«\s*([\s\S]*?)\s*»$/, '$1');
+  // Préfixe retiré seulement suivi d'un deux-points, ou seul : « Salon fermé pour travaux » (motif
+  // libre d'une commande, enregistré brut) garde son premier mot
+  return String(reason || '').replace(/^(client|salon)\s*(?::\s*|$)/i, '').trim().replace(/^«\s*([\s\S]*?)\s*»$/, '$1');
 }

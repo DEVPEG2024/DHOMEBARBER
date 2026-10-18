@@ -196,13 +196,13 @@ export default function GangCollection({ cards, onOpen }) {
           <IdCard className="w-7 h-7 mx-auto text-muted-foreground mb-2" aria-hidden="true" />
           <p className="text-sm font-semibold text-foreground">{all.length === 0 ? 'Aucune carte pour l’instant' : 'Aucun client ne correspond'}</p>
           <p className="text-xs text-muted-foreground mt-1">
-            {all.length === 0 ? 'Un client reçoit sa carte après sa première visite terminée.' : 'Change la recherche ou le filtre.'}
+            {all.length === 0 ? 'Un client reçoit sa carte après sa première visite terminée.' : 'Changez la recherche ou le filtre.'}
           </p>
         </div>
       ) : (
         <>
           <p className="text-[11px] text-muted-foreground mb-2">
-            {list.length} {plural(list.length, 'carte', 'cartes')}{tier !== 'all' || query ? ` sur ${all.length}` : ''} · touche une carte pour ouvrir la fiche du client
+            {list.length} {plural(list.length, 'carte', 'cartes')}{tier !== 'all' || query ? ` sur ${all.length}` : ''} · touchez une carte pour ouvrir la fiche du client
           </p>
           <ul className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-x-2 gap-y-3">
             {shown.map((e) => <Tile key={e.user_id || e.email} entry={e} onOpen={onOpen} />)}

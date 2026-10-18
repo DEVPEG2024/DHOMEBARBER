@@ -141,10 +141,17 @@ export default function SmartAgenda() {
       if (slowDays.length > 0) {
         const slowNames = slowDays.map((d) => d.name).join(', ');
         const maxOff = Math.max(1, Math.floor(employees.length / 2));
+        // Barbers proposés = les moins chargés ces jours-là (avant : les derniers de la liste, au hasard)
+        const slowSet = new Set(slowDays.map((d) => d.day));
+        const slowLoad = employees.map((e) => ({
+          name: e.name,
+          count: recentApts.filter((a) => String(a.employee_id) === String(e.id) && slowSet.has(parseISO(String(a.date).slice(0, 10)).getDay())).length,
+        }));
+        slowLoad.sort((a, b) => a.count - b.count);
         suggestions.push({
           title: `Jours creux : ${slowNames}`,
-          description: `Ces jours ont en moyenne ${slowDays.map((d) => d.avg.toFixed(1)).join(' et ')} RDV/semaine contre ${overallAvg.toFixed(1)} en moyenne. Vous pouvez réduire l'équipe.`,
-          recommended_employees: employees.slice(-maxOff).map((e) => e.name),
+          description: `Ces jours ont en moyenne ${slowDays.map((d) => d.avg.toFixed(1)).join(' et ')} RDV/semaine contre ${overallAvg.toFixed(1)} en moyenne. Vous pouvez réduire l'équipe (barbers proposés : ceux qui ont le moins de RDV ces jours-là).`,
+          recommended_employees: slowLoad.slice(0, maxOff).map((e) => e.name),
           days: slowNames,
           savings: `${maxOff} barber${maxOff > 1 ? 's' : ''} en moins`,
         });

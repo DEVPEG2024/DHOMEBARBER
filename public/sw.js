@@ -179,13 +179,20 @@ self.addEventListener('fetch', (event) => {
       caches.open(ASSET_CACHE).then((cache) =>
         cache.match(request).then((cached) => {
           if (cached) return cached;
-          return fetch(request).then((response) => {
-            if (response.ok) {
-              const clone = response.clone();
-              keepAlive(event, cache.put(request, clone).then(() => trimAssetCache(cache)));
-            }
-            return response;
-          });
+          // Réponse en échec (404 d'un onglet périmé gardé « immuable » un an par le cache HTTP) :
+          // un seul nouvel essai qui contourne ce cache et remplace son entrée, sinon un fichier
+          // revenu après un retour arrière de déploiement resterait introuvable dans ce navigateur
+          return fetch(request)
+            .then((response) => (response.ok
+              ? response
+              : fetch(request.url, { cache: 'reload', credentials: 'same-origin' }).catch(() => response)))
+            .then((response) => {
+              if (response.ok) {
+                const clone = response.clone();
+                keepAlive(event, cache.put(request, clone).then(() => trimAssetCache(cache)));
+              }
+              return response;
+            });
         })
       )
     );

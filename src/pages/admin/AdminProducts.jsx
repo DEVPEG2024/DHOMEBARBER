@@ -199,7 +199,7 @@ export default function AdminProducts() {
   const uploading = !!upload;
 
   const openNew = () => {
-    setEditProduct({ name: '', description: '', price: 0, stock: 0, category: 'other', brand: '', image_url: '', images: [], is_active: true });
+    setEditProduct({ name: '', description: '', price: 0, stock: null, category: 'other', brand: '', image_url: '', images: [], is_active: true });
     setShowDialog(true);
   };
   const openEdit = (product) => {
@@ -501,7 +501,7 @@ export default function AdminProducts() {
           <AlertDialogHeader>
             <AlertDialogTitle>Supprimer {productToDelete?.name} ?</AlertDialogTitle>
             <AlertDialogDescription>
-              Le produit disparaît de la Boutique, des favoris et des paniers, avec ses photos et sa description. Cette action est irréversible. Pour le retirer de la vente sans le perdre, désactive-le plutôt (interrupteur Actif dans la fiche).
+              Le produit disparaît de la Boutique, des favoris et des paniers, avec ses photos et sa description. Cette action est irréversible. Pour le retirer de la vente sans le perdre, désactivez-le plutôt (interrupteur Actif dans la fiche).
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="gap-2">

@@ -108,7 +108,13 @@ export async function findRescheduleSlots({ appointment, employee, timeOffs = []
   // Durée d'aujourd'hui des prestations (catalogue) ; une prestation retirée : aucun créneau
   const current = currentServices(appointment, catalog);
   if (current.missing) return [];
-  const duration = current.duration > 0 ? current.duration : appointmentDuration(appointment);
+  // RDV sans prestation : le serveur refuserait chaque créneau (« Aucune prestation sélectionnée »)
+  if (!Array.isArray(appointment.services) || appointment.services.length === 0) return [];
+  // Prestations inchangées : jamais moins que la durée réelle du RDV (allongée par le salon), que le
+  // serveur garde au déplacement (sinon un trou trop court serait proposé, puis refusé)
+  const duration = current.duration > 0
+    ? Math.max(current.duration, appointmentDuration(appointment))
+    : appointmentDuration(appointment);
   const target = toMinutes(appointment.start_time);
   const wanted = Array.from({ length: days }, (_, i) => parisDay(i));
   const { rows: busy, keys: loadedKeys } = await fetchBusy(employee.id, wanted.map(d => d.key));
@@ -166,7 +172,8 @@ export async function moveAppointment({ appointment, employee, user, slot, withR
   // toute façon), sinon celles enregistrées sur l'ancien RDV
   const current = currentServices(appointment, catalog);
   const useCurrent = !current.missing && current.duration > 0;
-  const duration = useCurrent ? current.duration : appointmentDuration(appointment);
+  // Durée allongée par le salon (note « prévoir 1 h »…) conservée : le serveur fait de même
+  const duration = useCurrent ? Math.max(current.duration, appointmentDuration(appointment)) : appointmentDuration(appointment);
   const services = useCurrent ? current.services : (Array.isArray(appointment.services) ? appointment.services : []).map(s => ({
     service_id: s?.service_id ?? s?.id,
     name: s?.name,

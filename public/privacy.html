@@ -14,7 +14,7 @@
 </head>
 <body>
     <h1>Politique de Confidentialité</h1>
-    <p class="updated">Dernière mise à jour : 4 septembre 2026</p>
+    <p class="updated">Dernière mise à jour : 18 octobre 2026</p>
 
     <p>La société <strong>Nova 2.0</strong> (ci-après "nous"), exploitant l'application <strong>DhomeBarber</strong>, s'engage à protéger la vie privée de ses utilisateurs.</p>
 
@@ -26,6 +26,12 @@
         <li><strong>Données de commande</strong> : produits achetés, montants</li>
         <li><strong>Avis</strong> : commentaires et notes laissés</li>
         <li><strong>Notifications push</strong> : identifiant d'abonnement pour l'envoi de rappels</li>
+        <li><strong>Date de naissance</strong> (facultative) : sert uniquement à vous souhaiter votre anniversaire par notification et par email</li>
+        <li><strong>Photos que vous fournissez</strong> : photo de profil, images de vos publications et captures jointes à un signalement de bug</li>
+        <li><strong>Contenus publiés</strong> dans le fil « Ça dit quoi le Gang ? » : publications, commentaires et réactions</li>
+        <li><strong>Carte Gang</strong> : nombre de visites, niveau et statistiques de la carte, calculés à partir de vos rendez-vous (absences et annulations comprises)</li>
+        <li><strong>Bugs et suggestions</strong> : votre message et le contexte technique joint à l'envoi (plateforme, version de l'application, écran, navigateur)</li>
+        <li><strong>Cartes cadeau et précommandes textile</strong> : montants, codes, tailles et statuts</li>
     </ul>
 
     <h2>2. Finalités du traitement</h2>
@@ -35,6 +41,9 @@
         <li>Vous envoyer des rappels de rendez-vous</li>
         <li>Traiter vos commandes de produits</li>
         <li>Vous envoyer nos offres et actualités par email, sauf si vous les refusez</li>
+        <li>Vous souhaiter votre anniversaire, si vous avez indiqué votre date de naissance</li>
+        <li>Calculer votre carte Gang et faire vivre le fil communautaire</li>
+        <li>Corriger les bugs et étudier les suggestions que vous nous envoyez</li>
         <li>Améliorer nos services</li>
     </ul>
 
@@ -42,15 +51,24 @@
     <p>Le traitement de vos données repose sur :</p>
     <ul>
         <li>L'exécution du contrat de service (réservation, commande)</li>
-        <li>Votre consentement (notifications push, avis)</li>
+        <li>Votre consentement (notifications push, avis, date de naissance, publications dans le fil, apparition dans le classement Team of the Season)</li>
         <li>Notre intérêt légitime (amélioration du service)</li>
     </ul>
 
     <h2>4. Conservation des données</h2>
-    <p>Vos données sont conservées pendant la durée de votre compte. En cas de suppression de votre compte, vos données personnelles seront supprimées dans un délai de 30 jours.</p>
+    <p>Vos données sont conservées pendant la durée de votre compte. Vous pouvez supprimer votre compte à tout moment depuis l'application (Paramètres) : la suppression est immédiate. Votre compte, vos avis, vos publications, commentaires et réactions, vos envois de bugs et suggestions et vos abonnements aux notifications sont effacés.</p>
+    <p>Vos rendez-vous, commandes, cartes cadeau et précommandes sont conservés de façon anonyme, sous la mention « Compte supprimé », pour la comptabilité du salon : ils ne sont plus rattachés à votre nom, à votre email ni à votre téléphone.</p>
 
     <h2>5. Partage des données</h2>
-    <p>Vos données ne sont pas vendues ni partagées avec des tiers à des fins commerciales. Elles sont hébergées sur des serveurs sécurisés (Heroku/PostgreSQL).</p>
+    <p>Vos données ne sont jamais vendues ni partagées avec des tiers à des fins commerciales. Pour faire fonctionner l'application, elles sont confiées aux sous-traitants techniques suivants, uniquement pour le service décrit :</p>
+    <ul>
+        <li><strong>Heroku (Salesforce)</strong> : hébergement du serveur et de la base de données</li>
+        <li><strong>Vercel</strong> : hébergement du site dhomebarber.fr</li>
+        <li><strong>Apple (APNs) et Google (Firebase Cloud Messaging)</strong> : acheminement des notifications sur iPhone et Android</li>
+        <li><strong>Hostinger</strong> : envoi des emails</li>
+        <li><strong>Apple Wallet et Google Wallet</strong> : seulement si vous y ajoutez une carte cadeau</li>
+        <li><strong>Snap Inc.</strong> et notre <strong>prestataire de traitement d'image</strong> : voir la section 6</li>
+    </ul>
 
     <h2>6. Caméra, filtres et essayage virtuel</h2>
     <p>Deux fonctions de l'application utilisent la caméra ou une photo que vous fournissez. Elles ne
@@ -71,7 +89,14 @@
       par le salon ni par le prestataire, et n'est utilisée pour aucun autre usage.</li>
     </ul>
 
-    <h2>7. Vos droits</h2>
+    <h2>7. Ce qui est visible par les autres utilisateurs</h2>
+    <ul>
+        <li><strong>Le fil « Ça dit quoi le Gang ? »</strong> est lisible sans compte : vos publications et commentaires y apparaissent avec votre nom et votre photo de profil, jamais avec votre adresse email.</li>
+        <li><strong>Les avis publiés</strong> affichent votre nom.</li>
+        <li><strong>Le classement Team of the Season</strong> n'affiche votre prénom, l'initiale de votre nom, votre photo et votre carte Gang qu'avec votre accord, que vous pouvez retirer à tout moment depuis la page Carte Gang.</li>
+    </ul>
+
+    <h2>8. Vos droits</h2>
     <p>Conformément au RGPD, vous disposez des droits suivants :</p>
     <ul>
         <li>Droit d'accès à vos données</li>
@@ -83,10 +108,10 @@
     <p>Pour exercer ces droits, contactez-nous à l'adresse ci-dessous.</p>
     <p>Vous pouvez refuser à tout moment nos emails d'offres et d'actualités : par le lien « Ne plus recevoir nos offres par email » présent dans chacun d'eux, ou dans l'application (Paramètres → Emails d'offres et d'actualités). Les emails liés à vos rendez-vous et à vos commandes ne sont pas concernés.</p>
 
-    <h2>8. Sécurité</h2>
+    <h2>9. Sécurité</h2>
     <p>Nous mettons en place des mesures de sécurité appropriées : chiffrement des mots de passe, connexions HTTPS, restriction des accès.</p>
 
-    <h2>9. Contact</h2>
+    <h2>10. Contact</h2>
     <p>
         <strong>Nova 2.0</strong><br>
         21 Rue du Stade<br>

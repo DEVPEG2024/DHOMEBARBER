@@ -16,6 +16,7 @@ import {
   useCancelFeatures,
   invalidateOrderQueries,
   cancelledByLabel,
+  cancellationActor,
   cleanReason,
 } from '@/lib/cancellation';
 
@@ -35,6 +36,11 @@ const nextStatusLabel = {
   confirmed: 'Confirmer',
   ready: 'Marquer prête',
   delivered: 'Marquer retirée',
+};
+// Produit ajouté à un rendez-vous : remis par le barber pendant le RDV, pas à venir chercher
+const linkedNextStatusLabel = {
+  ready: 'Produit préparé',
+  delivered: 'Remis au RDV',
 };
 
 const FILTERS = [
@@ -155,9 +161,11 @@ function OrderSummary({ order }) {
 
 export default function AdminOrders() {
   const [filter, setFilter] = useState('all');
-  // Fenêtre de confirmation : { kind: 'cancel' | 'delete', order }
+  // Fenêtre de confirmation : { kind: 'cancel' | 'delete' | 'restore', order }
   const [confirm, setConfirm] = useState(null);
   const [reason, setReason] = useState('');
+  // Rétablissement : « Prévenir le client » (cochée par défaut)
+  const [notifyRestore, setNotifyRestore] = useState(true);
   const queryClient = useQueryClient();
   const features = useCancelFeatures();
 
@@ -236,6 +244,7 @@ export default function AdminOrders() {
 
   const openConfirm = (kind, order) => {
     setReason('');
+    setNotifyRestore(true);
     setConfirm({ kind, order });
   };
 
@@ -256,6 +265,17 @@ export default function AdminOrders() {
         ...(features.orderCancel && motif ? { cancellation_reason: motif } : {}),
       },
       successMessage: 'Commande annulée',
+      closeDialog: true,
+    });
+  };
+
+  const submitRestore = () => {
+    const order = confirm?.order;
+    if (!order) return;
+    updateMutation.mutate({
+      id: order.id,
+      data: { status: 'pending', notify_client: !!order.client_email && notifyRestore },
+      successMessage: order.client_email && notifyRestore ? 'Commande rétablie, client prévenu' : 'Commande rétablie',
       closeDialog: true,
     });
   };
@@ -381,7 +401,7 @@ export default function AdminOrders() {
                 {next && (
                   <Button size="sm" className="flex-1 min-w-[120px] gap-1.5" disabled={busy}
                     onClick={() => updateMutation.mutate({ id: order.id, data: { status: next } })}>
-                    {nextStatusLabel[next]}
+                    {(order.appointment_id && linkedNextStatusLabel[next]) || nextStatusLabel[next]}
                   </Button>
                 )}
                 {!isCancelled && st !== 'delivered' && (
@@ -405,21 +425,20 @@ export default function AdminOrders() {
                 {isCancelled && (
                   <Button size="sm" variant="outline" disabled={busy}
                     className="flex-1 min-w-[120px] border-green-500/30 text-green-400 hover:bg-green-500/10 gap-1.5"
-                    onClick={() => updateMutation.mutate({
-                      id: order.id,
-                      data: { status: 'pending' },
-                      successMessage: 'Commande rétablie',
-                    })}>
+                    onClick={() => openConfirm('restore', order)}>
                     <RotateCcw className="w-3.5 h-3.5" />
                     Rétablir
                   </Button>
                 )}
-                <Button size="sm" variant="ghost" disabled={busy}
-                  aria-label="Supprimer la commande"
-                  className="text-muted-foreground hover:text-red-400 px-2 ml-auto"
-                  onClick={() => openConfirm('delete', order)}>
-                  <Trash2 className="w-3.5 h-3.5" />
-                </Button>
+                {/* Une commande en cours s'annule (le client est prévenu), elle ne se supprime pas */}
+                {(isCancelled || st === 'delivered') && (
+                  <Button size="sm" variant="ghost" disabled={busy}
+                    aria-label="Supprimer la commande"
+                    className="text-muted-foreground hover:text-red-400 px-2 ml-auto"
+                    onClick={() => openConfirm('delete', order)}>
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </Button>
+                )}
               </div>
             </motion.div>
           );
@@ -448,16 +467,41 @@ export default function AdminOrders() {
                 <DialogTitle className="font-display pr-6 break-words">
                   {confirm.kind === 'cancel'
                     ? `Annuler la commande de ${confirmName} ?`
-                    : 'Supprimer cette commande ?'}
+                    : confirm.kind === 'restore'
+                      ? 'Rétablir la commande ?'
+                      : 'Supprimer cette commande ?'}
                 </DialogTitle>
                 <DialogDescription>
                   {confirm.kind === 'cancel'
                     ? 'La commande passe en « Annulée ». Vous pourrez la rétablir ensuite.'
-                    : `Commande de ${confirmName}. Elle disparaîtra définitivement de la liste et des statistiques.`}
+                    : confirm.kind === 'restore'
+                      ? `Commande de ${confirmName}. Elle repasse « En attente » et ses produits sont repris au stock.`
+                      : `Commande de ${confirmName}. Elle disparaîtra définitivement de la liste et des statistiques. Le client n'en sera pas informé.`}
                 </DialogDescription>
               </DialogHeader>
 
               <OrderSummary order={confirmOrder} />
+
+              {confirm.kind === 'restore' && (
+                <div className="space-y-2 text-xs min-w-0">
+                  {cancellationActor(confirmOrder) === 'client' && (
+                    <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-amber-200 break-words">
+                      Annulée par le client : il l'avait annulée lui-même, assurez-vous qu'il la veut toujours.
+                    </p>
+                  )}
+                  {confirmOrder.client_email && (
+                    <label className="flex items-start gap-2 text-foreground cursor-pointer min-w-0">
+                      <input
+                        type="checkbox"
+                        checked={notifyRestore}
+                        onChange={(e) => setNotifyRestore(e.target.checked)}
+                        className="mt-0.5 w-4 h-4 shrink-0 accent-green-500"
+                      />
+                      <span className="min-w-0 break-words">Prévenir le client (notification + email) : sa commande est de nouveau en préparation</span>
+                    </label>
+                  )}
+                </div>
+              )}
 
               {confirm.kind === 'cancel' && features.orderCancel && (
                 <div className="space-y-1">
@@ -479,12 +523,17 @@ export default function AdminOrders() {
 
               <div className="flex gap-2">
                 <Button type="button" variant="outline" className="flex-1" disabled={busy} onClick={closeConfirm}>
-                  Garder
+                  {confirm.kind === 'restore' ? 'Fermer' : 'Garder'}
                 </Button>
                 {confirm.kind === 'cancel' ? (
                   <Button type="button" className="flex-1 bg-red-500 hover:bg-red-600 text-white" disabled={busy}
                     onClick={submitCancel}>
                     {updateMutation.isPending ? 'Annulation…' : 'Annuler la commande'}
+                  </Button>
+                ) : confirm.kind === 'restore' ? (
+                  <Button type="button" className="flex-1 bg-green-600 hover:bg-green-700 text-white" disabled={busy}
+                    onClick={submitRestore}>
+                    {updateMutation.isPending ? 'Rétablissement…' : 'Rétablir'}
                   </Button>
                 ) : (
                   <Button type="button" className="flex-1 bg-red-500 hover:bg-red-600 text-white" disabled={busy}

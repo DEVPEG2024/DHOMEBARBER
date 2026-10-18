@@ -257,6 +257,8 @@ export default function BarberAccounts() {
             let perms = acc.permissions;
             if (typeof perms === 'string') { try { perms = JSON.parse(perms); } catch (_) { perms = []; } }
             perms = perms || [];
+            // Fiche employé supprimée ou inactive : le serveur refuse la connexion et toute modification (409)
+            const ficheClosed = !!acc.employee_id && acc.employee_active !== true;
 
             return (
               <motion.div key={acc.id} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }}
@@ -268,13 +270,18 @@ export default function BarberAccounts() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold truncate">{acc.full_name || acc.employee_name || acc.email}</p>
-                    <p className="text-[10px] text-muted-foreground">{acc.email}</p>
+                    <p className="text-[10px] text-muted-foreground truncate">{acc.email}</p>
+                    {ficheClosed && (
+                      <Badge variant="outline" className="mt-1 text-[10px] whitespace-normal bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400">
+                        Accès coupé : fiche supprimée ou inactive (Équipe)
+                      </Badge>
+                    )}
                     {acc.employee_name && (
                       <p className="text-[10px] text-primary/70">Barber : {acc.employee_name}</p>
                     )}
                   </div>
                   <div className="flex items-center gap-2">
-                    {!isEditing && (
+                    {!isEditing && !ficheClosed && (
                       <Button variant="outline" size="sm" className="gap-1 text-xs" onClick={() => startEdit(acc)}>
                         <KeyRound className="w-3 h-3" /> Modifier
                       </Button>
@@ -287,7 +294,7 @@ export default function BarberAccounts() {
                 </div>
 
                 {/* Permissions display */}
-                {!isEditing && (
+                {!isEditing && !ficheClosed && (
                   <div className="flex flex-wrap gap-1.5 mt-3">
                     {perms.filter(p => KNOWN_PERMISSIONS.has(p)).length === 0 ? (
                       <span className="text-[10px] text-muted-foreground">Aucune permission</span>

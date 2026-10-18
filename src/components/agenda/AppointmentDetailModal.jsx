@@ -11,7 +11,7 @@ import { STATUS_META, invalidateAppointmentQueries, withLastMinuteMarker, stripL
 import { foldText } from './ClientAccountPicker';
 import { useAuth } from '@/lib/AuthContext';
 import { parisInstant } from '@/lib/calendarLinks';
-import { formatStaffReason, cancellationActor, cancelledByLabel, cleanReason, LAST_MINUTE_EXPIRED_REASON, ORDER_STATUSES, normalizeOrderStatus, invalidateOrderQueries } from '@/lib/cancellation';
+import { formatStaffReason, cancellationActor, cancelledByLabel, cleanReason, isRescheduledCancel, LAST_MINUTE_EXPIRED_REASON, ORDER_STATUSES, normalizeOrderStatus, invalidateOrderQueries } from '@/lib/cancellation';
 import { orderItemsLabel } from '@/lib/appointmentProducts';
 import { formatPrice, isShopProduct, stockInfo } from '@/components/shop/productUtils';
 import { useGangSummaries } from '@/lib/gangCardApi';
@@ -267,7 +267,11 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
   const lastMinuteOver = isClosedOut && wasLastMinute && lmEnd != null && lmEnd + 15 * 60000 <= Date.now();
   // Rétablir un RDV client annulé et encore à venir : le client est prévenu (push + email), sinon il
   // croit le RDV annulé, ne vient pas et finit « Absent ». Pas pour un absent ni un last minute.
-  const canNotifyRestore = !wasLastMinute && !!appointment.client_email && appointment.status === 'cancelled'
+  // RDV que le client a déplacé lui-même (« Client : déplacé au … ») : il a déjà son nouveau RDV.
+  // Le rétablir garderait les deux : avertissement, et jamais « votre RDV est maintenu ».
+  const movedByClient = isRescheduledCancel(appointment);
+  const movedLabel = movedByClient ? String(appointment.cancellation_reason || '').replace(/^client\s*:\s*/i, '').trim() : '';
+  const canNotifyRestore = !movedByClient && !wasLastMinute && !!appointment.client_email && appointment.status === 'cancelled'
     && parisInstant(String(appointment.date || '').slice(0, 10), String(appointment.start_time || '00:00').slice(0, 5)) > Date.now();
 
   // Motif d'annulation affiché sur un RDV annulé / absent
@@ -322,7 +326,7 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
       const saved = await api.entities.Appointment.update(appointment.id, {
         status: wasLastMinute ? 'last_minute' : 'confirmed',
         cancellation_reason: null,
-        ...(canNotifyRestore && !notifyOnRestore ? { notify_client: false } : {}),
+        ...((movedByClient || (canNotifyRestore && !notifyOnRestore)) ? { notify_client: false } : {}),
       });
       const restored = Number(saved?.linked_orders_restored) || 0;
       const failed = Number(saved?.linked_orders_failed) || 0;
@@ -374,7 +378,7 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
     }
     dispatch({ type: 'SAVING', value: false });
     // RDV client à venir : toujours une confirmation, avec la case « Prévenir le client »
-    if (issues.clash || issues.warnings.length > 0 || canNotifyRestore) {
+    if (issues.clash || issues.warnings.length > 0 || canNotifyRestore || movedByClient) {
       setRestoreCheck(issues);
       return;
     }
@@ -523,6 +527,11 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
               <p className="font-semibold">Rétablir ce rendez-vous ?</p>
             )
           )}
+          {!restoreCheck.clash && movedByClient && (
+            <p className="break-words">
+              Le client a déplacé ce rendez-vous{movedLabel ? ` (« ${movedLabel} »)` : ''} : il a déjà un nouveau RDV. Le rétablir garderait les deux et bloquerait ce créneau.
+            </p>
+          )}
           {!restoreCheck.clash && canNotifyRestore && (
             <>
               {cancelActor === 'client' && (
@@ -552,7 +561,7 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
             {!restoreCheck.clash && (
               <button type="button" onClick={doRestore} disabled={state.saving}
                 className="flex-1 py-2 rounded-lg bg-amber-500 text-black font-semibold disabled:opacity-60">
-                {state.saving ? 'Rétablissement…' : restoreCheck.warnings.length > 0 ? 'Rétablir quand même' : 'Rétablir le rendez-vous'}
+                {state.saving ? 'Rétablissement…' : (restoreCheck.warnings.length > 0 || movedByClient) ? 'Rétablir quand même' : 'Rétablir le rendez-vous'}
               </button>
             )}
           </div>

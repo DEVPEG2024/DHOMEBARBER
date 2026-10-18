@@ -431,7 +431,9 @@ export default function Home() {
   const { data: productsData } = useQuery({
     queryKey: ['products'],
     staleTime: 5 * 60 * 1000, // catalogue : change rarement
-    queryFn: () => api.entities.Product.filter({ is_active: true }, 'name', 50),
+    // Même requête que la Boutique, les favoris et la réservation (cache ['products'] partagé :
+    // une limite plus basse ici leur cacherait des produits pendant 5 min)
+    queryFn: () => api.entities.Product.filter({ is_active: true }, 'name', 100),
   });
   // Consommables du salon (onglet « Prestations » du stock) : jamais en vitrine
   const products = useMemo(() => (productsData || []).filter(isShopProduct), [productsData]);
@@ -505,10 +507,20 @@ export default function Home() {
     });
   }, [settings]);
 
+  // Jours en minuscules (« Du lundi au samedi ») ; un jour fermé en semaine n'est jamais annoncé ouvert
   const openDaysLabel = useMemo(() => {
-    const open = openingHours.filter(d => !d.closed);
-    if (open.length === 0) return 'Fermé';
-    return `Du ${open[0].day} au ${open[open.length - 1].day}`;
+    const openIdx = openingHours.map((d, i) => (d.closed ? -1 : i)).filter(i => i >= 0);
+    if (openIdx.length === 0) return 'Fermé';
+    const low = (i) => openingHours[i].day.toLowerCase();
+    if (openIdx.length === 1) return `Le ${low(openIdx[0])}`;
+    const contiguous = openIdx.every((v, k) => k === 0 || v === openIdx[k - 1] + 1);
+    if (contiguous) return `Du ${low(openIdx[0])} au ${low(openIdx[openIdx.length - 1])}`;
+    // Jours qui ne se suivent pas : plages abrégées, par ex. « Lun.–mar., jeu.–sam. »
+    const short = (i) => `${low(i).slice(0, 3)}.`;
+    const runs = [];
+    openIdx.forEach(i => { const r = runs[runs.length - 1]; if (r && i === r[1] + 1) r[1] = i; else runs.push([i, i]); });
+    const txt = runs.map(([a, b]) => (a === b ? short(a) : `${short(a)}–${short(b)}`)).join(', ');
+    return txt.charAt(0).toUpperCase() + txt.slice(1);
   }, [openingHours]);
 
   // Save section order to salon_settings : vrai si c'est enregistré (sinon le mode édition reste
@@ -530,10 +542,10 @@ export default function Home() {
       if (err?.status !== 401) {
         // Message repris seulement s'il vient du serveur (status) : jamais « Failed to fetch »
         toast.error(isNetworkError(err) || err?.timeout || (!err?.status && err?.name === 'TypeError')
-          ? 'Accueil non enregistré : pas de connexion internet. Vérifie ta connexion et réessaie.'
+          ? 'Accueil non enregistré : pas de connexion internet. Vérifiez votre connexion et réessayez.'
           : (err?.status && err?.message && !/^HTTP \d+$/.test(err.message)
             ? `Accueil non enregistré : ${err.message}`
-            : 'Accueil non enregistré. Vérifie ta connexion et réessaie.'));
+            : 'Accueil non enregistré. Vérifiez votre connexion et réessayez.'));
       }
       return false;
     } finally {

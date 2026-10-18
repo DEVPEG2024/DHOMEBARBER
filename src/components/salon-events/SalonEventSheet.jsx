@@ -391,7 +391,7 @@ export default function SalonEventSheet({ event, onClose, onRsvp, pending = fals
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-sm font-semibold text-green-400 inline-flex items-center gap-2">
                     <Check className="w-4 h-4" />
-                    {phase === 'past' ? 'Tu y étais' : 'Tu viens'} · {guestsLabel(myGuests)}
+                    {phase === 'past' ? 'Vous y étiez' : 'Vous venez'} · {guestsLabel(myGuests)}
                   </p>
                   {phase !== 'past' && (
                     <button
@@ -423,8 +423,8 @@ export default function SalonEventSheet({ event, onClose, onRsvp, pending = fals
               <div className="rounded-2xl bg-card border border-border p-3 flex items-center gap-3 text-xs text-muted-foreground">
                 <span className={`w-2 h-2 rounded-full shrink-0 ${style.dot}`} />
                 {phase === 'past' || started
-                  ? "Tu avais répondu que tu ne pouvais pas venir."
-                  : "Tu as répondu que tu ne pouvais pas venir. Tu peux changer d'avis jusqu'au début de l'événement."}
+                  ? "Vous aviez répondu que vous ne pouviez pas venir."
+                  : "Vous avez répondu que vous ne pouviez pas venir. Vous pouvez changer d'avis jusqu'au début de l'événement."}
               </div>
             ) : phase === 'past' ? (
               <div className="rounded-2xl bg-card border border-border p-3 flex items-center gap-3 text-xs text-muted-foreground">
@@ -440,8 +440,8 @@ export default function SalonEventSheet({ event, onClose, onRsvp, pending = fals
               <div className="rounded-2xl bg-amber-500/10 border border-amber-500/20 p-3 flex items-center gap-3 text-xs text-amber-200/90">
                 <Users className="w-4 h-4 shrink-0 text-amber-400" />
                 {response === 'open'
-                  ? 'Ouvert à tous les clients du salon : inscris-toi ci-dessous.'
-                  : 'Le salon attend ta réponse. Tu peux venir accompagné.'}
+                  ? 'Ouvert à tous les clients du salon : inscrivez-vous ci-dessous.'
+                  : 'Le salon attend votre réponse. Vous pouvez venir accompagné.'}
               </div>
             )}
           </div>
@@ -452,12 +452,12 @@ export default function SalonEventSheet({ event, onClose, onRsvp, pending = fals
           <div className="border-t border-border px-5 pt-3 pb-6 shrink-0 bg-background space-y-3">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-sm font-semibold text-foreground">{accepted ? 'Tes places' : 'Combien de places ?'}</p>
+                <p className="text-sm font-semibold text-foreground">{accepted ? 'Vos places' : 'Combien de places ?'}</p>
                 <p className="text-[11px] text-muted-foreground">
                   {full
                     ? 'Complet, plus aucune place disponible'
                     : maxGuests >= 1
-                      ? `Toi compris · ${maxGuests} max${cap.capacity != null && cap.left != null && !accepted ? ` (${cap.left} restante${cap.left > 1 ? 's' : ''})` : ''}`
+                      ? `Vous compris · ${maxGuests} max${cap.capacity != null && cap.left != null && !accepted ? ` (${cap.left} restante${cap.left > 1 ? 's' : ''})` : ''}`
                       : 'Aucune place disponible'}
                 </p>
               </div>
@@ -531,7 +531,7 @@ export default function SalonEventSheet({ event, onClose, onRsvp, pending = fals
             )}
             {declined && (
               <p className="text-center text-[11px] text-muted-foreground">
-                Tu peux revenir sur ta réponse avec « Je viens ».
+                Vous pouvez revenir sur votre réponse avec « Je viens ».
               </p>
             )}
           </div>

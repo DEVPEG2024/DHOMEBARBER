@@ -149,6 +149,10 @@ export default function Shop() {
   const [openProductId, setOpenProductId] = useState(null);
   // Garde contre le double envoi (deux taps avant que `ordering` ne soit rendu)
   const submittingRef = useRef(false);
+  // Clé d'essai de la commande en cours ({ key, sig } : sig = contenu du panier). Gardée tant que
+  // l'envoi échoue sur le réseau (un nouvel essai retombe sur la même commande), remise à zéro après
+  // un succès ou un refus du serveur, ou quand le panier change
+  const orderRefKey = useRef(null);
   const queryClient = useQueryClient();
   const reduceMotion = useReducedMotion();
 
@@ -337,7 +341,15 @@ export default function Shop() {
         };
       });
 
-      await api.entities.Order.create({
+      const sig = JSON.stringify(cartItems.map(([id, qty]) => [String(id), qty]).sort()) + notes.trim();
+      if (!orderRefKey.current || orderRefKey.current.sig !== sig) {
+        const key = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+          ? crypto.randomUUID()
+          : Date.now().toString(36) + Math.random().toString(36).slice(2);
+        orderRefKey.current = { key, sig };
+      }
+
+      const res = await api.entities.Order.create({
         client_email: user?.email || '',
         client_name: user?.full_name || user?.name || '',
         client_phone: user?.phone || '',
@@ -347,7 +359,11 @@ export default function Shop() {
         notes: notes.trim().slice(0, NOTES_MAX),
         // Horodatage complet : « Mes commandes » affiche l'heure de Paris
         created_date: new Date().toISOString(),
+        client_ref: orderRefKey.current.key,
       });
+      orderRefKey.current = null;
+      // Même envoi déjà enregistré (réponse perdue puis nouvel essai) : pas un second succès
+      if (res?.duplicate) toast.info('Cette commande était déjà enregistrée');
 
       setCart({});
       setNotes('');
@@ -367,6 +383,8 @@ export default function Shop() {
         queryClient.invalidateQueries({ queryKey: ['myOrders'] });
         return; // le bloc finally remet quand même submittingRef et ordering à zéro
       }
+      // Refus du serveur : rien n'a été créé, le prochain envoi est une nouvelle commande
+      if (err?.status >= 400 && err?.status < 500) orderRefKey.current = null;
       // Message du serveur (ex. 409 « plus que N en stock ») plutôt qu'une erreur générique
       const message = err?.data?.error || err?.message;
       toast.error(message && !/^HTTP \d+$/.test(message) ? message : 'Erreur lors de la commande');

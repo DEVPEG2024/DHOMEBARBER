@@ -9,6 +9,7 @@ import { useQuery } from '@tanstack/react-query';
 import { UserPlus, ListChecks, Calendar } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { fetchSalonEventGuests, formatEventDate } from '@/lib/salonEventsApi';
+import { queryFailed } from '@/components/shared/LoadError';
 import { guestsKey, EVENT_STATUS_STYLES, eventStatusLabel, StatusPill, Spinner } from './shared';
 import InviteTab from './InviteTab';
 import GuestListTab from './GuestListTab';
@@ -37,7 +38,9 @@ export default function GuestsDialog({ event, initialTab, isAdmin, onClose }) {
   });
   const invites = Array.isArray(guestsQ.data?.invites) ? guestsQ.data.invites : [];
   const inviteCount = invites.length;
-  const loaded = guestsQ.data !== undefined || !!guestsQ.error;
+  // Hors connexion, la requête se met en pause sans erreur : c'est un échec, pas une attente infinie
+  const failed = queryFailed(guestsQ);
+  const loaded = guestsQ.data !== undefined || !!guestsQ.error || failed;
   const eventData = guestsQ.data?.event ? { ...event, ...guestsQ.data.event } : event;
 
   // Onglet d'ouverture, décidé une seule fois par ouverture : celui demandé, sinon « Liste » s'il y a
@@ -47,11 +50,12 @@ export default function GuestsDialog({ event, initialTab, isAdmin, onClose }) {
     if (!eventId) { setTab(null); return; }
     setTab((current) => {
       if (current) return current;
+      if (failed && !initialTab) return 'list';
       if (initialTab) return initialTab;
       if (!loaded) return null;
       return inviteCount > 0 ? 'list' : 'invite';
     });
-  }, [eventId, initialTab, loaded, inviteCount]);
+  }, [eventId, initialTab, loaded, failed, inviteCount]);
 
   if (!event) return null;
 
@@ -98,7 +102,7 @@ export default function GuestsDialog({ event, initialTab, isAdmin, onClose }) {
         ) : tab === 'invite' ? (
           <InviteTab event={eventData} invites={invites} onSent={() => setTab('list')} />
         ) : (
-          <GuestListTab event={eventData} invites={invites} isLoading={guestsQ.isLoading} error={guestsQ.error} isAdmin={isAdmin}
+          <GuestListTab event={eventData} invites={invites} isLoading={guestsQ.isLoading} error={guestsQ.error} failed={failed} isAdmin={isAdmin}
             onRetry={guestsQ.refetch} retrying={guestsQ.isFetching} />
         )}
       </DialogContent>

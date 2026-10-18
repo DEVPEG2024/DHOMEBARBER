@@ -1,7 +1,7 @@
 import React from 'react';
 import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays, isSameDay, isSameMonth } from 'date-fns';
 import { Euro } from 'lucide-react';
-import { isBreak, isCancelledLike, needsClosing, toDateStr } from './agendaUtils';
+import { isBreak, isCancelledLike, isLastMinuteSlot, needsClosing, toDateStr } from './agendaUtils';
 
 const statusDot = {
   pending: 'bg-yellow-400',
@@ -37,7 +37,9 @@ export default function MonthView({ currentDate, appointments, employees, onDayC
         {days.map((day) => {
           const dateStr = toDateStr(day);
           const dayApts = appointments.filter((a) => a.date === dateStr && !isBreak(a));
-          const active = dayApts.filter((a) => !isCancelledLike(a)).length;
+          // Un last minute encore libre n'est pas un rendez-vous (comme le compteur de la barre)
+          const active = dayApts.filter((a) => !isCancelledLike(a) && !isLastMinuteSlot(a)).length;
+          const freeLm = dayApts.filter(isLastMinuteSlot).length;
           const toClose = dayApts.filter((a) => needsClosing(a)).length;
           const isToday = isSameDay(day, new Date());
           const inMonth = isSameMonth(day, currentDate);
@@ -61,6 +63,9 @@ export default function MonthView({ currentDate, appointments, employees, onDayC
                     <span className="w-3.5 h-3.5 rounded-full bg-amber-400 text-black flex items-center justify-center" title={`${toClose} à encaisser`}>
                       <Euro className="w-2.5 h-2.5" />
                     </span>
+                  )}
+                  {freeLm > 0 && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-orange-400 sm:hidden" title={`${freeLm} last minute libre${freeLm > 1 ? 's' : ''}`} />
                   )}
                   {active > 0 && <span className="text-[9px] font-semibold text-muted-foreground sm:hidden">{active}</span>}
                 </span>

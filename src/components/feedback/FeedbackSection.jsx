@@ -7,7 +7,7 @@ import { api } from '@/api/apiClient';
 import {
   FEEDBACK_QUERY_KEY, FEEDBACK_TYPES, FEEDBACK_STATUSES, fetchMyFeedback, formatFeedbackDate,
 } from '@/lib/feedbackApi';
-import LoadError from '@/components/shared/LoadError';
+import LoadError, { queryFailed } from '@/components/shared/LoadError';
 import { useAndroidBack } from '@/lib/useAndroidBack';
 import FeedbackSheet from './FeedbackSheet';
 
@@ -22,12 +22,14 @@ export default function FeedbackSection({ user }) {
   const [openType, setOpenType] = useState(null);
   const [expanded, setExpanded] = useState(null);
 
-  const { data, error, isError, refetch, isFetching } = useQuery({
+  // Requête gardée entière : queryFailed() couvre aussi la requête en pause hors connexion
+  const query = useQuery({
     // Préfixe FEEDBACK_QUERY_KEY gardé : les invalidations existantes (envoi, admin) s'y appliquent
     queryKey: [...FEEDBACK_QUERY_KEY, 'mine', user?.email],
     queryFn: () => fetchMyFeedback(user?.email),
     enabled: !!user?.email,
   });
+  const { data, error, refetch, isFetching } = query;
   const mine = Array.isArray(data) ? data : [];
 
   // Android : le bouton retour ferme la fenêtre (comme sa croix), la saisie n'est pas perdue
@@ -65,7 +67,7 @@ export default function FeedbackSection({ user }) {
           </button>
         ))}
 
-        {isError && !data && (
+        {queryFailed(query) && (
           <div className="border-t border-white/5 px-4 pt-3 pb-4">
             <LoadError compact what="vos envois" error={error} onRetry={refetch} retrying={isFetching} />
           </div>

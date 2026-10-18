@@ -458,22 +458,34 @@ export async function runGiftCardUndo({ card, transaction, previousApt = null, q
       data = { card: fresh, returned: transaction?.amount };
     } else {
       const noAnswer = isNetworkError(err) || (!err?.status && err?.name === 'TypeError');
-      toast.error("Impossible d'annuler le débit", {
-        description: noAnswer ? UNDO_NETWORK_MESSAGE : friendlyGiftCardError(err),
-        ...(noAnswer ? { duration: 12000 } : {}),
-      });
       if (noAnswer) {
-        // L'annulation est peut-être passée : solde et historique relus (jamais « réessayez »)
-        try {
-          const fresh = await fetchGiftCard(card.id);
+        // Pas de réponse : l'annulation est peut-être passée. On relit la carte ET l'historique ;
+        // si ce débit y est marqué annulé, le serveur a bien tout fait (solde rendu, part carte du
+        // RDV remise à 0) : on finit le travail ci-dessous (réouverture vérifiée du RDV), sinon le
+        // bouton « Annuler ce débit » disparaît de l'historique et le RDV resterait « payé carte ».
+        let fresh = null;
+        try { fresh = await fetchGiftCard(card.id); } catch { /* relecture au mieux */ }
+        let list = null;
+        try { list = await fetchGiftCardTransactions(card.id); } catch { /* relecture au mieux */ }
+        const done = Array.isArray(list) ? list.find((t) => String(t.id) === String(transaction?.id)) : null;
+        if (done?.undone_at) {
+          alreadyUndone = true;
+          const undoRow = list.find((t) => t.kind === 'undo' && String(t.reverses_id) === String(transaction?.id));
+          data = { card: fresh, returned: undoRow?.amount ?? transaction?.amount };
+        } else {
+          toast.error("Impossible d'annuler le débit", { description: UNDO_NETWORK_MESSAGE, duration: 12000 });
+          // Jamais « réessayez » : solde et historique relus
           if (fresh) {
             patchGiftCardCache(queryClient, fresh);
             onCardChange?.(fresh);
           }
-        } catch { /* relecture au mieux : le toast suffit */ }
-        queryClient.invalidateQueries({ queryKey: giftCardTransactionsKey(card.id) });
+          queryClient.invalidateQueries({ queryKey: giftCardTransactionsKey(card.id) });
+          return false;
+        }
+      } else {
+        toast.error("Impossible d'annuler le débit", { description: friendlyGiftCardError(err) });
+        return false;
       }
-      return false;
     }
   }
   try {

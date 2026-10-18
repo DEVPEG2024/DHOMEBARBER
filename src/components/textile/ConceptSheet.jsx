@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { X, ChevronLeft, ChevronRight, Flame, Check, Store, Clock, Minus, Plus, Lock, Sparkles, Timer, Ruler } from 'lucide-react';
-import { categoryLabel, categoryEmoji, conceptAvailability, formatDropDate, formatPrice, msUntilOpen, newSendKey } from '@/lib/textileApi';
+import { categoryLabel, categoryEmoji, conceptAvailability, formatDropDate, formatPrice, msUntilOpen, sendKeyFor, settleSendKey } from '@/lib/textileApi';
 import { hapticFeedback } from '@/lib/capacitor';
 import EmojiBurst from './EmojiBurst';
 import { ColorSwatches } from './ConceptCard';
@@ -221,10 +221,6 @@ export default function ConceptSheet({
   const [quantity, setQuantity] = useState(1);
   const [burst, setBurst] = useState(null);
   const [success, setSuccess] = useState(null);
-  // Clé d'essai de la précommande : la même à un nouvel essai après une réponse perdue (pas de
-  // doublon), une neuve après un succès ou quand la taille / la quantité change (autre pièce voulue)
-  const requestKeyRef = useRef(newSendKey());
-  useEffect(() => { requestKeyRef.current = newSendKey(); }, [selectedSize, quantity]);
 
   const voted = Boolean(myVote);
   const live = phase === 'live';
@@ -272,17 +268,28 @@ export default function ConceptSheet({
   const handleReserve = async () => {
     if (!canReserve) return;
     hapticFeedback();
+    // Clé d'essai gardée au niveau du module pour (pièce, taille, quantité) : rouvrir la fiche ou
+    // revenir de L à M après une réponse perdue reprend la même clé, le serveur renvoie alors la
+    // précommande existante (ni second email ni second push). Oubliée après un succès (une seconde
+    // pièce voulue = clé neuve) ou un refus franc ; gardée 10 min, comme la mémoire du serveur.
+    const sz = selectedSize ?? '';
+    const qty = String(quantity);
+    const requestKey = sendKeyFor('reserve', concept.id, sz, qty);
     try {
-      const res = await onReserve(concept.id, { size: selectedSize ?? null, quantity, requestKey: requestKeyRef.current });
-      requestKeyRef.current = newSendKey();
+      const res = await onReserve(concept.id, { size: selectedSize ?? null, quantity, requestKey });
+      settleSendKey('reserve', concept.id, sz, qty, 'ok');
       // Valeurs du serveur (une précommande retrouvée après une coupure garde les siennes)
       setSuccess({
         reservation: res?.reservation || null,
         size: res?.reservation?.size ?? selectedSize,
         quantity: Number(res?.reservation?.quantity) || quantity,
       });
-    } catch {
+    } catch (err) {
       // Le message du serveur est déjà affiché en toast par le hook ; sur 409 le restant est rechargé.
+      // Pas de réponse : clé gardée (incertaine). « Réservation déjà en cours » : le premier essai peut
+      // encore aboutir, clé gardée. Tout autre refus : le serveur a libéré la clé, on l'oublie aussi.
+      if (!err?.status) settleSendKey('reserve', concept.id, sz, qty, 'uncertain');
+      else if (!(err.status === 409 && /en cours/i.test(err.message || ''))) settleSendKey('reserve', concept.id, sz, qty, 'error');
     }
   };
 

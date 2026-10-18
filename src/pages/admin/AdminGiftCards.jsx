@@ -22,7 +22,7 @@ function oneYearFromToday() {
   const [y, m, d] = parisToday().split('-').map(Number);
   return new Date(Date.UTC(y + 1, m - 1, d)).toISOString().slice(0, 10);
 }
-import LoadError from '@/components/shared/LoadError';
+import LoadError, { queryFailed } from '@/components/shared/LoadError';
 import { useAndroidBack } from '@/lib/useAndroidBack';
 
 /**
@@ -54,9 +54,12 @@ function ExtendValidity({ card, outdated, onCardChange }) {
   const [saving, setSaving] = useState(false);
 
   const today = parisToday();
-  const minDate = addDaysYmd(today, 1);
-  const maxDate = addMonthsYmd(today, 60);
   const current = card.valid_until ? String(card.valid_until).slice(0, 10) : '';
+  // Carte encore valable : une date antérieure raccourcirait sa validité, jamais proposée (le
+  // serveur la refuse aussi). Carte déjà dépassée : demain au plus tôt.
+  const stillValid = !!current && current >= today;
+  const minDate = stillValid && addDaysYmd(current, 1) > addDaysYmd(today, 1) ? addDaysYmd(current, 1) : addDaysYmd(today, 1);
+  const maxDate = addMonthsYmd(today, 60);
   const from = current && !isValidityPassed(card, today) ? current : today;
   const targetOk = /^\d{4}-\d{2}-\d{2}$/.test(target) && target >= minDate && target <= maxDate;
 
@@ -150,7 +153,11 @@ function ExtendValidity({ card, outdated, onCardChange }) {
         />
       </label>
       {target && !targetOk && (
-        <p className="text-[11px] text-red-400">Choisissez une date entre le {formatDay(minDate)} et le {formatDay(maxDate)}.</p>
+        <p className="text-[11px] text-red-400">
+          {stillValid && /^\d{4}-\d{2}-\d{2}$/.test(target) && target <= current
+            ? `Cette date raccourcirait la validité (actuellement jusqu'au ${formatDay(current)}) : choisissez une date après le ${formatDay(current)}.`
+            : `Choisissez une date entre le ${formatDay(minDate)} et le ${formatDay(maxDate)}.`}
+        </p>
       )}
       {!confirming ? (
         <button
@@ -761,10 +768,15 @@ export default function AdminGiftCards() {
   const [pendingScanCode, setPendingScanCode] = useState(null);
   const queryClient = useQueryClient();
 
-  const { data: giftCards = [], isLoading, isError, error, refetch, isFetching } = useQuery({
+  const giftCardsQuery = useQuery({
     queryKey: ['adminGiftCards'],
     queryFn: () => api.entities.GiftCard.list('-created_at', 200),
   });
+  const { data: giftCards = [], isLoading, isError, error, refetch, isFetching } = giftCardsQuery;
+  // Échec, ou requête en pause hors connexion (ni isLoading ni isError) : jamais « Aucune carte »
+  // ni « CA Cartes 0 € »
+  const listFailed = queryFailed(giftCardsQuery) || (isError && !giftCards.length);
+  const statsUnknown = listFailed || isLoading;
   const giftCardsRef = useRef(giftCards);
   giftCardsRef.current = giftCards;
 
@@ -855,13 +867,21 @@ export default function AdminGiftCards() {
     total: giftCards.reduce((sum, c) => (c.validated_at || c.status === 'validated' || c.status === 'used') ? sum + (Number(c.amount) || 0) : sum, 0),
   };
 
-  const filters = [
-    { key: 'all', label: 'Toutes' },
-    { key: 'pending', label: `En attente (${stats.pending})` },
-    { key: 'validated', label: `Actives (${stats.validated})` },
-    { key: 'used', label: `Utilisées (${stats.used})` },
-    { key: 'expired', label: `Expirées${stats.expired ? ` (${stats.expired})` : ''}` },
-  ];
+  const filters = statsUnknown
+    ? [
+      { key: 'all', label: 'Toutes' },
+      { key: 'pending', label: 'En attente' },
+      { key: 'validated', label: 'Actives' },
+      { key: 'used', label: 'Utilisées' },
+      { key: 'expired', label: 'Expirées' },
+    ]
+    : [
+      { key: 'all', label: 'Toutes' },
+      { key: 'pending', label: `En attente (${stats.pending})` },
+      { key: 'validated', label: `Actives (${stats.validated})` },
+      { key: 'used', label: `Utilisées (${stats.used})` },
+      { key: 'expired', label: `Expirées${stats.expired ? ` (${stats.expired})` : ''}` },
+    ];
 
   return (
     <div>
@@ -888,19 +908,19 @@ export default function AdminGiftCards() {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-5">
         <div className="bg-card rounded-2xl border border-border p-4">
           <p className="text-xs text-amber-400 font-medium">En attente</p>
-          <p className="text-2xl font-bold text-foreground mt-1">{stats.pending}</p>
+          <p className="text-2xl font-bold text-foreground mt-1">{statsUnknown ? '—' : stats.pending}</p>
         </div>
         <div className="bg-card rounded-2xl border border-border p-4">
           <p className="text-xs text-green-400 font-medium">Actives</p>
-          <p className="text-2xl font-bold text-foreground mt-1">{stats.validated}</p>
+          <p className="text-2xl font-bold text-foreground mt-1">{statsUnknown ? '—' : stats.validated}</p>
         </div>
         <div className="bg-card rounded-2xl border border-border p-4">
           <p className="text-xs text-blue-400 font-medium">Utilisées</p>
-          <p className="text-2xl font-bold text-foreground mt-1">{stats.used}</p>
+          <p className="text-2xl font-bold text-foreground mt-1">{statsUnknown ? '—' : stats.used}</p>
         </div>
         <div className="bg-card rounded-2xl border border-border p-4">
           <p className="text-xs text-primary font-medium">CA Cartes</p>
-          <p className="text-2xl font-bold text-primary mt-1">{formatEuro(stats.total)}</p>
+          <p className="text-2xl font-bold text-primary mt-1">{statsUnknown ? '—' : formatEuro(stats.total)}</p>
         </div>
       </div>
 
@@ -932,7 +952,7 @@ export default function AdminGiftCards() {
       </div>
 
       {/* List */}
-      {isError && !giftCards.length ? (
+      {listFailed ? (
         <LoadError what="les cartes cadeau" error={error} onRetry={refetch} retrying={isFetching} />
       ) : isLoading ? (
         <div className="flex justify-center py-20">

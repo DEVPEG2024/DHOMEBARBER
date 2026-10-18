@@ -1066,8 +1066,10 @@ export default function Feed() {
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
               transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-              className="fixed inset-x-0 bottom-0 z-[60] rounded-t-2xl border-t border-border bg-background p-5"
+              className="fixed inset-x-0 bottom-0 z-[60] rounded-t-2xl border-t border-border bg-background flex flex-col max-h-[90vh] overflow-hidden"
             >
+              {/* En-tête fixe : la croix reste visible même clavier ouvert, le corps défile */}
+              <div className="shrink-0 px-5 pt-5">
               <div className="flex justify-center mb-3">
                 <div className="w-10 h-1 rounded-full bg-muted" />
               </div>
@@ -1077,7 +1079,9 @@ export default function Feed() {
                   <X className="w-4 h-4" />
                 </button>
               </div>
+              </div>
 
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-5">
               <div className="flex gap-3">
                 <div className="w-10 h-10 rounded-full bg-secondary border border-border flex items-center justify-center flex-shrink-0 overflow-hidden">
                   {getAuthorPhoto() ? (
@@ -1106,7 +1110,7 @@ export default function Feed() {
               </p>
 
               {imageUrl && (
-                <div className="relative mt-3 ml-[52px] w-32">
+                <div className="relative mt-3 ml-[52px] w-32 [body.keyboard-open_&]:w-16">
                   <div className="rounded-xl overflow-hidden" style={{ aspectRatio: '4/5' }}>
                     <img src={imageUrl} alt="" className="w-full h-full object-cover" />
                   </div>
@@ -1140,6 +1144,7 @@ export default function Feed() {
                   {posting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5 mr-1" />}
                   Publier
                 </Button>
+              </div>
               </div>
             </motion.div>
           </>

@@ -182,6 +182,11 @@ export default function EventDialog({ open, onOpenChange, event }) {
   const publishesNow = form.status === 'published' && event?.status !== 'published';
   const rescheduled = wasPublished && form.status === 'published' && !!event?.starts_at && !!form.starts_at
     && toLocalInputValue(event.starts_at) !== form.starts_at;
+  // Lieu ou prix changé sur un événement publié (sans changement d'horaire, qui prévient déjà) :
+  // le serveur prévient les invités qui n'ont pas refusé
+  const eventPrice = Number(event?.price) > 0 ? Number(event.price) : null;
+  const infoChanged = wasPublished && form.status === 'published' && !rescheduled && !isPast
+    && (form.location.trim() !== String(event?.location ?? '').trim() || parsePrice(form.price) !== eventPrice);
   const statusOptions = event?.id
     ? SALON_EVENT_STATUSES.filter((s) => !(isPast && s.value === 'cancelled' && event.status !== 'cancelled'))
     : SALON_EVENT_STATUSES.filter((s) => s.value === 'draft' || s.value === 'published');
@@ -279,6 +284,11 @@ export default function EventDialog({ open, onOpenChange, event }) {
                 onChange={(e) => set({ capacity: e.target.value })} className={INPUT_CLASS} placeholder="Illimité" />
             </Field>
           </div>
+          {infoChanged && (
+            <Notice icon={Bell}>
+              Le lieu ou le prix d'un événement publié change : les invités qui n'ont pas refusé reçoivent un push et un email.
+            </Notice>
+          )}
 
           <Field label="Tenue" hint="Facultative (ex : « Chic décontracté », « Tenue blanche »).">
             <Input value={form.dress_code} onChange={(e) => set({ dress_code: e.target.value })} className={INPUT_CLASS} maxLength={DRESS_CODE_MAX} />

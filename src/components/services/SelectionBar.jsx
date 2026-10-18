@@ -22,7 +22,7 @@ export default function SelectionBar({ count, totalDuration, totalPrice, ids, on
       transition={{ type: 'spring', damping: 22, stiffness: 260 }}
       className="fixed bottom-24 left-4 right-4 max-w-lg mx-auto z-40"
       role="region"
-      aria-label="Ta sélection"
+      aria-label="Votre sélection"
     >
       <div className="rounded-2xl border border-border bg-card/95 backdrop-blur-xl shadow-2xl shadow-black/30 p-2 pl-1 flex items-center gap-2">
         <button

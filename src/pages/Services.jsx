@@ -213,7 +213,7 @@ export default function Services() {
             <p className="text-[11px] uppercase tracking-[0.3em] text-primary font-semibold">Catalogue</p>
           </div>
           <h1 className="font-display text-3xl font-bold text-foreground">Nos Prestations</h1>
-          <p className="text-sm text-muted-foreground mt-1">Choisis, combine, on calcule le total. Réserve ensuite en un tap.</p>
+          <p className="text-sm text-muted-foreground mt-1">Choisissez, combinez, on calcule le total. Réservez ensuite en un tap.</p>
           <div className="h-0.5 w-12 mt-3 rounded-full bg-gradient-to-r from-primary to-primary/30" />
         </motion.div>
 

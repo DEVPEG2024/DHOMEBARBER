@@ -172,11 +172,17 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
   // Choix obligatoire tant que des RDV du jour existent ; liste encore en chargement : on attend
   const attachRequired = attachMode && appointments.length > 0 && attachAptId === undefined;
   const attachPending = attachMode && aptQuery.isPending;
+  // Liste des RDV du jour en échec (429, 503, réseau) : on ne sait pas s'il y a un RDV à rattacher.
+  // Le débit reste bloqué tant que la relecture n'a pas réussi ou que l'admin n'a pas choisi
+  // « Pas de RDV aujourd'hui » (sinon il partirait sans rattachement ni avertissement)
+  const aptLoadFailed = aptQuery.isError && !aptQuery.data;
+  const attachUnknown = attachMode && aptLoadFailed && attachAptId === undefined;
   const attachNoPrice = !!attachedApt && appointmentPrice(attachedApt) <= 0;
   const attachOver = !!attachedApt && (attachNoPrice || debit > appointmentDue(attachedApt) + 0.005);
   const selectedNoPrice = !!selectedApt && appointmentPrice(selectedApt) <= 0;
   const blockReason = !(debit > 0) ? null
     : attachPending ? 'Chargement des RDV du jour…'
+      : attachUnknown ? 'RDV du jour non chargés : réessayez ou choisissez “Pas de RDV aujourd\'hui”'
       : attachRequired ? 'Rattachez ce débit à un RDV ou choisissez “Pas de RDV aujourd\'hui”'
         : attachNoPrice ? 'Ce RDV n\'a pas encore de prestation'
           : attachOver ? 'Le débit dépasse le reste dû du RDV'
@@ -280,7 +286,8 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
         attached: !apt && !!attachedApt,
         aptRest: !apt && attachedApt ? round2(Math.max(0, appointmentDue(attachedApt) - debit)) : 0,
         // Débit hors RDV alors que des RDV du jour existaient : rappel du rattachement après coup
-        unattached: !apt && !attachedApt && attachMode && appointments.length > 0,
+        // (ou liste du jour illisible : on ne sait pas s'il y en avait)
+        unattached: !apt && !attachedApt && attachMode && (appointments.length > 0 || aptLoadFailed),
         closed: !!previousApt,
         closeFailed,
         snapshot,
@@ -485,12 +492,16 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
       )}
 
       {/* Débit hors RDV alors que des clients ont rendez-vous aujourd'hui : choix obligatoire
-          (la part carte est portée sur le RDV ; sans lui, le tableau de bord la compterait deux fois) */}
-      {attachMode && appointments.length > 0 && (
-        <div className={`rounded-xl border p-2.5 space-y-1.5 min-w-0 ${attachRequired ? 'border-amber-500/40 bg-amber-500/5' : 'border-white/10 bg-white/5'}`} data-testid="gc-attach-today">
+          (la part carte est portée sur le RDV ; sans lui, le tableau de bord la compterait deux fois).
+          Liste du jour en échec : même bloc, avec « Réessayer » à la place des RDV */}
+      {attachMode && (appointments.length > 0 || aptLoadFailed) && (
+        <div className={`rounded-xl border p-2.5 space-y-1.5 min-w-0 ${attachRequired || attachUnknown ? 'border-amber-500/40 bg-amber-500/5' : 'border-white/10 bg-white/5'}`} data-testid="gc-attach-today">
           <p className="text-[11px] font-semibold text-foreground">Ce débit paie-t-il un RDV du jour ?</p>
+          {aptLoadFailed && (
+            <LoadError compact what="les rendez-vous du jour" error={aptQuery.error} onRetry={aptQuery.refetch} retrying={aptQuery.isFetching} />
+          )}
           <div className="flex flex-wrap gap-1.5">
-            {appointments.map((a) => {
+            {!aptLoadFailed && appointments.map((a) => {
               const mine = isOwner(a);
               const noPrice = appointmentPrice(a) <= 0;
               return (

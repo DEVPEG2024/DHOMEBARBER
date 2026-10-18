@@ -10,7 +10,7 @@ import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { isNative } from '@/lib/capacitor';
 import { formatPrice } from '@/components/services/serviceUtils';
-import LoadError, { isNetworkError } from '@/components/shared/LoadError';
+import LoadError, { isNetworkError, queryFailed } from '@/components/shared/LoadError';
 import WalletButtons from '@/components/giftcards/WalletButtons';
 import { useAndroidBack } from '@/lib/useAndroidBack';
 
@@ -119,6 +119,10 @@ function GiftCardVisual({ card, cardRef, compact = false }) {
   const status = cardStatus(card);
   const isValid = status === 'validated';
   const validDate = formatValidUntil(card.valid_until, true);
+  // Carte entamée : le recto (et donc la 1re page du PDF) annonce le solde, pas le montant initial
+  const amount = Number(card.amount) || 0;
+  const balance = cardBalance(card);
+  const partly = isValid && balance < amount - 0.004;
 
   return (
     <div
@@ -165,8 +169,10 @@ function GiftCardVisual({ card, cardRef, compact = false }) {
 
         {/* Center - Amount */}
         <div className="text-center -mt-2">
-          <p className="text-4xl font-black text-white tracking-tight">{formatPrice(card.amount)}</p>
-          <p className="text-xs text-primary font-semibold mt-1">D'Home Barber</p>
+          <p className="text-4xl font-black text-white tracking-tight">{formatPrice(partly ? balance : amount)}</p>
+          <p className="text-xs text-primary font-semibold mt-1 whitespace-nowrap">
+            {partly ? <>restants sur {formatPrice(amount)} · D'Home Barber</> : "D'Home Barber"}
+          </p>
         </div>
 
         {/* Bottom row : une seule ligne de chaque côté, sinon le recto (ratio fixe 1,6) coupait
@@ -223,7 +229,7 @@ function GiftCardBack({ card, backRef }) {
         <div className="min-w-0 flex-1 flex flex-col justify-center text-left">
           <p className="text-[10px] leading-tight text-white/40 uppercase tracking-[0.15em]">À présenter au salon</p>
           <p className="text-xs text-white/60 font-mono break-all mt-1">{card.code}</p>
-          {(status === 'validated' || status === 'used') && (
+          {(status === 'validated' || status === 'used' || (status === 'expired' && balance > 0)) && (
             <div className="mt-2">
               <p className="text-[10px] uppercase text-white/40">Solde</p>
               <p className={`text-sm font-bold ${balance > 0 ? 'text-primary' : 'text-muted-foreground'}`}>{formatPrice(balance)}</p>
@@ -533,6 +539,12 @@ function GiftCardDetailModal({ card, onClose }) {
               Solde : {formatPrice(balance)}
             </div>
           )}
+          {/* Échue avec un solde : couleur neutre, la carte n'est pas utilisable en l'état */}
+          {status === 'expired' && balance > 0 && (
+            <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border bg-amber-500/15 border-amber-500/20 text-xs font-bold text-amber-400">
+              Solde restant : {formatPrice(balance)}
+            </div>
+          )}
         </div>
 
         {/* Info */}
@@ -599,7 +611,14 @@ function GiftCardDetailModal({ card, onClose }) {
                   </>
                 )
               : status === 'expired'
-                ? 'Cette carte a expiré.'
+                ? (balance > 0
+                  ? (
+                    <>
+                      Cette carte a expiré avec {formatPrice(balance)} restants. Le salon peut prolonger sa validité : appelez le{' '}
+                      <a href="tel:0666083605" className="underline font-semibold whitespace-nowrap">06 66 08 36 05</a>.
+                    </>
+                  )
+                  : 'Cette carte a expiré.')
                 : status === 'used'
                   ? 'Cette carte a été entièrement utilisée.'
                   : 'Cette carte n’est pas active.'}
@@ -681,7 +700,7 @@ export default function GiftCards() {
         <div className="space-y-3" aria-busy="true">
           {[0, 1, 2].map(i => <div key={i} className="h-24 rounded-2xl bg-white/5 animate-pulse" />)}
         </div>
-      ) : cardsQuery.isError && !cardsQuery.data ? (
+      ) : queryFailed(cardsQuery) ? (
         <LoadError what="vos cartes cadeau" error={cardsQuery.error} onRetry={cardsQuery.refetch} retrying={cardsQuery.isFetching} />
       ) : myCards.length === 0 ? (
         <div className="text-center py-16">
@@ -780,7 +799,9 @@ export default function GiftCards() {
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Historique ({otherCards.length})</p>
               <div className="space-y-2">
                 {otherCards.map(card => {
-                  const conf = STATUS_CONFIG[cardStatus(card, today)] || STATUS_CONFIG.pending;
+                  const st = cardStatus(card, today);
+                  const conf = STATUS_CONFIG[st] || STATUS_CONFIG.pending;
+                  const leftover = st === 'expired' ? cardBalance(card) : 0;
                   return (
                     <motion.div
                       key={card.id}
@@ -799,6 +820,9 @@ export default function GiftCards() {
                         <div className="text-right shrink-0">
                           <p className="text-sm font-bold text-foreground">{formatPrice(card.amount)}</p>
                           <p className={`text-[10px] font-semibold ${conf.color}`}>{conf.label}</p>
+                          {leftover > 0 && (
+                            <p className="text-[10px] text-amber-400 whitespace-nowrap">{formatPrice(leftover)} restants</p>
+                          )}
                         </div>
                       </div>
                     </motion.div>

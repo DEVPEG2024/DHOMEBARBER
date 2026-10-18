@@ -19,7 +19,7 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { inviteToSalonEvent, formatEventDate } from '@/lib/salonEventsApi';
-import LoadError from '@/components/shared/LoadError';
+import LoadError, { queryFailed } from '@/components/shared/LoadError';
 import { CLIENTS_KEY, INPUT_CLASS, INVITE_MESSAGE_MAX, invalidateSalonEvents, countLabel, Spinner } from './shared';
 
 const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
@@ -186,7 +186,7 @@ export default function InviteTab({ event, invites, onSent }) {
               Vous pouvez tout de même inviter tous les clients avec l'interrupteur ci-dessus.
             </span>
           </div>
-        ) : clientsQ.error && !clientsQ.data ? (
+        ) : queryFailed(clientsQ) ? (
           <div className="mt-2 space-y-2">
             <LoadError compact what="la liste des clients" error={clientsQ.error} onRetry={clientsQ.refetch} retrying={clientsQ.isFetching} />
             <p className="text-[11px] text-muted-foreground">Vous pouvez tout de même inviter tous les clients avec l'interrupteur ci-dessus.</p>

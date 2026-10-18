@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { api, apiRequest, apiUrl } from '@/api/apiClient';
 import { useAuth } from '@/lib/AuthContext';
 import LoadError, { friendlyError, queryFailed } from '@/components/shared/LoadError';
+import { formatPrice } from '@/components/shop/productUtils';
 
 // Stock saisi : vide / null = non suivi (vente libre, comme Admin → Produits), sinon entier ≥ 0
 const toStock = (v) => {
@@ -43,7 +44,7 @@ export default function AdminStock() {
   const [edits, setEdits] = useState({});
   const [saving, setSaving] = useState(false);
   const [showAddDialog, setShowAddDialog] = useState(false);
-  const [newProduct, setNewProduct] = useState({ name: '', ref: '', stock: 0, critical_stock: 3, brand: '', category: 'other', price: 0, stock_type: 'boutique', image_url: '' });
+  const [newProduct, setNewProduct] = useState({ name: '', ref: '', stock: '', critical_stock: 3, brand: '', category: 'other', price: 0, stock_type: 'boutique', image_url: '' });
   const [productToDelete, setProductToDelete] = useState(null);
   const [uploading, setUploading] = useState(false);
   // Ajout en cours : un double tap ne crée pas deux produits
@@ -211,13 +212,14 @@ export default function AdminStock() {
         ...newProduct,
         stock_type: tab,
         is_active: true,
-        stock: parseInt(newProduct.stock) || 0,
-        critical_stock: parseInt(newProduct.critical_stock) || 3,
+        // Vide = non suivi (null envoyé, vente libre), 0 = rupture ; seuil vide = 3, 0 accepté
+        stock: toStock(newProduct.stock),
+        critical_stock: (() => { const n = parseInt(newProduct.critical_stock, 10); return Number.isFinite(n) ? Math.max(0, n) : 3; })(),
         price: parseFloat(newProduct.price) || 0,
       });
       queryClient.invalidateQueries({ queryKey: ['products'] });
       setShowAddDialog(false);
-      setNewProduct({ name: '', ref: '', stock: 0, critical_stock: 3, brand: '', category: 'other', price: 0, stock_type: 'boutique', image_url: '' });
+      setNewProduct({ name: '', ref: '', stock: '', critical_stock: 3, brand: '', category: 'other', price: 0, stock_type: 'boutique', image_url: '' });
       toast.success('Produit ajouté');
     } catch (err) {
       toast.error(friendlyError(err, "Erreur lors de l'ajout"));
@@ -370,7 +372,7 @@ export default function AdminStock() {
                       )}
                     </div>
                     <div className="flex items-center gap-2 mt-0.5 min-w-0">
-                      <p className="text-xs text-muted-foreground shrink-0">{product.price}€</p>
+                      <p className="text-xs text-muted-foreground shrink-0">{formatPrice(product.price)}</p>
                       {getVal(product, 'ref') && <p className="text-[10px] text-muted-foreground/60 truncate">Réf: {getVal(product, 'ref')}</p>}
                     </div>
                   </div>
@@ -505,12 +507,14 @@ export default function AdminStock() {
               </div>
               <div>
                 <Label className="text-xs">Stock</Label>
-                <Input type="number" value={newProduct.stock} onChange={e => setNewProduct(prev => ({ ...prev, stock: e.target.value }))}
+                <Input type="number" min="0" step="1" inputMode="numeric" placeholder="non suivi"
+                  value={newProduct.stock ?? ''} onChange={e => setNewProduct(prev => ({ ...prev, stock: e.target.value }))}
                   className="bg-secondary border-border mt-1" />
               </div>
               <div>
                 <Label className="text-xs">Seuil critique</Label>
-                <Input type="number" value={newProduct.critical_stock} onChange={e => setNewProduct(prev => ({ ...prev, critical_stock: e.target.value }))}
+                <Input type="number" min="0" step="1" inputMode="numeric"
+                  value={newProduct.critical_stock} onChange={e => setNewProduct(prev => ({ ...prev, critical_stock: e.target.value }))}
                   className="bg-secondary border-border mt-1" />
               </div>
             </div>

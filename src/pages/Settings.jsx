@@ -10,7 +10,7 @@ import { Link } from 'react-router-dom';
 import { isNative, platform, openExternalUrl } from '@/lib/capacitor';
 import FeedbackSection from '@/components/feedback/FeedbackSection';
 import { hasObjectionableContent } from '@/lib/contentFilter';
-import LoadError, { friendlyError } from '@/components/shared/LoadError';
+import LoadError, { friendlyError, queryFailed } from '@/components/shared/LoadError';
 import { GANG_LEADERBOARD_QUERY_KEY } from '@/lib/gangCardApi';
 import { parisDay } from '@/lib/slots';
 
@@ -151,14 +151,16 @@ export default function Settings() {
   useEffect(() => { setMarketingOverride(null); }, [user?.marketing_emails]);
 
   // Utilisateurs bloqués depuis le fil
-  const {
-    data: blocksData, isError: blocksError, error: blocksErr, refetch: refetchBlocks,
-    isFetching: blocksFetching, isLoading: blocksLoading,
-  } = useQuery({
+  // Requête gardée entière : queryFailed() couvre aussi la requête en pause hors connexion
+  const blocksQuery = useQuery({
     queryKey: ['userBlocks'],
     queryFn: () => api.entities.UserBlock.list('-created_at', 200),
     enabled: !!user,
   });
+  const {
+    data: blocksData, error: blocksErr, refetch: refetchBlocks,
+    isFetching: blocksFetching, isLoading: blocksLoading,
+  } = blocksQuery;
   // Seulement MES blocages (le serveur filtre déjà, admin compris) : jamais « Débloquer » pour autrui
   const myEmail = String(user?.email || '').toLowerCase();
   const blocks = (blocksData ?? []).filter(b => String(b.blocker_email || '').toLowerCase() === myEmail);
@@ -453,7 +455,7 @@ export default function Settings() {
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }}
           className="rounded-2xl border border-white/8 bg-white/4 backdrop-blur-xl overflow-hidden mb-4">
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 pt-4 pb-2">Utilisateurs bloqués</p>
-          {blocksError && !blocksData ? (
+          {queryFailed(blocksQuery) ? (
             <div className="px-4 pb-4">
               <LoadError compact what="vos utilisateurs bloqués" error={blocksErr} onRetry={refetchBlocks} retrying={blocksFetching} />
             </div>

@@ -13,7 +13,7 @@ import ServicePicker from '@/components/services/ServicePicker';
 import EmployeeCard from '@/components/shared/EmployeeCard';
 import LoadError, { isNetworkError } from '@/components/shared/LoadError';
 import { hapticFeedback, isNative } from '@/lib/capacitor';
-import { blocksClient, checkOldCancelled } from '@/lib/reschedule';
+import { blocksClient, checkOldCancelled, appointmentDuration } from '@/lib/reschedule';
 import { useAndroidBack } from '@/lib/useAndroidBack';
 import { BARBER_PHOTO_ASPECT } from '@/lib/barberPhoto';
 import { appointmentEvent, openCalendar, parisInstant } from '@/lib/calendarLinks';
@@ -811,7 +811,16 @@ export default function Booking() {
     if (preSelectedBarber && !selectedEmployee) setSelectedEmployee(preSelectedBarber);
   }, [preSelectedBarber]);
 
-  const totalDuration = selectedServices.reduce((sum, s) => sum + (s.duration || 0), 0);
+  const catalogDuration = selectedServices.reduce((sum, s) => sum + (s.duration || 0), 0);
+  // Déplacement avec les mêmes prestations : la durée allongée par le salon (« prévoir 1 h ») est
+  // conservée, comme le fait le serveur ; sinon il refuserait (409) un créneau proposé ici
+  const sameServicesAsOld = useMemo(() => {
+    if (!oldApt || selectedServices.length === 0) return false;
+    const key = (ids) => [...new Set(ids.filter(id => id !== undefined && id !== null && id !== '').map(String))].sort().join(',');
+    const oldKey = key((Array.isArray(oldApt.services) ? oldApt.services : []).map(s => s?.service_id ?? s?.id));
+    return oldKey !== '' && oldKey === key(selectedServices.map(s => s.id));
+  }, [oldApt, selectedServices]);
+  const totalDuration = sameServicesAsOld ? Math.max(catalogDuration, appointmentDuration(oldApt)) : catalogDuration;
   const totalPrice = selectedServices.reduce((sum, s) => sum + (s.price || 0), 0);
 
   // Produits ajoutés au rendez-vous (même catalogue et même cache que la Boutique). Pas proposés

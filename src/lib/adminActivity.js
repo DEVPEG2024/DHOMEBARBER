@@ -182,19 +182,29 @@ export async function fetchAdminActivity({ days = DEFAULT_DAYS } = {}) {
     E.Appointment.filter({ status: 'cancelled', cancelled_by: 'client' }, '-cancelled_at', 200));
 
   const [
-    staffUsers, newAppointments, cancelledAppointments, cancelledBookings, orders, reviews, giftCards,
+    staffUsers, newAppointments, cancelledAppointments, authoredCancels, legacyCancels, orders, reviews, giftCards,
     events, eventAnswers, reservations, invites, salonEvents, feedbacks, users, reports,
   ] = await Promise.all([
     staffPromise,
     // Pauses et last minute exclus par le serveur : ils n'entrent plus dans la limite de 300 (une
     // pause récurrente en créait 27 d'un coup et faisait sortir des réservations du fil). Annulés
     // exclus aussi : un import de clients crée des centaines de fiches « annulées » d'un coup. Les
-    // réservations annulées depuis, QUEL QU'EN SOIT L'AUTEUR (client, salon, ancienne annulation sans
-    // auteur), sont reprises de la requête dédiée `cancelledBookings` (plus celles de
-    // `cancelledAppointments`, annulées par le client).
+    // réservations annulées depuis sont reprises de deux requêtes dédiées (plus `cancelledAppointments`,
+    // annulées par le client) :
+    // - `authoredCancels` : annulations avec auteur (client ou salon ; le serveur pose `cancelled_by`
+    //   et `cancelled_at` ensemble), triées par `cancelled_at`. Le filtre sur l'auteur écarte les
+    //   fiches d'import (`cancelled_by` NULL) et les last minute expirés (`system`) : un import de
+    //   300 clients ne remplit plus la limite ;
+    // - `legacyCancels` : anciennes annulations sans auteur (avant le backend v102 du 13 oct. 2026),
+    //   sans contrôle de limite : après un gros import elle ne ramène que des fiches, écartées par
+    //   isClientPlaceholder, sans faux bandeau d'échec. À retirer quand ces annulations auront quitté
+    //   la fenêtre de 14 jours (vers le 27 oct. 2026).
     safe('Rendez-vous', failed, () => E.Appointment.filter({ status: ['confirmed', 'completed', 'no_show'] }, '-created_date', 300)),
     cancelledPromise,
-    safe('Réservations annulées', failed, () => E.Appointment.filter({ status: 'cancelled' }, '-created_date', 300)),
+    safe('Réservations annulées', failed, () =>
+      E.Appointment.filter({ status: 'cancelled', cancelled_by: ['client', 'staff'] }, '-cancelled_at', 300)),
+    safe('Réservations annulées (anciennes)', failed, () =>
+      E.Appointment.filter({ status: 'cancelled', cancelled_by: null }, '-created_date', 300)),
     safe('Commandes', failed, () => E.Order.list('-created_date', 200)),
     safe('Avis', failed, () => E.Review.list('-created_date', 200)),
     safe('Cartes cadeau', failed, () => E.GiftCard.list('-created_at', 200)),
@@ -254,23 +264,29 @@ export async function fetchAdminActivity({ days = DEFAULT_DAYS } = {}) {
     });
   }
 
-  if (cancelledBookings.length >= 300) {
-    const last = cancelledBookings[cancelledBookings.length - 1];
-    if (inWindow(toIso(last.created_date || last.created_at))) failed.push('Réservations annulées (plus de 300 sur la période : les plus anciennes manquent)');
+  // Limite atteinte sur les annulations avec auteur (triées par `cancelled_at`) : une réservation
+  // manquante a un `cancelled_at`, donc un `created_date`, antérieur à celui de la dernière ligne ;
+  // il ne peut en manquer une dans la fenêtre que si cette dernière ligne y est elle-même.
+  if (authoredCancels.length >= 300) {
+    const last = authoredCancels[authoredCancels.length - 1];
+    if (inWindow(toIso(last.cancelled_at))) failed.push('Réservations annulées (plus de 300 sur la période : les plus anciennes manquent)');
   }
 
   // Réservations faites puis annulées (par le client ou le salon) : la réservation a bien eu lieu
   // (une ligne annulée n'est plus dans `newAppointments`, donc jamais en double). Union par id des
-  // deux requêtes : une annulation du client sortie de la limite de 300 reste comptée.
+  // trois requêtes : une annulation du client sortie de la limite de 300 reste comptée. La ligne dit
+  // que la réservation a été annulée (ou déplacée) depuis : l'agenda masque les annulés par défaut.
   const cancelledById = new Map();
-  for (const apt of [...cancelledBookings, ...cancelledAppointments]) if (apt?.id != null) cancelledById.set(String(apt.id), apt);
+  for (const apt of [...authoredCancels, ...legacyCancels, ...cancelledAppointments]) if (apt?.id != null) cancelledById.set(String(apt.id), apt);
   for (const apt of cancelledById.values()) {
     if (!isClientAppointment(apt, staffEmails) || isClientPlaceholder(apt)) continue;
+    const moved = isRescheduledCancel(apt);
     push('appointment_new', apt, toIso(apt.created_date || apt.created_at), {
       ...who(apt),
-      detail: join(serviceNames(apt), appointmentWhen(apt)),
+      detail: join(serviceNames(apt), appointmentWhen(apt), moved ? 'déplacé depuis' : 'annulé depuis'),
       amount: toNumber(apt.grand_total) ?? toNumber(apt.total_price),
       link: appointmentLink(apt),
+      cancelled: true,
     });
   }
 
@@ -313,6 +329,7 @@ export async function fetchAdminActivity({ days = DEFAULT_DAYS } = {}) {
     const email = lower(moved.clientEmail);
     if (!email || !Number.isFinite(tMoved)) continue;
     const idx = out.findIndex((e) => e.type === 'appointment_new'
+      && !e.cancelled // le nouvel horaire est actif ; jamais l'ancienne réservation annulée
       && lower(e.clientEmail) === email
       && e.entityId !== moved.entityId
       && Math.abs(tMoved - Date.parse(e.at)) <= MOVE_PAIR_MS);
@@ -362,11 +379,13 @@ export async function fetchAdminActivity({ days = DEFAULT_DAYS } = {}) {
 
   for (const g of giftCards) {
     if (isStaffEmail(g.sender_email)) continue;
-    // Rejetée (jamais validée donc jamais payée) : reste au fil, hors du montant du jour
+    // Rejetée (jamais validée donc jamais payée) : reste au fil, titrée comme telle, hors du montant
+    // du jour (montant gardé à droite, comme une commande annulée : le titre lève l'ambiguïté)
     const rejected = g.status === 'expired' && !g.validated_at;
     push('giftcard_new', g, toIso(g.created_at || g.created_date), {
       ...who(g, 'sender_name', 'sender_email'),
-      detail: join(g.recipient_name ? `Pour ${g.recipient_name}` : '', g.code || '', g.status === 'pending' ? 'à valider' : '', rejected ? 'rejetée' : ''),
+      ...(rejected ? { title: 'Carte cadeau rejetée' } : {}),
+      detail: join(g.recipient_name ? `Pour ${g.recipient_name}` : '', g.code || '', g.status === 'pending' ? 'à valider' : ''),
       amount: toNumber(g.amount),
       cancelled: rejected,
     });

@@ -50,8 +50,8 @@ function FadingRow({ row, nudgedAt, onNudged }) {
       if (devices === 0 || res?.sent === false) {
         // Rien n'est parti : le délai de 7 jours n'est pas déclenché, le bouton reste disponible
         toast.warning(devices === 0
-          ? 'Ce client n’a pas activé les notifications : appelle-le'
-          : 'La notification n’a pas pu être livrée sur son téléphone : appelle-le');
+          ? 'Ce client n’a pas activé les notifications : appelez-le'
+          : 'La notification n’a pas pu être livrée sur son téléphone : appelez-le');
         onNudged(row.email, null, true);
       } else {
         toast.success(`Relance envoyée sur ${devices} appareil${devices > 1 ? 's' : ''}`);
@@ -69,7 +69,7 @@ function FadingRow({ row, nudgedAt, onNudged }) {
       } else if (err?.status === 404) {
         toast.error(message || 'Compte client introuvable.');
       } else if (err?.status === 429) {
-        toast.error(message || 'Trop de relances pour l’instant. Réessaie dans un moment.');
+        toast.error(message || 'Trop de relances pour l’instant. Réessayez dans un moment.');
       } else if (!err?.status) {
         toast.error('Pas de connexion : la relance n’est pas partie.');
       } else {

@@ -66,8 +66,8 @@ export function myResponse(event) {
 
 /** Styles des pastilles de réponse (carte et fiche). */
 export const RESPONSE_STYLE = {
-  accepted: { label: 'Tu viens ✓', text: 'text-green-400', bg: 'bg-green-500/12 border-green-500/25', dot: 'bg-green-400' },
-  declined: { label: 'Tu ne viens pas', text: 'text-muted-foreground', bg: 'bg-white/5 border-white/10', dot: 'bg-muted-foreground' },
+  accepted: { label: 'Vous venez ✓', text: 'text-green-400', bg: 'bg-green-500/12 border-green-500/25', dot: 'bg-green-400' },
+  declined: { label: 'Vous ne venez pas', text: 'text-muted-foreground', bg: 'bg-white/5 border-white/10', dot: 'bg-muted-foreground' },
   invited: { label: 'Répondre', text: 'text-amber-400', bg: 'bg-amber-500/12 border-amber-500/25', dot: 'bg-amber-400' },
   open: { label: 'Ouvert à tous', text: 'text-primary', bg: 'bg-primary/10 border-primary/25', dot: 'bg-primary' },
 };

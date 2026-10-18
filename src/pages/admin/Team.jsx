@@ -13,7 +13,7 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import LoadError, { friendlyError } from '@/components/shared/LoadError';
+import LoadError, { friendlyError, queryFailed } from '@/components/shared/LoadError';
 
 /**
  * Message du serveur (409 « a N rendez-vous à venir… », photo refusée…), message levé par l'app
@@ -162,8 +162,12 @@ export default function Team() {
         </Button>
       </div>
 
-      {employeesQuery.isError && !employeesQuery.data ? (
+      {queryFailed(employeesQuery) ? (
         <LoadError what="l'équipe" error={employeesQuery.error} onRetry={employeesQuery.refetch} retrying={employeesQuery.isFetching} />
+      ) : employeesQuery.isPending ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {[0, 1, 2].map(i => <div key={i} className="h-24 bg-card border border-border rounded-xl animate-pulse" />)}
+        </div>
       ) : (
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {employees.map(emp => (

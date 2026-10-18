@@ -11,6 +11,7 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import LoadError, { friendlyError } from '@/components/shared/LoadError';
+import StaffNotificationsCard from '@/components/shared/StaffNotificationsCard';
 
 // Champs que cette page modifie : la sauvegarde n'envoie qu'eux (l'ordre de l'accueil, les réglages
 // d'alertes, la relance… modifiés ailleurs entre-temps ne sont jamais écrasés)
@@ -216,6 +217,13 @@ export default function AdminSettings() {
       </div>
 
       <div className="space-y-6">
+        {/* Notifications de l'admin sur cet appareil : effet immédiat, hors du bouton Sauvegarder
+            (la fenêtre d'activation promet qu'on peut les couper « dans tes paramètres ») */}
+        <StaffNotificationsCard
+          title="Mes notifications (cet appareil)"
+          description="Activité des clients, rendez-vous, annulations, congés : effet immédiat"
+        />
+
         {/* General */}
         <div className="bg-card border border-border rounded-xl p-5">
           <h3 className="text-sm font-semibold mb-4">Informations générales</h3>

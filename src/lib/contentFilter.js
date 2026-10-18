@@ -107,15 +107,43 @@ function matchesBlockedTerm(text) {
 // d'une majuscule (fin de phrase sans espace).
 const JOINED_WORD = /([\p{L}\d@$€])(?:[-_*]+|\.(?=\p{Ll}))(?=[\p{L}\d@$€])/gu;
 
-// Menaces à l'impératif : bloquées écrites avec un trait d'union, ou en tête de phrase (le texte brut est découpé sur . ! ? … et les retours à la ligne).
-// Ailleurs, « on va crever de chaud », « mon pneu va crever » ou « elle tue, toi… » passent.
-const IMPERATIVE_THREATS = ['va crever', 'tue toi', 'suicide toi'];
+// Menaces à l'impératif (« tue toi », « suicide toi », « va crever ») : bloquées avec un trait d'union,
+// et partout ailleurs dans le texte, sauf tournures sûres contrôlées autour de chaque occurrence :
+// sujet devant (« on va crever », « il va crever », « ça tue toi aussi »), groupe nominal devant
+// (« mon pneu va crever »), « va crever de chaud / de froid / de rire », « crever l'abcès ».
+// Le texte brut est découpé sur la ponctuation, virgule comprise (« elle tue, toi tu dors » reste
+// permis), puis les amorces de tête (« mais », « franchement », « ta gueule »…) sont retirées en boucle.
+const THREAT_LEADS = ['mais', 'et', 'allez', 'aller', 'alors', 'bon', 'ben', 'bah', 'oh', 'eh', 'hey', 'ouais', 'toi', 'mec', 'frere',
+  'franchement', 'serieux', 'serieusement', 'stp', 'ta gueule', 'je te le dis', 'je te dis', 'vas y', 'va y'];
+const THREAT_SUBJECTS = new Set(['il', 'elle', 'on', 'ca', 'ce', 'cela', 'qui', 'ils', 'elles']);
+const THREAT_DETERMINERS = new Set(['mon', 'ma', 'ton', 'ta', 'son', 'sa', 'le', 'la', 'un', 'une', 'ce', 'cette', 'notre', 'votre', 'leur']);
+// Seules tournures tolérées derrière « va crever de » (« va crever de faim », « de ta belle mort » : bloqués)
+const CREVER_OK = new Set(['chaud', 'froid', 'rire']);
 function matchesImperativeThreat(text) {
   const raw = String(text || '');
   if (/(^|[^\p{L}])(tue|suicide)[-‐–]toi(?![\p{L}])/iu.test(raw.normalize('NFD').replace(/\p{M}/gu, ''))) return true;
-  return raw.split(/[.!?…\n]+/).some((s) => {
-    const n = normalizeForFilter(s);
-    return IMPERATIVE_THREATS.some((p) => n === p || (n.startsWith(`${p} `) && !n.startsWith(`${p} de `)));
+  return raw.split(/[.!?…\n,;:«»"“”()]+/).some((s) => {
+    let n = normalizeForFilter(s);
+    for (let again = true; again;) {
+      again = false;
+      for (const l of THREAT_LEADS) if (n.startsWith(`${l} `)) { n = n.slice(l.length + 1); again = true; }
+    }
+    const t = n.split(' ').filter(Boolean);
+    for (let i = 0; i < t.length - 1; i++) {
+      const prev = t[i - 1];
+      if ((t[i] === 'tue' || t[i] === 'suicide') && t[i + 1] === 'toi') {
+        if (t[i] === 'tue' && THREAT_SUBJECTS.has(prev)) continue; // « elle tue toi… », « ça tue toi aussi »
+        return true;
+      }
+      if (t[i] === 'va' && t[i + 1] === 'crever') {
+        if (THREAT_SUBJECTS.has(prev)) continue; // « on va crever », « il va crever »
+        if (prev && prev !== 'gueule' && THREAT_DETERMINERS.has(t[i - 2])) continue; // « mon pneu va crever »
+        if (t[i + 2] === 'de' && CREVER_OK.has(t[i + 3])) continue; // « va crever de chaud »
+        if (t[i + 2] === 'l' && t[i + 3] === 'abces') continue; // « qui va crever l'abcès »
+        return true;
+      }
+    }
+    return false;
   });
 }
 

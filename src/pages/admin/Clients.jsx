@@ -744,7 +744,8 @@ export default function Clients() {
             <AlertDialogDescription>
               Êtes-vous sûr de vouloir supprimer <strong>tous les comptes clients</strong> ? Leurs rendez-vous à venir
               non encaissés ({allUpcomingCount}) seront annulés. Les rendez-vous passés et encaissés sont conservés
-              (chiffre d'affaires, statistiques). Les comptes du personnel ne sont pas touchés. Cette action est irréversible.
+              (chiffre d'affaires, statistiques). Leurs publications, commentaires, réactions, avis, envois Bugs et suggestions,
+              votes textile et invitations sont effacés. Les comptes du personnel ne sont pas touchés. Cette action est irréversible.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -768,7 +769,8 @@ export default function Clients() {
             <AlertDialogDescription>
               Êtes-vous sûr de vouloir supprimer le compte de <strong>{clientToDelete?.name || clientToDelete?.email}</strong> ?
               Ses rendez-vous à venir non encaissés ({clientUpcomingCount}) seront annulés. Son historique (rendez-vous
-              passés et encaissés) est conservé : il restera visible ici tant qu'il a des rendez-vous. Cette action est irréversible.
+              passés et encaissés) est conservé : il restera visible ici tant qu'il a des rendez-vous. Ses publications,
+              commentaires, réactions, avis, envois Bugs et suggestions, votes textile et invitations sont effacés. Cette action est irréversible.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
