@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { ACTIVITY_TYPES } from '@/lib/adminActivity';
 import { ALERT_GROUPS, useAdminAlertPrefs } from '@/lib/adminAlerts';
-import LoadError from '@/components/shared/LoadError';
+import LoadError, { friendlyError } from '@/components/shared/LoadError';
 
 /**
  * Réglages des alertes de l'admin : pour chaque type d'action client, « Notifier » (push sur le
@@ -37,9 +37,7 @@ export default function AlertSettingsDialog({ open, onOpenChange }) {
       toast.success('Réglages des alertes enregistrés ✓');
       onOpenChange(false);
     } catch (err) {
-      toast.error(err?.message && !/^HTTP \d+$/.test(err.message)
-        ? err.message
-        : 'Impossible d’enregistrer les réglages. Réessayez.');
+      toast.error(friendlyError(err, 'Impossible d’enregistrer les réglages. Réessayez.'));
     }
   };
 

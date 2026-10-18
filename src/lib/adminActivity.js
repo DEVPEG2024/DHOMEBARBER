@@ -34,7 +34,8 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { api } from '@/api/apiClient';
 import { useAuth } from '@/lib/AuthContext';
-import { cancellationActor, cleanReason } from '@/lib/cancellation';
+import { cancellationActor, cleanReason, isRescheduledCancel } from '@/lib/cancellation';
+import { isClientPlaceholder } from '@/components/agenda/agendaUtils';
 import { useAdminAlertPrefs } from '@/lib/adminAlerts';
 
 export const ADMIN_ACTIVITY_QUERY_KEY = ['adminActivity'];
@@ -47,6 +48,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export const ACTIVITY_TYPES = {
   appointment_new: { label: 'Nouveau rendez-vous', emoji: '📅', adminPath: '/admin/agenda', tone: 'green' },
   appointment_cancelled: { label: 'Rendez-vous annulé', emoji: '❌', adminPath: '/admin/agenda', tone: 'red' },
+  // Déplacement fait par le client (l'ancien RDV porte « Client : déplacé au … ») : pas une annulation
+  appointment_moved: { label: 'Rendez-vous déplacé', emoji: '📅', adminPath: '/admin/agenda', tone: 'amber' },
   order_new: { label: 'Nouvelle commande', emoji: '🛍️', adminPath: '/admin/orders', tone: 'blue' },
   order_cancelled: { label: 'Commande annulée', emoji: '❌', adminPath: '/admin/orders', tone: 'red' },
   review_new: { label: 'Nouvel avis', emoji: '⭐', adminPath: '/admin/reviews', tone: 'amber' },
@@ -119,12 +122,7 @@ async function safe(name, failed, fn) {
 
 const STAFF_STATUSES = new Set(['break', 'last_minute']);
 
-/** Fiche client créée par l'admin (Clients → ajouter / importer) : faux RDV annulé de 0 min. */
-const isClientPlaceholder = (apt) =>
-  apt.status === 'cancelled'
-  && (!Array.isArray(apt.services) || apt.services.length === 0)
-  && String(apt.start_time || '') === String(apt.end_time || '')
-  && !toNumber(apt.total_price);
+// Fiche client créée par l'admin (Clients → ajouter / importer) : isClientPlaceholder d'agendaUtils
 
 function isClientAppointment(apt, staffEmails) {
   if (!apt || STAFF_STATUSES.has(apt.status)) return false;
@@ -184,7 +182,9 @@ export async function fetchAdminActivity({ days = DEFAULT_DAYS } = {}) {
     events, eventAnswers, reservations, invites, salonEvents, feedbacks, users, reports,
   ] = await Promise.all([
     staffPromise,
-    safe('Rendez-vous', failed, () => E.Appointment.list('-created_date', 300)),
+    // Pauses et last minute exclus par le serveur : ils n'entrent plus dans la limite de 300 (une
+    // pause récurrente en créait 27 d'un coup et faisait sortir des réservations du fil)
+    safe('Rendez-vous', failed, () => E.Appointment.filter({ status: ['confirmed', 'completed', 'cancelled', 'no_show'] }, '-created_date', 300)),
     cancelledPromise,
     safe('Commandes', failed, () => E.Order.list('-created_date', 200)),
     safe('Avis', failed, () => E.Review.list('-created_date', 200)),
@@ -227,6 +227,12 @@ export async function fetchAdminActivity({ days = DEFAULT_DAYS } = {}) {
     clientEmail: row[emailKey] || null,
   });
 
+  // Limite de 300 atteinte sur la période : les plus anciens manquent, on le signale
+  if (newAppointments.length >= 300) {
+    const last = newAppointments[newAppointments.length - 1];
+    if (inWindow(toIso(last.created_date || last.created_at))) failed.push('Rendez-vous (plus de 300 sur la période : les plus anciens manquent)');
+  }
+
   // Rendez-vous réservés (y compris ceux déjà annulés depuis : la réservation a bien eu lieu)
   for (const apt of newAppointments) {
     if (!isClientAppointment(apt, staffEmails) || isClientPlaceholder(apt)) continue;
@@ -245,6 +251,16 @@ export async function fetchAdminActivity({ days = DEFAULT_DAYS } = {}) {
     if (actor === 'staff' || actor === 'system') continue; // sécurité : agenda du salon, last minute expiré
     const at = toIso(apt.cancelled_at);
     if (!at) continue;
+    // Déplacé par le client : « Rendez-vous déplacé · déplacé au … », pas une annulation
+    if (isRescheduledCancel(apt)) {
+      push('appointment_moved', apt, at, {
+        ...who(apt),
+        detail: join(serviceNames(apt), appointmentWhen(apt), cleanReason(apt.cancellation_reason)),
+        amount: toNumber(apt.grand_total) ?? toNumber(apt.total_price),
+        link: appointmentLink(apt),
+      });
+      continue;
+    }
     push('appointment_cancelled', apt, at, {
       ...who(apt),
       detail: join(
@@ -530,7 +546,9 @@ export function useActivityToasts() {
     // puis rétablie, RDV ancien qui entre dans la limite de 300…) est simplement mémorisé.
     const threshold = mountedAt.current - TOAST_GRACE_MS;
     // Types réglés « sans notification » (Réglages des alertes) : notés dans le fil, sans toast
-    const fresh = unseen.filter((e) => Date.parse(e.at) >= threshold && alertPrefsRef.current[e.type] !== false);
+    // (un déplacement suit le réglage des annulations : pas de nouveau réglage à part)
+    const prefKey = (type) => (type === 'appointment_moved' ? 'appointment_cancelled' : type);
+    const fresh = unseen.filter((e) => Date.parse(e.at) >= threshold && alertPrefsRef.current[prefKey(e.type)] !== false);
     if (!fresh.length) return;
 
     // Du plus ancien au plus récent, pour que le dernier toast soit la dernière action

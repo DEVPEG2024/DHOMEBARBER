@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { api, apiRequest, apiUrl } from '@/api/apiClient';
 import { useAuth } from '@/lib/AuthContext';
-import LoadError from '@/components/shared/LoadError';
+import LoadError, { friendlyError } from '@/components/shared/LoadError';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Package, AlertTriangle, Save, Search, Plus, Trash2, ShoppingBag, Scissors, Upload, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -40,10 +40,16 @@ export default function AdminStock() {
   const [uploading, setUploading] = useState(false);
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  const editsRef = React.useRef(edits);
+  editsRef.current = edits;
 
   const productsQuery = useQuery({
     queryKey: ['products', 'all'], // liste complète (inactifs inclus) : clé distincte de la boutique
     queryFn: () => api.entities.Product.list('name', 200),
+    // Le stock bouge avec chaque commande : relu à l'ouverture, puis chaque minute tant que rien
+    // n'est en cours de saisie (une saisie partie d'une valeur périmée écrasait le serveur)
+    refetchOnMount: 'always',
+    refetchInterval: () => (editsRef.current && Object.keys(editsRef.current).length > 0 ? false : 60000),
   });
   const products = productsQuery.data ?? [];
   // Liste impossible à charger : jamais « Aucun produit… Ajouter » (doublons créés à la reprise)
@@ -58,10 +64,13 @@ export default function AdminStock() {
   };
 
   const setVal = (product, field, value) => {
-    setEdits(prev => ({
-      ...prev,
-      [product.id]: { ...prev[product.id], [field]: value },
-    }));
+    setEdits(prev => {
+      const current = prev[product.id] || {};
+      const next = { ...current, [field]: value };
+      // Stock lu au début de la saisie : envoyé au serveur (`expected_stock`), qui refuse s'il a changé
+      if (field === 'stock' && !('base_stock' in current)) next.base_stock = product.stock ?? null;
+      return { ...prev, [product.id]: next };
+    });
   };
 
   const isCritical = (product) => {
@@ -90,19 +99,44 @@ export default function AdminStock() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      const entries = Object.entries(edits);
-      for (const [id, data] of entries) {
+      const all = Object.entries(edits);
+      // Produit par produit : un refus (stock changé entre-temps) garde sa saisie, les autres partent
+      const kept = {};
+      const entries = [];
+      let conflicts = 0;
+      let otherError = null;
+      for (const [id, data] of all) {
         const update = {};
-        if (data.stock !== undefined) update.stock = parseInt(data.stock) || 0;
+        if (data.stock !== undefined) {
+          update.stock = parseInt(data.stock) || 0;
+          update.expected_stock = 'base_stock' in data
+            ? data.base_stock
+            : (products.find(p => String(p.id) === String(id))?.stock ?? null);
+        }
         if (data.ref !== undefined) update.ref = data.ref;
         if (data.critical_stock !== undefined) update.critical_stock = parseInt(data.critical_stock) || 0;
-        if (Object.keys(update).length > 0) {
+        if (Object.keys(update).length === 0) continue;
+        try {
           await api.entities.Product.update(id, update);
+          entries.push([id, data]);
+        } catch (err) {
+          if (err?.status === 409) {
+            conflicts++;
+            toast.error(friendlyError(err, 'Le stock a changé entre-temps : vérifiez avant d\'enregistrer'), { duration: 10000 });
+            // La saisie est gardée, sa base sera relue avec la liste
+            const { base_stock: _ignored, ...rest } = data;
+            kept[id] = rest;
+          } else {
+            kept[id] = data;
+            otherError = err;
+          }
         }
       }
       queryClient.invalidateQueries({ queryKey: ['products'] });
-      setEdits({});
-      toast.success(`${entries.length} produit(s) mis à jour`);
+      setEdits(kept);
+      if (entries.length > 0) toast.success(`${entries.length} produit(s) mis à jour`);
+      if (otherError) toast.error(friendlyError(otherError, 'Erreur lors de la sauvegarde'));
+      if (conflicts === 0 && !otherError && entries.length === 0) toast.info('Rien à enregistrer');
 
       // Alerte « Stock critique » aux admins seulement (jamais aux clients : `audience: 'staff'`),
       // et seulement pour les produits modifiés qui viennent de passer sous leur seuil
@@ -131,8 +165,8 @@ export default function AdminStock() {
           }).catch(() => {});
         }
       }
-    } catch {
-      toast.error('Erreur lors de la sauvegarde');
+    } catch (err) {
+      toast.error(friendlyError(err, 'Erreur lors de la sauvegarde'));
     } finally {
       setSaving(false);
     }
@@ -193,6 +227,7 @@ export default function AdminStock() {
         <div className="shrink-0">
           <p className="text-[11px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Inventaire</p>
           <h1 className="font-display text-2xl font-bold">Stock Produits</h1>
+          <p className="text-[11px] text-muted-foreground mt-1 max-w-xs">Stock disponible à la vente : les pièces des commandes en cours sont déjà retirées.</p>
         </div>
         <div className="flex gap-2">
           {hasEdits && (

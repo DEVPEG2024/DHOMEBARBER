@@ -6,6 +6,7 @@ import { useAuth } from '@/lib/AuthContext';
 import { motion } from 'framer-motion';
 import { Calendar, Star, ShoppingBag, Settings, LogOut, ChevronRight, Shield, Bell, Camera, Shirt, Handshake, Heart, IdCard } from 'lucide-react';
 import { toast } from 'sonner';
+import { friendlyError } from '@/components/shared/LoadError';
 import ImageCropDialog, { unreadableImageMessage } from '@/components/shared/ImageCropDialog';
 import { parisInstant } from '@/lib/calendarLinks';
 import { formatPrice } from '@/components/services/serviceUtils';
@@ -78,7 +79,7 @@ export default function Profile() {
       invalidateGang();
       toast.success('Photo de profil mise à jour');
     } catch (err) {
-      toast.error(err?.message || 'Erreur lors de la mise à jour de la photo');
+      toast.error(friendlyError(err, 'Erreur lors de la mise à jour de la photo'));
     } finally {
       setUploading(false);
     }

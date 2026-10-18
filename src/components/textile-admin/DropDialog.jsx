@@ -6,6 +6,7 @@ import React, { useEffect, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Upload, X, Image as ImageIcon, Rocket } from 'lucide-react';
 import { toast } from 'sonner';
+import { adminErrorMessage } from '@/lib/adminErrors';
 import { api } from '@/api/apiClient';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -78,7 +79,7 @@ export default function DropDialog({ open, onOpenChange, drop }) {
       toast.success(drop?.id ? 'Drop mis à jour' : 'Drop créé');
       onOpenChange(false);
     },
-    onError: (err) => toast.error(err?.message || 'Erreur lors de la sauvegarde'),
+    onError: (err) => toast.error(adminErrorMessage(err, 'Erreur lors de la sauvegarde')),
   });
 
   const handleSave = () => {
@@ -101,7 +102,7 @@ export default function DropDialog({ open, onOpenChange, drop }) {
       set({ cover_image_url: url });
       toast.success('Couverture ajoutée');
     } catch (err) {
-      toast.error(err?.message || "Erreur lors de l'upload");
+      toast.error(adminErrorMessage(err, "Erreur lors de l'upload"));
     } finally {
       setUploading(false);
     }

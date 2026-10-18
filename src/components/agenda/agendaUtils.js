@@ -117,6 +117,15 @@ export function isUnclaimedLastMinute(apt) {
  * quel que soit le fuseau de l'appareil. À comparer à `Date.now()` ; `null` si la date est invalide.
  * Sert là où l'heure saisie vient elle-même de l'heure de Paris (« Ajouter un client » : `nowRounded`).
  */
+/**
+ * Fiche client créée par Clients → Ajouter / Importer : faux rendez-vous annulé, sans prestation,
+ * à 0 €, sans encaissement, début = fin. Jamais compté comme un vrai RDV (tableau de bord, agenda,
+ * statistiques, activité) ; même règle que la suppression d'un client.
+ */
+export const isClientPlaceholder = (apt) => !!apt && apt.status === 'cancelled'
+  && !(Array.isArray(apt.services) && apt.services.length) && !Number(apt.total_price) && !apt.payment_method
+  && String(apt.start_time || '') === String(apt.end_time || '');
+
 export function appointmentEndParis(apt) {
   const day = String(apt.date || '').slice(0, 10);
   if (!parseDateParam(day)) return null;

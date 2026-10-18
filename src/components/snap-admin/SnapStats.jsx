@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Loader2, Eye, ShieldCheck, Sparkles, Camera, Share2, CalendarCheck, AlertTriangle } from 'lucide-react';
+import LoadError from '@/components/shared/LoadError';
 
 /**
  * Statistiques d'usage des filtres Snap (GET /snap/admin/stats) : tuiles de chiffres, visites
@@ -107,7 +108,7 @@ function TopLenses({ top }) {
   );
 }
 
-export default function SnapStats({ stats, days, onDaysChange, isLoading, error }) {
+export default function SnapStats({ stats, days, onDaysChange, isLoading, error, onRetry, retrying = false }) {
   const counts = stats?.counts || {};
   const visitors = counts.open?.users || 0;
   const errors = counts.error?.n || 0;
@@ -139,7 +140,7 @@ export default function SnapStats({ stats, days, onDaysChange, isLoading, error 
         <div className="py-10 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-primary" /></div>
       )}
       {error && !stats && (
-        <p className="text-xs text-red-300">Statistiques indisponibles : {error.message}</p>
+        <LoadError compact what="les statistiques" error={error} onRetry={onRetry} retrying={retrying} />
       )}
 
       {stats && (

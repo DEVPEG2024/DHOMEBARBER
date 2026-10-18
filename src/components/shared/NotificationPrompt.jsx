@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { Bell, CalendarCheck, Zap, Sparkles, X, Settings as SettingsIcon } from 'lucide-react';
+import { Bell, CalendarCheck, Zap, Sparkles, X, Settings as SettingsIcon, CalendarDays, ClipboardList } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/AuthContext';
 import { isNative, platform, hapticFeedback } from '@/lib/capacitor';
@@ -63,9 +63,17 @@ const BENEFITS = [
   { icon: Zap, title: 'Créneaux last minute', text: 'Une place se libère ? Tu es le premier au courant.' },
   { icon: Sparkles, title: 'Drops et événements', text: 'Textile, soirées du salon, bons plans du Gang.' },
 ];
+// Équipe (barbers, admin) : ce qu'ils reçoivent vraiment, pas les avantages d'un client
+const STAFF_BENEFITS = [
+  { icon: CalendarCheck, title: 'Nouveaux rendez-vous et annulations', text: 'Dès qu’un client réserve, déplace ou annule.' },
+  { icon: CalendarDays, title: 'Tes demandes de congé', text: 'La réponse du salon dès qu’elle tombe.' },
+  { icon: ClipboardList, title: 'Ménage du jour et activité', text: 'Tes tâches du jour, l’activité des clients pour l’admin.' },
+];
 
 export default function NotificationPrompt() {
   const { user } = useAuth();
+  const isStaff = user?.role === 'admin' || user?.role === 'barber';
+  const benefits = isStaff ? STAFF_BENEFITS : BENEFITS;
   const location = useLocation();
   const reduceMotion = useReducedMotion();
   const [mode, setMode] = useState(null); // null | 'prompt' | 'denied'
@@ -176,10 +184,12 @@ export default function NotificationPrompt() {
                   Ne rate rien du Gang
                 </h2>
                 <p className="text-center text-sm text-muted-foreground mt-2">
-                  Active les notifications, on ne t’écrit que pour ce qui compte.
+                  {isStaff
+                    ? 'Active les notifications pour suivre ton agenda en direct. Tu peux les couper à tout moment dans tes paramètres.'
+                    : 'Active les notifications, on ne t’écrit que pour ce qui compte.'}
                 </p>
                 <ul className="mt-6 space-y-3">
-                  {BENEFITS.map(({ icon: Icon, title, text }) => (
+                  {benefits.map(({ icon: Icon, title, text }) => (
                     <li key={title} className="flex items-start gap-3 rounded-2xl bg-white/4 border border-white/8 p-3">
                       <span className="w-9 h-9 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0">
                         <Icon className="w-4 h-4 text-primary" />
@@ -207,7 +217,9 @@ export default function NotificationPrompt() {
                   Notifications désactivées
                 </h2>
                 <p className="text-center text-sm text-muted-foreground mt-2">
-                  Tu ne recevras ni le rappel de ton rendez-vous ni les créneaux last minute.
+                  {isStaff
+                    ? 'Tu ne seras prévenu ni des nouveaux rendez-vous ni des annulations.'
+                    : 'Tu ne recevras ni le rappel de ton rendez-vous ni les créneaux last minute.'}
                   {canOpenSettings
                     ? ' Tu peux les réactiver en un geste dans les réglages.'
                     : deniedHelp}

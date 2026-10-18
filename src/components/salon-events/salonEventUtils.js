@@ -7,6 +7,7 @@
 import { useEffect, useState } from 'react';
 import { MAX_GUESTS, eventPhase, formatEventDate, formatPrice, spotsLeft } from '@/lib/salonEventsApi';
 import { SALON_LOCATION } from '@/lib/calendarLinks';
+import { isNative } from '@/lib/capacitor';
 
 /** Courbe « signature » de l'app (sortie très douce). */
 export const EASE = [0.16, 1, 0.3, 1];
@@ -188,8 +189,11 @@ export function buildSalonCalendarEvent(event) {
   };
 }
 
-/** Cibles « Ajouter au calendrier » (mêmes libellés que Mes rendez-vous). */
+/**
+ * Cibles « Ajouter au calendrier » (mêmes libellés que Mes rendez-vous). Le .ics ne s'ouvre pas
+ * dans l'app native (voir openCalendar) : « Apple / Outlook » seulement sur le web.
+ */
 export const CALENDAR_TARGETS = [
   { kind: 'google', label: 'Google Agenda' },
-  { kind: 'ics', label: 'Apple / Outlook' },
+  ...(isNative ? [] : [{ kind: 'ics', label: 'Apple / Outlook' }]),
 ];

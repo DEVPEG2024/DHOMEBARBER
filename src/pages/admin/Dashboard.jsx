@@ -16,8 +16,11 @@ import { exportToCSV } from '@/utils/exportCSV';
 import SalesOverview from '@/components/admin/SalesOverview';
 import {
   needsClosing, datesBetween, fetchAppointmentsForDates, isCancelledLike, isConvertedLastMinute, isUnclaimedLastMinute,
+  isClientPlaceholder,
 } from '@/components/agenda/agendaUtils';
 import LoadError from '@/components/shared/LoadError';
+import { toast } from 'sonner';
+import { isRescheduledCancel } from '@/lib/cancellation';
 
 // Plafond de `fetchAppointmentsForDates` : au-delà, les chiffres de la période seraient incomplets
 const APPOINTMENTS_LIMIT = 2000;
@@ -123,7 +126,8 @@ export default function AdminDashboard() {
 
   // Hors pauses, créneaux last minute encore libres et last minute que personne n'a pris
   // (passés « absent » automatiquement : ni no-show ni annulation d'un client)
-  const isRealAppt = (a) => a.status !== 'break' && a.status !== 'last_minute' && !isUnclaimedLastMinute(a);
+  // ni les fiches créées par Clients → Ajouter / Importer (faux RDV annulé à 0 €, 09:00 → 09:00)
+  const isRealAppt = (a) => a.status !== 'break' && a.status !== 'last_minute' && !isUnclaimedLastMinute(a) && !isClientPlaceholder(a);
   const realAppts = useMemo(() => allAppointments.filter(isRealAppt), [allAppointments]);
 
   // Last Minute : créneaux publiés = encore libres + pris par un client (repère dans la note interne)
@@ -142,6 +146,8 @@ export default function AdminDashboard() {
   const isPaid = (a) => a.payment_status === 'paid' || a.status === 'completed';
   // CA hors pourboire (les pourboires ont leur propre section)
   const getTotal = revenueOf;
+  // Hors part déjà payée par carte cadeau (débit au comptoir) : c'est ce qui reste à encaisser
+  const outsideGift = (a) => revenueOf(a) - giftPartOf(a);
   const lastMinuteRevenueMonth = round2(lastMinuteCompletedMonth.filter(isPaid).reduce((sum, a) => sum + getTotal(a), 0));
 
   // TODAY
@@ -149,22 +155,25 @@ export default function AdminDashboard() {
   const confirmedToday = todayAppts.filter(a => a.status === 'confirmed');
   const completedToday = todayAppts.filter(a => a.status === 'completed');
   const pendingToday = todayAppts.filter(a => a.status === 'pending');
-  const cancelledToday = todayAppts.filter(a => a.status === 'cancelled');
+  // Un déplacement fait par le client n'est pas une annulation (même règle que la carte Gang)
+  const cancelledToday = todayAppts.filter(a => a.status === 'cancelled' && !isRescheduledCancel(a));
   const noShowToday = todayAppts.filter(a => a.status === 'no_show');
 
   // Paid = payment_status 'paid' OR status 'completed'
   const paidToday = todayAppts.filter(isPaid);
-  const unpaidToday = confirmedToday.filter(a => !isPaid(a));
+  // Non encaissés : seulement les RDV du jour terminés (heure de fin passée, heure de Paris), même
+  // règle que la pastille € de l'agenda et « À encaisser » ; les RDV à venir n'y entrent pas
+  const unpaidToday = confirmedToday.filter(a => !isPaid(a) && needsClosing(a));
   const todayRevenue = round2(paidToday.reduce((sum, a) => sum + getTotal(a), 0));
-  const todayUnpaid = unpaidToday.reduce((sum, a) => sum + (a.total_price || 0), 0);
+  const todayUnpaid = round2(unpaidToday.reduce((sum, a) => sum + outsideGift(a), 0));
 
   // Tips & products today
   const todayTips = round2(paidToday.reduce((sum, a) => sum + (a.tip || 0), 0));
-  const todayProducts = paidToday.reduce((sum, a) => sum + (a.product_price || 0), 0);
+  const todayProducts = round2(paidToday.reduce((sum, a) => sum + (a.product_price || 0), 0));
 
   // YESTERDAY (for trend)
   const yesterdayAppts = realAppts.filter(a => a.date === yesterday);
-  const yesterdayRevenue = yesterdayAppts.filter(isPaid).reduce((sum, a) => sum + getTotal(a), 0);
+  const yesterdayRevenue = round2(yesterdayAppts.filter(isPaid).reduce((sum, a) => sum + getTotal(a), 0));
   const revenueTrend = yesterdayRevenue > 0 ? Math.round(((todayRevenue - yesterdayRevenue) / yesterdayRevenue) * 100) : null;
 
   // MONTH
@@ -178,16 +187,15 @@ export default function AdminDashboard() {
   //    (« Valider la prestation »), même règle que la pastille € de l'agenda (`needsClosing`) ;
   //  - RDV confirmés **à venir** du mois (pas encore dus).
   const unclosedMonth = thisMonth.filter(a => a.status === 'confirmed' && !isPaid(a) && needsClosing(a));
-  const monthUnpaid = unclosedMonth.reduce((sum, a) => sum + (a.total_price || 0), 0);
+  const monthUnpaid = round2(unclosedMonth.reduce((sum, a) => sum + outsideGift(a), 0));
   const upcomingMonth = thisMonth.filter(a => a.status === 'confirmed' && !isPaid(a) && !needsClosing(a));
-  const monthUpcoming = upcomingMonth.reduce((sum, a) => sum + (a.total_price || 0), 0);
+  const monthUpcoming = round2(upcomingMonth.reduce((sum, a) => sum + outsideGift(a), 0));
   const noShowsMonth = thisMonth.filter(a => a.status === 'no_show').length;
-  const cancelledMonth = thisMonth.filter(a => a.status === 'cancelled').length;
+  const cancelledMonth = thisMonth.filter(a => a.status === 'cancelled' && !isRescheduledCancel(a)).length;
 
   // Prestations CB vs Espèces vs Carte cadeau (sans pourboire). La part payée par carte cadeau
   // (débit au comptoir, même partiel) n'est jamais comptée en CB / espèces : seul le reste l'est.
   // Un RDV « Carte cadeau » dont la carte n'a couvert qu'une partie : le reste en « non renseigné ».
-  const outsideGift = (a) => revenueOf(a) - giftPartOf(a);
   const sumBy = (list, method) => round2(list
     .filter(a => (method === null ? (!a.payment_method || a.payment_method === 'carte_cadeau') : a.payment_method === method))
     .reduce((s, a) => s + outsideGift(a), 0));
@@ -225,7 +233,10 @@ export default function AdminDashboard() {
       map[name].products += a.product_price || 0;
       map[name].count++;
     });
-    return Object.values(map).sort((a, b) => b.revenue - a.revenue);
+    // Arrondi à la fin (pas à chaque ajout) : « 83.10000000000001 € » ne s'affiche plus
+    return Object.values(map)
+      .map(e => ({ ...e, revenue: round2(e.revenue), tips: round2(e.tips), products: round2(e.products) }))
+      .sort((a, b) => b.revenue - a.revenue);
   }, [paidToday, employees]);
 
   // Weekly chart data
@@ -271,7 +282,7 @@ export default function AdminDashboard() {
   // Breaks today
   const breaksToday = allAppointments.filter(a => a.date === today && a.status === 'break');
 
-  const handleExportComptable = () => {
+  const handleExportComptable = async () => {
     const targetAmount = parseFloat(exportAmount);
     if (!targetAmount || targetAmount <= 0) return;
 
@@ -336,18 +347,29 @@ export default function AdminDashboard() {
       }
     }
 
-    if (rows.length === 0) return;
+    if (rows.length === 0) {
+      toast.info('Aucune donnée à exporter pour ce mois');
+      return;
+    }
 
     // Add total row
     const totalExported = rows.reduce((s, r) => s + parseFloat(r.montant), 0);
     rows.push({ date: '', type: '', designation: 'TOTAL', client: '', barber: '', paiement: '', montant: totalExported.toFixed(2) });
 
-    exportToCSV(rows, `export-comptable-${exportMonth}-${targetAmount}EUR`);
-    setShowExport(false);
+    // Apps natives : enregistrement par la feuille de partage (la fenêtre ne se ferme qu'une fois
+    // le fichier produit, sinon l'export semblait réussi sans rien produire)
+    try {
+      await exportToCSV(rows, `export-comptable-${exportMonth}-${targetAmount}EUR`);
+      setShowExport(false);
+    } catch {
+      toast.error('Export impossible, réessayez');
+    }
   };
 
-  // Rendez-vous illisibles : pas de tableau de bord à zéro, qui laisserait croire à un CA nul
-  if (appointmentsQuery.isError && !appointmentsQuery.data) {
+  // Rendez-vous illisibles : pas de tableau de bord à zéro, qui laisserait croire à un CA nul. Une
+  // requête en pause faute de réseau (React Query : pending + paused, sans erreur) compte comme un échec.
+  if ((appointmentsQuery.isError && !appointmentsQuery.data)
+      || (appointmentsQuery.isPending && appointmentsQuery.fetchStatus === 'paused')) {
     return (
       <div className="min-w-0">
         <p className="text-[11px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Tableau de bord</p>
@@ -358,6 +380,19 @@ export default function AdminDashboard() {
           onRetry={appointmentsQuery.refetch}
           retrying={appointmentsQuery.isFetching}
         />
+      </div>
+    );
+  }
+
+  // Premier chargement : des cartes squelette, jamais des montants à 0 €
+  if (appointmentsQuery.isPending) {
+    return (
+      <div className="min-w-0" aria-busy="true">
+        <p className="text-[11px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Tableau de bord</p>
+        <h1 className="font-display text-2xl font-bold mb-4">Ciao le gang ! 🇮🇹🇵🇹</h1>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => <div key={i} className="h-24 rounded-xl bg-card border border-border animate-pulse" />)}
+        </div>
       </div>
     );
   }
@@ -482,7 +517,7 @@ export default function AdminDashboard() {
           (a.status === 'completed' && !a.payment_method)
         );
         if (toClose.length === 0) return null;
-        const totalToClose = toClose.reduce((s, a) => s + (a.total_price || 0), 0);
+        const totalToClose = round2(toClose.reduce((s, a) => s + (a.total_price || 0), 0));
         return (
           <div onClick={() => navigate('/admin/agenda')}
             className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl px-4 py-3 mb-4 flex items-center gap-3 cursor-pointer hover:bg-yellow-500/15 active:scale-[0.99] transition-all">

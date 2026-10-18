@@ -144,8 +144,10 @@ export async function findRescheduleSlots({ appointment, employee, timeOffs = []
  * et prestations), puis annule l'ancien. Le serveur annule désormais l'ancien lui-même à la
  * création (`reschedule_of`) ; l'appel qui suit ne fait alors plus rien (déjà annulé). Sans `withReason`, l'annulation envoie exactement
  * `{ status: 'cancelled' }` (un champ inconnu ferait refuser l'annulation).
- * @returns {Promise<{ created: object, oldCancelled: boolean }>} — lève l'erreur du serveur si la
- *   création est refusée (créneau pris entre-temps : 409)
+ * @returns {Promise<{ created: object, oldCancelled: boolean|null }>} — `oldCancelled` : true si
+ *   l'ancien est annulé, false s'il est encore actif, null si on ne sait pas (réseau coupé : le
+ *   serveur l'a très probablement déjà annulé lui-même). Lève l'erreur du serveur si la création
+ *   est refusée (créneau pris entre-temps : 409)
  */
 export async function moveAppointment({ appointment, employee, user, slot, withReason = false, catalog = null }) {
   // Prestations et durée d'aujourd'hui quand le catalogue est connu (le serveur recalcule de
@@ -186,7 +188,27 @@ export async function moveAppointment({ appointment, employee, user, slot, withR
         : { status: 'cancelled' },
     );
   } catch {
-    oldCancelled = false;
+    // L'échec du filet de secours ne prouve rien : le serveur annule l'ancien à la création.
+    // On relit son état avant de parler d'échec.
+    const state = await checkOldCancelled(appointment.id);
+    oldCancelled = state === 'active' ? false : (state === 'cancelled' ? true : null);
   }
   return { created, oldCancelled };
+}
+
+/**
+ * État d'un ancien rendez-vous après un déplacement : 'cancelled' (annulé, absent ou disparu),
+ * 'active' (encore confirmé) ou 'unknown' (lecture impossible, réseau coupé). La politique de
+ * lecture du serveur limite déjà un client à ses propres lignes : filtrer sur `id` est sûr.
+ * @returns {Promise<'cancelled'|'active'|'unknown'>}
+ */
+export async function checkOldCancelled(id) {
+  try {
+    const rows = await api.entities.Appointment.filter({ id }, '-date', 1);
+    const r = Array.isArray(rows) ? rows[0] : null;
+    if (!r || ['cancelled', 'no_show'].includes(r.status)) return 'cancelled';
+    return ['confirmed', 'pending'].includes(r.status) ? 'active' : 'cancelled';
+  } catch {
+    return 'unknown';
+  }
 }

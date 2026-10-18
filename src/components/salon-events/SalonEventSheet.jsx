@@ -93,10 +93,10 @@ function EventGallery({ images, title, reduceMotion }) {
   );
 }
 
-/** Deux boutons Google Agenda / Apple-Outlook (mêmes cibles que Mes rendez-vous). */
+/** Boutons Google Agenda (+ Apple / Outlook sur le web), mêmes cibles que Mes rendez-vous. */
 function CalendarButtons({ onPick, dark = false }) {
   return (
-    <div className="grid grid-cols-2 gap-2">
+    <div className={`grid ${CALENDAR_TARGETS.length > 1 ? 'grid-cols-2' : 'grid-cols-1'} gap-2`}>
       {CALENDAR_TARGETS.map(({ kind, label }) => (
         <motion.button
           key={kind}

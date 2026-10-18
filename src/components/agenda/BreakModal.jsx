@@ -32,6 +32,9 @@ export default function BreakModal({ breakItem, employees, onClose, onDelete, on
   });
   const [weeksCount, setWeeksCount] = useState(4);
   const [applying, setApplying] = useState(false);
+  // Suppression en deux taps : une pause bloque souvent une demi-journée ou une journée entière,
+  // l'effacer rend aussitôt le créneau réservable par les clients
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   if (!breakItem) return null;
 
@@ -221,10 +224,40 @@ export default function BreakModal({ breakItem, employees, onClose, onDelete, on
           </div>
         </div>
 
+        {confirmDelete && (
+          <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 space-y-3">
+            <p className="text-xs text-red-300 break-words">
+              Supprimer la pause de <strong>{empName}</strong>
+              {breakItem.date && <>, {format(new Date(breakItem.date + 'T00:00:00'), 'EEE d MMM', { locale: fr })}</>}
+              {' '}{String(breakItem.start_time || '').slice(0, 5)} – {String(breakItem.end_time || '').slice(0, 5)} ?
+              {' '}Le créneau redeviendra réservable par les clients.
+            </p>
+            <div className="flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmDelete(false)}
+                className="px-3 py-2 text-xs rounded-lg border border-border text-foreground hover:bg-secondary transition-all"
+              >
+                Non, garder
+              </button>
+              <button
+                type="button"
+                onClick={() => { onDelete(breakItem.id); onClose(); }}
+                className="flex items-center gap-1.5 px-3 py-2 text-xs rounded-lg bg-red-600 text-white hover:bg-red-700 transition-all"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Oui, supprimer
+              </button>
+            </div>
+          </div>
+        )}
+
         <DialogFooter className="flex gap-2 sm:gap-2">
           <button
-            onClick={() => { onDelete(breakItem.id); onClose(); }}
-            className="flex items-center gap-1.5 px-3 py-2 text-xs rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-all"
+            type="button"
+            onClick={() => setConfirmDelete(true)}
+            disabled={confirmDelete}
+            className="flex items-center gap-1.5 px-3 py-2 text-xs rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-all disabled:opacity-50"
           >
             <Trash2 className="w-3.5 h-3.5" />
             Supprimer

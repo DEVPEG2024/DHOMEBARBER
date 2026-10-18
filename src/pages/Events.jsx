@@ -127,9 +127,10 @@ export default function Events() {
       setForm({ event_type: '', date: '', time_slot: 'full_day', guest_count: '', message: '' });
     },
     onError: (err) => {
-      // Message du serveur (créneau invalide, date déjà prise…) plutôt qu'une erreur générique
-      const message = err?.data?.error || err?.message;
-      toast.error(message && !/^HTTP \d+$/.test(message) ? message : 'Erreur lors de l\'envoi');
+      // Message du serveur (créneau invalide, date passée, doublon, quota…) ; coupure réseau en
+      // français (« Load failed » sinon). Le formulaire reste rempli : le serveur rend la même
+      // demande sans la recréer si elle était déjà arrivée.
+      toast.error(serverMessage(err, 'Erreur lors de l\'envoi'));
       // Un créneau a pu être confirmé entre-temps : on recharge les créneaux pris
       if (err?.status === 409 || err?.status === 400) queryClient.invalidateQueries({ queryKey: ['confirmedEvents'] });
     },

@@ -22,13 +22,13 @@ import BreakModal from '@/components/agenda/BreakModal';
 import AppointmentDetailModal from '@/components/agenda/AppointmentDetailModal';
 import MoveDialog, { buildMoveFields, saveMove } from '@/components/agenda/MoveDialog';
 import WalkInDialog from '@/components/agenda/WalkInDialog';
-import AttendanceCheck from '@/components/agenda/AttendanceCheck';
+import AttendanceCheck, { useParisTodayKey } from '@/components/agenda/AttendanceCheck';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   BARBER_COLORS, timeToMinutes, toDateStr, parseDateParam, visibleRange, datesBetween,
   fetchAppointmentsForDates, agendaQueryKey, invalidateAppointmentQueries,
   isBreak, isLastMinuteSlot, slotIssues, aptDuration, isUnclaimedLastMinute,
-  isCancelledLike, minutesToTime, agendaErrorMessage, appointmentEndParis,
+  isCancelledLike, minutesToTime, agendaErrorMessage, appointmentEndParis, isClientPlaceholder,
 } from '@/components/agenda/agendaUtils';
 
 const VIEWS = ['day', 'week', 'month'];
@@ -66,7 +66,10 @@ export default function Agenda() {
   // ─── Position dans l'agenda : dans l'adresse (rechargement, retour arrière, lien depuis le planning) ───
   const view = VIEWS.includes(searchParams.get('view')) ? searchParams.get('view') : (readStoredView() || 'week');
   const dateParam = searchParams.get('date');
-  const currentDate = useMemo(() => parseDateParam(dateParam) || new Date(), [dateParam]);
+  // Sans ?date=, l'agenda resté ouvert après minuit passe de lui-même au nouveau jour ; avec une
+  // date explicite, il reste où l'utilisateur l'a mis
+  const parisTodayKey = useParisTodayKey();
+  const currentDate = useMemo(() => parseDateParam(dateParam) || new Date(), [dateParam, parisTodayKey]);
   const dateKey = toDateStr(currentDate);
   const ownEmployeeId = user?.role === 'barber' && user?.employee_id ? String(user.employee_id) : null;
   const employeeFilter = searchParams.get('barber') || ownEmployeeId || 'all';
@@ -148,8 +151,10 @@ export default function Agenda() {
     () => appointments.filter((a) => dateSet.has(String(a.date).slice(0, 10))),
     [appointments, dateSet],
   );
+  // Fiches créées par Clients → Ajouter / Importer (faux RDV annulé à 09:00) : jamais dans l'agenda
   const forBarber = useMemo(
-    () => (employeeFilter === 'all' ? inRange : inRange.filter((a) => String(a.employee_id) === String(employeeFilter))),
+    () => (employeeFilter === 'all' ? inRange : inRange.filter((a) => String(a.employee_id) === String(employeeFilter)))
+      .filter((a) => !isClientPlaceholder(a)),
     [inRange, employeeFilter],
   );
   const cancelledCount = forBarber.filter((a) => a.status === 'cancelled').length;
@@ -232,18 +237,48 @@ export default function Agenda() {
     setPendingBreak(null);
   };
 
-  const handlePendingBreakSelectAll = () => {
+  // « Tous les barbers » : seulement ceux qui travaillent ce jour-là (ni repos, ni congé, ni déjà un
+  // créneau qui commence à cette heure ou un client pendant la pause) ; chaque refus est compté à
+  // part, les pauses posées restent annoncées
+  const handlePendingBreakSelectAll = async () => {
     if (!pendingBreak || employees.length === 0) return;
-    Promise.all(employees.map((emp) =>
-      api.entities.Appointment.create(buildBreakPayload(pendingBreak.start_time, pendingBreak.end_time, emp.id, pendingBreak.date)),
-    )).then(() => {
-      refreshAll();
-      toast.success(`Pause ajoutée pour ${employees.length} barbers`);
-    }).catch(() => {
-      refreshAll();
-      toast.error('Erreur lors de la création des pauses');
-    });
+    const { start_time, end_time, date } = pendingBreak;
     setPendingBreak(null);
+    const day = new Date(`${date}T12:00:00`);
+    const s = timeToMinutes(start_time);
+    const e = timeToMinutes(end_time);
+    const skipped = [];
+    const targets = employees.filter((emp) => {
+      // Repos ce jour-là (un profil sans horaires du tout n'est pas écarté, comme côté serveur)
+      const hasHours = emp.working_hours && typeof emp.working_hours === 'object' && Object.keys(emp.working_hours).length > 0;
+      if (hasHours && !workingHoursOf(emp, day)) { skipped.push(`${emp.name} en repos`); return false; }
+      if (isOnLeave(emp, date, approvedTimeOffs)) { skipped.push(`${emp.name} en congé`); return false; }
+      const sameDay = inRange.filter((a) => String(a.date).slice(0, 10) === date
+        && String(a.employee_id) === String(emp.id)
+        && !['cancelled', 'last_minute', 'no_show'].includes(a.status));
+      if (sameDay.some((a) => String(a.start_time).slice(0, 5) === start_time)) { skipped.push(`${emp.name} : déjà un créneau à ${start_time}`); return false; }
+      if (sameDay.some((a) => a.status !== 'break' && timeToMinutes(a.start_time) < e && timeToMinutes(a.end_time || a.start_time) > s)) {
+        skipped.push(`${emp.name} : un client à cette heure`); return false;
+      }
+      return true;
+    });
+    if (targets.length === 0) {
+      toast.warning(skipped.length ? `Aucune pause posée · ${skipped.join(' · ')}` : 'Aucun barber ne travaille ce jour-là', { duration: 8000 });
+      return;
+    }
+    const results = await Promise.allSettled(targets.map((emp) =>
+      api.entities.Appointment.create(buildBreakPayload(start_time, end_time, emp.id, date)),
+    ));
+    let created = 0;
+    results.forEach((r, i) => {
+      if (r.status === 'fulfilled') { created++; return; }
+      const name = targets[i].name;
+      skipped.push(r.reason?.status === 409 ? `${name} : déjà un créneau à ${start_time}` : `${name} : ${agendaErrorMessage(r.reason, 'erreur')}`);
+    });
+    refreshAll();
+    const head = `${created} pause${created > 1 ? 's' : ''} ajoutée${created > 1 ? 's' : ''}`;
+    if (skipped.length === 0) toast.success(head);
+    else toast.warning([head, ...skipped].join(' · '), { duration: 8000 });
   };
 
   // Récurrence d'une pause : jamais par-dessus un client, un congé ou une pause déjà posée à la
@@ -295,7 +330,8 @@ export default function Agenda() {
   };
 
   const handleExport = () => {
-    exportToCSV(
+    // Apps natives : enregistrement par la feuille de partage (exportCSV.js) ; un échec est dit
+    Promise.resolve(exportToCSV(
       visible.filter((a) => a.status !== 'break').map((a) => ({
         date: a.date, heure_debut: a.start_time, heure_fin: a.end_time,
         client: a.client_name, email: a.client_email, telephone: a.client_phone || '',
@@ -303,7 +339,8 @@ export default function Agenda() {
         duree_min: a.total_duration, prix_eur: a.total_price, statut: a.status, notes: a.notes || '',
       })),
       `agenda_${dates[0]}`,
-    );
+    )).then((done) => { if (done === false) toast.info('Aucun rendez-vous à exporter sur cette période'); })
+      .catch(() => toast.error('Export impossible, réessayez'));
   };
 
   const openDay = (day) => updateParams({ view: 'day', date: toDateStr(day) });

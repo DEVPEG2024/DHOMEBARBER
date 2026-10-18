@@ -52,11 +52,15 @@ export default function SmartAgenda() {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiSuggestions, setAiSuggestions] = useState([]);
 
-  const { data: appointments = [], isFetching } = useQuery({
+  const apptsQuery = useQuery({
     queryKey: ['planningAppointments', weekKey],
     queryFn: () => fetchAppointmentsForDates(weekDates),
     placeholderData: keepPreviousData,
   });
+  const appointments = apptsQuery.data ?? [];
+  const isFetching = apptsQuery.isFetching;
+  // Échec sans données : jamais de faux « 0 RDV / 0 € » (règle LoadError)
+  const apptsFailed = apptsQuery.isError && !apptsQuery.data;
 
   const { data: employees = [] } = useQuery({
     queryKey: ['employees'],
@@ -287,6 +291,9 @@ export default function SmartAgenda() {
       </div>
 
       {/* Jours de la semaine : un tap ouvre la journée dans l'agenda */}
+      {apptsFailed ? (
+        <LoadError what="les rendez-vous de la semaine" error={apptsQuery.error} onRetry={apptsQuery.refetch} retrying={apptsQuery.isFetching} className="mb-6" />
+      ) : (
       <div className="grid grid-cols-7 gap-1 mb-6">
         {weekStats.map(({ day, dayStr, count, revenue }) => {
           const isToday = isSameDay(day, new Date());
@@ -310,6 +317,7 @@ export default function SmartAgenda() {
           );
         })}
       </div>
+      )}
 
       {/* Présence de l'équipe : chaque case ouvre la journée du barber */}
       <div className="bg-card border border-border rounded-xl p-3 sm:p-4 mb-6">
@@ -339,12 +347,12 @@ export default function SmartAgenda() {
                       ? 'bg-destructive/10 text-destructive'
                       : closed
                         ? 'bg-secondary text-muted-foreground'
-                        : aptCount > 0 ? 'bg-accent/20 text-accent-foreground' : 'bg-border/30 text-muted-foreground';
+                        : !apptsFailed && aptCount > 0 ? 'bg-accent/20 text-accent-foreground' : 'bg-border/30 text-muted-foreground';
                     return (
                       <td key={dayStr} className="text-center py-1.5 px-0.5">
                         <Link to={agendaLink(dayStr, emp.id)} title={`${emp.name} · ${format(day, 'EEEE d MMMM', { locale: fr })}`}
                           className={`inline-flex items-center justify-center w-8 h-8 rounded-lg text-[10px] font-semibold hover:ring-2 hover:ring-primary/50 transition-all ${cls}`}>
-                          {off ? <Moon className="w-3 h-3" /> : closed ? '—' : (aptCount > 0 ? aptCount : '✓')}
+                          {off ? <Moon className="w-3 h-3" /> : closed ? '—' : apptsFailed ? '–' : (aptCount > 0 ? aptCount : '✓')}
                         </Link>
                       </td>
                     );

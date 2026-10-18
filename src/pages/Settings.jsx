@@ -3,14 +3,14 @@ import { useAuth } from '@/lib/AuthContext';
 import { api, apiRequest, apiUrl } from '@/api/apiClient';
 import { isPushSupported, isSubscribed, subscribeToPush, unsubscribeFromPush, getPushPermission, syncPushSubscription } from '@/lib/pushNotifications';
 import { motion } from 'framer-motion';
-import { User, Mail, Phone, Bell, Shield, ChevronRight, Cake, Trash2, Ban, Pencil, Settings as SettingsIcon } from 'lucide-react';
+import { User, Mail, Phone, Bell, Shield, ChevronRight, Cake, Trash2, Ban, Pencil, Settings as SettingsIcon, Megaphone } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
 import { isNative, platform, openExternalUrl } from '@/lib/capacitor';
 import FeedbackSection from '@/components/feedback/FeedbackSection';
 import { hasObjectionableContent } from '@/lib/contentFilter';
-import LoadError from '@/components/shared/LoadError';
+import LoadError, { friendlyError } from '@/components/shared/LoadError';
 import { parisDay } from '@/lib/slots';
 
 // Mêmes limites que l'inscription (routes/auth.js côté serveur)
@@ -64,7 +64,7 @@ function InlineField({ id, icon: Icon, label, value, placeholder, validate, onSa
       await onSave(cleaned);
     } catch (err) {
       console.error(`${label} save error:`, err);
-      toast.error(err?.message || 'Erreur lors de la sauvegarde');
+      toast.error(friendlyError(err, 'Erreur lors de la sauvegarde'));
     } finally {
       setSaving(false);
     }
@@ -124,6 +124,30 @@ export default function Settings() {
   const pushSupported = isPushSupported();
   const queryClient = useQueryClient();
   const [unblocking, setUnblocking] = useState(null);
+  // Emails d'offres et d'actualités (« Tous les clients ») : activés tant que le compte ne les a
+  // pas refusés (champ absent d'un ancien serveur = activé). Les emails liés aux rendez-vous et
+  // commandes ne sont pas concernés.
+  const [marketingOverride, setMarketingOverride] = useState(null);
+  const [marketingSaving, setMarketingSaving] = useState(false);
+  const marketingEnabled = marketingOverride ?? (user?.marketing_emails !== false);
+  const toggleMarketing = async () => {
+    if (!user?.id || marketingSaving) return;
+    const next = !marketingEnabled;
+    setMarketingOverride(next);
+    setMarketingSaving(true);
+    try {
+      await api.entities.User.update(user.id, { marketing_emails: next });
+      if (refreshUser) await refreshUser();
+      toast.success(next ? 'Emails d\'offres activés' : 'Vous ne recevrez plus nos offres par email');
+    } catch (err) {
+      setMarketingOverride(!next);
+      toast.error(friendlyError(err, 'Réglage non enregistré, réessayez'));
+    } finally {
+      setMarketingSaving(false);
+    }
+  };
+  // Une fois l'utilisateur relu, c'est lui qui fait foi
+  useEffect(() => { setMarketingOverride(null); }, [user?.marketing_emails]);
 
   // Utilisateurs bloqués depuis le fil
   const {
@@ -156,7 +180,7 @@ export default function Settings() {
       queryClient.invalidateQueries({ queryKey: ['postComments'] });
       toast.success(`${blockedLabel(b)} débloqué`);
     } catch (err) {
-      toast.error(err?.message || 'Erreur lors du déblocage');
+      toast.error(friendlyError(err, 'Erreur lors du déblocage'));
     } finally {
       setUnblocking(null);
     }
@@ -235,7 +259,7 @@ export default function Settings() {
       const permission = await getPushPermission().catch(() => null);
       if (permission) setPushPermission(permission);
       if (permission === 'denied') toast.error('Notifications refusées sur cet appareil');
-      else toast.error(err?.message || 'Erreur notifications');
+      else toast.error(friendlyError(err, 'Erreur notifications', { foreign: "Impossible d'activer les notifications sur cet appareil. Réessayez." }));
     } finally {
       setPushLoading(false);
     }
@@ -331,7 +355,7 @@ export default function Settings() {
                         toast.success(value ? 'Date de naissance enregistrée' : 'Date de naissance supprimée');
                       } catch (err) {
                         console.error('Birth date save error:', err);
-                        toast.error(err?.message || 'Erreur lors de la sauvegarde');
+                        toast.error(friendlyError(err, 'Erreur lors de la sauvegarde'));
                       } finally {
                         setSavingBirth(false);
                       }
@@ -396,6 +420,25 @@ export default function Settings() {
               )}
             </div>
           )}
+          {/* Emails d'offres (« Tous les clients ») : refus simple à tout moment (CNIL, art. L34-5 CPCE) */}
+          <button
+            onClick={toggleMarketing}
+            disabled={marketingSaving}
+            className="flex items-center justify-between w-full px-4 py-3.5 hover:bg-white/5 transition-colors disabled:opacity-50 border-t border-white/5"
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+                <Megaphone className="w-4 h-4 text-primary" />
+              </div>
+              <div className="text-left min-w-0">
+                <p className="text-sm font-semibold text-foreground">Emails d'offres et d'actualités</p>
+                <p className="text-[11px] text-muted-foreground">Les emails de vos rendez-vous et commandes arrivent toujours</p>
+              </div>
+            </div>
+            <div className={`w-11 h-6 rounded-full transition-colors relative shrink-0 ${marketingEnabled ? 'bg-primary' : 'bg-muted'}`}>
+              <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${marketingEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+            </div>
+          </button>
         </motion.div>
 
         {/* Bugs et suggestions */}
@@ -459,7 +502,16 @@ export default function Settings() {
           </motion.div>
         )}
 
-        {/* Danger zone */}
+        {/* Compte du salon (admin qui parcourt les pages client) : pas de suppression ici, le serveur
+            la refuse (le salon perdait son seul accès administrateur) */}
+        {user && user.role !== 'user' && (
+          <p className="mt-4 mb-4 rounded-2xl border border-white/8 bg-white/4 px-4 py-3 text-[11px] text-muted-foreground leading-relaxed">
+            Compte du salon : il se gère depuis l'espace admin → Comptes barbers.
+          </p>
+        )}
+
+        {/* Danger zone (clients seulement) */}
+        {(!user || user.role === 'user') && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
           className="rounded-2xl border border-red-500/20 bg-red-500/5 overflow-hidden mb-4 mt-4">
           <p className="text-xs font-semibold text-red-400 uppercase tracking-wider px-4 pt-4 pb-2">Zone de danger</p>
@@ -498,7 +550,7 @@ export default function Settings() {
                       // Le serveur a déjà effacé les abonnements push du compte : pas de désinscription
                       await logout({ detachPush: false });
                     } catch (err) {
-                      toast.error(err?.message || 'Erreur lors de la suppression');
+                      toast.error(friendlyError(err, 'Erreur lors de la suppression'));
                     } finally {
                       setDeleteLoading(false);
                     }
@@ -512,6 +564,7 @@ export default function Settings() {
             </div>
           )}
         </motion.div>
+        )}
 
         {/* Contact (directive App Store 1.2 : coordonnées publiées pour joindre le salon) */}
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.22 }}

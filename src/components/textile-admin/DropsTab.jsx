@@ -10,6 +10,8 @@ import {
   Plus, Pencil, Trash2, Bell, Rocket, Flag, Shirt, ClipboardList, CalendarClock, Sparkles, Image as ImageIcon,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { adminErrorMessage } from '@/lib/adminErrors';
+import LoadError from '@/components/shared/LoadError';
 import { api } from '@/api/apiClient';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -136,7 +138,9 @@ function Stat({ icon: Icon, value, label, className = '' }) {
  * @param {boolean} props.isAdmin
  * @param {boolean} props.isLoading
  */
-export default function DropsTab({ drops, concepts, reservations, isAdmin, isLoading }) {
+export default function DropsTab({ drops, concepts, reservations, isAdmin, isLoading, error = null, onRetry, retrying = false }) {
+  // Chargement en échec sans donnée : LoadError, jamais « Aucun drop » ni « Nouveau drop »
+  const loadFailed = !!error && drops.length === 0;
   const queryClient = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingDrop, setEditingDrop] = useState(null);
@@ -164,7 +168,7 @@ export default function DropsTab({ drops, concepts, reservations, isAdmin, isLoa
       setOpenTarget(null);
       toast.success(status === 'live' ? 'Drop ouvert : les réservations sont possibles' : 'Drop terminé');
     },
-    onError: (err) => toast.error(err?.message || 'Erreur lors du changement de statut'),
+    onError: (err) => toast.error(adminErrorMessage(err, 'Erreur lors du changement de statut')),
   });
 
   // Suppression : les pièces d'abord si demandé (une par une, le serveur n'a pas de suppression
@@ -188,7 +192,7 @@ export default function DropsTab({ drops, concepts, reservations, isAdmin, isLoa
     },
     onError: (err) => {
       invalidateTextile(queryClient);
-      toast.error(err?.message || 'Erreur lors de la suppression');
+      toast.error(adminErrorMessage(err, 'Erreur lors de la suppression'));
     },
   });
 
@@ -207,6 +211,7 @@ export default function DropsTab({ drops, concepts, reservations, isAdmin, isLoa
 
   return (
     <div>
+      {!loadFailed && (
       <div className="flex items-center justify-between gap-3 mb-4">
         <p className="text-xs text-muted-foreground">
           {drops.length} drop{drops.length > 1 ? 's' : ''} · les brouillons restent invisibles des clients
@@ -217,9 +222,12 @@ export default function DropsTab({ drops, concepts, reservations, isAdmin, isLoa
           </Button>
         )}
       </div>
+      )}
 
       {isLoading ? (
         <Spinner />
+      ) : loadFailed ? (
+        <LoadError what="les drops" error={error} onRetry={onRetry} retrying={retrying} />
       ) : drops.length === 0 ? (
         <EmptyState icon={Sparkles} title="Aucun drop pour le moment"
           hint={isAdmin ? 'Créez un drop, ajoutez-lui des pièces, puis annoncez-le.' : undefined} />

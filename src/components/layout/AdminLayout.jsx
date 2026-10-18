@@ -43,6 +43,7 @@ const allNavItems = [
   { path: '/admin/my-cleaning', icon: Sparkles, label: 'Entretien', barberOnly: true, alwaysShow: true, category: 'Mon espace' },
   { path: '/admin/my-leave', icon: CalendarDays, label: 'Mes Congés', barberOnly: true, alwaysShow: true, category: 'Mon espace' },
   { path: '/admin/my-settings', icon: Settings, label: 'Paramètres', barberOnly: true, alwaysShow: true, category: 'Mon espace' },
+  { path: '/admin/my-notifications', icon: Bell, label: 'Mes notifications', barberOnly: true, alwaysShow: true, category: 'Mon espace' },
   { path: '/admin/stats', icon: BarChart3, label: 'Statistiques', perm: 'stats', category: 'Analyse' },
   { path: '/admin/feed', icon: Newspaper, label: 'New\'sGang', alwaysShow: true, category: 'Divers' },
   { path: '/admin/events', icon: PartyPopper, label: 'Privatisations', adminOnly: true, category: 'Divers' },

@@ -57,10 +57,14 @@ function formatValidUntil(value, long = false) {
 }
 
 /**
- * Statut affiché : une carte validée dont la date de fin (jour de Paris) est passée est expirée,
- * même si le serveur ne l'a pas encore marquée. Valable jusqu'au soir de cette date incluse.
+ * Statut affiché.
+ * - Le statut serveur `expired` n'est posé que par l'admin (carte en attente rejetée ou carte
+ *   validée annulée), sans toucher à `valid_until` : c'est une carte annulée par le salon.
+ * - La vraie expiration est calculée ici : une carte validée dont la date de fin (jour de Paris)
+ *   est passée est expirée. Valable jusqu'au soir de cette date incluse.
  */
 function cardStatus(card, today = parisYmd()) {
+  if (card?.status === 'expired') return 'cancelled';
   if (card?.status === 'validated') {
     const end = validUntilYmd(card.valid_until);
     if (end && end < today) return 'expired';
@@ -85,9 +89,30 @@ const STATUS_CONFIG = {
   validated: { label: 'Validée', color: 'text-green-400', bg: 'bg-green-500/15 border-green-500/20', icon: CheckCircle2 },
   used: { label: 'Utilisée', color: 'text-blue-400', bg: 'bg-blue-500/15 border-blue-500/20', icon: CheckCircle2 },
   expired: { label: 'Expirée', color: 'text-red-400', bg: 'bg-red-500/15 border-red-500/20', icon: XCircle },
+  cancelled: { label: 'Annulée', color: 'text-red-400', bg: 'bg-red-500/15 border-red-500/20', icon: XCircle },
 };
 
 const QR_BASE_URL = 'https://dhomebarber.fr/admin/gift-cards';
+
+/**
+ * Copie capturée par html2canvas (PDF) : il ne dessine pas `text-overflow: ellipsis` et décale le
+ * texte de quelques pixels vers le bas, donc un nom tronqué par `truncate` sortait rogné. On abrège
+ * le texte nous-mêmes (« Jean-Baptiste … ») puis on laisse la ligne déborder verticalement.
+ */
+function fitEllipsisForCapture(doc) {
+  doc.querySelectorAll('[data-fit-ellipsis]').forEach((el) => {
+    const full = el.textContent || '';
+    if (el.scrollWidth > el.clientWidth) {
+      el.style.textOverflow = 'clip';
+      let n = full.length;
+      while (n > 1 && el.scrollWidth > el.clientWidth) {
+        n -= 1;
+        el.textContent = `${full.slice(0, n).trimEnd()} …`;
+      }
+    }
+    el.style.overflow = 'visible';
+  });
+}
 
 // Premium gift card visual component (FRONT)
 function GiftCardVisual({ card, cardRef, compact = false }) {
@@ -112,11 +137,11 @@ function GiftCardVisual({ card, cardRef, compact = false }) {
       {/* Gold/premium border effect */}
       <div className="absolute inset-[1px] rounded-3xl border border-white/10" />
 
-      {/* Watermark for pending/expired cards */}
-      {(status === 'pending' || status === 'expired') && (
+      {/* Watermark for pending/expired/cancelled cards */}
+      {(status === 'pending' || status === 'expired' || status === 'cancelled') && (
         <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
           <p className="whitespace-nowrap text-3xl sm:text-5xl font-black text-red-500/30 -rotate-12 tracking-widest select-none">
-            {status === 'pending' ? 'EN ATTENTE' : 'EXPIRÉE'}
+            {status === 'pending' ? 'EN ATTENTE' : status === 'cancelled' ? 'ANNULÉE' : 'EXPIRÉE'}
           </p>
         </div>
       )}
@@ -144,20 +169,23 @@ function GiftCardVisual({ card, cardRef, compact = false }) {
           <p className="text-xs text-primary font-semibold mt-1">D'Home Barber</p>
         </div>
 
-        {/* Bottom row */}
-        <div className="flex items-end justify-between">
-          <div>
+        {/* Bottom row : une seule ligne de chaque côté, sinon le recto (ratio fixe 1,6) coupait
+            la date et la fin du nom sur un téléphone de 320 px, y compris dans le PDF */}
+        <div className="flex items-end justify-between gap-3">
+          <div className="min-w-0 flex-1">
             <p className="text-[10px] text-white/40 uppercase tracking-wider">Pour</p>
-            <p className="text-sm font-semibold text-white">{card.recipient_name || 'À définir'}</p>
+            <p data-fit-ellipsis className="text-sm font-semibold text-white truncate">{card.recipient_name || 'À définir'}</p>
           </div>
-          <div className="text-right">
+          <div className="text-right shrink-0">
             {isValid ? (
               validDate && (
                 <>
-                  <p className="text-[10px] text-white/40 uppercase tracking-wider">Valable jusqu'au</p>
-                  <p className="text-xs text-white/70">{validDate}</p>
+                  <p className="text-[10px] text-white/40 uppercase tracking-wider whitespace-nowrap">Valable jusqu'au</p>
+                  <p className="text-xs text-white/70 whitespace-nowrap">{validDate}</p>
                 </>
               )
+            ) : status === 'cancelled' ? (
+              <p className="text-xs font-bold text-red-400">Annulée</p>
             ) : status === 'expired' ? (
               <p className="text-xs font-bold text-red-400">Expirée</p>
             ) : status === 'used' ? (
@@ -401,7 +429,7 @@ function GiftCardDetailModal({ card, onClose }) {
     setDownloading(true);
     try {
       // Front
-      const frontCanvas = await html2canvas(cardRef.current, { scale: 3, backgroundColor: null, useCORS: true });
+      const frontCanvas = await html2canvas(cardRef.current, { scale: 3, backgroundColor: null, useCORS: true, onclone: fitEllipsisForCapture });
       const frontImg = frontCanvas.toDataURL('image/png');
       const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: [90, 55] });
       pdf.addImage(frontImg, 'PNG', 0, 0, 90, 55);
@@ -560,6 +588,13 @@ function GiftCardDetailModal({ card, onClose }) {
           <p className={`mt-5 text-center text-xs rounded-xl px-4 py-3 border ${statusConf.bg} ${statusConf.color}`}>
             {status === 'pending'
               ? 'À régler au salon pour l’activer : vous pourrez ensuite la télécharger et la partager.'
+              : status === 'cancelled'
+                ? (
+                  <>
+                    Cette carte a été annulée par le salon. Une question ? Appelez le{' '}
+                    <a href="tel:0666083605" className="underline font-semibold whitespace-nowrap">06 66 08 36 05</a>.
+                  </>
+                )
               : status === 'expired'
                 ? 'Cette carte a expiré.'
                 : status === 'used'

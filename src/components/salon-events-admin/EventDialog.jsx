@@ -10,6 +10,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Upload, X, ArrowLeft, ArrowRight, Image as ImageIcon, Bell, CalendarClock, Info } from 'lucide-react';
 import { toast } from 'sonner';
+import { adminErrorMessage } from '@/lib/adminErrors';
 import { api } from '@/api/apiClient';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -123,7 +124,7 @@ export default function EventDialog({ open, onOpenChange, event }) {
       toast.success(event?.id ? 'Événement mis à jour' : 'Événement créé');
       onOpenChange(false);
     },
-    onError: (err) => toast.error(err?.message || 'Erreur lors de la sauvegarde'),
+    onError: (err) => toast.error(adminErrorMessage(err, 'Erreur lors de la sauvegarde')),
   });
 
   const handleSave = () => {
@@ -155,7 +156,7 @@ export default function EventDialog({ open, onOpenChange, event }) {
         const url = await uploadImageFile(file);
         setForm((prev) => (prev.images.length >= MAX_IMAGES || prev.images.includes(url) ? prev : { ...prev, images: [...prev.images, url] }));
       } catch (err) {
-        toast.error(err?.message || `Échec de l'envoi de ${file.name}`);
+        toast.error(adminErrorMessage(err, `Échec de l'envoi de ${file.name}`));
       }
       setUpload((p) => (p ? { ...p, done: p.done + 1 } : p));
     }

@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
+import LoadError, { friendlyError } from '@/components/shared/LoadError';
 import {
   SNAP_ADMIN_KEY, snapStatsKey, fetchSnapAdmin, saveSnapAdmin, fetchSnapStats, loadSnapLenses, resetSnapSettings,
   buildEntries, isColorLens, isBeardLens,
@@ -72,7 +73,7 @@ export default function AdminSnap() {
       resetSnapSettings();
       toast.success('Enregistré');
     },
-    onError: (err) => toast.error(err?.message || 'Erreur lors de l\'enregistrement'),
+    onError: (err) => toast.error(friendlyError(err, 'Erreur lors de l\'enregistrement')),
   });
 
   const lenses = lensesQ.data?.lenses || [];
@@ -85,13 +86,9 @@ export default function AdminSnap() {
   if (configQ.isLoading) {
     return <div className="py-20 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>;
   }
-  if (configQ.error) {
-    return (
-      <div className="flex items-start gap-2 rounded-xl border border-red-500/25 bg-red-500/10 p-4 text-sm text-red-300">
-        <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-        Impossible de charger la configuration des filtres : {configQ.error.message}
-      </div>
-    );
+  // Échec (ou hors ligne) : LoadError avec Réessayer, jamais « … : Load failed »
+  if (configQ.error && !configQ.data) {
+    return <LoadError what="la configuration des filtres" error={configQ.error} onRetry={() => configQ.refetch()} retrying={configQ.isFetching} />;
   }
 
   const status = config.live ? 'live' : config.configured ? 'off' : 'unconfigured';
@@ -206,6 +203,8 @@ export default function AdminSnap() {
             onDaysChange={setDays}
             isLoading={statsQ.isLoading}
             error={statsQ.error}
+            onRetry={() => statsQ.refetch()}
+            retrying={statsQ.isFetching}
           />
         </div>
       )}

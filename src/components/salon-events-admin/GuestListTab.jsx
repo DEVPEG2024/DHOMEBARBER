@@ -11,6 +11,7 @@ import {
   Phone, Mail, Users, UserCheck, UserX, Clock, Armchair, BellRing, Download, Trash2, AlertTriangle, Bell,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { adminErrorMessage, isUncertainSend } from '@/lib/adminErrors';
 import { api } from '@/api/apiClient';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
@@ -74,7 +75,8 @@ export default function GuestListTab({ event, invites, isLoading, error, isAdmin
         : `Aucun ${who} joignable par push (notifications non activées)`);
       if (Number(data?.failed) > 0) toast.warning(`${data.failed} envoi${data.failed > 1 ? 's' : ''} en échec`);
     },
-    onError: (err) => toast.error(err?.message || "Erreur lors de l'envoi du rappel"),
+    // Coupure réseau : l'envoi est peut-être parti, avertir sans inviter à renvoyer
+    onError: (err) => (isUncertainSend(err) ? toast.warning : toast.error)(adminErrorMessage(err, "Erreur lors de l'envoi du rappel", { sending: true }), { duration: 10000 }),
   });
 
   const removeMutation = useMutation({
@@ -83,12 +85,13 @@ export default function GuestListTab({ event, invites, isLoading, error, isAdmin
       invalidateSalonEvents(queryClient, event.id);
       toast.success('Invitation retirée');
     },
-    onError: (err) => toast.error(err?.message || 'Erreur lors du retrait'),
+    onError: (err) => toast.error(adminErrorMessage(err, 'Erreur lors du retrait')),
   });
 
   const handleExport = () => {
     if (rows.length === 0) { toast.error('Aucun invité à exporter'); return; }
-    exportToCSV(rows.map((r) => ({
+    // Apps natives : enregistrement par la feuille de partage (exportCSV.js) ; un échec est dit
+    Promise.resolve(exportToCSV(rows.map((r) => ({
       Nom: r.user_name || '',
       Email: r.user_email || '',
       Téléphone: r.phone || '',
@@ -97,8 +100,9 @@ export default function GuestListTab({ event, invites, isLoading, error, isAdmin
       'Invité le': r.invited_at ? formatParisDateTime(r.invited_at) : '',
       'Répondu le': r.responded_at ? formatParisDateTime(r.responded_at) : '',
       'Notifié le': r.notified_at ? formatParisDateTime(r.notified_at) : '',
-    })), `invites-${slugify(event.title)}`);
-    toast.success('Export CSV téléchargé');
+    })), `invites-${slugify(event.title)}`))
+      .then(() => toast.success('Export CSV prêt'))
+      .catch(() => toast.error('Export impossible, réessayez'));
   };
 
   const filters = [

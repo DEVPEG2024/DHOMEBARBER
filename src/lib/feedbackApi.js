@@ -54,9 +54,15 @@ export const isBackendMissing = (err) => {
   return /\bentit(y|ies|é)|unknown table|table inconnue/i.test(message);
 };
 
-export async function fetchMyFeedback() {
+/**
+ * Envois du compte connecté. Le filtre explicite par email compte pour l'admin : sans lui, le
+ * serveur lui renvoie les envois de tous les clients (pour un client ou un barber, il est
+ * redondant avec celui que le serveur force déjà).
+ */
+export async function fetchMyFeedback(email) {
+  if (!email) return [];
   try {
-    return await api.entities.Feedback.list('-created_at', 50);
+    return await api.entities.Feedback.filter({ client_email: email }, '-created_at', 50);
   } catch (err) {
     if (isBackendMissing(err)) return [];
     throw err;

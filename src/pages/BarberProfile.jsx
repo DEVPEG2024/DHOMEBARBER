@@ -173,7 +173,9 @@ const WEEK_DAYS = [
 
 // Contenu du profil d'un barber (carte, vidéo, à propos, horaires, CTA).
 // Rendu dans un bloc glissable : un swipe gauche / droite passe au barber suivant / précédent.
-function BarberProfileContent({ employee, skillCategories }) {
+function BarberProfileContent({ employee, skillCategories, catsQuery = null }) {
+  // Catégories de compétences en échec : jamais une carte « sans stats » sans explication
+  const catsFailed = !!catsQuery && catsQuery.isError && skillCategories.length === 0;
   const employeeSkills = employee.skills || [];
   const allSkills = skillCategories.map(cat => {
     const s = employeeSkills.find(s => String(s.category_id) === String(cat.id));
@@ -208,6 +210,9 @@ function BarberProfileContent({ employee, skillCategories }) {
       >
         Double tap sur la carte pour lire la description
       </motion.p>
+      {catsFailed && (
+        <LoadError compact className="mb-6" what="ses statistiques" error={catsQuery.error} onRetry={catsQuery.refetch} retrying={catsQuery.isFetching} />
+      )}
 
       {/* Vidéo de présentation, si renseignée */}
       <MediaBlock videoUrl={videoUrl} photoUrl={photoUrl} />
@@ -315,18 +320,14 @@ export default function BarberProfile() {
     retry: 1,
   });
 
-  const { data: skillCategories = [] } = useQuery({
+  // L'erreur est levée (plus avalée en liste vide mise en cache 5 min) : la carte affichait « – »
+  // et aucune stat pour tous les clients après une simple coupure réseau
+  const skillCategoriesQuery = useQuery({
     queryKey: ['skillCategories'],
     staleTime: 5 * 60 * 1000, // catalogue : change rarement
-    queryFn: async () => {
-      try {
-        return await api.entities.SkillCategory.list('sort_order', 100);
-      } catch {
-        return [];
-      }
-    },
-    retry: false,
+    queryFn: () => api.entities.SkillCategory.list('sort_order', 100),
   });
+  const skillCategories = skillCategoriesQuery.data ?? [];
 
   const count = employees.length;
   const index = employees.findIndex(e => String(e.id) === String(id));
@@ -458,7 +459,7 @@ export default function BarberProfile() {
               dragMomentum={false}
               onDragEnd={handleDragEnd}
             >
-              <BarberProfileContent employee={employee} skillCategories={skillCategories} />
+              <BarberProfileContent employee={employee} skillCategories={skillCategories} catsQuery={skillCategoriesQuery} />
             </motion.div>
           </AnimatePresence>
         </div>

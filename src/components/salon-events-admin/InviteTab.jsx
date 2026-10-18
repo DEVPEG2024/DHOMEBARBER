@@ -11,6 +11,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Search, Send, Users, CheckSquare, Square, AlertTriangle, Mail, Bell, UserCheck } from 'lucide-react';
 import { toast } from 'sonner';
+import { adminErrorMessage, isUncertainSend } from '@/lib/adminErrors';
 import { api } from '@/api/apiClient';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -109,7 +110,8 @@ export default function InviteTab({ event, invites, onSent }) {
         : 'Aucune nouvelle invitation : ces clients étaient déjà invités');
       if (invited > 0 && onSent) onSent();
     },
-    onError: (err) => toast.error(err?.message || "Erreur lors de l'envoi des invitations"),
+    // Coupure réseau : l'envoi est peut-être parti, avertir sans inviter à renvoyer
+    onError: (err) => (isUncertainSend(err) ? toast.warning : toast.error)(adminErrorMessage(err, "Erreur lors de l'envoi des invitations", { sending: true }), { duration: 10000 }),
   });
 
   const canSend = isPublished && !sendMutation.isPending && (inviteAll || selected.size > 0);

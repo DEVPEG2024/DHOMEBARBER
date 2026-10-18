@@ -34,6 +34,8 @@ export default function AdminLeave() {
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState('all'); // all, pending, approved, declined
   const [leaveToDelete, setLeaveToDelete] = useState(null);
+  // Refus en deux taps : le barber reçoit tout de suite une notification
+  const [leaveToDecline, setLeaveToDecline] = useState(null);
   // Approbation d'un congé qui tombe sur des RDV clients : { leave, conflicts, failed } ; `checkingId` pendant la vérification
   const [approval, setApproval] = useState(null);
   const [checkingId, setCheckingId] = useState(null);
@@ -186,7 +188,7 @@ export default function AdminLeave() {
                     </p>
                   </div>
 
-                  <div className="flex items-center gap-1.5 shrink-0">
+                  <div className="flex flex-wrap items-center justify-end gap-1.5 shrink-0 max-w-[45%] sm:max-w-none">
                     {isPending && (
                       <>
                         <Button size="sm" className="gap-1 text-xs bg-green-600 hover:bg-green-700"
@@ -195,10 +197,26 @@ export default function AdminLeave() {
                           <CheckCircle className="w-3 h-3" /> {checkingId === leave.id ? 'Vérification…' : 'Valider'}
                         </Button>
                         <Button size="sm" variant="outline" className="gap-1 text-xs text-red-500 border-red-500/30 hover:bg-red-500/10"
-                          onClick={() => handleUpdateStatus(leave, 'declined')}>
+                          disabled={!!checkingId}
+                          onClick={() => setLeaveToDecline(leave)}>
                           <XCircle className="w-3 h-3" /> Refuser
                         </Button>
                       </>
+                    )}
+                    {/* Revenir sur la décision : le serveur accepte approuvé ↔ refusé et prévient le barber */}
+                    {leave.status === 'declined' && (
+                      <Button size="sm" variant="outline" className="h-8 gap-1 px-2 text-xs text-green-600 border-green-500/30 hover:bg-green-500/10"
+                        disabled={!!checkingId}
+                        onClick={() => handleApprove(leave)}>
+                        <CheckCircle className="w-3 h-3" /> {checkingId === leave.id ? 'Vérification…' : 'Approuver'}
+                      </Button>
+                    )}
+                    {leave.status === 'approved' && (
+                      <Button size="sm" variant="outline" className="h-8 gap-1 px-2 text-xs text-red-500 border-red-500/30 hover:bg-red-500/10"
+                        disabled={!!checkingId}
+                        onClick={() => setLeaveToDecline(leave)}>
+                        <XCircle className="w-3 h-3" /> Refuser
+                      </Button>
                     )}
                     {!isPending && (
                       <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-red-500"
@@ -258,6 +276,33 @@ export default function AdminLeave() {
               className="bg-green-600 hover:bg-green-700"
             >
               Approuver quand même
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Refus confirmé : le barber est prévenu tout de suite */}
+      <AlertDialog open={!!leaveToDecline} onOpenChange={(open) => !open && setLeaveToDecline(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Refuser ce congé ?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Congé du {formatDate(leaveToDecline?.start_date)} au {formatDate(leaveToDecline?.end_date)}.
+              {' '}<strong>{leaveToDecline?.employee_name || 'Le barber'}</strong> sera prévenu par une notification.
+              {leaveToDecline?.status === 'approved' && ' Les dates seront débloquées dans l\'agenda.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setLeaveToDecline(null)}>Annuler</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const l = leaveToDecline;
+                setLeaveToDecline(null);
+                if (l) handleUpdateStatus(l, 'declined');
+              }}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              Refuser
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

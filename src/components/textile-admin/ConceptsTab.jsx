@@ -8,6 +8,8 @@ import React, { useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Pencil, Copy, Trash2, Shirt, FlaskConical, EyeOff } from 'lucide-react';
 import { toast } from 'sonner';
+import { adminErrorMessage } from '@/lib/adminErrors';
+import LoadError from '@/components/shared/LoadError';
 import { api } from '@/api/apiClient';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -135,7 +137,9 @@ function ConceptRow({ concept, isAdmin, busy, onEdit, onDuplicate, onDelete }) {
  * @param {boolean} props.isAdmin
  * @param {boolean} props.isLoading
  */
-export default function ConceptsTab({ concepts, drops, isAdmin, isLoading }) {
+export default function ConceptsTab({ concepts, drops, isAdmin, isLoading, error = null, onRetry, retrying = false }) {
+  // Chargement en échec sans donnée : LoadError, jamais « Aucune pièce » ni « Nouvelle pièce »
+  const loadFailed = !!error && concepts.length === 0;
   const queryClient = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -160,7 +164,7 @@ export default function ConceptsTab({ concepts, drops, isAdmin, isLoading }) {
   const deleteMutation = useMutation({
     mutationFn: (id) => api.entities.TextileConcept.delete(id),
     onSuccess: () => { invalidateTextile(queryClient, 'textileConcepts', 'textileReservations'); toast.success('Pièce supprimée'); },
-    onError: (err) => toast.error(err?.message || 'Erreur lors de la suppression'),
+    onError: (err) => toast.error(adminErrorMessage(err, 'Erreur lors de la suppression')),
   });
 
   const duplicateMutation = useMutation({
@@ -170,7 +174,7 @@ export default function ConceptsTab({ concepts, drops, isAdmin, isLoading }) {
       is_active: false,
     }),
     onSuccess: () => { invalidateTextile(queryClient, 'textileConcepts'); toast.success('Pièce dupliquée (inactive, à renommer)'); },
-    onError: (err) => toast.error(err?.message || 'Erreur lors de la duplication'),
+    onError: (err) => toast.error(adminErrorMessage(err, 'Erreur lors de la duplication')),
   });
 
   const openNew = (dropId = null) => { setEditing(null); setDefaultDropId(dropId); setDialogOpen(true); };
@@ -179,6 +183,7 @@ export default function ConceptsTab({ concepts, drops, isAdmin, isLoading }) {
 
   return (
     <div>
+      {!loadFailed && (
       <div className="flex items-center justify-between gap-3 mb-4">
         <p className="text-xs text-muted-foreground">
           {concepts.length} pièce{concepts.length > 1 ? 's' : ''} · les votes par taille aident à dimensionner la production
@@ -189,9 +194,12 @@ export default function ConceptsTab({ concepts, drops, isAdmin, isLoading }) {
           </Button>
         )}
       </div>
+      )}
 
       {isLoading ? (
         <Spinner />
+      ) : loadFailed ? (
+        <LoadError what="les pièces" error={error} onRetry={onRetry} retrying={retrying} />
       ) : groups.length === 0 ? (
         <EmptyState icon={Shirt} title="Aucune pièce" hint={isAdmin ? 'Ajoutez une pièce au Labo ou à un drop.' : undefined} />
       ) : (

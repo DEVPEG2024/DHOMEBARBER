@@ -63,6 +63,7 @@ export default function WeekView({ currentDate, appointments, employees, employe
   });
 
   const colorOf = (empId) => employees.find((e) => String(e.id) === String(empId))?.color || '#94a3b8';
+  const nameOf = (empId) => (empId == null ? '' : employees.find((e) => String(e.id) === String(empId))?.name || '');
 
   return (
     <div className="bg-card border border-border rounded-xl overflow-hidden flex flex-col h-[calc(100dvh-220px)] min-h-[420px]">
@@ -122,6 +123,11 @@ export default function WeekView({ currentDate, appointments, employees, employe
             // recouvrir sur toute la largeur (le compteur d'en-tête, lui, ne les compte pas)
             const lastMinutes = dayApts.filter(isLastMinuteSlot);
             const meta = layoutOverlaps([...bookings, ...lastMinutes], MIN_CARD_MINUTES);
+            // Vue « Tous » : les pauses de plusieurs barbers à la même heure se partagent la largeur
+            // (entre elles seulement : une pause d'une journée ne rétrécit pas les RDV, dessinés
+            // au-dessus) au lieu de s'empiler, sinon seule celle du dessus peut être ouverte
+            const breaks = dayApts.filter(isBreak);
+            const breakMeta = single ? {} : layoutOverlaps(breaks, MIN_CARD_MINUTES);
             const onLeaveEmps = employees.filter((emp) => isOnLeave(timeOffs, emp.id, dateStr));
             const singleOnLeave = single && onLeaveEmps.some((e) => String(e.id) === String(single.id));
             const preview = drag.previewFor(dateStr);
@@ -157,11 +163,22 @@ export default function WeekView({ currentDate, appointments, employees, employe
                   </div>
                 )}
 
-                {dayApts.filter(isBreak).map((apt) => (
-                  <BreakCard key={apt.id} apt={apt} onSelect={selectBreak} dragProps={dragProps(apt)} ghosted={moving?.apt.id === apt.id}
-                    resizeProps={onResizeRequest ? cardDrag.bindResize(apt) : null}
-                    style={{ ...verticalPlacement(apt.start_time, apt.end_time, HOUR_HEIGHT, 18), left: 1, right: 1 }} />
-                ))}
+                {breaks.map((apt) => {
+                  const { col, cols } = breakMeta[apt.id] || { col: 0, cols: 1 };
+                  const width = 100 / cols;
+                  return (
+                    <BreakCard key={apt.id} apt={apt} onSelect={selectBreak} dragProps={dragProps(apt)} ghosted={moving?.apt.id === apt.id}
+                      resizeProps={onResizeRequest ? cardDrag.bindResize(apt) : null}
+                      showBarber={!single}
+                      barberName={nameOf(apt.employee_id) || apt.employee_name}
+                      color={single ? undefined : colorOf(apt.employee_id)}
+                      style={{
+                        ...verticalPlacement(apt.start_time, apt.end_time, HOUR_HEIGHT, 18),
+                        left: `calc(${col * width}% + 1px)`,
+                        width: `calc(${width}% - 2px)`,
+                      }} />
+                  );
+                })}
 
                 {lastMinutes.map((apt) => {
                   const { col, cols } = meta[apt.id] || { col: 0, cols: 1 };

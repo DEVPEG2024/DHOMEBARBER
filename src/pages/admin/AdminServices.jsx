@@ -139,7 +139,7 @@ export default function AdminServices() {
         </div>
         <div className="flex flex-wrap gap-2 justify-end">
           <Button variant="outline" size="sm" className="border-border gap-1.5"
-            onClick={() => exportToCSV(services.map(s => ({ nom: s.name, description: s.description || '', duree_min: s.duration, prix_eur: s.price, actif: s.is_active ? 'oui' : 'non' })), 'prestations')}>
+            onClick={() => Promise.resolve(exportToCSV(services.map(s => ({ nom: s.name, description: s.description || '', duree_min: s.duration, prix_eur: s.price, actif: s.is_active ? 'oui' : 'non' })), 'prestations')).catch(() => toast.error('Export impossible, réessayez'))}>
             <Download className="w-3.5 h-3.5" /> Exporter
           </Button>
           <Button variant="outline" size="sm" className="border-border gap-1.5" onClick={() => fileRef.current?.click()}>

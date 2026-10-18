@@ -68,6 +68,20 @@ function CommentItem({ comment, currentUser, onDelete, onOpenMenu }) {
   const badge = getRoleBadge(comment.author_role);
   const initials = comment.author_name?.split(' ').map(n => n[0]).join('').slice(0, 2) || '?';
   const isOwner = currentUser?.role === 'admin' || isMine(comment, currentUser);
+  // Suppression en deux taps (comme les publications) : un tap involontaire effaçait pour de bon
+  const [confirm, setConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  useEffect(() => {
+    if (!confirm || deleting) return undefined;
+    const t = setTimeout(() => setConfirm(false), 4000);
+    return () => clearTimeout(t);
+  }, [confirm, deleting]);
+  const confirmDelete = async () => {
+    if (deleting) return;
+    setDeleting(true);
+    const ok = await onDelete(comment.id);
+    if (!ok) { setDeleting(false); setConfirm(false); }
+  };
 
   return (
     <motion.div
@@ -96,10 +110,21 @@ function CommentItem({ comment, currentUser, onDelete, onOpenMenu }) {
         </div>
         <div className="flex items-center gap-3 mt-1 px-1">
           <span className="text-[10px] text-muted-foreground">{timeAgo(comment.created_at)}</span>
-          {isOwner && (
-            <button onClick={() => onDelete(comment.id)} className="text-[10px] text-muted-foreground hover:text-red-400 transition-colors">
+          {isOwner && !confirm && (
+            <button onClick={() => setConfirm(true)} className="text-[10px] text-muted-foreground hover:text-red-400 transition-colors">
               Supprimer
             </button>
+          )}
+          {isOwner && confirm && (
+            <span className="inline-flex items-center gap-2 text-[10px]">
+              <span className="text-muted-foreground">Supprimer ?</span>
+              <button onClick={confirmDelete} disabled={deleting} className="font-semibold text-red-400 hover:text-red-300 disabled:opacity-50">
+                {deleting ? '…' : 'Oui'}
+              </button>
+              <button onClick={() => setConfirm(false)} disabled={deleting} className="text-muted-foreground hover:text-foreground disabled:opacity-50">
+                Non
+              </button>
+            </span>
           )}
           {!isOwner && currentUser && (
             <button
@@ -159,6 +184,8 @@ function GlassCard({ children }) {
 }
 
 const REACTIONS = ['❤️', '🔥', '💪', '😂', '👏', '💈'];
+// Réaction hors de la liste (texte injecté avant la liste fermée du serveur) : affichée en ❤️
+const safeReaction = (r) => (REACTIONS.includes(r) ? r : '❤️');
 // Appui long sur « J'aime » : ouvre le sélecteur pour changer de réaction
 const LONG_PRESS_MS = 450;
 const LONG_PRESS_MOVE = 10;
@@ -227,7 +254,7 @@ function PostCard({
   // Group reactions by emoji
   const reactionCounts = {};
   postLikes.forEach(l => {
-    const r = l.reaction || '❤️';
+    const r = safeReaction(l.reaction);
     reactionCounts[r] = (reactionCounts[r] || 0) + 1;
   });
   const postComments = comments.filter(c => String(c.post_id) === String(post.id));
@@ -236,7 +263,7 @@ function PostCard({
   const initials = post.author_name?.split(' ').map(n => n[0]).join('').slice(0, 2) || '?';
   const isOwner = currentUser?.role === 'admin' || isMine(post, currentUser);
 
-  const myReaction = userLike ? (userLike.reaction || '❤️') : null;
+  const myReaction = userLike ? safeReaction(userLike.reaction) : null;
   // Une réaction à la fois : un second tap pendant l'envoi créerait un doublon (refusé par le serveur)
   const likeBusy = useRef(false);
   const sendReaction = async (emoji) => {
@@ -504,13 +531,13 @@ function PostCard({
         >
           {userLike ? (
             <motion.span
-              key={userLike.reaction || '❤️'}
+              key={safeReaction(userLike.reaction)}
               initial={{ scale: 0, rotate: -20 }}
               animate={{ scale: 1, rotate: 0 }}
               transition={{ type: 'spring', stiffness: 500, damping: 18 }}
               className="text-lg inline-block"
             >
-              {userLike.reaction || '❤️'}
+              {safeReaction(userLike.reaction)}
             </motion.span>
           ) : (
             <Heart className="w-5 h-5 text-muted-foreground" />
@@ -700,11 +727,17 @@ export default function Feed() {
   const blocks = (blocksData ?? []).filter(b => String(b.blocker_email || '').toLowerCase() === myEmail);
 
   // Admin : signalements en attente
-  const { data: reports = [] } = useQuery({
+  const {
+    data: reportsData, isError: reportsError, error: reportsErrorObj,
+    refetch: refetchReports, isFetching: reportsFetching,
+  } = useQuery({
     queryKey: ['postReports'],
     queryFn: () => api.entities.PostReport.filter({ status: 'pending' }, '-created_at', 50),
     enabled: user?.role === 'admin',
   });
+  const reports = reportsData ?? [];
+  // En échec sans données : jamais « aucun signalement » (l'admin croirait n'avoir rien à modérer)
+  const reportsFailed = user?.role === 'admin' && reportsError && !reportsData;
 
   // Les blocages portent désormais sur la clé publique (l'email n'est plus renvoyé aux clients),
   // mais on garde la comparaison par email pour le staff et les blocages déjà enregistrés.
@@ -843,12 +876,19 @@ export default function Feed() {
     }
   };
 
+  // Renvoie `true` si le commentaire n'existe plus (supprimé maintenant ou déjà supprimé)
   const handleDeleteComment = async (commentId) => {
     try {
       await api.entities.PostComment.delete(commentId);
-      queryClient.invalidateQueries({ queryKey: ['postComments'] });
+      toast.success('Commentaire supprimé');
+      return true;
     } catch (err) {
+      // Double tap sur un réseau lent : le premier envoi l'a déjà supprimé
+      if (err?.status === 404) { toast.success('Commentaire déjà supprimé'); return true; }
       toast.error(errorText(err, 'Erreur lors de la suppression'));
+      return false;
+    } finally {
+      queryClient.invalidateQueries({ queryKey: ['postComments'] });
     }
   };
 
@@ -860,6 +900,11 @@ export default function Feed() {
       toast.success('Publication supprimée');
       return true;
     } catch (err) {
+      if (err?.status === 404) {
+        queryClient.invalidateQueries({ queryKey: ['posts'] });
+        toast.success('Publication déjà supprimée');
+        return true;
+      }
       toast.error(errorText(err, 'Erreur lors de la suppression'));
       return false;
     }
@@ -1083,7 +1128,10 @@ export default function Feed() {
         )}
       </AnimatePresence>
 
-      {/* Admin : signalements en attente */}
+      {/* Admin : signalements en attente (en échec : LoadError, jamais un panneau absent) */}
+      {reportsFailed && (
+        <LoadError compact className="mb-6" what="les signalements" error={reportsErrorObj} onRetry={refetchReports} retrying={reportsFetching} />
+      )}
       {user?.role === 'admin' && reports.length > 0 && (
         <div className="mb-6 rounded-2xl border border-amber-500/30 bg-amber-500/5 overflow-hidden">
           <div className="flex items-center gap-2 px-4 py-3 border-b border-amber-500/20">

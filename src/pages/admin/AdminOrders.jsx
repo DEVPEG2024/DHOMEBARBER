@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import { formatPrice } from '@/components/shop/productUtils';
-import LoadError from '@/components/shared/LoadError';
+import LoadError, { isNetworkError } from '@/components/shared/LoadError';
 import {
   CANCEL_REASON_MAX,
   ORDER_STATUSES,
@@ -48,6 +48,7 @@ const FILTERS = [
 
 /** Message lisible : celui du serveur, sinon celui de l'erreur sauf « HTTP 409 », sinon le repli. */
 function errorMessage(err, fallback = 'Mise à jour impossible') {
+  if (isNetworkError(err) || err?.timeout) return 'Pas de connexion internet : réessayez.';
   const server = typeof err?.data?.error === 'string' ? err.data.error.trim() : '';
   if (server && !/^HTTP \d+$/.test(server)) return server;
   const msg = typeof err?.message === 'string' ? err.message.trim() : '';
@@ -170,7 +171,18 @@ export default function AdminOrders() {
     mutationFn: ({ id, data }) => api.entities.Order.update(id, data),
     onSuccess: (_res, vars) => {
       invalidateOrderQueries(queryClient);
-      toast.success(vars.successMessage || 'Statut mis à jour');
+      if (vars.data?.status === 'delivered') {
+        // « Marquer retirée » touché par erreur : retour à « prête » possible pendant 24 h
+        toast.success('Commande retirée', {
+          duration: 8000,
+          action: {
+            label: 'Annuler',
+            onClick: () => updateMutation.mutate({ id: vars.id, data: { status: 'ready' }, successMessage: 'Retrait annulé' }),
+          },
+        });
+      } else {
+        toast.success(vars.successMessage || 'Statut mis à jour');
+      }
       if (vars.closeDialog) setConfirm(null);
     },
     onError: (err) => {
@@ -378,6 +390,15 @@ export default function AdminOrders() {
                     onClick={() => openConfirm('cancel', order)}>
                     <XCircle className="w-3.5 h-3.5" />
                     Annuler
+                  </Button>
+                )}
+                {/* Retirée il y a moins de 24 h : retour à « prête » (tap par erreur sur « Marquer retirée ») */}
+                {st === 'delivered' && order.delivered_at && Date.now() - new Date(order.delivered_at).getTime() < 24 * 3600 * 1000 && (
+                  <Button size="sm" variant="outline" disabled={busy}
+                    className="gap-1.5 border-border"
+                    onClick={() => updateMutation.mutate({ id: order.id, data: { status: 'ready' }, successMessage: 'Retrait annulé' })}>
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    Pas encore retirée
                   </Button>
                 )}
                 {isCancelled && (

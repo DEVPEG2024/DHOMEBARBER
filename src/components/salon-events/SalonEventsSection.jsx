@@ -3,7 +3,8 @@ import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { ChevronDown, History, PartyPopper } from 'lucide-react';
 import { hapticFeedback } from '@/lib/capacitor';
 import { useMySalonEvents, useSalonEventRsvp } from './useSalonEvents';
-import { splitSalonEvents, useNow } from './salonEventUtils';
+import { hasStarted, splitSalonEvents, useNow } from './salonEventUtils';
+import { useAndroidBack } from '@/lib/useAndroidBack';
 import SalonEventCard from './SalonEventCard';
 import SalonEventSheet from './SalonEventSheet';
 
@@ -33,6 +34,9 @@ export default function SalonEventsSection() {
     if (selectedId != null && !selected) setSelectedId(null);
   }, [selectedId, selected]);
 
+  // Bouton retour d'Android : ferme la fiche (RSVP, places) au lieu de quitter la page
+  useAndroidBack(!!selected, () => setSelectedId(null));
+
   // Un rechargement en échec garde la section (et la fiche ouverte) tant que le cache a des données
   if (!data || view.isEmpty) return null;
 
@@ -40,7 +44,8 @@ export default function SalonEventsSection() {
     hapticFeedback();
     setSelectedId(event.id);
   };
-  const pendingCount = view.upcoming.filter(e => !e.my_invite || e.my_invite.status === 'invited').length;
+  // Un événement commencé n'accepte plus de réponse : il ne compte plus dans « à répondre »
+  const pendingCount = view.upcoming.filter(e => !hasStarted(e, nowMs) && (!e.my_invite || e.my_invite.status === 'invited')).length;
 
   return (
     <section className="mb-8" aria-labelledby="salon-events-title">

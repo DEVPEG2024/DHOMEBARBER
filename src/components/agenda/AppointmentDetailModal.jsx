@@ -7,12 +7,12 @@ import { api } from '@/api/apiClient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import AppointmentEditForm from './AppointmentEditForm';
-import { STATUS_META, invalidateAppointmentQueries, withLastMinuteMarker, stripLastMinuteMarker, isConvertedLastMinute, agendaErrorMessage } from './agendaUtils';
+import { STATUS_META, invalidateAppointmentQueries, withLastMinuteMarker, stripLastMinuteMarker, isConvertedLastMinute, agendaErrorMessage, appointmentEndParis } from './agendaUtils';
 import { useAuth } from '@/lib/AuthContext';
 import { parisInstant } from '@/lib/calendarLinks';
 import { formatStaffReason, cancellationActor, cancelledByLabel, cleanReason, LAST_MINUTE_EXPIRED_REASON, ORDER_STATUSES, normalizeOrderStatus, invalidateOrderQueries } from '@/lib/cancellation';
 import { orderItemsLabel } from '@/lib/appointmentProducts';
-import { formatPrice } from '@/components/shop/productUtils';
+import { formatPrice, isShopProduct, stockInfo } from '@/components/shop/productUtils';
 import { useGangSummaries } from '@/lib/gangCardApi';
 import { gangPalette } from '@/components/gang/gangTheme';
 
@@ -67,7 +67,9 @@ const initialState = (apt) => ({
   tip: apt.tip ? String(apt.tip) : '',
   tipMethod: apt.tip_method || '',
   paymentMethod: apt.payment_method || '',
-  selectedProductId: '',
+  // Produit vendu au fauteuil déjà enregistré (product_id) : gardé tel quel à la correction, sinon
+  // la validation l'enlèverait et rendrait l'unité au stock
+  selectedProductId: apt.product_id ? String(apt.product_id) : '',
   productPrice: apt.product_price ? String(apt.product_price) : '',
   productSold: apt.product_sold || '',
   clientName: apt.client_name || '',
@@ -129,7 +131,24 @@ function ModalInner({ appointment, linkedOrders = [], onUpdate, onDelete, onEdit
     try {
       await deliverOrder(order);
       markDelivered([order.id]);
-      toast.success('Produit remis et payé : compté dans la boutique');
+      // Tap par erreur : retour à « prête » possible pendant 24 h (le serveur le refuse au-delà)
+      toast.success('Produit remis et payé : compté dans la boutique', {
+        duration: 8000,
+        action: {
+          label: 'Annuler',
+          onClick: async () => {
+            try {
+              await api.entities.Order.update(order.id, { status: 'ready' });
+              setDeliveredIds((prev) => { const next = new Set(prev); next.delete(String(order.id)); return next; });
+              toast.success('Retrait annulé');
+            } catch (e) {
+              toast.error(errorMessage(e, 'Impossible d’annuler : corrigez depuis Commandes.'));
+            } finally {
+              invalidateLinkedOrders(queryClient);
+            }
+          },
+        },
+      });
       invalidateLinkedOrders(queryClient);
     } catch (e) {
       toast.error(errorMessage(e, 'Mise à jour de la commande impossible'));
@@ -158,11 +177,15 @@ function ModalInner({ appointment, linkedOrders = [], onUpdate, onDelete, onEdit
   const isClosedOut = appointment.status === 'cancelled' || appointment.status === 'no_show';
 
   // Le catalogue produits ne sert qu'à la validation : inutile sur une prestation déjà terminée
-  const { data: products = [] } = useQuery({
+  const { data: allProducts = [] } = useQuery({
     queryKey: ['products'],
     queryFn: () => api.entities.Product.filter({ is_active: true }, 'name', 100),
     enabled: !locked,
   });
+  // Vendables au fauteuil : produits de la boutique en stock (ni consommables du salon, ni ruptures) ;
+  // le produit déjà enregistré sur le RDV reste proposé, même épuisé, pour corriger l'encaissement
+  const products = allProducts.filter((p) => (isShopProduct(p) && !stockInfo(p).soldOut)
+    || (appointment.product_id && String(p.id) === String(appointment.product_id)));
 
   const { data: allServices = [] } = useQuery({
     queryKey: ['servicesForModal'],
@@ -194,6 +217,11 @@ function ModalInner({ appointment, linkedOrders = [], onUpdate, onDelete, onEdit
   const manualServiceTotal = selectedServices.reduce((sum, s) => sum + (s.price || 0), 0);
   const serviceTotal = appointment.total_price || manualServiceTotal || 0;
   const grandTotal = locked ? (appointment.grand_total || serviceTotal + tipValue + prodValue) : (serviceTotal + tipValue + prodValue);
+  // Part déjà payée par carte cadeau (débit au comptoir, gift_card_amount) : à déduire de ce qui
+  // reste à encaisser, sinon le client paie deux fois. grand_total enregistré reste le prix complet.
+  const giftPaid = Math.min(Number(appointment.gift_card_amount) || 0, serviceTotal + prodValue);
+  const showGiftPaid = giftPaid > 0 && (locked ? appointment.payment_method : state.paymentMethod) !== 'carte_cadeau';
+  const leftToCash = Math.round((grandTotal - giftPaid) * 100) / 100;
   // « Carte cadeau » ne débite pas la carte : le débit se fait depuis Cartes cadeau (qui clôture
   // le RDV), jamais par ce bouton (le solde restait entier et la carte resservait). Un RDV déjà
   // clôturé par le débit reste corrigeable sans nouveau débit.
@@ -203,6 +231,16 @@ function ModalInner({ appointment, linkedOrders = [], onUpdate, onDelete, onEdit
   // aucun email ne part de toute façon
   const canNotifyCancel = !!appointment.client_email && ['confirmed', 'pending'].includes(appointment.status)
     && parisInstant(String(appointment.date || '').slice(0, 10), String(appointment.start_time || '00:00').slice(0, 5)) > Date.now();
+
+  // « Absent » n'a de sens qu'une fois le rendez-vous commencé (heure de Paris) : avant, un tap à
+  // côté d'« Annuler » marquait absent un client qui venait le lendemain
+  const hasStarted = parisInstant(String(appointment.date || '').slice(0, 10), String(appointment.start_time || '00:00').slice(0, 5)) <= Date.now();
+  // Last minute passé « non pris » par l'agenda alors qu'un client de passage l'a pris : on le
+  // reprend (confirmé + repère) pour saisir le client et encaisser, au lieu de le rétablir en last
+  // minute que l'agenda repasserait aussitôt en « non pris »
+  const wasLastMinute = !appointment.client_email && appointment.client_name === 'Last Minute';
+  const lmEnd = appointmentEndParis(appointment);
+  const lastMinuteOver = isClosedOut && wasLastMinute && lmEnd != null && lmEnd + 15 * 60000 <= Date.now();
 
   // Motif d'annulation affiché sur un RDV annulé / absent
   const cancelActor = isClosedOut ? cancellationActor(appointment) : null;
@@ -260,6 +298,8 @@ function ModalInner({ appointment, linkedOrders = [], onUpdate, onDelete, onEdit
         tip_method: state.tipMethod,
         product_sold: state.productSold,
         product_price: prodValue,
+        // Le serveur décompte le stock, relit nom et prix du produit et refuse une rupture (409)
+        product_id: state.selectedProductId || null,
         grand_total: grandTotal,
       };
       // For last_minute: include selected services if none existed
@@ -342,8 +382,19 @@ function ModalInner({ appointment, linkedOrders = [], onUpdate, onDelete, onEdit
             onClick={async () => {
               dispatch({ type: 'SAVING', value: true });
               try {
-                // Un créneau last minute que personne n'a pris redevient un créneau last minute
-                const wasLastMinute = !appointment.client_email && appointment.client_name === 'Last Minute';
+                if (lastMinuteOver) {
+                  // Créneau passé : un client de passage l'a pris. Confirmé avec le repère du last
+                  // minute, la fiche (qui reste ouverte) propose alors le client et les prestations
+                  await api.entities.Appointment.update(appointment.id, {
+                    status: 'confirmed',
+                    cancellation_reason: null,
+                    internal_notes: withLastMinuteMarker(appointment.internal_notes),
+                  });
+                  toast.success('Créneau repris : saisissez le client puis encaissez');
+                  invalidateAppointmentQueries(queryClient);
+                  return;
+                }
+                // Un créneau last minute que personne n'a pris (encore à venir) redevient un last minute
                 await api.entities.Appointment.update(appointment.id, {
                   status: wasLastMinute ? 'last_minute' : 'confirmed',
                   cancellation_reason: null,
@@ -359,7 +410,7 @@ function ModalInner({ appointment, linkedOrders = [], onUpdate, onDelete, onEdit
             className="flex-1 min-w-[140px] flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-medium bg-green-500/10 border border-green-500/25 text-green-400 hover:bg-green-500/20 transition-all disabled:opacity-60"
           >
             <RotateCcw className="w-3.5 h-3.5" />
-            Rétablir le rendez-vous
+            {lastMinuteOver ? 'Un client l\'a pris' : 'Rétablir le rendez-vous'}
           </button>
         )}
       </div>
@@ -630,6 +681,18 @@ function ModalInner({ appointment, linkedOrders = [], onUpdate, onDelete, onEdit
               <span className="text-sm font-semibold text-foreground">Commande totale</span>
               <span className="text-lg font-bold text-primary">{grandTotal}€</span>
             </div>
+            {showGiftPaid && (
+              <>
+                <div className="flex items-center justify-between gap-2 text-xs text-amber-300">
+                  <span>Déjà payé par carte cadeau</span>
+                  <span className="shrink-0">−{formatPrice(giftPaid)}</span>
+                </div>
+                <div className="flex items-center justify-between gap-2 text-xs font-semibold text-foreground">
+                  <span>Reste encaissé</span>
+                  <span className="shrink-0">{formatPrice(leftToCash)}</span>
+                </div>
+              </>
+            )}
             <div className="flex items-center justify-between text-[10px] text-muted-foreground">
               <span>{appointment.total_duration} min</span>
               <span className="flex items-center gap-1">
@@ -753,6 +816,18 @@ function ModalInner({ appointment, linkedOrders = [], onUpdate, onDelete, onEdit
                 <span className="text-sm font-semibold text-foreground">Commande totale</span>
                 <span className="text-lg font-bold text-primary">{grandTotal}€</span>
               </div>
+              {showGiftPaid && (
+                <>
+                  <div className="flex items-center justify-between gap-2 text-xs text-amber-300">
+                    <span>Déjà payé par carte cadeau</span>
+                    <span className="shrink-0">−{formatPrice(giftPaid)}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 text-sm font-semibold text-foreground">
+                    <span>Reste à encaisser</span>
+                    <span className="shrink-0">{formatPrice(leftToCash)}</span>
+                  </div>
+                </>
+              )}
               {/* À encaisser en plus, hors grand_total : compté dans la boutique via la commande */}
               {openOrders.length > 0 && (
                 <div className="flex items-center justify-between gap-2 text-xs text-sky-300">
@@ -905,12 +980,27 @@ function ModalInner({ appointment, linkedOrders = [], onUpdate, onDelete, onEdit
                 <X className="w-3.5 h-3.5" />
                 Annuler
               </button>
+              {hasStarted && (
               <button
                 onClick={async () => {
                   dispatch({ type: 'SAVING', value: true });
                   try {
                     await api.entities.Appointment.update(appointment.id, { status: 'no_show' });
-                    toast.success('Marqué absent');
+                    // Comme « Client venu ? » : un tap par erreur se rattrape tout de suite
+                    toast('Marqué absent', {
+                      duration: 8000,
+                      action: {
+                        label: 'Annuler',
+                        onClick: async () => {
+                          try {
+                            await api.entities.Appointment.update(appointment.id, { status: 'confirmed' });
+                            onUpdate?.();
+                          } catch (e) {
+                            toast.error(errorMessage(e, 'Impossible d’annuler : rétablis le rendez-vous depuis sa fiche.'));
+                          }
+                        },
+                      },
+                    });
                     onUpdate?.();
                   } catch (e) {
                     toast.error(errorMessage(e, 'Modification impossible'));
@@ -924,6 +1014,7 @@ function ModalInner({ appointment, linkedOrders = [], onUpdate, onDelete, onEdit
                 <AlertTriangle className="w-3.5 h-3.5" />
                 Absent
               </button>
+              )}
             </div>
           )}
         </>

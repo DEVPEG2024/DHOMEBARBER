@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Sparkles, Loader2, Check, Undo2, Wand2 } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
+import { friendlyError } from '@/components/shared/LoadError';
 import { AI_REWRITES, aiWriterAvailable, draftNotification } from '@/lib/aiWriter';
 
 const ADDRESS_KEY = 'dhb-ai-writer-address';
@@ -65,7 +66,7 @@ export default function AiWriterPanel({ subject, message, audience, onApply }) {
       setProposals(result);
       setChosen(-1);
     } catch (err) {
-      toast.error(err?.message && !/^HTTP \d+$/.test(err.message) ? err.message : "L'assistant IA n'a pas répondu");
+      toast.error(friendlyError(err, "L'assistant IA n'a pas répondu"));
     }
     setBusy(null);
   };
@@ -79,7 +80,7 @@ export default function AiWriterPanel({ subject, message, audience, onApply }) {
         setChosen(-1);
       }
     } catch (err) {
-      toast.error(err?.message && !/^HTTP \d+$/.test(err.message) ? err.message : "L'assistant IA n'a pas répondu");
+      toast.error(friendlyError(err, "L'assistant IA n'a pas répondu"));
     }
     setBusy(null);
   };

@@ -12,7 +12,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import LoadError from '@/components/shared/LoadError';
+import LoadError, { friendlyError } from '@/components/shared/LoadError';
 
 // Seulement les permissions qui servent vraiment à un barber : Prestations, Équipe, Notifications,
 // Paramètres (écritures réservées à l'admin par le serveur) et Congés (sans effet) ont été retirées.
@@ -81,11 +81,13 @@ export default function BarberAccounts() {
     try {
       await apiCall('POST', '/barber-accounts', form);
       queryClient.invalidateQueries({ queryKey: ['barberAccounts'] });
+      // Les permissions vivent sur la fiche employé : Équipe ne doit pas les renvoyer périmées
+      queryClient.invalidateQueries({ queryKey: ['employees'] });
       toast.success('Compte barber créé');
       setForm({ email: '', password: '', full_name: '', employee_id: '', permissions: ['dashboard', 'agenda'] });
       setShowCreate(false);
     } catch (err) {
-      toast.error(err.message);
+      toast.error(friendlyError(err, 'Impossible de créer le compte'));
     } finally {
       setSaving(false);
     }
@@ -96,9 +98,11 @@ export default function BarberAccounts() {
     try {
       await apiCall('DELETE', `/barber-accounts/${accountToDelete.id}`);
       queryClient.invalidateQueries({ queryKey: ['barberAccounts'] });
+      // Les permissions vivent sur la fiche employé : Équipe ne doit pas les renvoyer périmées
+      queryClient.invalidateQueries({ queryKey: ['employees'] });
       toast.success('Compte supprimé');
     } catch (err) {
-      toast.error(err.message);
+      toast.error(friendlyError(err, 'Impossible de supprimer le compte'));
     } finally {
       setAccountToDelete(null);
     }
@@ -125,10 +129,12 @@ export default function BarberAccounts() {
         ...(editPassword ? { password: editPassword } : {}),
       });
       queryClient.invalidateQueries({ queryKey: ['barberAccounts'] });
+      // Les permissions vivent sur la fiche employé : Équipe ne doit pas les renvoyer périmées
+      queryClient.invalidateQueries({ queryKey: ['employees'] });
       toast.success(editPassword ? 'Mot de passe et permissions mis à jour' : 'Permissions mises à jour');
       setEditingId(null);
     } catch (err) {
-      toast.error(err.message);
+      toast.error(friendlyError(err, 'Impossible de modifier les permissions'));
     } finally {
       setSavingEdit(false);
     }

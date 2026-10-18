@@ -247,6 +247,8 @@ export async function fetchTodayAppointmentsToCash(day = parisToday()) {
   const list = Array.isArray(rows) ? rows : [];
   return list.filter((a) => {
     if (a.payment_method) return false;
+    // Déjà entièrement réglé par carte(s) cadeau (clôture échouée après le débit) : plus rien à débiter
+    if (appointmentGiftPaid(a) > 0 && appointmentDue(a) <= 0) return false;
     const name = String(a.client_name || '').trim();
     return !!(a.client_email || (name && name !== 'Last Minute'));
   });
@@ -255,6 +257,17 @@ export async function fetchTodayAppointmentsToCash(day = parisToday()) {
 /** Prix encaissé d'un RDV : prestations (+ produit vendu pendant le RDV s'il y en a un). */
 export function appointmentPrice(apt) {
   return round2((Number(apt?.total_price) || 0) + (Number(apt?.product_price) || 0));
+}
+
+/** Part du RDV déjà payée par carte cadeau (débits au comptoir, `gift_card_amount`). */
+export const appointmentGiftPaid = (apt) => round2(Number(apt?.gift_card_amount) || 0);
+
+/**
+ * Reste dû sur un RDV : prix moins la part déjà payée par carte. C'est ce qu'un nouveau débit peut
+ * couvrir (le serveur refuse au-delà) ; `appointmentPrice` reste le CA (grand_total à la clôture).
+ */
+export function appointmentDue(apt) {
+  return round2(Math.max(0, appointmentPrice(apt) - appointmentGiftPaid(apt)));
 }
 
 const toMinutes = (t) => {

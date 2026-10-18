@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { api } from '@/api/apiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { Plus, Pencil, Trash2, Package, Upload, X, Percent, ArrowLeft, ArrowRight, Images } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,6 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import LoadError, { isNetworkError } from '@/components/shared/LoadError';
+import { isShopProduct, formatPrice } from '@/components/shop/productUtils';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -67,6 +69,11 @@ export default function AdminProducts() {
     refetchOnMount: 'always',
   });
   const products = productsQuery.data ?? [];
+  // Les consommables du salon (Stock → Prestations) partagent la table mais ne sont jamais vendus :
+  // ni listés ici, ni touchés par « Modifier tous les prix ». La clé ['products','all'] reste la liste
+  // complète, partagée avec AdminStock.
+  const shopProducts = products.filter(isShopProduct);
+  const supplyCount = products.length - shopProducts.length;
   const productsFailed = productsQuery.isError && !productsQuery.data;
 
   const saveMutation = useMutation({
@@ -141,7 +148,7 @@ export default function AdminProducts() {
       const key = `${priceDirection}|${percentValue}`;
       if (!pricePlanRef.current || pricePlanRef.current.key !== key) {
         const multiplier = priceDirection === 'increase' ? 1 + percentValue / 100 : 1 - percentValue / 100;
-        const prices = new Map(products.map(p => [String(p.id), Math.max(0, Math.round((Number(p.price) || 0) * multiplier * 100) / 100)]));
+        const prices = new Map(shopProducts.map(p => [String(p.id), Math.max(0, Math.round((Number(p.price) || 0) * multiplier * 100) / 100)]));
         pricePlanRef.current = { key, prices, total: prices.size };
       }
       const plan = pricePlanRef.current;
@@ -238,7 +245,7 @@ export default function AdminProducts() {
       </div>
 
       <div className="space-y-2">
-        {products.map(product => (
+        {shopProducts.map(product => (
           <div key={product.id} className="bg-card border border-border rounded-xl p-4 flex items-center gap-4">
             <div className="w-12 h-12 rounded-lg bg-white flex items-center justify-center overflow-hidden flex-shrink-0">
               {product.image_url ? (
@@ -248,23 +255,26 @@ export default function AdminProducts() {
               )}
             </div>
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <h3 className="text-sm font-semibold truncate">{product.name}</h3>
-                {product.brand && <Badge variant="outline" className="text-[9px] border-border">{product.brand}</Badge>}
-                {!product.is_active && <Badge variant="outline" className="text-[9px] border-border text-muted-foreground">Masqué</Badge>}
-                {Array.isArray(product.images) && product.images.length > 1 && (
-                  <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground shrink-0" title={`${product.images.length} photos`}>
-                    <Images className="w-3 h-3" /> {product.images.length}
-                  </span>
-                )}
-              </div>
-              <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
-                <span className="font-bold text-primary text-sm">{product.price}€</span>
-                <span>Stock: {product.stock || 0}</span>
+              {/* Nom sur sa propre ligne, badges dessous : à 320 px la marque écrasait le nom */}
+              <h3 className="text-sm font-semibold truncate min-w-0">{product.name}</h3>
+              {(product.brand || !product.is_active || (Array.isArray(product.images) && product.images.length > 1)) && (
+                <div className="flex flex-wrap items-center gap-1.5 mt-0.5 min-w-0">
+                  {product.brand && <Badge variant="outline" className="text-[9px] border-border max-w-full truncate">{product.brand}</Badge>}
+                  {!product.is_active && <Badge variant="outline" className="text-[9px] border-border text-muted-foreground">Masqué</Badge>}
+                  {Array.isArray(product.images) && product.images.length > 1 && (
+                    <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground shrink-0" title={`${product.images.length} photos`}>
+                      <Images className="w-3 h-3" /> {product.images.length}
+                    </span>
+                  )}
+                </div>
+              )}
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1 text-xs text-muted-foreground">
+                <span className="font-bold text-primary text-sm">{formatPrice(product.price)}</span>
+                <span>{product.stock == null || product.stock === '' ? 'Stock non suivi' : `Stock : ${product.stock}`}</span>
                 <span>{categoryLabels[product.category] || product.category}</span>
               </div>
             </div>
-            <div className="flex gap-1">
+            <div className="flex gap-1 shrink-0">
               <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(product)}>
                 <Pencil className="w-3.5 h-3.5" />
               </Button>
@@ -284,10 +294,17 @@ export default function AdminProducts() {
         <div className="space-y-2" aria-busy="true">
           {[0, 1, 2].map(i => <div key={i} className="h-20 rounded-xl bg-card border border-border animate-pulse" />)}
         </div>
-      ) : products.length === 0 && (
+      ) : shopProducts.length === 0 && (
         <div className="text-center py-16 text-muted-foreground text-sm">
           Aucun produit. Cliquez sur "Ajouter" pour commencer.
         </div>
+      )}
+
+      {!productsFailed && supplyCount > 0 && (
+        <p className="mt-4 text-xs text-muted-foreground">
+          {supplyCount} consommable{supplyCount > 1 ? 's' : ''} du salon se gère{supplyCount > 1 ? 'nt' : ''} dans{' '}
+          <Link to="/admin/stock" className="text-primary underline underline-offset-2">Stock → Prestations</Link>.
+        </p>
       )}
 
       <Dialog open={showDialog} onOpenChange={setShowDialog}>
@@ -438,7 +455,7 @@ export default function AdminProducts() {
             </div>
             {pricePercent && !priceError && (
               <p className="text-xs text-muted-foreground">
-                {priceDirection === 'increase' ? '↑' : '↓'} {pricePercent}% sur {products.length} produits
+                {priceDirection === 'increase' ? '↑' : '↓'} {pricePercent}% sur {shopProducts.length} produit{shopProducts.length > 1 ? 's' : ''}
               </p>
             )}
             {pricePercent && priceError && <p className="text-xs text-red-400">{priceError}</p>}

@@ -16,6 +16,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, CalendarClock, AlertTriangle, PartyPopper, ArrowUpRight } from 'lucide-react';
 import { toast } from 'sonner';
+import { adminErrorMessage } from '@/lib/adminErrors';
 import { api } from '@/api/apiClient';
 import { useAuth } from '@/lib/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -100,7 +101,7 @@ export default function AdminSalonEvents() {
         toast.success('Statut mis à jour');
       }
     },
-    onError: (err) => toast.error(err?.message || 'Erreur lors du changement de statut'),
+    onError: (err) => toast.error(adminErrorMessage(err, 'Erreur lors du changement de statut')),
   });
 
   const deleteMutation = useMutation({
@@ -110,7 +111,7 @@ export default function AdminSalonEvents() {
       if (guestsTarget && String(guestsTarget.id) === String(id)) setGuestsTarget(null);
       toast.success('Événement supprimé');
     },
-    onError: (err) => toast.error(err?.message || 'Erreur lors de la suppression'),
+    onError: (err) => toast.error(adminErrorMessage(err, 'Erreur lors de la suppression')),
   });
 
   const openNew = () => { setEditingEvent(null); setDialogOpen(true); };

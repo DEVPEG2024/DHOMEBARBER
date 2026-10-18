@@ -11,6 +11,7 @@ import {
   Search, Phone, Mail, ClipboardList, CheckCircle2, PackageCheck, Ban, StickyNote, Clock, Pencil, Package,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { adminErrorMessage } from '@/lib/adminErrors';
 import { api } from '@/api/apiClient';
 import { Button } from '@/components/ui/button';
 import { RESERVATION_STATUSES } from '@/lib/textileApi';
@@ -84,7 +85,7 @@ export default function ReservationsTab({ reservations, isLoading, error = null,
       toast.success(successMessage || (data.status ? 'Statut mis à jour' : 'Note enregistrée'));
     },
     onError: (err) => {
-      toast.error(err?.message || 'Erreur lors de la mise à jour');
+      toast.error(adminErrorMessage(err, 'Erreur lors de la mise à jour'));
       // Refus du serveur (réservation expirée / annulée entre-temps) : la carte doit montrer l'état réel
       invalidateTextile(queryClient, 'textileReservations');
     },

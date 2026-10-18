@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { api } from '@/api/apiClient';
-import { isUnclaimedLastMinute } from '@/components/agenda/agendaUtils';
+import { isUnclaimedLastMinute, isClientPlaceholder } from '@/components/agenda/agendaUtils';
+import { isRescheduledCancel } from '@/lib/cancellation';
 import { useQuery } from '@tanstack/react-query';
 import LoadError from '@/components/shared/LoadError';
 // Même CA par RDV que le tableau de bord (prestations + produit vendu, hors pourboire)
@@ -48,8 +49,10 @@ export default function Stats() {
   const stats = useMemo(() => {
     // Taux calculés sur les vrais rendez-vous : ni pauses, ni créneaux last minute (libres ou non pris)
     // ni fiches de contact « Ajouter / Importer » des Clients (RDV annulé sans prestation ni prix)
+    // ni ancien RDV d'un déplacement fait par le client (ce n'est pas une annulation : il ne gonfle
+    // ni le taux d'annulation ni son dénominateur)
     const real = appointments.filter(a => a.status !== 'break' && a.status !== 'last_minute' && !isUnclaimedLastMinute(a)
-      && !(a.status === 'cancelled' && !a.services?.length && !Number(a.total_price)));
+      && !isClientPlaceholder(a) && !isRescheduledCancel(a));
     const completed = real.filter(a => a.status === 'completed');
     const cancelled = real.filter(a => a.status === 'cancelled');
     const noShows = real.filter(a => a.status === 'no_show');
@@ -143,7 +146,7 @@ export default function Stats() {
             <LineChart data={stats.monthly}>
               <XAxis dataKey="month" tick={{ fontSize: 10, fill: 'hsl(30 8% 55%)' }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 10, fill: 'hsl(30 8% 55%)' }} axisLine={false} tickLine={false} width={50} />
-              <Tooltip contentStyle={{ background: 'hsl(30 8% 10%)', border: '1px solid hsl(30 6% 18%)', borderRadius: '8px', fontSize: '12px' }} />
+              <Tooltip contentStyle={{ background: 'hsl(30 8% 10%)', border: '1px solid hsl(30 6% 18%)', borderRadius: '8px', fontSize: '12px' }} formatter={(v) => [`${Math.round(Number(v) || 0)} €`, 'CA']} />
               <Line type="monotone" dataKey="revenue" stroke="hsl(38 65% 50%)" strokeWidth={2} dot={{ r: 4 }} />
             </LineChart>
           </ResponsiveContainer>
@@ -180,7 +183,7 @@ export default function Stats() {
               <BarChart data={stats.perEmployee} layout="vertical">
                 <XAxis type="number" tick={{ fontSize: 10, fill: 'hsl(30 8% 55%)' }} axisLine={false} tickLine={false} />
                 <YAxis dataKey="name" type="category" tick={{ fontSize: 10, fill: 'hsl(30 8% 55%)' }} axisLine={false} tickLine={false} width={80} />
-                <Tooltip contentStyle={{ background: 'hsl(30 8% 10%)', border: '1px solid hsl(30 6% 18%)', borderRadius: '8px', fontSize: '12px' }} />
+                <Tooltip contentStyle={{ background: 'hsl(30 8% 10%)', border: '1px solid hsl(30 6% 18%)', borderRadius: '8px', fontSize: '12px' }} formatter={(v) => [`${Math.round(Number(v) || 0)} €`, 'CA']} />
                 <Bar dataKey="revenue" fill="hsl(38 65% 50%)" radius={[0, 4, 4, 0]} />
               </BarChart>
             </ResponsiveContainer>

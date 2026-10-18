@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { api } from '@/api/apiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
-import { Camera, LogOut, Loader2, User, Save, Clock, Video, AlertTriangle, Images } from 'lucide-react';
+import { Camera, LogOut, Loader2, User, Save, Clock, Video, AlertTriangle, Images, Bell, Settings as SettingsIcon } from 'lucide-react';
 import ImageCropDialog from '@/components/shared/ImageCropDialog';
 import GalleryEditor from '@/components/barber-gallery/GalleryEditor';
 import { BARBER_PHOTO_ASPECT, BARBER_PHOTO_BG, BARBER_PHOTO_RATIO } from '@/lib/barberPhoto';
@@ -12,6 +12,9 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
+import LoadError, { isNetworkError, friendlyError } from '@/components/shared/LoadError';
+import { isPushSupported, isSubscribed, subscribeToPush, unsubscribeFromPush, getPushPermission, syncPushSubscription } from '@/lib/pushNotifications';
+import { isNative, platform } from '@/lib/capacitor';
 
 const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 const DAY_LABELS = { monday: 'Lundi', tuesday: 'Mardi', wednesday: 'Mercredi', thursday: 'Jeudi', friday: 'Vendredi', saturday: 'Samedi', sunday: 'Dimanche' };
@@ -27,6 +30,110 @@ function sameHours(a, b) {
     const x = a[d] || {}, y = b[d] || {};
     return Boolean(x.closed) === Boolean(y.closed) && (x.start || '') === (y.start || '') && (x.end || '') === (y.end || '');
   });
+}
+
+/**
+ * Notifications du barber : nouveaux rendez-vous et annulations, réponse à une demande de congé,
+ * ménage du jour. Recours permanent (la fenêtre d'activation ne revient que 2 fois) et seul moyen
+ * de les couper (Paramètres client inaccessible au staff). Même logique que Settings.jsx.
+ */
+function StaffNotificationsCard() {
+  const supported = isPushSupported();
+  const [permission, setPermission] = useState(null);
+  const [enabled, setEnabled] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!supported) return undefined;
+    let cancelled = false;
+    let previous = null;
+    const refresh = async () => {
+      const perm = await getPushPermission().catch(() => 'unsupported');
+      if (cancelled) return;
+      setPermission(perm);
+      if (perm === 'granted' && previous && previous !== 'granted') syncPushSubscription();
+      previous = perm;
+      const sub = perm === 'denied' ? false : await isSubscribed().catch(() => false);
+      if (!cancelled) setEnabled(sub);
+    };
+    refresh();
+    const onVisible = () => { if (document.visibilityState === 'visible') refresh(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { cancelled = true; document.removeEventListener('visibilitychange', onVisible); };
+  }, [supported]);
+
+  const denied = permission === 'denied';
+  const canOpenSettings = isNative && platform === 'ios';
+  const toggle = async () => {
+    if (denied || busy) return;
+    setBusy(true);
+    try {
+      if (enabled) {
+        await unsubscribeFromPush();
+        setEnabled(false);
+        toast.success('Notifications désactivées');
+      } else {
+        await subscribeToPush();
+        setEnabled(true);
+        setPermission('granted');
+        syncPushSubscription();
+        toast.success('Notifications activées');
+      }
+    } catch (err) {
+      const perm = await getPushPermission().catch(() => null);
+      if (perm) setPermission(perm);
+      if (perm === 'denied') toast.error('Notifications refusées sur cet appareil');
+      else toast.error(friendlyError(err, 'Erreur notifications', { foreign: "Impossible d'activer les notifications sur cet appareil. Réessayez." }));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="bg-card border border-border rounded-xl p-6">
+      <button type="button" onClick={toggle} disabled={busy || !supported || denied}
+        className="flex items-center justify-between w-full gap-3 text-left disabled:opacity-60">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+            <Bell className="w-4 h-4 text-primary" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold">Notifications</p>
+            <p className="text-[11px] text-muted-foreground">
+              {!supported
+                ? "Ajoutez l'app à l'écran d'accueil, ou utilisez l'app du téléphone"
+                : denied
+                  ? (isNative ? 'Désactivées dans les réglages du téléphone' : 'Bloquées dans les réglages du navigateur')
+                  : 'Nouveaux rendez-vous, annulations, congés, ménage du jour'}
+            </p>
+          </div>
+        </div>
+        <div className={`w-11 h-6 rounded-full transition-colors relative shrink-0 ${enabled ? 'bg-primary' : 'bg-muted'}`}>
+          <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${enabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+        </div>
+      </button>
+      {denied && (
+        <div className="mt-3">
+          <p className="text-[11px] text-muted-foreground leading-relaxed">
+            Vous ne serez prévenu ni des nouveaux rendez-vous ni des annulations.{' '}
+            {canOpenSettings
+              ? 'Réactivez-les en un geste dans les réglages.'
+              : isNative
+                ? (platform === 'android'
+                  ? 'Pour les réactiver : Paramètres du téléphone → Applications → D’Home Barber → Notifications.'
+                  : 'Pour les réactiver : Réglages → D’Home Barber → Notifications.')
+                : 'Pour les réactiver : autorisez les notifications pour dhomebarber.fr dans les réglages du navigateur.'}
+          </p>
+          {canOpenSettings && (
+            <button type="button" onClick={() => { window.location.href = 'app-settings:'; }}
+              className="mt-2.5 inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-primary text-primary-foreground text-xs font-semibold">
+              <SettingsIcon className="w-3.5 h-3.5" /> Ouvrir les réglages
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function SkillSlider({ category, value, onChange }) {
@@ -207,19 +314,29 @@ export default function BarberSettings() {
   const [workingHours, setWorkingHours] = useState(null);
   const [dirty, setDirty] = useState(false);
   const [saveStatus, setSaveStatus] = useState('');
+  // Champs réellement touchés : seuls ceux-là partent au serveur. Une copie périmée de la fiche
+  // (page restée ouverte) écrasait sinon la vidéo posée par l'admin ou ses propres changements.
+  const [bioTouched, setBioTouched] = useState(false);
+  const [skillsTouched, setSkillsTouched] = useState(false);
+  const initialBioRef = useRef(null);
 
-  const { data: employees = [], isLoading: loadingEmployees } = useQuery({
+  const {
+    data: employees = [], isLoading: loadingEmployees, isError: employeesError, error: employeesErr,
+    refetch: refetchEmployees, isFetching: employeesFetching,
+  } = useQuery({
     queryKey: ['employees', 'me'], // liste complète : clé distincte des pages client
     queryFn: () => api.entities.Employee.list('-created_at', 100),
   });
 
-  const { data: skillCategories = [] } = useQuery({
+  // Erreur levée (plus avalée en liste vide) : une liste vide en cache faisait disparaître les
+  // spécialités et enregistrer « Niveau d'expérience 0 »
+  const {
+    data: skillCategories = [], isSuccess: catsLoaded, isError: catsError, error: catsErr,
+    refetch: refetchCats, isFetching: catsFetching,
+  } = useQuery({
     queryKey: ['skillCategories'],
-    queryFn: async () => {
-      try { return await api.entities.SkillCategory.list('sort_order', 100); }
-      catch { return []; }
-    },
-    retry: false,
+    queryFn: () => api.entities.SkillCategory.list('sort_order', 100),
+    staleTime: 5 * 60 * 1000,
   });
 
   const employee = findEmployee(employees, user);
@@ -234,6 +351,7 @@ export default function BarberSettings() {
       const { text, video } = extractVideoFromBio(employee.bio);
       setBio(text);
       setVideoUrl(video);
+      initialBioRef.current = employee.bio || '';
       setWorkingHours(employee.working_hours || defaultHours);
     }
   }, [employee]);
@@ -251,7 +369,7 @@ export default function BarberSettings() {
       queryClient.invalidateQueries({ queryKey: ['employees'] });
     },
     onError: (err) => {
-      toast.error('Erreur : ' + (err?.message || 'sauvegarde échouée'));
+      toast.error(isNetworkError(err) ? 'Pas de connexion internet : profil non sauvegardé' : friendlyError(err, 'Sauvegarde échouée'));
     },
   });
 
@@ -295,6 +413,7 @@ export default function BarberSettings() {
 
   const setSkillLevel = (categoryId, level) => {
     setDirty(true);
+    setSkillsTouched(true);
     setSkills(prev => {
       const existing = (prev || []).filter(s => s.category_id !== categoryId);
       if (level > 0) {
@@ -311,9 +430,37 @@ export default function BarberSettings() {
       return;
     }
     setSaveStatus('Sauvegarde en cours...');
-    // Pack video URL into bio
-    const fullBio = packBioWithVideo(bio, videoUrl);
-    const payload = { skills, bio: fullBio, experience_level: computedExperience };
+    const payload = {};
+    if (bioTouched) {
+      // Bio modifiée ailleurs (vidéo posée par l'admin…) depuis l'ouverture : on prévient au lieu
+      // d'écraser, la version enregistrée est rechargée
+      try {
+        const rows = await api.entities.Employee.filter({ id: employee.id }, null, 1);
+        const serverBio = Array.isArray(rows) && rows[0] ? (rows[0].bio || '') : null;
+        if (serverBio !== null && initialBioRef.current !== null && serverBio !== initialBioRef.current) {
+          const { text, video } = extractVideoFromBio(serverBio);
+          setBio(text);
+          setVideoUrl(video);
+          initialBioRef.current = serverBio;
+          setBioTouched(false);
+          queryClient.invalidateQueries({ queryKey: ['employees'] });
+          toast.warning('Votre bio ou votre vidéo a été modifiée ailleurs entre-temps : la version enregistrée est rechargée, refaites votre modification.', { duration: 10000 });
+          setSaveStatus('Modifiée ailleurs : rien n\'a été écrasé');
+          return;
+        }
+      } catch (err) {
+        toast.error(isNetworkError(err) ? 'Pas de connexion internet : profil non sauvegardé' : friendlyError(err, 'Sauvegarde échouée'));
+        setSaveStatus('Non sauvegardé');
+        return;
+      }
+      // Pack video URL into bio
+      payload.bio = packBioWithVideo(bio, videoUrl);
+    }
+    if (skillsTouched) {
+      payload.skills = skills;
+      // Niveau recalculé seulement sur des catégories réellement chargées (jamais « 0 » par défaut)
+      if (catsLoaded && skillCategories.length > 0) payload.experience_level = computedExperience;
+    }
     let hours = null;
     if (canEditHours) {
       hours = { ...(employee.working_hours || defaultHours), ...(workingHours || {}) };
@@ -321,6 +468,12 @@ export default function BarberSettings() {
       delete hours._video_url;
       setWorkingHours(hours);
       payload.working_hours = hours;
+    }
+
+    if (Object.keys(payload).length === 0) {
+      setSaveStatus('Rien à enregistrer');
+      setDirty(false);
+      return;
     }
 
     try {
@@ -336,12 +489,29 @@ export default function BarberSettings() {
       toast.success('Profil sauvegardé !');
       setSaveStatus('Sauvegardé !');
       setDirty(false);
+      // État repris de la ligne renvoyée : la prochaine sauvegarde part de la version enregistrée
+      if (saved && typeof saved === 'object') {
+        if (saved.bio !== undefined) initialBioRef.current = saved.bio || '';
+        if (Array.isArray(saved.skills)) setSkills(saved.skills);
+      }
+      setBioTouched(false);
+      setSkillsTouched(false);
       queryClient.invalidateQueries({ queryKey: ['employees'] });
     } catch (err) {
-      toast.error('Erreur : ' + (err?.message || 'sauvegarde échouée'));
-      setSaveStatus('Erreur : ' + (err?.message || 'échec'));
+      const message = isNetworkError(err) ? 'Pas de connexion internet : profil non sauvegardé' : friendlyError(err, 'Sauvegarde échouée');
+      toast.error(message);
+      setSaveStatus(message);
     }
   };
+
+  // Liste des fiches en échec (réseau faible) : jamais « Profil introuvable » avec des identifiants
+  if (employeesError && !employees.length) {
+    return (
+      <div className="p-6">
+        <LoadError what="ton profil" error={employeesErr} onRetry={refetchEmployees} retrying={employeesFetching} />
+      </div>
+    );
+  }
 
   // Show debug info if employee not found
   if (!loadingEmployees && !employee) {
@@ -451,7 +621,7 @@ export default function BarberSettings() {
           <p className="text-[11px] text-muted-foreground mb-4">Collez un lien YouTube ou vidéo directe (.mp4). Cliquez Sauvegarder en haut.</p>
           <Input
             value={videoUrl}
-            onChange={(e) => { setVideoUrl(e.target.value); setDirty(true); }}
+            onChange={(e) => { setVideoUrl(e.target.value); setDirty(true); setBioTouched(true); }}
             placeholder="https://youtube.com/watch?v=... ou lien .mp4"
             className="bg-secondary border-border text-sm"
           />
@@ -498,7 +668,7 @@ export default function BarberSettings() {
           <p className="text-[11px] text-muted-foreground mb-4">Présentez-vous aux clients en quelques lignes</p>
           <Textarea
             value={bio}
-            onChange={(e) => { setBio(e.target.value); setDirty(true); }}
+            onChange={(e) => { setBio(e.target.value); setDirty(true); setBioTouched(true); }}
             placeholder="Ex: Passionné par la coiffure depuis 10 ans, spécialisé dans les coupes modernes et les dégradés..."
             className="bg-secondary border-border text-sm"
             rows={4}
@@ -567,6 +737,9 @@ export default function BarberSettings() {
         </div>
 
         {/* Skills */}
+        {catsError && !skillCategories.length && (
+          <LoadError compact what="tes spécialités" error={catsErr} onRetry={refetchCats} retrying={catsFetching} />
+        )}
         {skillCategories.length > 0 && (
           <div className="bg-card border border-border rounded-xl p-6">
             <h3 className="text-sm font-semibold mb-1">Mes spécialités</h3>
@@ -590,6 +763,9 @@ export default function BarberSettings() {
           <p className="text-[11px] text-muted-foreground mb-4">Calculé automatiquement selon vos compétences</p>
           <ExperienceGauge value={computedExperience} />
         </div>
+
+        {/* Notifications (nouveaux RDV, annulations, congés, ménage) */}
+        <StaffNotificationsCard />
 
         {/* Account info */}
         <div className="bg-card border border-border rounded-xl p-6">

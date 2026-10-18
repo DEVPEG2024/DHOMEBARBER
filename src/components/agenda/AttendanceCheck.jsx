@@ -28,6 +28,22 @@ function servicesLabel(a) {
   return list.map((s) => s?.name).filter(Boolean).join(', ');
 }
 
+/**
+ * Jour de Paris courant (« AAAA-MM-JJ »), recalculé chaque minute et au retour au premier plan :
+ * un agenda resté ouvert après minuit (tablette du salon, PWA) passe au nouveau jour.
+ */
+export function useParisTodayKey() {
+  const [key, setKey] = useState(() => parisDay(0).key);
+  useEffect(() => {
+    const tick = () => { const k = parisDay(0).key; setKey((prev) => (prev === k ? prev : k)); };
+    const id = setInterval(tick, 60 * 1000);
+    const onVis = () => { if (document.visibilityState === 'visible') tick(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { clearInterval(id); document.removeEventListener('visibilitychange', onVis); };
+  }, []);
+  return key;
+}
+
 export default function AttendanceCheck({ user, onOpen }) {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -37,7 +53,9 @@ export default function AttendanceCheck({ user, onOpen }) {
   const confirmTimer = useRef(null);
   useEffect(() => () => clearTimeout(confirmTimer.current), []);
 
-  const days = useMemo(() => Array.from({ length: DAYS }, (_, i) => parisDay(-i).key), []);
+  // Fenêtre des 7 derniers jours, décalée au passage de minuit (nouvelle clé → nouveau chargement)
+  const todayKey = useParisTodayKey();
+  const days = useMemo(() => Array.from({ length: DAYS }, (_, i) => parisDay(-i).key), [todayKey]);
   const { data = [] } = useQuery({
     queryKey: [...ATTENDANCE_QUERY_KEY, days[0]],
     queryFn: () => api.entities.Appointment.filter({ date: days, status: 'confirmed' }, 'start_time', 1000),

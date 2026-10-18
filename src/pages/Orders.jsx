@@ -22,9 +22,12 @@ import {
 import LoadError from '@/components/shared/LoadError';
 import { parisInstant } from '@/lib/calendarLinks';
 
-/** Heure de fin du RDV (heure de Paris) passée : même règle que « à venir » dans Mes rendez-vous. */
-const aptEnded = (apt) => !apt?.date
-  || parisInstant(String(apt.date).slice(0, 10), String(apt.end_time || apt.start_time || '23:59').slice(0, 5)) <= Date.now();
+/**
+ * RDV commencé (heure de début passée, heure de Paris) : le barber a dû remettre le produit. Même
+ * règle que le serveur, qui refuse alors l'annulation en ligne (409 `order_handed`).
+ */
+const aptStarted = (apt) => !!apt?.date
+  && parisInstant(String(apt.date).slice(0, 10), String(apt.start_time || '00:00').slice(0, 5)) <= Date.now();
 
 const parisDateTime = new Intl.DateTimeFormat('fr-FR', {
   timeZone: 'Europe/Paris',
@@ -192,7 +195,7 @@ export default function Orders() {
               const statusKey = normalizeOrderStatus(order.status);
               const status = ORDER_STATUSES[statusKey];
               const count = itemCount(order);
-              const canCancel = canClientCancelOrder(order, features);
+              const canCancelStatus = canClientCancelOrder(order, features);
               const isOpen = OPEN_ORDER_STATUSES.includes(statusKey);
               const linked = !!order.appointment_id;
               const linkedApt = linked ? appointmentsById.get(String(order.appointment_id)) : null;
@@ -204,10 +207,15 @@ export default function Orders() {
               // Remise par le barber pendant le RDV, tant qu'elle n'est pas prête au salon — et
               // seulement si ce RDV a encore lieu. Rien d'affirmé tant que les RDV ne sont pas
               // chargés (ou en cas d'échec).
+              // Trois cas : RDV à venir (remise pendant le RDV), RDV commencé ou passé (remise déjà
+              // faite en principe : pas d'annulation en ligne), RDV annulé / absent / introuvable.
               const linkedOpen = linked && (statusKey === 'pending' || statusKey === 'confirmed');
-              const aptActive = !!linkedApt && linkedApt.status === 'confirmed' && !aptEnded(linkedApt);
-              const handedAtAppointment = linkedOpen && appointmentsLoaded && aptActive;
-              const appointmentGone = linkedOpen && appointmentsLoaded && !aptActive;
+              const aptCancelled = !!linkedApt && ['cancelled', 'no_show'].includes(linkedApt.status);
+              const aptPast = !!linkedApt && !aptCancelled && (linkedApt.status === 'completed' || aptStarted(linkedApt));
+              const handedAtAppointment = linkedOpen && appointmentsLoaded && !!linkedApt && !aptCancelled && !aptPast;
+              const appointmentGone = linkedOpen && appointmentsLoaded && (!linkedApt || aptCancelled);
+              const appointmentPast = linkedOpen && appointmentsLoaded && aptPast;
+              const canCancel = canCancelStatus && !appointmentPast;
               return (
                 <motion.div key={order.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
                   className="rounded-2xl border border-white/8 bg-white/4 backdrop-blur-xl p-4">
@@ -260,6 +268,14 @@ export default function Orders() {
                       Ce rendez-vous n'a plus lieu : passez la retirer au salon ou annulez-la.
                     </p>
                   )}
+                  {appointmentPast && (
+                    <p className="mt-3 text-[11px] text-muted-foreground leading-relaxed">
+                      Votre barber a dû vous la remettre pendant le rendez-vous. Si ce n'est pas le cas, appelez le salon au{' '}
+                      <a href={SALON_PHONE_HREF} className="inline-flex items-center gap-1 text-primary font-semibold whitespace-nowrap">
+                        <Phone className="w-3 h-3" />{SALON_PHONE}
+                      </a>
+                    </p>
+                  )}
 
                   {canCancel ? (
                     <div className="mt-3 flex justify-end">
@@ -272,7 +288,7 @@ export default function Orders() {
                         Annuler la commande
                       </button>
                     </div>
-                  ) : isOpen && (
+                  ) : isOpen && !appointmentPast && (
                     <p className="mt-3 text-[11px] text-muted-foreground leading-relaxed">
                       {statusKey === 'ready'
                         ? 'Votre commande est prête au salon : pour l\'annuler, appelez le '

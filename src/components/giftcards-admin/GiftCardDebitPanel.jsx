@@ -9,7 +9,7 @@ import LoadError, { isNetworkError } from '@/components/shared/LoadError';
 import {
   giftCardBalance, formatEuro, round2, parisToday, giftCardState,
   debitGiftCard, friendlyGiftCardError, invalidateGiftCardQueries, patchGiftCardCache,
-  fetchTodayAppointmentsToCash, giftCardTodayAppointmentsKey, closestAppointmentId, appointmentPrice,
+  fetchTodayAppointmentsToCash, giftCardTodayAppointmentsKey, closestAppointmentId, appointmentDue, appointmentGiftPaid,
   appointmentServicesLabel, closeAppointmentWithGiftCard, fetchGiftCard, newClientRef, runGiftCardUndo,
   DEBIT_NETWORK_MESSAGE,
 } from '@/lib/giftCardDebit';
@@ -56,7 +56,12 @@ function AppointmentRow({ apt, selected, highlighted, onSelect }) {
             {apt.employee_name || 'Barber'}{services ? ` · ${services}` : ''}
           </p>
         </div>
-        <p className="text-sm font-bold text-foreground shrink-0">{formatEuro(appointmentPrice(apt))}</p>
+        <div className="text-right shrink-0">
+          <p className="text-sm font-bold text-foreground">{formatEuro(appointmentDue(apt))}</p>
+          {appointmentGiftPaid(apt) > 0 && (
+            <p className="text-[10px] text-amber-300">dont {formatEuro(appointmentGiftPaid(apt))} déjà payés par carte</p>
+          )}
+        </div>
       </div>
     </button>
   );
@@ -116,7 +121,9 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
   const selectedServices = mode === 'services' ? services.filter((s) => selectedServiceIds.has(String(s.id))) : [];
 
   let requested = 0;
-  if (mode === 'appointments') requested = selectedApt ? appointmentPrice(selectedApt) : 0;
+  // RDV : le reste dû seulement (une part a pu être payée par une autre carte)
+  const aptGiftPaid = selectedApt ? appointmentGiftPaid(selectedApt) : 0;
+  if (mode === 'appointments') requested = selectedApt ? appointmentDue(selectedApt) : 0;
   else if (mode === 'services') requested = round2(selectedServices.reduce((sum, s) => sum + (Number(s.price) || 0), 0));
   else requested = round2(Number(String(freeAmount).replace(',', '.')) || 0);
 
@@ -233,6 +240,12 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
       const noAnswer = isNetworkError(err) || (!err?.status && err?.name === 'TypeError');
       if (noAnswer) toast.error('Débit incertain', { description: DEBIT_NETWORK_MESSAGE, duration: 12000 });
       else toast.error('Débit impossible', { description: friendlyGiftCardError(err) });
+      // RDV déjà encaissé ou déjà réglé par une autre carte : la liste du jour est relue, le RDV
+      // désélectionné (son reste dû a changé)
+      if (['appointment_already_paid', 'appointment_closed'].includes(err?.data?.code)) {
+        queryClient.invalidateQueries({ queryKey: giftCardTodayAppointmentsKey(today) });
+        setSelectedAptId(null);
+      }
       // Refus (solde changé, carte annulée ou épuisée ailleurs) ou réponse perdue : carte relue
       if (noAnswer || err?.status === 409 || err?.local) {
         invalidateGiftCardQueries(queryClient, card.id);
@@ -392,6 +405,17 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
         </div>
       )}
 
+      {/* Débit hors RDV alors qu'un client a rendez-vous aujourd'hui : sans rattachement, le tableau
+          de bord compterait la part carte deux fois (vente de la carte + RDV encaissé en entier) */}
+      {(mode === 'services' || mode === 'free') && appointments.length > 0 && (
+        <div role="status" className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs leading-relaxed text-amber-200 break-words min-w-0">
+          Ce client a un rendez-vous aujourd'hui ? Débitez depuis « RDV du jour » : le montant est alors rattaché au RDV et le tableau de bord ne le compte pas deux fois.{' '}
+          <button type="button" onClick={() => pickMode('appointments')} className="font-semibold text-primary underline underline-offset-2 whitespace-nowrap">
+            Voir les RDV du jour
+          </button>
+        </div>
+      )}
+
       {mode === 'services' && (
         servicesQuery.isPending ? (
           <div className="flex flex-wrap gap-1.5">
@@ -446,7 +470,10 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
       {/* Récapitulatif */}
       {requested > 0 && (
         <div className="rounded-2xl bg-white/5 border border-white/10 p-3 space-y-1.5 text-sm" data-testid="gc-recap">
-          <div className="flex justify-between"><span className="text-muted-foreground">À payer</span><span className="font-semibold">{formatEuro(requested)}</span></div>
+          {aptGiftPaid > 0 && (
+            <div className="flex justify-between text-xs"><span className="text-muted-foreground">Déjà payé par carte</span><span className="text-amber-300">{formatEuro(aptGiftPaid)}</span></div>
+          )}
+          <div className="flex justify-between"><span className="text-muted-foreground">{aptGiftPaid > 0 ? 'Reste à payer' : 'À payer'}</span><span className="font-semibold">{formatEuro(requested)}</span></div>
           <div className="flex justify-between"><span className="text-muted-foreground">Débité de la carte</span><span className="font-bold text-primary">{formatEuro(debit)}</span></div>
           {rest > 0 && (
             <p className="flex items-start gap-1.5 text-xs text-amber-300 pt-1" data-testid="gc-rest">

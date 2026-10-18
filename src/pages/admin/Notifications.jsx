@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { api, apiRequest, apiUrl } from '@/api/apiClient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Send, Users, User, CheckCircle, Smartphone, Mail } from 'lucide-react';
+import { Send, Users, User, CheckCircle, Smartphone, Mail, X, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -71,6 +71,8 @@ export default function Notifications() {
   const [subsError, setSubsError] = useState(false);
   const [subsLoading, setSubsLoading] = useState(false);
   const [clientSearch, setClientSearch] = useState('');
+  // Push parti mais aucun email : contexte gardé pour relancer les emails seuls (jamais le push)
+  const [emailRetry, setEmailRetry] = useState(null);
 
   const queryClient = useQueryClient();
   // Rien n'est chargé à l'ouverture : la liste des clients ne part que sur une action
@@ -141,7 +143,7 @@ export default function Notifications() {
    * Ancien serveur sans la route d'envoi groupé : un SendEmail par client. On compte les échecs et
    * on s'arrête au premier 429 (les suivants seraient refusés aussi).
    */
-  const sendEmailsOneByOne = async (targets) => {
+  const sendEmailsOneByOne = async (targets, subject, message) => {
     let sentCount = 0;
     let failed = 0;
     let lastError = null;
@@ -166,7 +168,87 @@ export default function Notifications() {
     return { sent: sentCount, failed, error: lastError };
   };
 
+  /**
+   * Étape emails, partagée par l'envoi et la relance « emails seulement » : envoi groupé pour
+   * « tous » (repli un par un sur 404), un par un pour un client.
+   */
+  const sendEmailsStep = async ({ subject, message, target, targets }) => {
+    let email = { sent: 0, failed: 0, error: null, total: targets.length };
+    if (target === 'all') {
+      try {
+        // Envoi groupé côté serveur : destinataires calculés par le serveur, pas de quota par email
+        const r = await apiRequest('POST', apiUrl('/notifications/broadcast-email'), { subject, message });
+        if (r?.queued) {
+          // 202 : le serveur répond tout de suite et envoie en arrière-plan (délai de 30 s
+          // d'Heroku) ; le récapitulatif arrive ensuite en push à l'admin
+          email = { sent: 0, failed: 0, error: null, total: Number(r?.total) || 0, queued: true };
+        } else {
+          email = { sent: Number(r?.sent) || 0, failed: Number(r?.failed) || 0, error: null, total: Number(r?.total) || 0 };
+          if (email.failed > 0) email.error = `${plural(email.failed, 'email')} refusé${email.failed > 1 ? 's' : ''} par le serveur d'envoi`;
+        }
+      } catch (err) {
+        if (err?.status === 404) {
+          email = { ...(await sendEmailsOneByOne(targets, subject, message)), total: targets.length };
+        } else if (isNetworkError(err) || err?.timeout || err?.status === 504 || (err?.status === 503 && !/SMTP/i.test(String(err?.message || '')))) {
+          // Réponse perdue ou coupée par le routeur : l'envoi a pu partir, ne pas inciter à relancer
+          email = { sent: 0, failed: 0, total: targets.length, uncertain: true, error: null };
+        } else {
+          email = { sent: 0, failed: targets.length, total: targets.length, error: errorText(err, "échec de l'envoi des emails") };
+        }
+      }
+    } else if (targets.length > 0) {
+      email = { ...(await sendEmailsOneByOne(targets, subject, message)), total: targets.length };
+    } else {
+      email = { sent: 0, failed: 0, total: 0, error: "ce client n'a pas d'email connu" };
+    }
+    return email;
+  };
+
+  /** Libellé du compte rendu des emails (toast) */
+  const emailPartOf = (email) => (email.queued
+    ? `Envoi de ${plural(email.total, 'email')} en cours`
+    : email.uncertain
+      ? 'Emails : envoi peut-être en cours, vérifiez avant de relancer'
+      : email.failed > 0 || email.error
+        ? `Emails : ${email.sent} envoyé${email.sent > 1 ? 's' : ''}, ${email.failed} non envoyé${email.failed > 1 ? 's' : ''}${email.error ? ` (${email.error})` : ''}`
+        : `Emails : ${email.sent} envoyé${email.sent > 1 ? 's' : ''}`);
+
+  /** Relance des emails seuls : aucun appel à /push/send, destinataires déjà chargés réutilisés */
+  const retryEmails = async () => {
+    if (!emailRetry || sending) return;
+    const ctx = emailRetry;
+    setSending(true);
+    try {
+      const email = await sendEmailsStep(ctx);
+      const emailPart = emailPartOf(email);
+      const done = email.sent > 0 || !!email.queued || !!email.uncertain;
+      const allOk = !email.error && email.failed === 0 && !email.uncertain;
+      if (allOk) toast.success(emailPart);
+      else if (done) toast.warning(emailPart, { duration: 10000 });
+      else toast.error(emailPart, { duration: 10000 });
+      if (done) {
+        setEmailRetry(null);
+        setSent(prev => [...prev, {
+          subject: ctx.subject,
+          target: ctx.target === 'all' ? `Tous (${email.total || ctx.targets.length})` : ctx.clientEmail,
+          emailOnly: true,
+          pushSent: 0,
+          pushError: null,
+          emailSent: email.sent,
+          emailFailed: email.failed,
+          emailQueued: !!email.queued,
+          emailUncertain: !!email.uncertain,
+          date: new Date().toLocaleTimeString('fr-FR', { timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit' }),
+        }]);
+      }
+    } finally {
+      setSending(false);
+    }
+  };
+
   const handleSend = async () => {
+    // Une relance d'emails en attente vise l'ancien message : jamais deux envois mêlés
+    if (emailRetry) return;
     if (!subject || !message) {
       toast.error('Objet et message requis');
       return;
@@ -209,45 +291,21 @@ export default function Notifications() {
       }
 
       // 3) Emails
-      let email = { sent: 0, failed: 0, error: null, total: targets.length };
-      if (target === 'all') {
-        try {
-          // Envoi groupé côté serveur : destinataires calculés par le serveur, pas de quota par email
-          const r = await apiRequest('POST', apiUrl('/notifications/broadcast-email'), { subject, message });
-          if (r?.queued) {
-            // 202 : le serveur répond tout de suite et envoie en arrière-plan (délai de 30 s
-            // d'Heroku) ; le récapitulatif arrive ensuite en push à l'admin
-            email = { sent: 0, failed: 0, error: null, total: Number(r?.total) || 0, queued: true };
-          } else {
-            email = { sent: Number(r?.sent) || 0, failed: Number(r?.failed) || 0, error: null, total: Number(r?.total) || 0 };
-            if (email.failed > 0) email.error = `${plural(email.failed, 'email')} refusé${email.failed > 1 ? 's' : ''} par le serveur d'envoi`;
-          }
-        } catch (err) {
-          if (err?.status === 404) {
-            email = { ...(await sendEmailsOneByOne(targets)), total: targets.length };
-          } else if (isNetworkError(err) || err?.timeout || err?.status === 504 || (err?.status === 503 && !/SMTP/i.test(String(err?.message || '')))) {
-            // Réponse perdue ou coupée par le routeur : l'envoi a pu partir, ne pas inciter à relancer
-            email = { sent: 0, failed: 0, total: targets.length, uncertain: true, error: null };
-          } else {
-            email = { sent: 0, failed: targets.length, total: targets.length, error: errorText(err, "échec de l'envoi des emails") };
-          }
-        }
-      } else if (targets.length > 0) {
-        email = { ...(await sendEmailsOneByOne(targets)), total: targets.length };
+      const email = await sendEmailsStep({ subject, message, target, targets });
+
+      // Push parti, aucun email parti (ni en file ni incertain) : proposer de relancer les emails
+      // seuls. `sent === 0` : un envoi un par un partiellement réussi n'est jamais relancé (doublons)
+      if (pushResult && !pushError && !email.queued && !email.uncertain && email.sent === 0
+        && (email.failed > 0 || email.error) && (email.total > 0 || targets.length > 0)) {
+        setEmailRetry({ subject, message, target, clientEmail, targets });
       } else {
-        email = { sent: 0, failed: 0, total: 0, error: "ce client n'a pas d'email connu" };
+        setEmailRetry(null);
       }
 
       // 4) Compte rendu par canal
       const pushSent = Number(pushResult?.sent) || 0;
       const pushPart = pushError ? `Push non envoyé : ${pushError}` : `Push : ${plural(pushSent, 'appareil')}`;
-      const emailPart = email.queued
-        ? `Envoi de ${plural(email.total, 'email')} en cours`
-        : email.uncertain
-          ? 'Emails : envoi peut-être en cours, vérifiez avant de relancer'
-          : email.failed > 0 || email.error
-            ? `Emails : ${email.sent} envoyé${email.sent > 1 ? 's' : ''}, ${email.failed} non envoyé${email.failed > 1 ? 's' : ''}${email.error ? ` (${email.error})` : ''}`
-            : `Emails : ${email.sent} envoyé${email.sent > 1 ? 's' : ''}`;
+      const emailPart = emailPartOf(email);
       // Envoi en cours ou incertain : compté comme parti (saisie vidée), pour éviter un doublon
       const anyOk = !!pushResult || email.sent > 0 || !!email.queued || !!email.uncertain;
       const allOk = !pushError && !email.error && email.failed === 0 && !email.uncertain;
@@ -430,11 +488,40 @@ export default function Notifications() {
                   : `${clientEmail ? 1 : 0} destinataire`})</p>
               </div>
 
-              <Button onClick={handleSend} disabled={sending || !subject || !message}
+              <Button onClick={handleSend} disabled={sending || !subject || !message || !!emailRetry}
                 className="w-full bg-primary text-primary-foreground hover:bg-primary/90">
                 <Send className="w-4 h-4 mr-2" />
                 {sending ? 'Envoi en cours...' : 'Envoyer (Push + Email)'}
               </Button>
+
+              {emailRetry && (
+                <div role="alert" className="relative rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 pr-10 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setEmailRetry(null)}
+                    aria-label="Abandonner l'envoi des emails"
+                    className="absolute top-2 right-2 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-white/10"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                  <p className="font-semibold text-amber-400">Le push est parti, les emails n'ont pas été envoyés</p>
+                  <p className="text-muted-foreground mt-1 break-words">
+                    « {emailRetry.subject} » — {emailRetry.target === 'all' ? 'tous les clients' : emailRetry.clientEmail}
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={retryEmails}
+                    disabled={sending}
+                    className="mt-2.5 border-amber-500/40 text-amber-300 hover:text-amber-200"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5 mr-1.5" />
+                    {sending ? 'Envoi en cours...' : 'Renvoyer seulement les emails'}
+                  </Button>
+                  <p className="text-muted-foreground/80 mt-2">Fermez cet encadré pour écrire un nouveau message.</p>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -478,7 +565,9 @@ export default function Notifications() {
                     <p className="font-medium truncate text-foreground">{s.subject}</p>
                     <p className="text-muted-foreground mt-0.5">{s.target}</p>
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1">
-                      <span className={s.pushError ? 'text-amber-400' : 'text-primary'}>Push : {s.pushError ? 'non envoyé' : s.pushSent}</span>
+                      {s.emailOnly
+                        ? <span className="text-muted-foreground">Emails seulement</span>
+                        : <span className={s.pushError ? 'text-amber-400' : 'text-primary'}>Push : {s.pushError ? 'non envoyé' : s.pushSent}</span>}
                       <span className="text-primary">Email : {s.emailQueued ? 'en cours' : s.emailUncertain ? 'à vérifier' : s.emailSent}</span>
                       {s.emailFailed > 0 && <span className="text-amber-400">{s.emailFailed} non envoyé{s.emailFailed > 1 ? 's' : ''}</span>}
                       <span className="text-muted-foreground/60 ml-auto">{s.date}</span>

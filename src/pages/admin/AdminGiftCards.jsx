@@ -17,6 +17,7 @@ import {
 
 const PAYMENT_LABELS = { cb: 'CB', especes: 'Espèces' };
 import LoadError from '@/components/shared/LoadError';
+import { useAndroidBack } from '@/lib/useAndroidBack';
 
 const STATUS_CONFIG = {
   pending: { label: 'En attente', color: 'text-amber-400', bg: 'bg-amber-500/15 border-amber-500/20', icon: Clock },
@@ -53,6 +54,11 @@ function ValidateModal({ card, onClose, onCardChange }) {
   const [debitResultShown, setDebitResultShown] = useState(false);
   const state = giftCardState(card);
   const showDebit = state === 'debitable' || debitResultShown;
+  // Bouton retour d'Android : ferme la fenêtre (montée seulement ouverte) au lieu de quitter la page
+  useAndroidBack(true, onClose);
+  // Suppression réservée aux cartes jamais payées (sinon la vente sortait du CA et l'historique des
+  // débits disparaissait) ; le serveur refuse aussi (409)
+  const neverPaid = card.status === 'pending' || (card.status === 'expired' && !card.validated_at);
 
   /**
    * Relit la carte avant de la valider ou de la rejeter : la liste n'est pas rechargée toute seule
@@ -312,6 +318,8 @@ function ValidateModal({ card, onClose, onCardChange }) {
                 <Ban className="w-3.5 h-3.5" /> Annuler cette carte
               </button>
             ) : (
+              <div className="space-y-2">
+              <p className="text-[11px] text-muted-foreground text-center">Le solde restant est perdu. La vente reste comptée dans le CA de son mois.</p>
               <div className="flex gap-2">
                 <button
                   onClick={() => setConfirmCancel(false)}
@@ -327,11 +335,13 @@ function ValidateModal({ card, onClose, onCardChange }) {
                   <Ban className="w-3.5 h-3.5" /> Confirmer l'annulation
                 </button>
               </div>
+              </div>
             )}
           </div>
         )}
 
-        {/* Delete */}
+        {/* Delete : carte jamais payée seulement */}
+        {neverPaid && (
         <div className="mt-4 pt-4 border-t border-border">
           {!confirmDelete ? (
             <button
@@ -358,6 +368,7 @@ function ValidateModal({ card, onClose, onCardChange }) {
             </div>
           )}
         </div>
+        )}
       </motion.div>
     </div>
   );
@@ -472,6 +483,8 @@ function QRScannerModal({ onClose, onScanned }) {
   };
 
   const handleClose = () => { stopCamera(); onClose(); };
+  // Bouton retour d'Android : coupe la caméra puis ferme
+  useAndroidBack(true, handleClose);
 
   return (
     <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center px-4 pt-[calc(env(safe-area-inset-top)+1rem)] pb-[calc(env(safe-area-inset-bottom)+1rem)]">
@@ -649,7 +662,9 @@ export default function AdminGiftCards() {
     validated: giftCards.filter(c => matchesFilter(c, 'validated')).length,
     used: giftCards.filter(c => matchesFilter(c, 'used')).length,
     expired: giftCards.filter(c => matchesFilter(c, 'expired')).length,
-    total: giftCards.reduce((sum, c) => c.status === 'validated' || c.status === 'used' ? sum + (Number(c.amount) || 0) : sum, 0),
+    // Toute carte payée compte, même annulée depuis (validated_at gardé) : une annulation ne
+    // modifie pas le CA d'un mois déjà vu ni ne fait disparaître les prestations qu'elle a payées
+    total: giftCards.reduce((sum, c) => (c.validated_at || c.status === 'validated' || c.status === 'used') ? sum + (Number(c.amount) || 0) : sum, 0),
   };
 
   const filters = [

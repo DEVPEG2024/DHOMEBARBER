@@ -4,6 +4,7 @@ import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { ChevronLeft, ChevronRight, Images, X } from 'lucide-react';
 import { hapticFeedback } from '@/lib/capacitor';
 import { GALLERY_PREVIEW, galleryOf } from '@/lib/barberGallery';
+import { useAndroidBack } from '@/lib/useAndroidBack';
 
 const SWIPE_OFFSET = 60;
 const SWIPE_VELOCITY = 450;
@@ -115,6 +116,8 @@ export default function BarberGallery({ employee, delay = 0 }) {
   const items = galleryOf(employee);
   const [open, setOpen] = useState(null); // index affiché, null = fermé
   const [expanded, setExpanded] = useState(false);
+  // Bouton retour d'Android : ferme la visionneuse au lieu de quitter le profil
+  useAndroidBack(open != null, () => setOpen(null));
   if (items.length === 0) return null;
 
   const shown = expanded ? items : items.slice(0, GALLERY_PREVIEW);

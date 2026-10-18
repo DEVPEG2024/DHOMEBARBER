@@ -1,5 +1,5 @@
 import React, { useState, useRef, useLayoutEffect, useEffect, useCallback, useMemo } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '@/api/apiClient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
@@ -14,7 +14,7 @@ import ProductSheet from '@/components/shop/ProductSheet';
 import FavoriteButton from '@/components/shared/FavoriteButton';
 import { useFavorites } from '@/lib/favorites';
 import { formatPrice, productCategoryLabel, productImages, stockInfo, isShopProduct, MAX_PER_PRODUCT, PER_PRODUCT_LIMIT_MESSAGE } from '@/components/shop/productUtils';
-import LoadError from '@/components/shared/LoadError';
+import LoadError, { isNetworkError } from '@/components/shared/LoadError';
 import { useAndroidBack } from '@/lib/useAndroidBack';
 
 /** Vol de la vignette produit vers le panier : taille du disque (px) et durée (s). */
@@ -118,6 +118,7 @@ function GlassCard({ children }) {
 }
 
 export default function Shop() {
+  const navigate = useNavigate();
   const { user } = useAuth();
   // Panier rattaché au compte : à un changement de compte, on relit la bonne clé (ajustement
   // pendant le rendu, sans écrire l'ancien panier sous la nouvelle clé).
@@ -355,6 +356,16 @@ export default function Shop() {
       queryClient.invalidateQueries({ queryKey: ['myOrders'] });
       queryClient.invalidateQueries({ queryKey: ['adminOrders'] });
     } catch (err) {
+      // Réseau coupé : la commande est peut-être passée (réponse perdue). Jamais « Failed to fetch » ;
+      // panier gardé, et on invite à vérifier avant de renvoyer (le serveur ne dédoublonne que 60 s)
+      if (isNetworkError(err) || err?.timeout) {
+        toast.error('Pas de connexion internet : vérifiez dans Mes commandes si la commande est passée avant de réessayer.', {
+          duration: 8000,
+          action: { label: 'Mes commandes', onClick: () => navigate('/orders') },
+        });
+        queryClient.invalidateQueries({ queryKey: ['myOrders'] });
+        return; // le bloc finally remet quand même submittingRef et ordering à zéro
+      }
       // Message du serveur (ex. 409 « plus que N en stock ») plutôt qu'une erreur générique
       const message = err?.data?.error || err?.message;
       toast.error(message && !/^HTTP \d+$/.test(message) ? message : 'Erreur lors de la commande');
@@ -441,6 +452,8 @@ export default function Shop() {
           // Tout le stock suivi est déjà au panier : le « + » reste touchable mais n'ajoute rien
           // et explique pourquoi (un bouton simplement grisé ne dirait rien)
           const atLimit = inCart > 0 && inCart >= cartLimit(product);
+          // Plafond de 20 par commande (et non le stock) : le message doit le dire
+          const capped = atLimit && limitedByCap(product);
           return (
             <GlassCard key={product.id}>
               <motion.div
@@ -473,8 +486,9 @@ export default function Shop() {
                       </div>
                     )}
                     {product.brand && (
-                      <Badge className="absolute top-2 left-2 bg-card/80 text-foreground text-[9px] border-none backdrop-blur-sm">
-                        {product.brand}
+                      <Badge className="absolute top-2 left-2 max-w-[calc(100%-3.75rem)] bg-card/80 text-foreground text-[9px] border-none backdrop-blur-sm">
+                        {/* Borné à gauche du cœur : le Badge est en inline-flex, la troncature se fait sur le span */}
+                        <span className="truncate min-w-0">{product.brand}</span>
                       </Badge>
                     )}
                     {photoCount > 1 && (
@@ -504,7 +518,7 @@ export default function Shop() {
                           <Minus className="w-3.5 h-3.5" />
                         </button>
                         <span className="text-sm font-bold w-4 text-center">{cart[product.id]}</span>
-                        <button onClick={e => addFromCard(product, e)} aria-disabled={atLimit} aria-label={atLimit ? 'Stock maximum atteint' : 'Ajouter une unité'} className={`w-8 h-8 rounded-full bg-primary flex items-center justify-center active:scale-95 ${atLimit ? 'opacity-40' : ''}`}>
+                        <button onClick={e => addFromCard(product, e)} aria-disabled={atLimit} aria-label={atLimit ? (capped ? `${MAX_PER_PRODUCT} maximum par produit` : 'Stock maximum atteint') : 'Ajouter une unité'} className={`w-8 h-8 rounded-full bg-primary flex items-center justify-center active:scale-95 ${atLimit ? 'opacity-40' : ''}`}>
                           <Plus className="w-3.5 h-3.5 text-primary-foreground" />
                         </button>
                       </div>
@@ -515,7 +529,7 @@ export default function Shop() {
                     )}
                   </div>
                   {atLimit && (
-                    <p className="text-[10px] text-amber-400 mt-1.5 leading-tight">Tout le stock est dans votre panier</p>
+                    <p className="text-[10px] text-amber-400 mt-1.5 leading-tight">{capped ? `${MAX_PER_PRODUCT} maximum par produit` : 'Tout le stock est dans votre panier'}</p>
                   )}
                 </div>
               </motion.div>

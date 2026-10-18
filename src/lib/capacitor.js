@@ -33,12 +33,27 @@ export function registerBackHandler(fn) {
   };
 }
 
+/**
+ * Barre d'état accordée au thème (iOS seulement) : texte sombre sur le thème clair, sinon
+ * l'heure et la batterie disparaissent sur le fond clair. Android garde sa barre à fond sombre
+ * (#1a1a2e) et donc son texte clair. Appelée par ThemeProvider au montage et à chaque bascule.
+ */
+export async function syncStatusBarTheme(theme) {
+  if (!isNative || platform !== 'ios') return;
+  try {
+    await StatusBar.setStyle({ style: theme === 'light' ? Style.Light : Style.Dark });
+  } catch {}
+}
+
 export async function initCapacitor() {
   if (!isNative) return;
 
-  // Status bar
+  // Status bar : sur iOS, style du thème enregistré (cet appel asynchrone peut arriver après
+  // l'effet de ThemeProvider : un Style.Dark fixe remettrait le texte clair sur le thème clair)
   try {
-    await StatusBar.setStyle({ style: Style.Dark });
+    let saved = 'dark';
+    try { saved = localStorage.getItem('theme') || 'dark'; } catch {}
+    await StatusBar.setStyle({ style: platform === 'ios' && saved === 'light' ? Style.Light : Style.Dark });
     if (platform === 'android') {
       await StatusBar.setBackgroundColor({ color: '#1a1a2e' });
     }

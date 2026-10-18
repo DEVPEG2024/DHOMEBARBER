@@ -117,19 +117,23 @@ function ResizeHandle({ edge, handlers }) {
   );
 }
 
-export function BreakCard({ apt, style, onSelect, dragProps, resizeProps, ghosted = false }) {
+export function BreakCard({ apt, style, onSelect, dragProps, resizeProps, ghosted = false, showBarber = false, barberName, color }) {
   const height = style.height || 0;
+  // Vue Semaine « Tous » : prénom du barber visible (le title ne se voit pas au doigt) ;
+  // une pause sans barber est une pause du salon
+  const fullName = barberName || apt.employee_name || (apt.employee_id ? '' : 'Salon');
+  const firstName = showBarber ? String(fullName || '').trim().split(/\s+/)[0] : '';
   return (
     <div
       data-block
       {...activate(() => onSelect(apt))}
       {...dragProps}
-      title={`Pause ${apt.start_time} – ${apt.end_time}${apt.employee_name ? ` · ${apt.employee_name}` : ''}`}
+      title={`Pause ${apt.start_time} – ${apt.end_time}${(barberName || apt.employee_name) ? ` · ${barberName || apt.employee_name}` : ''}`}
       className="absolute rounded-md overflow-hidden cursor-pointer hover:ring-2 hover:ring-slate-400/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
       style={{
         ...style,
         background: 'repeating-linear-gradient(135deg, rgba(148,163,184,0.16), rgba(148,163,184,0.16) 4px, rgba(148,163,184,0.07) 4px, rgba(148,163,184,0.07) 8px)',
-        borderLeft: '3px solid #94a3b8',
+        borderLeft: `3px solid ${color || '#94a3b8'}`,
         zIndex: 6,
         opacity: ghosted ? 0.3 : 1,
         ...NO_CALLOUT,
@@ -137,8 +141,11 @@ export function BreakCard({ apt, style, onSelect, dragProps, resizeProps, ghoste
     >
       <div className={`px-1.5 ${resizeProps && height >= 36 ? 'pt-2' : 'py-0.5'} flex items-center gap-1 min-w-0`}>
         <Coffee className="w-3 h-3 text-slate-400 shrink-0" />
-        <p className="text-[10px] font-bold text-slate-400 truncate">{apt.start_time} – {apt.end_time}</p>
+        <p className="text-[10px] font-bold text-slate-400 truncate">{firstName || `${apt.start_time} – ${apt.end_time}`}</p>
       </div>
+      {firstName && height >= 30 && (
+        <p className="px-1.5 text-[9px] font-semibold text-slate-400/90 truncate">{apt.start_time} – {apt.end_time}</p>
+      )}
       {/* Étirer la pause : haut = début, bas = fin (une pause très courte garde seulement le bas) */}
       {resizeProps && height >= 36 && <ResizeHandle edge="start" handlers={resizeProps.start} />}
       {resizeProps && <ResizeHandle edge="end" handlers={resizeProps.end} />}

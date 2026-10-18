@@ -11,6 +11,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Send, Bell, Users, PackageCheck, Check } from 'lucide-react';
 import { toast } from 'sonner';
+import { adminErrorMessage, isUncertainSend } from '@/lib/adminErrors';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
@@ -20,22 +21,27 @@ import { invalidateTextile, INPUT_CLASS } from './shared';
 
 const MESSAGE_MAX = 200;
 const OPEN_BODY = "Réserve ta pièce avant qu'il ne soit trop tard";
-// Drop pas encore ouvert : on ne peut pas encore réserver (même texte que le serveur, lib/textileNotify.js)
-const TEASING_BODY = "Bientôt disponible : active l'alerte pour être prévenu";
+// Drop terminé : ni ouverture à annoncer, ni alerte à activer (même texte que le serveur, lib/textileNotify.js)
+const ENDED_BODY = 'Le drop est terminé : merci à tous ! Découvre les prochaines pièces dans DHB Textile';
+// Fin de phrase d'une annonce : les abonnés ont déjà activé l'alerte, les autres sont invités à le faire
+const tailFor = (everyone) => (everyone ? "active l'alerte pour être prévenu" : "on te prévient dès que c'est ouvert");
 const PARIS_WHEN_FMT = new Intl.DateTimeFormat('fr-FR', {
   timeZone: 'Europe/Paris', weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
 });
 
-/** Corps par défaut du push selon l'état du drop, identique à `defaultBody` du serveur. */
-function announceBody(drop) {
+/** Corps par défaut du push selon l'état du drop et l'audience, identique à `defaultBody` du serveur. */
+function announceBody(drop, everyone = false) {
   if (drop?.status === 'live') return OPEN_BODY;
+  if (drop?.status === 'ended') return ENDED_BODY;
+  const tail = tailFor(everyone);
   const start = drop?.starts_at ? new Date(drop.starts_at) : null;
-  if (start && !Number.isNaN(start.getTime())) {
+  // Date d'ouverture annoncée seulement si elle est à venir
+  if (start && !Number.isNaN(start.getTime()) && start.getTime() > Date.now()) {
     const parts = PARIS_WHEN_FMT.formatToParts(start);
     const get = (type) => (parts.find((x) => x.type === type) || {}).value || '';
-    return `Ouverture le ${get('weekday')} ${get('day')} ${get('month')} à ${get('hour')}:${get('minute')} : active l'alerte pour être prévenu`;
+    return `Ouverture le ${get('weekday')} ${get('day')} ${get('month')} à ${get('hour')}:${get('minute')} : ${tail}`;
   }
-  return TEASING_BODY;
+  return `Bientôt disponible : ${tail}`;
 }
 const READY_BODY = 'Passe au salon récupérer ta pièce';
 // Statuts qui valent « a payé sa précommande » (les pièces déjà prêtes reçoivent le rappel aussi)
@@ -89,7 +95,8 @@ export default function NotifyDialog({ drop, reservations = [], onClose }) {
             : 'Aucun destinataire joignable',
       );
     },
-    onError: (err) => toast.error(err?.message || "Erreur lors de l'envoi"),
+    // Coupure réseau : l'envoi est peut-être parti, avertir sans inviter à renvoyer
+    onError: (err) => (isUncertainSend(err) ? toast.warning : toast.error)(adminErrorMessage(err, "Erreur lors de l'envoi", { sending: true }), { duration: 10000 }),
   });
 
   if (!drop) return null;
@@ -98,7 +105,7 @@ export default function NotifyDialog({ drop, reservations = [], onClose }) {
   const title = isPaid
     ? `✨ Ta commande ${drop.name} est prête !`
     : drop.status === 'live' ? `🔥 Drop ${drop.name} ouvert !` : `📣 ${drop.name}`;
-  const defaultBody = isPaid ? READY_BODY : announceBody(drop);
+  const defaultBody = isPaid ? READY_BODY : announceBody(drop, audience === 'everyone');
   // Avant l'ouverture, un envoi aux abonnés / à tous est une relance : le push d'ouverture partira quand même
   const isReminder = !isPaid && (drop.status === 'teasing' || drop.status === 'draft');
 

@@ -4,14 +4,14 @@ import { useQuery, useInfiniteQuery, useQueryClient } from '@tanstack/react-quer
 import { motion } from 'framer-motion';
 import { UserPlus, AlertTriangle, Download, Upload, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { exportToCSV } from '@/utils/exportCSV';
+import { exportToCSV, saveTextFile } from '@/utils/exportCSV';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
-import LoadError from '@/components/shared/LoadError';
+import LoadError, { friendlyError } from '@/components/shared/LoadError';
 import { useAuth } from '@/lib/AuthContext';
 import { parisInstant } from '@/lib/calendarLinks';
-import { invalidateAppointmentQueries } from '@/components/agenda/agendaUtils';
+import { invalidateAppointmentQueries, isClientPlaceholder } from '@/components/agenda/agendaUtils';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -44,9 +44,17 @@ const parisTodayStr = () => new Intl.DateTimeFormat('en-CA', {
 }).format(new Date());
 
 /** Fiche « Ajouter » / « Importer » : RDV annulé, sans prestation ni prix, posé pour faire exister le contact. */
-const isPlaceholderAppointment = (apt) =>
-  apt.status === 'cancelled' && !(apt.services?.length) && !Number(apt.total_price) && !apt.payment_method
-  && String(apt.start_time || '') === String(apt.end_time || '');
+const isPlaceholderAppointment = isClientPlaceholder;
+
+/** Vraie visite : RDV confirmé ou terminé dont l'heure de fin (Paris) est passée (ni annulé, ni absent, ni à venir). */
+const isPastVisit = (apt, now = Date.now()) =>
+  !!apt.date && (apt.status === 'completed' || apt.status === 'confirmed')
+  && parisInstant(apt.date, apt.end_time || apt.start_time || '00:00') <= now;
+
+// Import : lots de 8 créations, au moins 2,5 s entre deux lots (~190 requêtes / min, moins de la
+// moitié du quota de 400 / min / IP que partage tout le Wi-Fi du salon)
+const IMPORT_BATCH = 8;
+const IMPORT_PAUSE_MS = 2500;
 
 /** RDV à venir (heure de Paris), pas encore encaissé : annulé à la suppression du compte. */
 const isUpcomingUnpaid = (apt, now = Date.now()) =>
@@ -104,6 +112,7 @@ function buildClients(registeredUsers, appointments, employees) {
   });
 
   // Ensuite, enrichir/ajouter avec les données des rendez-vous
+  const now = Date.now();
   appointments.forEach(apt => {
     if (!apt.client_email) return;
     const key = apt.client_email.toLowerCase();
@@ -127,7 +136,8 @@ function buildClients(registeredUsers, appointments, employees) {
       c.totalSpent += apt.total_price || 0;
     }
     if (apt.status === 'no_show') c.noShows++;
-    if (!c.lastVisit || apt.date > c.lastVisit) c.lastVisit = apt.date;
+    // Dernière visite : jamais un RDV à venir, annulé (fiches Ajouter / Importer comprises) ou absent
+    if (isPastVisit(apt, now) && (!c.lastVisit || apt.date > c.lastVisit)) c.lastVisit = apt.date;
   });
   return Object.values(map).sort((a, b) => (b.lastVisit || b.registeredAt || '').localeCompare(a.lastVisit || a.registeredAt || ''));
 }
@@ -140,6 +150,9 @@ export default function Clients() {
   const [newClient, setNewClient] = useState({ name: '', email: '', phone: '' });
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // Import en cours : { done, total } (bouton désactivé, second import ignoré)
+  const [importing, setImporting] = useState(null);
+  const importingRef = useRef(false);
   const fileInputRef = useRef(null);
   const queryClient = useQueryClient();
   const { user } = useAuth();
@@ -168,6 +181,8 @@ export default function Clients() {
     error: usersErr,
     refetch: refetchUsers,
     isFetching: usersFetching,
+    isPending: usersPending,
+    fetchStatus: usersFetchStatus,
   } = useInfiniteQuery({
     queryKey: USERS_QUERY_KEY,
     initialPageParam: 0,
@@ -182,9 +197,14 @@ export default function Clients() {
 
   // Comptes ou rendez-vous non chargés : LoadError, jamais « Aucun client » ni des clients à
   // 0 visite / 0 € (leurs rendez-vous manquent)
-  const usersFailed = usersError && !usersPages;
-  const appointmentsFailed = appointmentsQ.isError && !appointmentsQ.data;
+  // Hors connexion, React Query met la requête en pause (pending + paused, sans erreur) : c'est un
+  // échec aussi, sinon « Aucun client trouvé » s'affichait jusqu'au retour du réseau
+  const paused = (q) => q.isPending && q.fetchStatus === 'paused';
+  const usersFailed = (usersError && !usersPages) || (usersPending && usersFetchStatus === 'paused');
+  const appointmentsFailed = (appointmentsQ.isError && !appointmentsQ.data) || paused(appointmentsQ);
   const listFailed = usersFailed || appointmentsFailed;
+  // Premier chargement : des lignes squelette, jamais « Aucun client trouvé »
+  const listLoading = !listFailed && (usersPending || appointmentsQ.isPending);
   const retryList = () => Promise.all([
     usersFailed ? refetchUsers() : null,
     appointmentsFailed ? appointmentsQ.refetch() : null,
@@ -287,7 +307,7 @@ export default function Clients() {
         });
       }
     } catch (err) {
-      toast.error(err?.message && !/^HTTP/.test(err.message) ? err.message : 'Erreur lors de la suppression du client');
+      toast.error(friendlyError(err, 'Erreur lors de la suppression du client'));
     } finally {
       invalidateAppointmentQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: ['registeredUsers'] });
@@ -362,46 +382,50 @@ export default function Clients() {
       setNewClient({ name: '', email: '', phone: '' });
       setShowAddClient(false);
     } catch (err) {
-      toast.error('Erreur lors de l\'ajout du client');
+      toast.error(friendlyError(err, 'Erreur lors de l\'ajout du client'));
     } finally {
       setSaving(false);
     }
   };
 
   // Les exports portent sur toute la base : on complète d'abord les lots de comptes
+  // Apps natives : enregistrement par la feuille de partage (exportCSV.js) ; tout échec est dit
   const handleExportCSV = async () => {
-    const allClients = buildClients(await ensureAllUsers(), appointments, employees);
-    exportToCSV(allClients.map(c => ({
-      nom: c.name,
-      email: c.email,
-      telephone: c.phone || '',
-      visites: c.visits,
-      depense_eur: c.totalSpent,
-      no_shows: c.noShows,
-      derniere_visite: c.lastVisit || '',
-    })), 'clients');
+    try {
+      const allClients = buildClients(await ensureAllUsers(), appointments, employees);
+      const done = await exportToCSV(allClients.map(c => ({
+        nom: c.name,
+        email: c.email,
+        telephone: c.phone || '',
+        visites: c.visits,
+        depense_eur: c.totalSpent,
+        no_shows: c.noShows,
+        derniere_visite: c.lastVisit || '',
+      })), 'clients');
+      if (done === false) toast.info('Aucun client à exporter');
+    } catch (err) {
+      toast.error(friendlyError(err, 'Export impossible, réessayez'));
+    }
   };
 
   const handleExportJSON = async () => {
-    const allClients = buildClients(await ensureAllUsers(), appointments, employees);
-    const data = allClients.map(c => ({
-      nom: c.name,
-      email: c.email,
-      telephone: c.phone || '',
-    }));
-    const json = JSON.stringify(data, null, 2);
-    const blob = new Blob([json], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'clients.json';
-    a.click();
-    URL.revokeObjectURL(url);
+    try {
+      const allClients = buildClients(await ensureAllUsers(), appointments, employees);
+      const data = allClients.map(c => ({
+        nom: c.name,
+        email: c.email,
+        telephone: c.phone || '',
+      }));
+      await saveTextFile(JSON.stringify(data, null, 2), 'clients.json', 'application/json');
+    } catch (err) {
+      toast.error(friendlyError(err, 'Export impossible, réessayez'));
+    }
   };
 
   const handleImportCSV = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (importingRef.current) { e.target.value = ''; return; }
 
     const reader = new FileReader();
     reader.onload = async (event) => {
@@ -447,8 +471,14 @@ export default function Clients() {
           return;
         }
 
-        // Filter out clients that already exist (sur toute la base, pas sur les lots chargés)
-        const allClients = buildClients(await ensureAllUsers(), appointments, employees);
+        // Filter out clients that already exist (sur toute la base, pas sur les lots chargés). Les
+        // RDV sont relus d'abord : un nouvel import après un import interrompu ne recrée rien
+        const freshAppointments = await queryClient.fetchQuery({
+          queryKey: APPOINTMENTS_QUERY_KEY,
+          queryFn: () => api.entities.Appointment.list('-date', APPOINTMENTS_LIMIT),
+          staleTime: 0,
+        });
+        const allClients = buildClients(await ensureAllUsers(), freshAppointments || appointments, employees);
         const existingEmails = new Set(allClients.map(c => c.email.toLowerCase()));
         const newClients = importedClients.filter(
           c => c.email && !existingEmails.has(c.email.toLowerCase())
@@ -459,30 +489,49 @@ export default function Clients() {
           return;
         }
 
-        // Create a placeholder appointment for each new client so they appear in the list
-        await Promise.all(
-          newClients.map(c =>
-            api.entities.Appointment.create({
-              client_name: c.nom || c.name || '',
-              client_email: c.email,
-              client_phone: c.telephone || c.phone || '',
-              date: parisTodayStr(),
-              start_time: '09:00',
-              end_time: '09:00',
-              status: 'cancelled',
-              total_price: 0,
-              total_duration: 0,
-              employee_id: (employees[0] || {}).id || 'none',
-              employee_name: (employees[0] || {}).name || '',
-              services: [],
-            })
-          )
-        );
-
-        invalidateAppointmentQueries(queryClient);
-        toast.success(`${newClients.length} client(s) importé(s) avec succès`);
+        // Une fiche (RDV annulé) par nouveau client, à débit limité : tout lancer d'un coup
+        // dépassait le quota global (429 pour tout le salon pendant une minute) et un seul refus
+        // annonçait un échec total alors que la plupart étaient créés
+        const create = (c) => api.entities.Appointment.create({
+          client_name: c.nom || c.name || '',
+          client_email: c.email,
+          client_phone: c.telephone || c.phone || '',
+          date: parisTodayStr(),
+          start_time: '09:00',
+          end_time: '09:00',
+          status: 'cancelled',
+          total_price: 0,
+          total_duration: 0,
+          employee_id: (employees[0] || {}).id || 'none',
+          employee_name: (employees[0] || {}).name || '',
+          services: [],
+        });
+        importingRef.current = true;
+        setImporting({ done: 0, total: newClients.length });
+        let ok = 0;
+        let failed = 0;
+        try {
+          for (let i = 0; i < newClients.length; i += IMPORT_BATCH) {
+            const res = await Promise.allSettled(newClients.slice(i, i + IMPORT_BATCH).map(create));
+            res.forEach((r) => { if (r.status === 'fulfilled') ok++; else failed++; });
+            setImporting({ done: Math.min(i + IMPORT_BATCH, newClients.length), total: newClients.length });
+            // Quota atteint : on s'arrête au lieu de saturer le réseau du salon
+            if (res.some((r) => r.reason?.status === 429)) {
+              failed += Math.max(0, newClients.length - (i + IMPORT_BATCH));
+              break;
+            }
+            if (i + IMPORT_BATCH < newClients.length) await new Promise((r) => setTimeout(r, IMPORT_PAUSE_MS));
+          }
+        } finally {
+          // Toujours, même en échec : sinon un nouvel import recréerait les clients déjà importés
+          invalidateAppointmentQueries(queryClient);
+          importingRef.current = false;
+          setImporting(null);
+        }
+        if (failed === 0) toast.success(`${ok} client(s) importé(s)`);
+        else toast.warning(`${ok} importé(s), ${failed} en échec : réessayez l'import dans une minute (les clients déjà créés seront ignorés)`, { duration: 10000 });
       } catch (err) {
-        toast.error('Erreur lors de l\'importation du fichier');
+        toast.error(friendlyError(err, 'Erreur lors de l\'importation du fichier'));
       }
     };
     reader.readAsText(file);
@@ -518,9 +567,9 @@ export default function Clients() {
               <Trash2 className="w-3.5 h-3.5" /> Supprimer tout
             </Button>
           )}
-          <Button variant="outline" size="sm" className="border-border gap-1.5"
+          <Button variant="outline" size="sm" className="border-border gap-1.5" disabled={!!importing}
             onClick={() => fileInputRef.current?.click()}>
-            <Upload className="w-3.5 h-3.5" /> Importer
+            <Upload className="w-3.5 h-3.5" /> {importing ? `Import… ${importing.done}/${importing.total}` : 'Importer'}
           </Button>
           <Button variant="outline" size="sm" className="border-border gap-1.5"
             onClick={handleExportCSV}>
@@ -532,6 +581,45 @@ export default function Clients() {
           </Button>
         </div>
       </div>
+
+      {/* Formulaire d'ajout en haut de page (rendu sous 50 fiches, il restait invisible) */}
+      {showAddClient && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-card border border-border rounded-xl p-5 mb-4"
+        >
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-semibold">Nouveau client</h3>
+            <Button variant="ghost" size="sm" onClick={() => { setShowAddClient(false); setNewClient({ name: '', email: '', phone: '' }); }}>
+              Annuler
+            </Button>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="space-y-1">
+              <Label htmlFor="client-name" className="text-xs">Nom</Label>
+              <Input id="client-name" autoFocus placeholder="Nom du client" value={newClient.name}
+                onChange={e => setNewClient(prev => ({ ...prev, name: e.target.value }))} className="bg-background border-border" />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="client-email" className="text-xs">Email *</Label>
+              <Input id="client-email" type="email" placeholder="email@exemple.com" value={newClient.email}
+                onChange={e => setNewClient(prev => ({ ...prev, email: e.target.value }))} className="bg-background border-border" />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="client-phone" className="text-xs">Téléphone</Label>
+              <Input id="client-phone" type="tel" placeholder="06 12 34 56 78" value={newClient.phone}
+                onChange={e => setNewClient(prev => ({ ...prev, phone: e.target.value }))} className="bg-background border-border" />
+            </div>
+          </div>
+          <div className="flex justify-end mt-4">
+            <Button type="button" onClick={handleAddClient} disabled={saving} className="gap-1.5">
+              <UserPlus className="w-3.5 h-3.5" />
+              {saving ? 'Ajout en cours...' : 'Ajouter le client'}
+            </Button>
+          </div>
+        </motion.div>
+      )}
 
       <Input
         placeholder="Rechercher un client..."
@@ -561,7 +649,13 @@ export default function Clients() {
         />
       )}
 
-      {!listFailed && (
+      {listLoading && (
+        <div className="space-y-2" aria-busy="true">
+          {[0, 1, 2, 3, 4].map((i) => <div key={i} className="h-[72px] rounded-xl bg-card border border-border animate-pulse" />)}
+        </div>
+      )}
+
+      {!listFailed && !listLoading && (
       <div className="space-y-2">
         {visibleClients.map((client, i) => (
           <motion.div
@@ -632,49 +726,10 @@ export default function Clients() {
         </div>
       )}
 
-      {!listFailed && filtered.length === 0 && (
+      {!listFailed && !listLoading && filtered.length === 0 && (
         <div className="text-center py-16 text-muted-foreground text-sm">
           {search.trim() && hasNextPage ? 'Recherche dans tous les comptes...' : 'Aucun client trouvé'}
         </div>
-      )}
-
-      {/* Add client inline form */}
-      {showAddClient && (
-        <motion.div
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="bg-card border border-border rounded-xl p-5 mb-4"
-        >
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-semibold">Nouveau client</h3>
-            <Button variant="ghost" size="sm" onClick={() => { setShowAddClient(false); setNewClient({ name: '', email: '', phone: '' }); }}>
-              Annuler
-            </Button>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div className="space-y-1">
-              <Label htmlFor="client-name" className="text-xs">Nom</Label>
-              <Input id="client-name" placeholder="Nom du client" value={newClient.name}
-                onChange={e => setNewClient(prev => ({ ...prev, name: e.target.value }))} className="bg-background border-border" />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="client-email" className="text-xs">Email *</Label>
-              <Input id="client-email" type="email" placeholder="email@exemple.com" value={newClient.email}
-                onChange={e => setNewClient(prev => ({ ...prev, email: e.target.value }))} className="bg-background border-border" />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="client-phone" className="text-xs">Téléphone</Label>
-              <Input id="client-phone" type="tel" placeholder="06 12 34 56 78" value={newClient.phone}
-                onChange={e => setNewClient(prev => ({ ...prev, phone: e.target.value }))} className="bg-background border-border" />
-            </div>
-          </div>
-          <div className="flex justify-end mt-4">
-            <Button type="button" onClick={handleAddClient} disabled={saving} className="gap-1.5">
-              <UserPlus className="w-3.5 h-3.5" />
-              {saving ? 'Ajout en cours...' : 'Ajouter le client'}
-            </Button>
-          </div>
-        </motion.div>
       )}
 
       {/* Delete all confirmation dialog */}

@@ -123,7 +123,7 @@ export default function SalonEventCard({ event, onOpen, index = 0, reduceMotion 
       </div>
 
       <div className="p-4 space-y-2">
-        <p className="text-sm font-semibold text-foreground inline-flex items-center gap-2">
+        <p className="text-sm font-semibold text-foreground flex items-center gap-2">
           <Calendar className="w-4 h-4 text-primary shrink-0" />
           <span>
             {formatEventDate(event.starts_at)}
@@ -131,15 +131,15 @@ export default function SalonEventCard({ event, onOpen, index = 0, reduceMotion 
           </span>
         </p>
         {event.location && (
-          <p className="text-xs text-muted-foreground inline-flex items-center gap-2">
+          <p className="text-xs text-muted-foreground flex items-center gap-2">
             <MapPin className="w-3.5 h-3.5 shrink-0" />
-            <span className="line-clamp-1">{event.location}</span>
+            <span className="line-clamp-1 min-w-0">{event.location}</span>
           </p>
         )}
         {event.dress_code && (
-          <p className="text-xs text-muted-foreground inline-flex items-center gap-2">
+          <p className="text-xs text-muted-foreground flex items-center gap-2">
             <Shirt className="w-3.5 h-3.5 shrink-0" />
-            <span className="line-clamp-1">Tenue : {event.dress_code}</span>
+            <span className="line-clamp-1 min-w-0">Tenue : {event.dress_code}</span>
           </p>
         )}
         {!inactive && cap.capacity != null && (

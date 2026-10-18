@@ -22,6 +22,12 @@ const serverText = (err, fallback) =>
 const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 const DAY_LABELS = { monday: 'Lundi', tuesday: 'Mardi', wednesday: 'Mercredi', thursday: 'Jeudi', friday: 'Vendredi', saturday: 'Samedi', sunday: 'Dimanche' };
 
+// Champs du formulaire : seuls ceux-là partent, et seulement s'ils ont changé. Renvoyer la fiche
+// entière (copie du cache, parfois vieille de plusieurs heures) écrasait la photo, la bio, les
+// compétences ou les permissions modifiées ailleurs (Mes paramètres du barber, Comptes barbers).
+const FORM_FIELDS = ['name', 'title', 'email', 'phone', 'photo_url', 'bio', 'working_hours', 'color', 'is_active'];
+const sameValue = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+
 const defaultHours = DAYS.reduce((acc, d) => ({
   ...acc,
   [d]: d === 'sunday' ? { start: '09:00', end: '19:00', closed: true } : { start: '09:00', end: '19:00', closed: false }
@@ -29,6 +35,9 @@ const defaultHours = DAYS.reduce((acc, d) => ({
 
 export default function Team() {
   const [editEmployee, setEditEmployee] = useState(null);
+  // Ligne d'origine de la fiche ouverte (relue sur le serveur) : base de la comparaison à l'envoi
+  const [originalEmployee, setOriginalEmployee] = useState(null);
+  const openToken = React.useRef(0);
   const [showDialog, setShowDialog] = useState(false);
   const [cropSrc, setCropSrc] = useState(null);
   const [showCrop, setShowCrop] = useState(false);
@@ -50,18 +59,24 @@ export default function Team() {
   const employees = employeesQuery.data ?? [];
 
   const saveMutation = useMutation({
-    mutationFn: (data) => {
+    mutationFn: async (data) => {
       if (data.id) {
-        // La galerie s'enregistre à part (GalleryEditor) : ne pas la réécrire avec une copie périmée
-        const { id, gallery: _gallery, ...rest } = data;
-        return api.entities.Employee.update(id, rest);
+        // Seuls les champs du formulaire qui ont changé (jamais skills, permissions,
+        // experience_level, gallery, sort_order…)
+        const base = originalEmployee && String(originalEmployee.id) === String(data.id) ? originalEmployee : {};
+        const changes = {};
+        for (const key of FORM_FIELDS) {
+          if (data[key] !== undefined && !sameValue(data[key], base[key])) changes[key] = data[key];
+        }
+        if (Object.keys(changes).length === 0) return { unchanged: true };
+        return api.entities.Employee.update(data.id, changes);
       }
       return api.entities.Employee.create(data);
     },
-    onSuccess: () => {
+    onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['employees'] });
       setShowDialog(false);
-      toast.success('Collaborateur sauvegardé');
+      toast.success(res?.unchanged ? 'Aucune modification' : 'Collaborateur sauvegardé');
     },
     onError: (err) => {
       toast.error(serverText(err, 'Erreur lors de la sauvegarde'));
@@ -83,8 +98,28 @@ export default function Team() {
 
   const openNew = () => {
     const nextColor = BARBER_COLORS[employees.length % BARBER_COLORS.length];
+    openToken.current++;
+    setOriginalEmployee(null);
     setEditEmployee({ name: '', title: '', bio: '', email: '', phone: '', is_active: true, working_hours: defaultHours, color: nextColor });
     setShowDialog(true);
+  };
+
+  // Ouverture d'une fiche : affichée tout de suite, puis remplacée par la ligne relue sur le
+  // serveur (bio / vidéo modifiées ailleurs) tant que rien n'a encore été touché
+  const openEdit = async (emp) => {
+    setConfirmDeleteId(null);
+    const token = ++openToken.current;
+    const initial = { ...emp, working_hours: emp.working_hours || defaultHours };
+    setOriginalEmployee(emp);
+    setEditEmployee(initial);
+    setShowDialog(true);
+    try {
+      const rows = await api.entities.Employee.filter({ id: emp.id }, null, 1);
+      const fresh = Array.isArray(rows) ? rows[0] : null;
+      if (!fresh || token !== openToken.current) return;
+      setOriginalEmployee(fresh);
+      setEditEmployee((cur) => (cur && sameValue(cur, initial) ? { ...fresh, working_hours: fresh.working_hours || defaultHours } : cur));
+    } catch { /* hors ligne : la fiche du cache reste, la sauvegarde ne renvoie que les champs changés */ }
   };
 
   const updateHours = (day, field, value) => {
@@ -137,7 +172,7 @@ export default function Team() {
                 )}
               </div>
               <div className="flex gap-1 shrink-0">
-                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setConfirmDeleteId(null); setEditEmployee({ ...emp, working_hours: emp.working_hours || defaultHours }); setShowDialog(true); }}>
+                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(emp)}>
                   <Pencil className="w-3.5 h-3.5" />
                 </Button>
                 <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Réalisations de ${emp.name}`}
@@ -174,7 +209,7 @@ export default function Team() {
       )}
 
       <Dialog open={showDialog} onOpenChange={setShowDialog}>
-        <DialogContent className="bg-card border-border max-w-md max-h-[90vh] overflow-y-auto">
+        <DialogContent className="bg-card border-border max-w-md max-h-[90vh] overflow-y-auto overflow-x-hidden grid-cols-[minmax(0,1fr)]">
           <DialogHeader>
             <DialogTitle className="font-display">{editEmployee?.id ? 'Modifier' : 'Nouveau'} Collaborateur</DialogTitle>
           </DialogHeader>
@@ -249,8 +284,8 @@ export default function Team() {
                 <Label className="text-xs mb-2 block">Horaires</Label>
                 <div className="space-y-2">
                   {DAYS.map(day => (
-                    <div key={day} className="flex items-center gap-2 text-xs">
-                      <span className="w-16 text-muted-foreground">{DAY_LABELS[day]}</span>
+                    <div key={day} className="flex items-center gap-2 text-xs min-w-0">
+                      <span className="w-14 shrink-0 text-muted-foreground">{DAY_LABELS[day]}</span>
                       <Switch
                         checked={!editEmployee.working_hours?.[day]?.closed}
                         onCheckedChange={v => updateHours(day, 'closed', !v)}
@@ -259,11 +294,11 @@ export default function Team() {
                         <>
                           <Input type="time" value={editEmployee.working_hours?.[day]?.start || '09:00'}
                             onChange={e => updateHours(day, 'start', e.target.value)}
-                            className="w-24 h-7 text-xs bg-secondary border-border" />
-                          <span className="text-muted-foreground">-</span>
+                            className="flex-1 min-w-0 max-w-24 h-7 px-2 text-xs bg-secondary border-border" />
+                          <span className="shrink-0 text-muted-foreground">-</span>
                           <Input type="time" value={editEmployee.working_hours?.[day]?.end || '19:00'}
                             onChange={e => updateHours(day, 'end', e.target.value)}
-                            className="w-24 h-7 text-xs bg-secondary border-border" />
+                            className="flex-1 min-w-0 max-w-24 h-7 px-2 text-xs bg-secondary border-border" />
                         </>
                       )}
                     </div>

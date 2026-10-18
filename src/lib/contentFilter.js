@@ -13,15 +13,16 @@
 // Mots bloqués, comparés mot à mot après normalisation (minuscules, sans accents, chiffres « leet »
 // remplacés), puis une seconde fois lettres doublées réduites (« fuuuck », « connnard »). Pas de
 // mot français courant ici : « retard », « con », « baiser » ou « Niger » ne doivent jamais bloquer,
-// ni un vrai nom de famille (Conard, Batard, Salaud, Bitte) ni « pédale », « chatte » (l'animal),
-// « tapette » (à mouches) : ces mots ne sont bloqués que dans une insulte (PHRASES).
+// ni un vrai nom de famille (Conard, Batard, Salaud, Bitte, Nègre, Fagot) ni « pédale », « chatte »
+// (l'animal), « tapette » (à mouches), « enfoiré » (« les Enfoirés », le concert des Restos du cœur),
+// « negro » (le Rio Negro) : ces mots ne sont bloqués que dans une insulte (PHRASES).
 const WORDS = [
   // Insultes
   'connard', 'connasse', 'conasse', 'salope', 'salopard', 'encule', 'enculer', 'enculee',
-  'enfoire', 'enfoiree', 'fdp', 'ntm', 'niquer', 'pute', 'pouffiasse', 'petasse',
+  'fdp', 'ntm', 'niquer', 'pute', 'pouffiasse', 'petasse',
   'trouduc', 'pd',
   // Propos haineux
-  'pede', 'gouine', 'negre', 'negro', 'bougnoule', 'bicot', 'youpin',
+  'pede', 'gouine', 'bougnoule', 'bicot', 'youpin',
   'chinetoque', 'bamboula', 'nigger', 'nigga', 'faggot', 'tranny',
   // Sexuel explicite
   'branlette', 'branleur', 'porno', 'porn', 'nudes', 'sodomie',
@@ -39,6 +40,9 @@ const PHRASES = [
   // Mots ordinaires ou noms de famille hors insulte, bloqués seulement dans ces tournures
   'sale pedale', 'grosse pedale', 'sale tapette', 'grosse tapette', 'sale batard', 'espece de batard',
   'espece de salaud', 'sale salaud', 'gros salaud', 'espece de conard', 'suce ma bite', 'grosse bite',
+  'sale enfoire', 'sale enfoiree', 'espece d enfoire', 'espece d enfoiree', 'gros enfoire', 'pauvre enfoire',
+  'bande d enfoires', 't es un enfoire', 'tu es un enfoire',
+  'sale negre', 'sale negro', 'sale negresse', 'gros negre', 'sale race de negre',
 ];
 
 const LEET = { 0: 'o', 1: 'i', 3: 'e', 4: 'a', 5: 's', 7: 't', '@': 'a', $: 's', '€': 'e' };
@@ -60,8 +64,9 @@ const squeeze = (word) => word.replace(/([a-z])\1+/g, '$1');
 
 const WORD_SET = new Set(WORDS.map(normalizeForFilter));
 // Formes réduites, sauf celles qui tombent sur un mot ordinaire ou un nom (nigger → niger,
-// connard → conard, un nom de famille ; « connnard » reste bloqué : la normalisation le ramène à « connard »)
-const SQUEEZED_SET = new Set([...WORD_SET].map(squeeze).filter((w) => !['niger', 'conard'].includes(w)));
+// connard → conard et faggot → fagot, des noms de famille, petasse → petase, le chapeau grec ;
+// « connnard » ou « fagggot » restent bloqués : la normalisation les ramène à « connard », « faggot »)
+const SQUEEZED_SET = new Set([...WORD_SET].map(squeeze).filter((w) => !['niger', 'conard', 'fagot', 'petase'].includes(w)));
 const PHRASE_LIST = PHRASES.map(normalizeForFilter);
 // Mots assez longs pour être cherchés aussi lettres collées (« c.o.n.n.a.r.d », « s a l o p e »)
 const SPELLED = [...WORD_SET].filter((w) => w.length >= 6);

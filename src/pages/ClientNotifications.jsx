@@ -19,6 +19,9 @@ const clearBadge = () => {
 export default function ClientNotifications() {
   const { user } = useAuth();
   const userId = user?.id;
+  // Barber / admin (page /admin/my-notifications) : ses réglages et des liens vers l'espace admin
+  // seulement (RequireAuth le renverrait ailleurs depuis une page client)
+  const isStaff = !!user && user.role !== 'user';
   const [notifications, setNotifications] = useState(() => (userId ? readNotifications(userId) : []));
 
   // Relit la liste et la marque comme lue : la page est sous les yeux du client
@@ -100,14 +103,15 @@ export default function ClientNotifications() {
               reçues sur cet appareil s’affichent ici.
               {isNative ? ' Une notification effacée de l’écran verrouillé sans être touchée n’y figure pas.' : ''}
             </p>
-            <Link to="/settings" className="inline-flex items-center gap-1 mt-4 text-xs font-semibold text-primary">
+            <Link to={isStaff ? '/admin/my-settings' : '/settings'} className="inline-flex items-center gap-1 mt-4 text-xs font-semibold text-primary">
               Gérer les notifications <ChevronRight className="w-3.5 h-3.5" />
             </Link>
           </motion.div>
         ) : (
           <div className="space-y-2.5">
             {notifications.map((notif, i) => {
-              const target = notif.url && notif.url !== '/notifications' ? notif.url : null;
+              const rawTarget = notif.url && notif.url !== '/notifications' ? notif.url : null;
+              const target = rawTarget && (!isStaff || String(rawTarget).startsWith('/admin')) ? rawTarget : null;
               return (
                 <motion.div
                   key={notif.id}

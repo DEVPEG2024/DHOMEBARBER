@@ -113,6 +113,12 @@ const SALON_PHONE_RE = /0?6 ?66 ?08 ?36 ?05/;
  * Erreur d'annulation → `{ message, callSalon, refetch }` : message à afficher, proposer
  * d'appeler le salon, recharger les données (l'état a probablement changé côté serveur).
  */
+/**
+ * Annulation posée par un déplacement fait par le client (« Client : déplacé au … ») : ce n'est
+ * pas une annulation (même règle que la carte Gang, MOVED_REASON_RE côté serveur).
+ */
+export const isRescheduledCancel = (a) => a?.status === 'cancelled' && /^client\s*:\s*d[ée]plac/i.test(String(a?.cancellation_reason || ''));
+
 export function friendlyCancelError(err, kind) {
   const status = err?.status;
   if (!status) {
@@ -120,6 +126,10 @@ export function friendlyCancelError(err, kind) {
   }
   const raw = err?.data?.error;
   const serverMsg = typeof raw === 'string' && raw.trim() && !/^HTTP \d+$/.test(raw.trim()) ? raw.trim() : '';
+  // Ancien serveur : « Not found » en anglais pour une ligne supprimée entre-temps
+  if (status === 404 && /^not found$/i.test(serverMsg)) {
+    return { message: kind === 'order' ? 'Cette commande n\'existe plus.' : 'Ce rendez-vous n\'existe plus.', callSalon: false, refetch: true };
+  }
 
   if (status === 401) {
     return { message: 'Votre session a expiré : reconnectez-vous.', callSalon: false, refetch: false };

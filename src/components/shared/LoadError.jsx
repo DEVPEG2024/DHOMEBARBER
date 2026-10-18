@@ -10,6 +10,27 @@ export function isNetworkError(err) {
 }
 
 /**
+ * Message d'erreur en français pour un toast : jamais « Load failed », « Failed to fetch » ni
+ * « HTTP 503 ». Réseau / délai → « Pas de connexion… » ; réponse du serveur → son message (sinon le
+ * repli) ; erreur levée dans l'app (HEIC, « Permission refusée »…) → son message, déjà en français ;
+ * erreur d'une API du navigateur (DOMException du push) → `foreign` quand il est fourni.
+ *
+ *   toast.error(friendlyError(err, 'Erreur lors de la mise à jour'));
+ */
+export function friendlyError(err, fallback, { foreign } = {}) {
+  if (isNetworkError(err)) return 'Pas de connexion internet. Vérifiez votre réseau, puis réessayez.';
+  if (err?.timeout) return 'Le serveur met trop de temps à répondre. Réessayez dans un instant.';
+  const status = err?.status || err?.response?.status;
+  const msg = String(err?.message || '').trim();
+  const serverMsg = err?.data?.error || err?.data?.message;
+  if (/^HTTP \d+$/.test(msg) || (status >= 500 && !serverMsg)) return 'Le serveur ne répond pas. Réessayez dans un instant.';
+  if (status === 429 && !serverMsg) return 'Trop de tentatives. Réessayez dans quelques minutes.';
+  if (status) return serverMsg || (msg && !/^HTTP/.test(msg) ? msg : fallback);
+  if (foreign && err?.name && err.name !== 'Error') return foreign;
+  return msg || fallback;
+}
+
+/**
  * État d'erreur d'une liste qui n'a pas pu se charger : à afficher À LA PLACE de l'état vide
  * (« Aucune commande »…), sinon le client croit que ses données ont disparu.
  *

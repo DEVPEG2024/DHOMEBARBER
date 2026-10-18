@@ -278,6 +278,8 @@ const AppRoutes = () => {
           <Route path="/admin/activity" element={<Suspense fallback={<LazyFallback />}><AdminActivity /></Suspense>} />
           <Route path="/admin/gang-cards" element={<Suspense fallback={<LazyFallback />}><AdminGangCards /></Suspense>} />
           <Route path="/admin/my-settings" element={<Suspense fallback={<LazyFallback />}><BarberSettings /></Suspense>} />
+          {/* Historique des notifications reçues par un barber (/notifications est une page client) */}
+          <Route path="/admin/my-notifications" element={<ClientNotifications />} />
         </Route>
       </Route>
 

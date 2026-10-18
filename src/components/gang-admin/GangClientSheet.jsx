@@ -26,6 +26,8 @@ const VISITS_SHOWN = 8;
 
 const dayFmt = new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
 const weekdayFmt = new Intl.DateTimeFormat('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+// Horodatages (created_at) : jour lu à l'heure de Paris, pas en UTC
+const instantDayFmt = new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Europe/Paris' });
 /** « 12 sept. 2026 » depuis AAAA-MM-JJ (lu sans fuseau) */
 function dayLabel(iso, withWeekday = false) {
   if (!/^\d{4}-\d{2}-\d{2}/.test(String(iso || ''))) return '–';
@@ -34,7 +36,7 @@ function dayLabel(iso, withWeekday = false) {
 }
 const sinceLabel = (iso) => {
   const t = new Date(iso || '').getTime();
-  return Number.isFinite(t) ? dayFmt.format(new Date(t)) : null;
+  return Number.isFinite(t) ? instantDayFmt.format(new Date(t)) : null;
 };
 
 function Section({ title, aside, children }) {

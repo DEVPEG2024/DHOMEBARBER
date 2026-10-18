@@ -37,6 +37,8 @@ const STATUS_CONFIG = {
   accepted: { label: 'Devis accepté', color: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20', icon: CheckCircle },
   confirmed: { label: 'Confirmé', color: 'bg-green-500/10 text-green-400 border-green-500/20', icon: CheckCircle },
   declined: { label: 'Refusé', color: 'bg-red-500/10 text-red-400 border-red-500/20', icon: XCircle },
+  // Posé par le serveur quand le client supprime son compte (demande en attente ou devis envoyé)
+  cancelled: { label: 'Annulée', color: 'bg-muted text-muted-foreground border-border', icon: XCircle },
 };
 
 export default function AdminEvents() {
@@ -145,6 +147,7 @@ export default function AdminEvents() {
           { id: 'accepted', label: 'Acceptés' },
           { id: 'confirmed', label: 'Confirmées' },
           { id: 'declined', label: 'Refusées' },
+          { id: 'cancelled', label: 'Annulées' },
         ].map(f => (
           <button key={f.id} onClick={() => setFilter(f.id)}
             className={`flex-shrink-0 px-3 py-1.5 text-xs rounded-full border transition-all ${
@@ -166,7 +169,9 @@ export default function AdminEvents() {
       <div className="space-y-3">
         {filtered.map((event, i) => {
           const type = EVENT_TYPES[event.event_type] || EVENT_TYPES.autre;
-          const status = STATUS_CONFIG[event.status] || STATUS_CONFIG.pending;
+          // Statut inconnu : affiché tel quel, jamais comme « En attente » (aucune action possible)
+          const status = STATUS_CONFIG[event.status]
+            || { label: event.status || 'Inconnu', color: 'bg-muted text-muted-foreground border-border', icon: Clock };
           const StatusIcon = status.icon;
           const isEditing = editingId === event.id;
 
@@ -184,7 +189,7 @@ export default function AdminEvents() {
                   <div>
                     <p className="text-sm font-semibold">{type.label}</p>
                     <p className="text-[11px] text-muted-foreground">
-                      {event.client_name} · {event.client_email}
+                      {event.client_name}{event.client_email ? ` · ${event.client_email}` : ''}
                     </p>
                     {event.client_phone && (
                       <p className="text-[11px] text-muted-foreground">{event.client_phone}</p>
@@ -314,6 +319,14 @@ export default function AdminEvents() {
                     onClick={() => handleStatus(event, 'confirmed')}>
                     <CheckCircle className="w-3.5 h-3.5" /> Confirmer (payé au salon)
                   </Button>
+                )}
+                {/* Cancelled: annulée par la suppression du compte du client, rien à traiter */}
+                {event.status === 'cancelled' && (
+                  <div className="flex-1 py-2 rounded-lg bg-muted/50 border border-border text-center">
+                    <p className="text-xs text-muted-foreground font-medium">
+                      {event.client_email ? 'Demande annulée' : 'Annulée : le client a supprimé son compte'}
+                    </p>
+                  </div>
                 )}
                 {/* Modifier le devis (pending ou quoted) */}
                 {!isEditing && (event.status === 'pending' || event.status === 'quoted') && (

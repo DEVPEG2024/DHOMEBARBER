@@ -214,7 +214,7 @@ export default function ProductSheet({ product, cartQty = 0, onClose, onAdd, red
             {cartQty > 0 && (
               <p className="text-[11px] text-muted-foreground inline-flex items-center gap-1.5">
                 <ShoppingCart className="w-3.5 h-3.5 text-primary" />
-                Déjà {cartQty} dans ton panier
+                Déjà {cartQty} dans votre panier
               </p>
             )}
           </div>
@@ -253,7 +253,7 @@ export default function ProductSheet({ product, cartQty = 0, onClose, onAdd, red
             {stock.soldOut
               ? 'Rupture de stock'
               : stockExhausted
-                ? (capByLimit ? `${MAX_PER_PRODUCT} maximum par produit` : 'Tout le stock est dans ton panier')
+                ? (capByLimit ? `${MAX_PER_PRODUCT} maximum par produit` : 'Tout le stock est dans votre panier')
                 : <><ShoppingCart className="w-4 h-4" /> Ajouter au panier · <span className="font-fut text-lg">{formatPrice(total)}</span></>}
           </motion.button>
         </div>

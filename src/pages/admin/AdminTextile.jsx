@@ -86,9 +86,14 @@ export default function AdminTextile() {
     concepts: concepts.length === 0 && (conceptsQ.isLoading || overviewQ.isLoading),
     reservations: reservationsQ.isLoading,
   };
+  // Échec sans aucune donnée à montrer : LoadError dans l'onglet (jamais « Aucun drop » / « Aucune pièce »)
+  const dropsLoadError = dropsQ.isError && overviewQ.isError && !dropsQ.data && !overviewQ.data ? (dropsQ.error || overviewQ.error) : null;
+  const conceptsLoadError = conceptsQ.isError && overviewQ.isError && !conceptsQ.data && !overviewQ.data ? (conceptsQ.error || overviewQ.error) : null;
+  const retryDrops = () => { dropsQ.refetch(); overviewQ.refetch(); };
+  const retryConcepts = () => { conceptsQ.refetch(); overviewQ.refetch(); };
   const errorForTab = {
-    drops: dropsQ.error && overviewQ.error ? (dropsQ.error.message || overviewQ.error.message) : null,
-    concepts: conceptsQ.error && overviewQ.error ? (conceptsQ.error.message || overviewQ.error.message) : null,
+    drops: dropsQ.error && overviewQ.error && !dropsLoadError ? (dropsQ.error.message || overviewQ.error.message) : null,
+    concepts: conceptsQ.error && overviewQ.error && !conceptsLoadError ? (conceptsQ.error.message || overviewQ.error.message) : null,
     // Sans donnée en cache, LoadError (dans l'onglet) remplace le bandeau : pas de doublon
     reservations: reservationsQ.error && reservationsQ.data ? reservationsQ.error.message : null,
   }[tab];
@@ -144,10 +149,12 @@ export default function AdminTextile() {
       )}
 
       {tab === 'drops' && (
-        <DropsTab drops={drops} concepts={concepts} reservations={reservations} isAdmin={isAdmin} isLoading={loadingByTab.drops} />
+        <DropsTab drops={drops} concepts={concepts} reservations={reservations} isAdmin={isAdmin} isLoading={loadingByTab.drops}
+          error={dropsLoadError} onRetry={retryDrops} retrying={dropsQ.isFetching || overviewQ.isFetching} />
       )}
       {tab === 'concepts' && (
-        <ConceptsTab concepts={concepts} drops={drops} isAdmin={isAdmin} isLoading={loadingByTab.concepts} />
+        <ConceptsTab concepts={concepts} drops={drops} isAdmin={isAdmin} isLoading={loadingByTab.concepts}
+          error={conceptsLoadError} onRetry={retryConcepts} retrying={conceptsQ.isFetching || overviewQ.isFetching} />
       )}
       {tab === 'reservations' && (
         <ReservationsTab

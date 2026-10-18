@@ -10,7 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
-import LoadError from '@/components/shared/LoadError';
+import LoadError, { friendlyError } from '@/components/shared/LoadError';
 
 // Champs que cette page modifie : la sauvegarde n'envoie qu'eux (l'ordre de l'accueil, les réglages
 // d'alertes, la relance… modifiés ailleurs entre-temps ne sont jamais écrasés)
@@ -60,7 +60,7 @@ export default function AdminSettings() {
       setNewSkill({ name: '', emoji: '✂️', color: '#3fcf8e' });
       toast.success('Compétence ajoutée');
     },
-    onError: (err) => toast.error(err?.message || "Impossible d'ajouter la compétence"),
+    onError: (err) => toast.error(friendlyError(err, "Impossible d'ajouter la compétence")),
   });
 
   const updateSkillMutation = useMutation({
@@ -70,7 +70,7 @@ export default function AdminSettings() {
       setEditingSkill(null);
       toast.success('Compétence modifiée');
     },
-    onError: (err) => toast.error(err?.message || 'Impossible de modifier la compétence'),
+    onError: (err) => toast.error(friendlyError(err, 'Impossible de modifier la compétence')),
   });
 
   const deleteSkillMutation = useMutation({
@@ -79,7 +79,7 @@ export default function AdminSettings() {
       queryClient.invalidateQueries({ queryKey: ['skillCategories'] });
       toast.success('Compétence supprimée', { description: 'Les niveaux notés sur les barbers pour cette compétence ne s’affichent plus.' });
     },
-    onError: (err) => toast.error(err?.message || 'Impossible de supprimer la compétence'),
+    onError: (err) => toast.error(friendlyError(err, 'Impossible de supprimer la compétence')),
     onSettled: () => setConfirmDeleteSkill(null),
   });
 
@@ -138,7 +138,7 @@ export default function AdminSettings() {
     onError: (err) => {
       if (err?.reload && allSettings[0]) setSettings(allSettings[0]);
       if (err?.status === 409) refetchSettings().then(r => { if (r.data?.[0]) setSettings(r.data[0]); });
-      toast.error(err?.message && !/^HTTP \d+$/.test(err.message) ? err.message : 'Erreur lors de la sauvegarde');
+      toast.error(friendlyError(err, 'Erreur lors de la sauvegarde'));
     },
   });
 

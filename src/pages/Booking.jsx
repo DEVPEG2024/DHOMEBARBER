@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api } from '@/api/apiClient';
 import { useAuth } from '@/lib/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -13,7 +13,8 @@ import ServicePicker from '@/components/services/ServicePicker';
 import EmployeeCard from '@/components/shared/EmployeeCard';
 import LoadError, { isNetworkError } from '@/components/shared/LoadError';
 import { hapticFeedback, isNative } from '@/lib/capacitor';
-import { blocksClient } from '@/lib/reschedule';
+import { blocksClient, checkOldCancelled } from '@/lib/reschedule';
+import { useAndroidBack } from '@/lib/useAndroidBack';
 import { BARBER_PHOTO_ASPECT } from '@/lib/barberPhoto';
 import { appointmentEvent, openCalendar, parisInstant } from '@/lib/calendarLinks';
 import { SALON_PHONE, SALON_PHONE_HREF, useCancelFeatures } from '@/lib/cancellation';
@@ -36,6 +37,10 @@ const stepTransition = { x: { type: 'spring', stiffness: 380, damping: 34 }, opa
 const springy = { type: 'spring', stiffness: 420, damping: 30 };
 /** Durée de l'écran de succès avant la redirection vers Mes rendez-vous (ms). */
 const SUCCESS_DURATION = 4200;
+
+// Première lettre en majuscule seulement (« Mardi 20 octobre ») : la classe `capitalize` en met une
+// à chaque mot (« Mardi 20 Octobre À 11:00 »), contraire à l'usage français
+const upperFirst = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 /** Pluie de lames : nombre et instant de l'éclatement (s). */
 const BLADE_COUNT = 30;
 const BURST_AT = 0.35;
@@ -143,7 +148,7 @@ const Chip = React.forwardRef(function Chip({ icon: Icon, children }, ref) {
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.8 }}
       transition={springy}
-      className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-white/5 border border-white/10 text-foreground/90 capitalize"
+      className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-white/5 border border-white/10 text-foreground/90"
     >
       {Icon && <Icon className="w-3 h-3 text-primary" />}
       {children}
@@ -375,7 +380,7 @@ export function SuccessOverlay({ barberName, detail, calendarEvent = null, durat
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 1.05, duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-            className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-xs text-foreground/90 capitalize"
+            className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-xs text-foreground/90"
           >
             <Calendar className="w-3.5 h-3.5 text-primary" />
             {detail}
@@ -921,6 +926,10 @@ export default function Booking() {
     hapticFeedback();
   };
 
+  // Redirection de l'écran de succès : annulée si la page est quittée avant (bouton retour…)
+  const successTimer = useRef(null);
+  useEffect(() => () => clearTimeout(successTimer.current), []);
+
   /** Étape 2 : barber précis (quitte le mode « peu importe »). Le créneau est réinitialisé si le barber change. */
   const chooseBarber = (emp) => {
     setAnyBarber(false);
@@ -963,10 +972,19 @@ export default function Booking() {
       );
       toast.success('Ancien rendez-vous annulé');
     } catch {
-      toast.warning(
-        `Nouveau rendez-vous confirmé, mais l'ancien (${oldLabel}) n'a pas pu être annulé : annulez-le dans Mes rendez-vous ou appelez le salon au ${SALON_PHONE}.`,
-        { duration: 12000 },
-      );
+      // Le serveur annule l'ancien lui-même à la création (reschedule_of) : l'échec de ce filet de
+      // secours (réseau coupé) ne prouve rien, on relit l'état avant d'avertir
+      const state = await checkOldCancelled(previous.id);
+      if (state === 'cancelled') {
+        toast.success('Ancien rendez-vous annulé');
+      } else if (state === 'unknown') {
+        toast.info('Connexion instable : vérifiez dans Mes rendez-vous que l\'ancien rendez-vous a bien disparu.', { duration: 8000 });
+      } else {
+        toast.warning(
+          `Nouveau rendez-vous confirmé, mais l'ancien (${oldLabel}) n'a pas pu être annulé : annulez-le dans Mes rendez-vous ou appelez le salon au ${SALON_PHONE}.`,
+          { duration: 12000 },
+        );
+      }
     } finally {
       queryClient.invalidateQueries({ queryKey: ['myAppointments'] });
       queryClient.invalidateQueries({ queryKey: ['appointments'] });
@@ -982,6 +1000,7 @@ export default function Booking() {
         navigate('/login?redirect=/booking');
         throw new Error('Non connecté');
       }
+      if (user.role === 'admin' || user.role === 'barber') throw new Error('Les comptes de l\'équipe réservent depuis l\'agenda.');
       if (!selectedEmployee || !selectedDate || !selectedTime) throw new Error('Sélection incomplète');
       const [sh, sm] = selectedTime.split(':').map(Number);
       const endMin = sh * 60 + sm + totalDuration;
@@ -1051,7 +1070,8 @@ export default function Booking() {
       // Explosion de lames, puis la liste des rendez-vous
       setSuccess(true);
       hapticFeedback();
-      setTimeout(() => navigate('/appointments'), SUCCESS_DURATION);
+      clearTimeout(successTimer.current);
+      successTimer.current = setTimeout(() => navigate('/appointments'), SUCCESS_DURATION);
       // Déplacement : le nouveau RDV est confirmé, on annule l'ancien (jamais avant)
       if (previous) cancelPreviousAppointment(previous);
     },
@@ -1122,7 +1142,20 @@ export default function Booking() {
 
   const hasRecap = selectedServices.length > 0 || !!selectedEmployee || anyBarber || !!selectedTime;
   // « Confirmer » : sélection complète, et RDV à déplacer identifié (ou écarté) avant l'envoi
-  const canConfirm = !!selectedEmployee && !!selectedDate && !!selectedTime && !reschedulePending && !rescheduleTooLate;
+  // Comptes de l'équipe : ils réservent depuis l'agenda (le serveur refuse un RDV à leur propre
+  // email). La navigation dans les étapes reste possible pour prévisualiser la page.
+  const isStaffAccount = user?.role === 'admin' || user?.role === 'barber';
+  const canConfirm = !!selectedEmployee && !!selectedDate && !!selectedTime && !reschedulePending && !rescheduleTooLate && !isStaffAccount;
+
+  // Bouton retour d'Android : étape précédente (même règle que « Retour ») au lieu de quitter la
+  // page et de perdre la sélection ; sur l'écran de succès, « Mes rendez-vous » tout de suite (sans
+  // retour arrière suivi d'une redirection surprise). Sans effet sur le web et iOS.
+  useAndroidBack(step > 0 && !success && !createAppointment.isPending,
+    () => goToStep((step === 2 && skipBarberStep) ? 0 : step - 1));
+  useAndroidBack(success, () => {
+    clearTimeout(successTimer.current);
+    navigate('/appointments', { replace: true });
+  });
 
   // Date sans créneau : pourquoi (repos, congé, journée terminée ou complète), et le conseil sur la
   // durée des prestations seulement quand un créneau plus court tiendrait ce jour-là.
@@ -1230,6 +1263,14 @@ export default function Booking() {
               </p>
             </motion.div>
           </AnimatePresence>
+
+          {/* Compte de l'équipe (admin qui parcourt les pages client) : réservation depuis l'agenda */}
+          {isStaffAccount && !success && (
+            <div role="status" className="mt-4 rounded-2xl border border-amber-500/25 bg-amber-500/10 px-3.5 py-3 text-xs leading-relaxed text-amber-200/90 break-words">
+              Les comptes de l'équipe réservent depuis l'agenda.{' '}
+              <Link to="/admin/agenda" className="font-semibold text-primary underline underline-offset-2 whitespace-nowrap">Ouvrir l'agenda</Link>
+            </div>
+          )}
 
           {/* Lien « Déplacer » inutilisable : la réservation sera un nouveau rendez-vous */}
           {rescheduleUnavailable && !success && (
@@ -1452,7 +1493,7 @@ export default function Booking() {
                     </div>
                     <div>
                       <p className="text-[11px] uppercase tracking-widest text-muted-foreground">{label}</p>
-                      <p className="text-sm font-semibold text-foreground capitalize">{value}</p>
+                      <p className="text-sm font-semibold text-foreground first-letter:uppercase">{value}</p>
                     </div>
                   </motion.div>
                 ))}
@@ -1562,7 +1603,7 @@ export default function Booking() {
                     )}
                     {selectedEmployee && <Chip key="barber" icon={User}>{selectedEmployee.name}</Chip>}
                     {!selectedEmployee && anyBarber && <Chip key="any-barber" icon={Users}>Premier dispo</Chip>}
-                    {selectedDate && <Chip key="date" icon={Calendar}>{format(selectedDate, 'EEE d MMM', { locale: fr })}</Chip>}
+                    {selectedDate && <Chip key="date" icon={Calendar}>{upperFirst(format(selectedDate, 'EEE d MMM', { locale: fr }))}</Chip>}
                   </AnimatePresence>
                 </div>
               </div>
@@ -1608,7 +1649,7 @@ export default function Booking() {
           <SuccessOverlay
             key="success"
             barberName={selectedEmployee?.name}
-            detail={selectedDate && selectedTime ? `${format(selectedDate, 'EEEE d MMMM', { locale: fr })} · ${selectedTime}` : ''}
+            detail={selectedDate && selectedTime ? `${upperFirst(format(selectedDate, 'EEEE d MMMM', { locale: fr }))} · ${selectedTime}` : ''}
             calendarEvent={calendarEvent}
           />
         )}

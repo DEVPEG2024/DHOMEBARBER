@@ -4,6 +4,7 @@ import { useAuth } from '@/lib/AuthContext';
 import { motion } from 'framer-motion';
 import { Mail, Lock, User, Phone, Eye, EyeOff, Download, Bell, CheckCircle, ArrowRight, Share, Plus, KeyRound, WifiOff, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
+import { friendlyError } from '@/components/shared/LoadError';
 import LegalLink from '@/components/shared/LegalLink';
 import { isPushSupported, subscribeToPush } from '@/lib/pushNotifications';
 import { isNative } from '@/lib/capacitor';
@@ -68,9 +69,16 @@ export default function Login() {
 
   // Session expirée en cours d'utilisation (voir AuthContext) : dire pourquoi on est ici,
   // plutôt que de renvoyer l'utilisateur sur un écran de connexion sans explication.
+  // Le drapeau de session (posé par AuthContext avant de vider l'état) couvre la redirection de
+  // RequireAuth, qui arrive sans expired=1 ; l'`id` évite un double toast quand les deux sont là.
   useEffect(() => {
-    if (searchParams.get('expired') === '1') {
-      toast.info('Votre session a expiré, reconnectez-vous.');
+    let flagged = false;
+    try {
+      flagged = sessionStorage.getItem('dhb-session-expired') === '1';
+      sessionStorage.removeItem('dhb-session-expired');
+    } catch { /* stockage indisponible */ }
+    if (flagged || searchParams.get('expired') === '1') {
+      toast.info('Votre session a expiré, reconnectez-vous.', { id: 'session-expired' });
     }
   }, [searchParams]);
 
@@ -223,7 +231,7 @@ export default function Login() {
       setPushDone(true);
       toast.success('Notifications activées !');
     } catch (err) {
-      toast.error(err.message || 'Impossible d\'activer les notifications');
+      toast.error(friendlyError(err, "Impossible d'activer les notifications", { foreign: "Impossible d'activer les notifications sur cet appareil. Réessayez." }));
     }
   };
 

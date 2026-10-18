@@ -10,6 +10,7 @@ import {
   Plus, Pencil, Trash2, Upload, X, ArrowUp, ArrowDown, Handshake, Star, EyeOff, AlertTriangle, Ticket,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { adminErrorMessage } from '@/lib/adminErrors';
 import { api } from '@/api/apiClient';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -82,7 +83,7 @@ function ImageField({ label, hint, value, onChange, square = false }) {
       if (!file_url) throw new Error("Le serveur n'a pas renvoyé d'URL pour l'image");
       onChange(file_url);
     } catch (err) {
-      toast.error(err?.message || "Échec de l'envoi de l'image");
+      toast.error(adminErrorMessage(err, "Échec de l'envoi de l'image"));
     } finally {
       setBusy(false);
     }
@@ -193,19 +194,19 @@ export default function AdminPartners() {
       return api.entities.Partner.create({ ...payload, sort_order: maxOrder + 1 });
     },
     onSuccess: () => { invalidate(); setEditing(null); toast.success('Partenaire enregistré'); },
-    onError: (err) => toast.error(err?.message || "Erreur lors de l'enregistrement"),
+    onError: (err) => toast.error(adminErrorMessage(err, "Erreur lors de l'enregistrement")),
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id) => api.entities.Partner.delete(id),
     onSuccess: () => { invalidate(); setConfirmDelete(null); toast.success('Partenaire supprimé'); },
-    onError: (err) => toast.error(err?.message || 'Erreur lors de la suppression'),
+    onError: (err) => toast.error(adminErrorMessage(err, 'Erreur lors de la suppression')),
   });
 
   const toggleMutation = useMutation({
     mutationFn: ({ id, patch }) => api.entities.Partner.update(id, patch),
     onSuccess: invalidate,
-    onError: (err) => toast.error(err?.message || 'Erreur lors de la mise à jour'),
+    onError: (err) => toast.error(adminErrorMessage(err, 'Erreur lors de la mise à jour')),
   });
 
   /** Échange de place avec le voisin : on renumérote toute la liste pour réparer d'éventuels ex æquo. */
@@ -223,7 +224,7 @@ export default function AdminPartners() {
       }
     },
     onSuccess: invalidate,
-    onError: (err) => { invalidate(); toast.error(err?.message || "Erreur lors du changement d'ordre"); },
+    onError: (err) => { invalidate(); toast.error(adminErrorMessage(err, "Erreur lors du changement d'ordre")); },
   });
 
   const openNew = () => setEditing({ ...EMPTY_PARTNER, offers: [newOffer()] });

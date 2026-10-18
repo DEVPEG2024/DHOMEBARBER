@@ -315,8 +315,13 @@ export default function Appointments() {
       queryClient.invalidateQueries({ queryKey: ['appointments-day'] });
       queryClient.invalidateQueries({ queryKey: ['rescheduleSlots'] });
       queryClient.invalidateQueries({ queryKey: ['myOrders'] }); // les produits ajoutés suivent le nouveau RDV
-      if (oldCancelled) {
+      if (oldCancelled === true) {
         toast.success(`Rendez-vous déplacé au ${slot.label} à ${slot.time}`);
+      } else if (oldCancelled === null) {
+        // Réseau coupé après la création : le serveur a très probablement annulé l'ancien lui-même.
+        // Jamais « l'ancien n'a pas pu être annulé » ni d'appel au salon pour rien.
+        toast.success(`Rendez-vous déplacé au ${slot.label} à ${slot.time}`);
+        toast.info('Connexion instable : vérifiez dans Mes rendez-vous que l\'ancien a bien disparu.', { duration: 8000 });
       } else {
         // Ancien RDV non annulé : s'il est déjà dans le délai d'annulation, seul le salon peut le faire
         toast.warning(
@@ -534,7 +539,7 @@ export default function Appointments() {
                       {/* Header row */}
                       <div className="flex items-start justify-between mb-3">
                         <div>
-                          <p className="font-bold text-sm text-foreground capitalize">
+                          <p className="font-bold text-sm text-foreground first-letter:uppercase">
                             {apt.date && format(parseISO(apt.date), 'EEEE d MMMM', { locale: fr })}
                           </p>
                           <div className="flex items-center gap-1.5 mt-1">
@@ -720,7 +725,7 @@ export default function Appointments() {
 
               {/* Rappel du rendez-vous */}
               <div className="rounded-2xl bg-white/4 border border-white/8 p-3 space-y-1.5 min-w-0">
-                <p className="text-sm font-bold text-foreground capitalize">
+                <p className="text-sm font-bold text-foreground first-letter:uppercase">
                   {cancelApt.date && format(parseISO(cancelApt.date), 'EEEE d MMMM', { locale: fr })}
                 </p>
                 <p className="flex items-center gap-1.5 text-xs text-muted-foreground">

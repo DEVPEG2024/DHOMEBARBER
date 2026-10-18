@@ -27,6 +27,7 @@ import {
 import { api } from '@/api/apiClient';
 import { TEXTILE_QUERY_KEY, fetchTextileOverview, ACTIVE_RESERVATION_STATUSES } from '@/lib/textileApi';
 import LoadError from '@/components/shared/LoadError';
+import { useAuth } from '@/lib/AuthContext';
 
 const ORDER_OPEN = ['pending', 'confirmed', 'ready'];
 const EVENT_OPEN = ['pending', 'quoted'];
@@ -83,10 +84,13 @@ function ChannelPanel({ title, icon: Icon, color, to, children, badge, failed = 
           <Icon className="w-3.5 h-3.5" /> {title}
           {badge}
         </h3>
-        <button type="button" onClick={() => navigate(to)}
-          className="text-[11px] text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
-          Gérer <ArrowRight className="w-3 h-3" />
-        </button>
+        {/* Sans accès à la page (barber sans la permission) : pas de bouton qui ramènerait ici */}
+        {to && (
+          <button type="button" onClick={() => navigate(to)}
+            className="text-[11px] text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
+            Gérer <ArrowRight className="w-3 h-3" />
+          </button>
+        )}
       </div>
       <div className="grid grid-cols-2 gap-2">{children}</div>
     </div>
@@ -103,6 +107,17 @@ export default function SalesOverview({ appointments }) {
   const navigate = useNavigate();
   const today = format(new Date(), 'yyyy-MM-dd');
   const monthPrefix = today.slice(0, 7);
+  // Liens vers les pages que ce compte peut ouvrir (mêmes règles que le menu d'AdminLayout) :
+  // un barber avec la seule permission Dashboard était renvoyé ici sans explication
+  const { user } = useAuth();
+  const perms = Array.isArray(user?.permissions) ? user.permissions : [];
+  const isAdmin = !user || user.role === 'admin';
+  const can = (perm) => isAdmin || (perm != null && perms.includes(perm));
+  const canOrders = can('orders');
+  const canTextile = can('products');
+  const canAgenda = can('agenda');
+  const canGift = isAdmin;
+  const canEvents = isAdmin;
 
   const ordersQ = useQuery({
     queryKey: ['dashboard', 'orders'],
@@ -127,11 +142,13 @@ export default function SalesOverview({ appointments }) {
   const textile = textileQ.data;
   const reservations = resQ.data ?? [];
   // Canal dont la source n'a pas pu se charger : jamais « 0 € », mais « — » et une alerte
+  // Une requête en pause faute de réseau (pending + paused, sans erreur) compte comme un échec
+  const off = (q) => (q.isError && !q.data) || (q.isPending && q.fetchStatus === 'paused');
   const failed = {
-    boutique: ordersQ.isError && !ordersQ.data,
-    cartes: giftCardsQ.isError && !giftCardsQ.data,
-    privatisations: eventsQ.isError && !eventsQ.data,
-    textile: (textileQ.isError && !textileQ.data) || (resQ.isError && !resQ.data),
+    boutique: off(ordersQ),
+    cartes: off(giftCardsQ),
+    privatisations: off(eventsQ),
+    textile: off(textileQ) || off(resQ),
   };
   const failedLabels = [
     failed.boutique && 'Boutique', failed.cartes && 'Cartes cadeau',
@@ -139,8 +156,13 @@ export default function SalesOverview({ appointments }) {
   ].filter(Boolean);
   const incomplete = failedLabels.length > 0;
   const retryFailed = () => Promise.all([ordersQ, giftCardsQ, eventsQ, textileQ, resQ]
-    .filter((q) => q.isError).map((q) => q.refetch()));
-  const money = (key, value) => (failed[key] ? '—' : eur(value));
+    .filter(off).map((q) => q.refetch()));
+  // Premier chargement en ligne : « … » plutôt que « 0 € »
+  const loadingKey = {
+    boutique: ordersQ.isPending, cartes: giftCardsQ.isPending, privatisations: eventsQ.isPending,
+    textile: textileQ.isPending || resQ.isPending,
+  };
+  const money = (key, value) => (failed[key] ? '—' : loadingKey[key] ? '…' : eur(value));
 
   const stats = useMemo(() => {
     const isToday = (v) => dayOf(v) === today;
@@ -161,7 +183,8 @@ export default function SalesOverview({ appointments }) {
     };
 
     // ─── Cartes cadeau ───
-    const sold = giftCards.filter((c) => c.status === 'validated' || c.status === 'used');
+    // Toute carte payée (validated_at), même annulée depuis : la vente reste comptée dans son mois
+    const sold = giftCards.filter((c) => c.validated_at || c.status === 'validated' || c.status === 'used');
     const soldDate = (c) => c.validated_at || c.created_at;
     const pendingCards = giftCards.filter((c) => c.status === 'pending');
     // Moyen de paiement noté à la validation (cb / especes) ; les cartes d'avant : « non renseigné »
@@ -278,8 +301,8 @@ export default function SalesOverview({ appointments }) {
           )}
         </motion.div>
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-          onClick={() => navigate('/admin/agenda?view=week')}
-          className="bg-card border border-border rounded-xl p-4 cursor-pointer hover:border-primary/30 active:scale-[0.98] transition-all">
+          onClick={canAgenda ? () => navigate('/admin/agenda?view=week') : undefined}
+          className={`bg-card border border-border rounded-xl p-4 transition-all ${canAgenda ? 'cursor-pointer hover:border-primary/30 active:scale-[0.98]' : ''}`}>
           <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">À encaisser</p>
           <p className="text-2xl font-bold mt-1 text-amber-400">{eur(pending.total)}</p>
           <div className="mt-1 space-y-0.5 text-[10px] leading-tight">
@@ -296,8 +319,8 @@ export default function SalesOverview({ appointments }) {
           </div>
         </motion.div>
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-          onClick={() => navigate('/admin/textile')}
-          className="bg-card border border-border rounded-xl p-4 cursor-pointer hover:border-primary/30 active:scale-[0.98] transition-all">
+          onClick={canTextile ? () => navigate('/admin/textile') : undefined}
+          className={`bg-card border border-border rounded-xl p-4 transition-all ${canTextile ? 'cursor-pointer hover:border-primary/30 active:scale-[0.98]' : ''}`}>
           <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Drop textile</p>
           {drop ? (
             <>
@@ -309,7 +332,7 @@ export default function SalesOverview({ appointments }) {
           ) : (
             <>
               <p className="text-base font-bold mt-1 text-foreground">Aucun drop en cours</p>
-              <p className="text-[10px] text-muted-foreground mt-0.5">{tx.labVotes} vote{tx.labVotes > 1 ? 's' : ''} au Labo ▸</p>
+              <p className="text-[10px] text-muted-foreground mt-0.5">{tx.labVotes} vote{tx.labVotes > 1 ? 's' : ''} au Labo{canTextile ? ' ▸' : ''}</p>
             </>
           )}
         </motion.div>
@@ -347,7 +370,7 @@ export default function SalesOverview({ appointments }) {
 
       {/* Un panneau par canal */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
-        <ChannelPanel title="Boutique" icon={ShoppingBag} color={CHANNEL_COLORS.boutique} to="/admin/orders" failed={failed.boutique}
+        <ChannelPanel title="Boutique" icon={ShoppingBag} color={CHANNEL_COLORS.boutique} to={canOrders ? '/admin/orders' : null} failed={failed.boutique}
           badge={!failed.boutique && boutique.openCount > 0 && <span className="ml-1 px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 text-[10px]">{boutique.openCount} en cours</span>}>
           <Mini label="Commandes retirées auj." value={money('boutique', boutique.today)} icon={Euro} color={CHANNEL_COLORS.boutique} />
           <Mini label="Commandes retirées ce mois" value={money('boutique', boutique.month)} icon={Euro} color={CHANNEL_COLORS.boutique} hint={failed.boutique ? '' : `${boutique.monthCount} commande${boutique.monthCount > 1 ? 's' : ''}`} />
@@ -355,7 +378,7 @@ export default function SalesOverview({ appointments }) {
           <Mini label="Prêtes à retirer" value={failed.boutique ? '—' : boutique.readyCount} icon={PackageCheck} color="#4ade80" />
         </ChannelPanel>
 
-        <ChannelPanel title="Cartes cadeau" icon={Gift} color={CHANNEL_COLORS.cartes} to="/admin/gift-cards" failed={failed.cartes}
+        <ChannelPanel title="Cartes cadeau" icon={Gift} color={CHANNEL_COLORS.cartes} to={canGift ? '/admin/gift-cards' : null} failed={failed.cartes}
           badge={!failed.cartes && cartes.pendingCount > 0 && <span className="ml-1 px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 text-[10px]">{cartes.pendingCount} à valider</span>}>
           <Mini label="Validées aujourd'hui" value={money('cartes', cartes.today)} icon={Euro} color={CHANNEL_COLORS.cartes} hint={failed.cartes || !cartes.today ? '' : payHint(cartes.todayBy)} />
           <Mini label="Validées ce mois" value={money('cartes', cartes.month)} icon={Euro} color={CHANNEL_COLORS.cartes} hint={failed.cartes ? '' : `${cartes.monthCount} carte${cartes.monthCount > 1 ? 's' : ''}`} />
@@ -366,7 +389,7 @@ export default function SalesOverview({ appointments }) {
           )}
         </ChannelPanel>
 
-        <ChannelPanel title="Privatisations" icon={PartyPopper} color={CHANNEL_COLORS.privatisations} to="/admin/events" failed={failed.privatisations}
+        <ChannelPanel title="Privatisations" icon={PartyPopper} color={CHANNEL_COLORS.privatisations} to={canEvents ? '/admin/events' : null} failed={failed.privatisations}
           badge={!failed.privatisations && privatisations.openCount > 0 && <span className="ml-1 px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 text-[10px]">{privatisations.openCount} demande{privatisations.openCount > 1 ? 's' : ''}</span>}>
           <Mini label="Événements du mois" value={money('privatisations', privatisations.month)} icon={Euro} color={CHANNEL_COLORS.privatisations} hint={failed.privatisations ? '' : `${privatisations.monthCount} accepté${privatisations.monthCount > 1 ? 's' : ''} / confirmé${privatisations.monthCount > 1 ? 's' : ''}`} />
           <Mini label="À venir" value={money('privatisations', privatisations.upcomingAmount)} icon={Timer} color="#60a5fa" hint={failed.privatisations ? '' : `${privatisations.upcomingCount} événement${privatisations.upcomingCount > 1 ? 's' : ''}`} />
@@ -374,7 +397,7 @@ export default function SalesOverview({ appointments }) {
           <Mini label="Demandes à traiter" value={failed.privatisations ? '—' : privatisations.openCount} icon={Users} color="#f59e0b" />
         </ChannelPanel>
 
-        <ChannelPanel title="Textile · drops" icon={Shirt} color={CHANNEL_COLORS.textile} to="/admin/textile?tab=reservations" failed={failed.textile}
+        <ChannelPanel title="Textile · drops" icon={Shirt} color={CHANNEL_COLORS.textile} to={canTextile ? '/admin/textile?tab=reservations' : null} failed={failed.textile}
           badge={!failed.textile && tx.toPayCount > 0 && <span className="ml-1 px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 text-[10px]">{tx.toPayCount} à payer</span>}>
           <Mini label="Précommandes payées auj." value={money('textile', tx.today)} icon={Euro} color={CHANNEL_COLORS.textile} />
           <Mini label="Précommandes payées ce mois" value={money('textile', tx.month)} icon={Euro} color={CHANNEL_COLORS.textile} hint={failed.textile ? '' : `total ${eur(tx.total)} · ${tx.paidCount} pièce${tx.paidCount > 1 ? 's' : ''}`} />

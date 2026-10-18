@@ -3,6 +3,16 @@ import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog"
 
 import { cn } from "@/lib/utils"
 import { buttonVariants } from "@/components/ui/button"
+import { useAndroidBack } from "@/lib/useAndroidBack"
+
+// Bouton retour d'Android : même fermeture que « Annuler » (clic programmé sur le bouton), au lieu
+// de quitter la page. Monté avec le contenu, donc seulement fenêtre ouverte. Sans effet ailleurs.
+const AlertDialogCancelRefContext = React.createContext(null)
+
+function AndroidBackCancel({ cancelRef }) {
+  useAndroidBack(true, () => cancelRef.current?.click())
+  return null
+}
 
 const AlertDialog = AlertDialogPrimitive.Root
 
@@ -21,18 +31,26 @@ const AlertDialogOverlay = React.forwardRef(({ className, ...props }, ref) => (
 ))
 AlertDialogOverlay.displayName = AlertDialogPrimitive.Overlay.displayName
 
-const AlertDialogContent = React.forwardRef(({ className, ...props }, ref) => (
-  <AlertDialogPortal>
-    <AlertDialogOverlay />
-    <AlertDialogPrimitive.Content
-      ref={ref}
-      className={cn(
-        "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
-        className
-      )}
-      {...props} />
-  </AlertDialogPortal>
-))
+const AlertDialogContent = React.forwardRef(({ className, children, ...props }, ref) => {
+  const cancelRef = React.useRef(null)
+  return (
+    <AlertDialogPortal>
+      <AlertDialogOverlay />
+      <AlertDialogPrimitive.Content
+        ref={ref}
+        className={cn(
+          "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
+          className
+        )}
+        {...props}>
+        <AlertDialogCancelRefContext.Provider value={cancelRef}>
+          <AndroidBackCancel cancelRef={cancelRef} />
+          {children}
+        </AlertDialogCancelRefContext.Provider>
+      </AlertDialogPrimitive.Content>
+    </AlertDialogPortal>
+  )
+})
 AlertDialogContent.displayName = AlertDialogPrimitive.Content.displayName
 
 const AlertDialogHeader = ({
@@ -74,12 +92,21 @@ const AlertDialogAction = React.forwardRef(({ className, ...props }, ref) => (
 ))
 AlertDialogAction.displayName = AlertDialogPrimitive.Action.displayName
 
-const AlertDialogCancel = React.forwardRef(({ className, ...props }, ref) => (
-  <AlertDialogPrimitive.Cancel
-    ref={ref}
-    className={cn(buttonVariants({ variant: "outline" }), "mt-2 sm:mt-0", className)}
-    {...props} />
-))
+const AlertDialogCancel = React.forwardRef(({ className, ...props }, ref) => {
+  const cancelRef = React.useContext(AlertDialogCancelRefContext)
+  // Réf. fusionnée : celle de l'appelant et celle du bouton retour d'Android
+  const setRefs = React.useCallback((node) => {
+    if (cancelRef) cancelRef.current = node
+    if (typeof ref === "function") ref(node)
+    else if (ref) ref.current = node
+  }, [cancelRef, ref])
+  return (
+    <AlertDialogPrimitive.Cancel
+      ref={setRefs}
+      className={cn(buttonVariants({ variant: "outline" }), "mt-2 sm:mt-0", className)}
+      {...props} />
+  )
+})
 AlertDialogCancel.displayName = AlertDialogPrimitive.Cancel.displayName
 
 export {

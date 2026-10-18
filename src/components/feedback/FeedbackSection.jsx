@@ -23,9 +23,10 @@ export default function FeedbackSection({ user }) {
   const [expanded, setExpanded] = useState(null);
 
   const { data, error, isError, refetch, isFetching } = useQuery({
-    queryKey: FEEDBACK_QUERY_KEY,
-    queryFn: fetchMyFeedback,
-    enabled: !!user,
+    // Préfixe FEEDBACK_QUERY_KEY gardé : les invalidations existantes (envoi, admin) s'y appliquent
+    queryKey: [...FEEDBACK_QUERY_KEY, 'mine', user?.email],
+    queryFn: () => fetchMyFeedback(user?.email),
+    enabled: !!user?.email,
   });
   const mine = Array.isArray(data) ? data : [];
 

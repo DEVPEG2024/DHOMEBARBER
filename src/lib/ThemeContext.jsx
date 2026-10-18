@@ -1,13 +1,15 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { syncStatusBarTheme } from '@/lib/capacitor';
 
 const ThemeContext = createContext();
 
 export function ThemeProvider({ children }) {
   const [theme, setTheme] = useState(() => {
-    if (typeof window !== 'undefined') {
+    try {
       return localStorage.getItem('theme') || 'dark';
+    } catch {
+      return 'dark';
     }
-    return 'dark';
   });
 
   useEffect(() => {
@@ -17,7 +19,9 @@ export function ThemeProvider({ children }) {
     } else {
       root.classList.remove('dark');
     }
-    localStorage.setItem('theme', theme);
+    try { localStorage.setItem('theme', theme); } catch {}
+    // App iPhone : heure et batterie lisibles sur le thème clair (sans effet sur le web)
+    syncStatusBarTheme(theme);
   }, [theme]);
 
   const toggleTheme = () => setTheme(t => t === 'dark' ? 'light' : 'dark');

@@ -9,6 +9,7 @@ import ConceptCard from '@/components/textile/ConceptCard';
 import ConceptSheet from '@/components/textile/ConceptSheet';
 import ReservationCard from '@/components/textile/ReservationCard';
 import { CompactCountdown } from '@/components/textile/Countdown';
+import { useAndroidBack } from '@/lib/useAndroidBack';
 
 function SectionTitle({ eyebrow, title, hint, right }) {
   return (
@@ -112,6 +113,8 @@ export default function Textile() {
   useEffect(() => {
     if (openId && data && !openConcept) setOpenId(null); // pièce retirée entre-temps
   }, [openId, data, openConcept]);
+  // Bouton retour d'Android : ferme la fiche de la pièce (taille, quantité) au lieu de quitter /textile
+  useAndroidBack(!!openConcept, () => setOpenId(null));
 
   useEffect(() => {
     if (!scrollToReservations || view.reservations.length === 0) return;

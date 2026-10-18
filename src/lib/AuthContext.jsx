@@ -14,6 +14,19 @@ const hasStoredToken = () => {
   }
 };
 
+// Compte d'un jeton (charge utile du JWT, sans vérification : seulement pour savoir si un autre
+// onglet a changé de compte), null s'il est illisible
+const tokenUserId = (token) => {
+  try {
+    const part = String(token || '').split('.')[1];
+    if (!part) return null;
+    const payload = JSON.parse(atob(part.replace(/-/g, '+').replace(/_/g, '/')));
+    return payload && payload.userId != null ? String(payload.userId) : null;
+  } catch {
+    return null;
+  }
+};
+
 const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
@@ -31,8 +44,15 @@ export const AuthProvider = ({ children }) => {
   // Déconnexion en cours : le 401 éventuel de la désinscription push (jeton déjà expiré,
   // compte supprimé) ne doit pas déclencher « session expirée »
   const loggingOutRef = useRef(false);
+  // Valeurs courantes pour l'écouteur `storage` (abonné une seule fois)
+  const userRef = useRef(null);
+  const isAuthenticatedRef = useRef(false);
+  userRef.current = user;
+  isAuthenticatedRef.current = isAuthenticated;
+  const reloadingRef = useRef(false);
+  const meInFlightRef = useRef(false);
 
-  const checkAuth = useCallback(async ({ retry = false } = {}) => {
+  const checkAuth = useCallback(async ({ retry = false, staleRetries = 0 } = {}) => {
     if (retry) setIsRetryingAuth(true);
     try {
       // If there's a token in localStorage, the SDK already set Authorization header
@@ -49,9 +69,15 @@ export const AuthProvider = ({ children }) => {
       syncPushSubscription();
       return 'ok';
     } catch (err) {
-      // Jeton changé pendant la vérification (déconnexion, connexion à un autre compte) : la
-      // réponse concerne l'ancienne session, la nouvelle a déjà posé son propre état
-      if (err?.stale) return 'stale';
+      // Jeton remplacé pendant la vérification : renouvellement par un autre onglet (deux onglets
+      // restaurés ensemble, jeton de plus de 12 h), connexion ou déconnexion. On revérifie une fois
+      // avec le jeton rangé maintenant, au lieu de laisser l'écran de connexion à tort. Le `await`
+      // garde isLoadingAuth à vrai jusqu'à la fin de la seconde vérification.
+      if (err?.stale) {
+        if (!hasStoredToken()) { setAuthError(null); return 'signedOut'; }
+        if (staleRetries < 1) return await checkAuth({ retry, staleRetries: staleRetries + 1 });
+        return 'stale';
+      }
       // Ne jamais effacer le jeton sur une panne réseau : ouvrir l'app dans le métro ou
       // en avion déconnectait définitivement, il fallait retaper son mot de passe.
       // Seule une réponse d'authentification du serveur (401 / 403) invalide la session.
@@ -143,7 +169,18 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     const onUnauthorized = () => {
       if (loggingOutRef.current) return;
-      if (!localStorage.getItem('base44_access_token') && !localStorage.getItem('token')) return;
+      if (!hasStoredToken()) {
+        // Plus de jeton (déconnexion dans un autre onglet) mais l'interface se croit connectée :
+        // on referme la session au lieu de laisser des pages en erreur sous l'ancien nom
+        if (isAuthenticatedRef.current) {
+          clearSession();
+          if (window.location.pathname !== '/login') window.location.assign('/login');
+        }
+        return;
+      }
+      // Drapeau posé avant de vider l'état : RequireAuth redirige vers /login (sans expired=1)
+      // avant la fin de la fusion des notifications ; la page de connexion le lit pour expliquer
+      try { sessionStorage.setItem('dhb-session-expired', '1'); } catch { /* stockage indisponible */ }
       // On attend la fusion des notifications (2 s au plus) avant de rediriger : le
       // déchargement de la page interromprait la transaction IndexedDB en cours
       const done = clearSession();
@@ -156,6 +193,53 @@ export const AuthProvider = ({ children }) => {
     };
     window.addEventListener('dhb:unauthorized', onUnauthorized);
     return () => window.removeEventListener('dhb:unauthorized', onUnauthorized);
+  }, [clearSession]);
+
+  // Autres onglets (ordinateur ou tablette partagés) : une déconnexion ailleurs renvoie cet onglet
+  // à la connexion ; une connexion à un AUTRE compte recharge la page (sinon cet onglet affichait
+  // l'ancien nom et agissait sous le nouveau compte). Un simple renouvellement du jeton du même
+  // compte (/me) ne recharge rien : on compare toujours l'id du compte.
+  useEffect(() => {
+    const onStorage = (e) => {
+      if (e.storageArea && e.storageArea !== localStorage) return;
+      if (e.key !== null && e.key !== 'base44_access_token' && e.key !== 'token') return;
+      if (loggingOutRef.current || reloadingRef.current) return;
+      if (!hasStoredToken()) {
+        // Déconnexion dans un autre onglet (ou localStorage.clear(), key === null)
+        if (!isAuthenticatedRef.current) return;
+        clearSession();
+        if (window.location.pathname !== '/login') window.location.assign('/login');
+        return;
+      }
+      // Jeton posé ou remplacé : renouvellement du même compte, ou autre compte. Le compte se lit
+      // dans le jeton (aucun appel réseau, pas de renouvellements en écho entre onglets) ; /me
+      // seulement si le jeton est illisible.
+      const reload = () => {
+        reloadingRef.current = true;
+        queryClientInstance.clear();
+        window.location.reload();
+      };
+      const cur = userRef.current;
+      let stored = null;
+      try { stored = localStorage.getItem('base44_access_token') || localStorage.getItem('token'); } catch { /* stockage indisponible */ }
+      const uid = tokenUserId(stored);
+      if (uid) {
+        if (cur && String(cur.id) === uid) return; // même compte : rien à faire
+        reload();
+        return;
+      }
+      if (meInFlightRef.current) return;
+      meInFlightRef.current = true;
+      api.auth.me().then((fresh) => {
+        if (!fresh || fresh.id == null || reloadingRef.current) return;
+        const now = userRef.current;
+        if (now && String(now.id) === String(fresh.id)) { setUser(fresh); return; }
+        // Autre compte (ou connexion alors que cet onglet était déconnecté) : on repart de zéro
+        reload();
+      }).catch(() => {}).finally(() => { meInFlightRef.current = false; });
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
   }, [clearSession]);
 
   const login = useCallback(async (email, password) => {

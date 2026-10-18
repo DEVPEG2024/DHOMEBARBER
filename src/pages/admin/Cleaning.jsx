@@ -89,11 +89,12 @@ export default function Cleaning() {
     return b ? !b.present : false;
   };
 
-  const { data: history = [] } = useQuery({
+  const historyQuery = useQuery({
     queryKey: ['cleaningHistory'],
     queryFn: () => apiRequest('GET', apiUrl('/cleaning/history')),
     enabled: showHistory,
   });
+  const history = Array.isArray(historyQuery.data) ? historyQuery.data : [];
 
   // Mutations
   const saveMutation = useMutation({
@@ -109,7 +110,7 @@ export default function Cleaning() {
       setShowDialog(false);
       toast.success('Tâche sauvegardée');
     },
-    onError: () => toast.error('Erreur'),
+    onError: actionError,
   });
 
   const deleteMutation = useMutation({
@@ -381,7 +382,11 @@ export default function Cleaning() {
         {showHistory && (
           <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}
             className="mt-2 bg-card border border-border rounded-xl overflow-hidden">
-            {history.length === 0 ? (
+            {historyQuery.isError && !historyQuery.data ? (
+              <LoadError compact what="l'historique" error={historyQuery.error} onRetry={historyQuery.refetch} retrying={historyQuery.isFetching} className="m-2" />
+            ) : historyQuery.isLoading ? (
+              <p className="text-xs text-muted-foreground text-center py-6">Chargement…</p>
+            ) : history.length === 0 ? (
               <p className="text-xs text-muted-foreground text-center py-6">Aucune tâche effectuée</p>
             ) : (
               <div className="overflow-x-auto">
