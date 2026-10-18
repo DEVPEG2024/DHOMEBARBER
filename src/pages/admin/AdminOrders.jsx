@@ -101,7 +101,7 @@ function formatCancelledAt(value) {
 // ── Commandes rattachées à un rendez-vous (produits ajoutés à la réservation) ──
 
 /** RDV lus pour les badges : ids dans l'adresse de la requête, donc bornés (limite d'URL). */
-const LINKED_APPOINTMENTS_MAX = 100;
+const LINKED_APPOINTMENTS_MAX = 200;
 
 /** Annulée automatiquement par le serveur quand le client a annulé son RDV. */
 const CANCELLED_WITH_APPOINTMENT_RE = /^client\s*:\s*rendez-vous annulé/i;
@@ -176,7 +176,18 @@ export default function AdminOrders() {
 
   const ordersQuery = useQuery({
     queryKey: ['adminOrders'],
-    queryFn: () => api.entities.Order.list('-created_date', 200),
+    queryFn: async () => {
+      const recent = await api.entities.Order.list('-created_date', 200);
+      // Commandes en cours plus anciennes que les 200 dernières : jamais perdues de vue
+      // (meilleur effort : si le filtre échoue, on garde les récentes)
+      let open = [];
+      try {
+        const res = await api.entities.Order.filter({ status: ['pending', 'confirmed', 'ready'] }, '-created_date', 500);
+        open = Array.isArray(res) ? res : [];
+      } catch { /* filtre indisponible */ }
+      const seen = new Set(recent.map((o) => String(o.id)));
+      return [...recent, ...open.filter((o) => !seen.has(String(o.id)))];
+    },
   });
   const orders = ordersQuery.data ?? [];
 

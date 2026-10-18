@@ -18,6 +18,7 @@ import {
   SALON_PHONE, SALON_PHONE_HREF, CANCEL_REASON_MAX, APPOINTMENT_CANCEL_REASONS,
   useCancelFeatures, friendlyCancelError, cancelledByLabel, cleanReason,
 } from '@/lib/cancellation';
+import { isClientPlaceholder } from '@/components/agenda/agendaUtils';
 import { findRescheduleSlots, moveAppointment, currentServices, appointmentDuration } from '@/lib/reschedule';
 import { openOrdersByAppointment, orderItemsLabel } from '@/lib/appointmentProducts';
 import { formatPrice } from '@/components/shop/productUtils';
@@ -123,7 +124,8 @@ export default function Appointments() {
 
   const appointmentsQuery = useQuery({
     queryKey: ['myAppointments', user?.email],
-    queryFn: () => api.entities.Appointment.filter({ client_email: user.email }, '-date', 100),
+    // Fiches « Ajouter / Importer » des Clients (RDV fantômes annulés) : jamais montrées au client
+    queryFn: async () => ((await api.entities.Appointment.filter({ client_email: user.email }, '-date', 100)) || []).filter(a => !isClientPlaceholder(a)),
     enabled: !!user?.email,
     refetchInterval: 30000, // Auto-refresh toutes les 30s
   });

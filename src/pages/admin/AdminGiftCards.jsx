@@ -17,6 +17,7 @@ import {
   patchGiftCardCache, fetchGiftCard, round2, parisToday, isValidityPassed,
 } from '@/lib/giftCardDebit';
 
+const GIFT_LIST_LIMIT = 200;
 const PAYMENT_LABELS = { cb: 'CB', especes: 'Espèces' };
 
 /** Jour de Paris + 1 an (AAAA-MM-JJ) : validité d'une carte payée aujourd'hui (même calcul que le serveur). */
@@ -737,13 +738,16 @@ export default function AdminGiftCards() {
 
   const giftCardsQuery = useQuery({
     queryKey: ['adminGiftCards'],
-    queryFn: () => api.entities.GiftCard.list('-created_at', 200),
+    queryFn: () => api.entities.GiftCard.list('-created_at', GIFT_LIST_LIMIT),
   });
   const { data: giftCards = [], isLoading, isError, error, refetch, isFetching } = giftCardsQuery;
   // Échec, ou requête en pause hors connexion (ni isLoading ni isError) : jamais « Aucune carte »
   // ni « CA Cartes 0 € »
   const listFailed = queryFailed(giftCardsQuery) || (isError && !giftCards.length);
   const statsUnknown = listFailed || isLoading;
+  // Liste tronquée : recherche, filtres et totaux ne voient pas les cartes plus anciennes
+  const truncated = !statsUnknown && giftCards.length >= GIFT_LIST_LIMIT;
+  const plus = truncated ? '+' : '';
   const giftCardsRef = useRef(giftCards);
   giftCardsRef.current = giftCards;
 
@@ -867,10 +871,10 @@ export default function AdminGiftCards() {
     ]
     : [
       { key: 'all', label: 'Toutes' },
-      { key: 'pending', label: `En attente (${stats.pending})` },
-      { key: 'validated', label: `Actives (${stats.validated})` },
-      { key: 'used', label: `Utilisées (${stats.used})` },
-      { key: 'expired', label: `Annulées / expirées${stats.expired ? ` (${stats.expired})` : ''}` },
+      { key: 'pending', label: `En attente (${stats.pending}${plus})` },
+      { key: 'validated', label: `Actives (${stats.validated}${plus})` },
+      { key: 'used', label: `Utilisées (${stats.used}${plus})` },
+      { key: 'expired', label: `Annulées / expirées${stats.expired ? ` (${stats.expired}${plus})` : ''}` },
     ];
 
   return (
@@ -920,23 +924,26 @@ export default function AdminGiftCards() {
         <GiftCardJournal onOpenCard={openFromJournal} />
       ) : (
       <>
+      {truncated && (
+        <p className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">Seules les {GIFT_LIST_LIMIT} dernières cartes sont affichées : recherchez une carte plus ancienne par son code.</p>
+      )}
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-5">
         <div className="bg-card rounded-2xl border border-border p-4">
           <p className="text-xs text-amber-400 font-medium">En attente</p>
-          <p className="text-2xl font-bold text-foreground mt-1">{statsUnknown ? '—' : stats.pending}</p>
+          <p className="text-2xl font-bold text-foreground mt-1">{statsUnknown ? '—' : `${stats.pending}${plus}`}</p>
         </div>
         <div className="bg-card rounded-2xl border border-border p-4">
           <p className="text-xs text-green-400 font-medium">Actives</p>
-          <p className="text-2xl font-bold text-foreground mt-1">{statsUnknown ? '—' : stats.validated}</p>
+          <p className="text-2xl font-bold text-foreground mt-1">{statsUnknown ? '—' : `${stats.validated}${plus}`}</p>
         </div>
         <div className="bg-card rounded-2xl border border-border p-4">
           <p className="text-xs text-blue-400 font-medium">Utilisées</p>
-          <p className="text-2xl font-bold text-foreground mt-1">{statsUnknown ? '—' : stats.used}</p>
+          <p className="text-2xl font-bold text-foreground mt-1">{statsUnknown ? '—' : `${stats.used}${plus}`}</p>
         </div>
         <div className="bg-card rounded-2xl border border-border p-4">
           <p className="text-xs text-primary font-medium">CA Cartes</p>
-          <p className="text-2xl font-bold text-primary mt-1">{statsUnknown ? '—' : formatEuro(stats.total)}</p>
+          <p className="text-2xl font-bold text-primary mt-1">{statsUnknown ? '—' : `${formatEuro(stats.total)}${plus}`}</p>
         </div>
       </div>
 

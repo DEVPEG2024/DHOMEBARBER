@@ -33,7 +33,7 @@ export default function TextileHomeCard() {
   if (!data) return null;
   if (!featured && view.labConcepts.length === 0) return null;
 
-  const pieceCount = view.featuredConcepts.length;
+  const pieceCount = view.featuredConcepts.length + (isLive ? view.otherLiveConceptCount || 0 : 0);
   const alertsCount = Number(featured?.alerts_count) || 0;
   const remaining = isTeasing ? msUntilOpen(featured, nowMs) : null;
   const thumb = featured?.cover_image_url || conceptCover(view.featuredConcepts[0]) || conceptCover(view.labConcepts[0]);

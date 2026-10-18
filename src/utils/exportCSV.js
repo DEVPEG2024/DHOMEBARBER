@@ -4,12 +4,14 @@ import { isNative } from '@/lib/capacitor';
 // de client `=HYPERLINK(…)` ou une note `@SUM(…)` s'exécutait à l'ouverture du fichier. Les
 // guillemets autour du champ ne protègent pas : le tableur les retire avant d'évaluer.
 const FORMULA_START = /^[=+\-@\t\r]/;
+// Numéro international (+33 6 12 34 56 78) : chiffres, espaces et + ( ) . - ne forment jamais une formule
+const PHONE_LIKE = /^\+[\d\s().-]{6,}$/;
 
 /** Cellule CSV : texte neutralisé (préfixe `'`), guillemets doublés. Les nombres restent des nombres. */
 function csvCell(val) {
   let str = typeof val === 'object' ? JSON.stringify(val) : String(val);
   // Un montant négatif (prix, CA) n'est pas une formule : seuls les textes sont préfixés
-  if (typeof val !== 'number' && FORMULA_START.test(str)) str = `'${str}`;
+  if (typeof val !== 'number' && FORMULA_START.test(str) && !PHONE_LIKE.test(str)) str = `'${str}`;
   return `"${str.replace(/"/g, '""')}"`;
 }
 

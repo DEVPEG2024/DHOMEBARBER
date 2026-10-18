@@ -257,6 +257,44 @@ export default function Textile() {
             </Section>
           )}
 
+          {/* Autres drops ouverts en même temps */}
+          {view.otherLive.map(drop => {
+            const list = view.conceptsByDrop.get(String(drop.id)) || [];
+            const phase = dropPhase(drop, nowMs);
+            return (
+              <Section key={drop.id} reduceMotion={reduceMotion} className="space-y-5">
+                <DropHero
+                  drop={drop}
+                  phase={phase}
+                  opening={isOpening(drop, nowMs)}
+                  nowMs={nowMs}
+                  pieceCount={list.length}
+                  subscribed={myAlerts.has(String(drop.id))}
+                  alertPending={actions.pending.alert}
+                  onToggleAlert={() => actions.toggleAlert(drop.id, { subscribed: myAlerts.has(String(drop.id)) })}
+                  reduceMotion={reduceMotion}
+                />
+                {list.length > 0 && (
+                  <div className="grid grid-cols-2 gap-3">
+                    {list.map((concept, i) => (
+                      <ConceptCard
+                        key={concept.id}
+                        concept={concept}
+                        index={i}
+                        voted={Boolean(myVotes[concept.id])}
+                        canVote={phase !== 'ended'}
+                        live={phase === 'live'}
+                        onVote={voteFromCard}
+                        onOpen={openSheet}
+                        reduceMotion={reduceMotion}
+                      />
+                    ))}
+                  </div>
+                )}
+              </Section>
+            );
+          })}
+
           {/* Mes réservations */}
           {view.reservations.length > 0 && (
             <Section reduceMotion={reduceMotion}>

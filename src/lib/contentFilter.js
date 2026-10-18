@@ -20,7 +20,7 @@ const WORDS = [
   // Insultes
   'connard', 'connasse', 'conasse', 'salope', 'salopard', 'encule', 'enculer', 'enculee',
   'fdp', 'ntm', 'niquer', 'pute', 'pouffiasse', 'petasse',
-  'trouduc', 'pd',
+  'trouduc',
   // Propos haineux
   'pede', 'gouine', 'bougnoule', 'bicot', 'youpin',
   'chinetoque', 'nigger', 'nigga', 'faggot', 'tranny',
@@ -50,6 +50,7 @@ const PHRASES = [
   'espece de salaud', 'sale salaud', 'gros salaud', 'espece de conard', 'suce ma bite', 'grosse bite',
   'sale enfoire', 'sale enfoiree', 'espece d enfoire', 'espece d enfoiree', 'gros enfoire', 'pauvre enfoire',
   'bande d enfoires', 't es un enfoire', 'tu es un enfoire',
+  'sale pd', 'espece de pd', 't es un pd', 'tu es un pd', 'gros pd', 'mort aux pd',
   'sale bamboula', 'gros bamboula', 'espece de bamboula',
   'sale negre', 'sale negro', 'sale negresse', 'gros negre', 'sale race de negre',
 ];
@@ -63,14 +64,21 @@ const stripInvisible = (s) => String(s || '').replace(/[\p{Cf}­͏ᅟᅠㅤﾠ]/
 // Lettres cyrilliques et grecques proches d'une lettre latine (« sаlope » avec un a cyrillique).
 // NFKD (appliqué avant) ramène déjà la pleine chasse, les lettres mathématiques et cerclées.
 const HOMOGLYPHS = { 'а': 'a', 'е': 'e', 'о': 'o', 'р': 'p', 'с': 'c', 'х': 'x', 'і': 'i',
-  'α': 'a', 'ε': 'e', 'ο': 'o', 'ρ': 'p', 'ι': 'i' };
+  'ѕ': 's', 'ј': 'j', 'һ': 'h', 'ԁ': 'd', 'ӏ': 'l', 'ɑ': 'a',
+  'α': 'a', 'ε': 'e', 'ο': 'o', 'ρ': 'p', 'ι': 'i', 'κ': 'k', 'υ': 'u', 'ν': 'v', 'ƒ': 'f',
+  // Petites capitales
+  'ᴀ': 'a', 'ʙ': 'b', 'ᴄ': 'c', 'ᴅ': 'd', 'ᴇ': 'e', 'ꜰ': 'f', 'ɢ': 'g', 'ʜ': 'h', 'ɪ': 'i', 'ᴊ': 'j',
+  'ᴋ': 'k', 'ʟ': 'l', 'ᴍ': 'm', 'ɴ': 'n', 'ᴏ': 'o', 'ᴘ': 'p', 'ʀ': 'r', 'ꜱ': 's', 'ᴛ': 't', 'ᴜ': 'u',
+  'ᴠ': 'v', 'ᴡ': 'w', 'ʏ': 'y', 'ᴢ': 'z' };
+// Classe construite depuis la table : les deux ne peuvent plus diverger
+const HOMOGLYPH_RE = new RegExp(`[${Object.keys(HOMOGLYPHS).join('')}]`, 'g');
 
 /** Texte comparable : minuscules, sans accents, « leet » remplacé, triples lettres ramenées à deux. */
 export function normalizeForFilter(text) {
   return stripInvisible(text)
     .normalize('NFKD')
     .toLowerCase()
-    .replace(/[аеорсхіαεορι]/g, (c) => HOMOGLYPHS[c] || c)
+    .replace(HOMOGLYPH_RE, (c) => HOMOGLYPHS[c] || c)
     .replace(/\p{M}/gu, '')
     .replace(/[013457@$€]/g, (c) => LEET[c] || c)
     .replace(/([a-z])\1{2,}/g, '$1$1')
@@ -268,10 +276,19 @@ function matchesImperativeThreat(text) {
 // remplacée tour à tour par chaque voyelle. Mot de moins de 5 caractères : expressions seulement
 // (« la p*te est cuite » passe, « fils de p*te » non). Jamais deux « * » dans le même mot.
 const MASKED_WORD = /(?<![\p{L}*])(\p{L}+)\*(\p{L}+)(?![\p{L}*])/gu;
+// Un texte plein de « a*b » bloquait le processus (coût quadratique) : chaque mot n'est testé qu'avec
+// 40 caractères de contexte, et seuls les 20 premiers et les 20 derniers mots masqués le sont (dix
+// mots masqués anodins en tête ne suffisent plus à faire passer l'insulte qui suit)
+const MASKED_EDGE_WORDS = 20;
+const MASKED_WINDOW = 40;
 function matchesMaskedLetter(raw, opts = {}) {
-  for (const m of raw.matchAll(MASKED_WORD)) {
-    const before = raw.slice(0, m.index);
-    const after = raw.slice(m.index + m[0].length);
+  const all = [...raw.matchAll(MASKED_WORD)];
+  const picked = all.length > 2 * MASKED_EDGE_WORDS
+    ? all.slice(0, MASKED_EDGE_WORDS).concat(all.slice(-MASKED_EDGE_WORDS))
+    : all;
+  for (const m of picked) {
+    const before = raw.slice(Math.max(0, m.index - MASKED_WINDOW), m.index);
+    const after = raw.slice(m.index + m[0].length, m.index + m[0].length + MASKED_WINDOW);
     const phrasesOnly = m[0].length < 5;
     for (const v of 'aeiouy') {
       if (matchesBlockedTerm(`${before}${m[1]}${v}${m[2]}${after}`, { ...opts, phrasesOnly })) return true;

@@ -207,6 +207,18 @@ export default function Cleaning() {
   const today = format(new Date(), 'yyyy-MM-dd');
   const misplaced = schedule.filter(s => s.status !== 'done' && s.date >= today && isAbsent(s.employee_id, s.date)).length;
 
+  // Cases « tâche active × jour ouvré à venir » sans aucune ligne au planning (barber passé inactif :
+  // le serveur supprime ses tâches à faire sans les redonner) : il faut générer le planning
+  const unassigned = (scheduleQuery.isSuccess && tasksQuery.isSuccess && schedule.length > 0)
+    ? weekDates.filter(date => {
+      if (date < today) return false;
+      const day = presenceByDate[date];
+      if (day && (day.salonClosed || !(day.barbers || []).some(b => b.present))) return false;
+      return true;
+    }).reduce((n, date) => n + tasks.filter(t => t.is_active
+      && !schedule.some(s => s.date === date && (String(s.task_id) === String(t.id) || s.task_name === t.name))).length, 0)
+    : 0;
+
   return (
     <div>
       <div className="flex flex-wrap items-start justify-between mb-6 gap-3">
@@ -302,6 +314,15 @@ export default function Cleaning() {
           <p>
             {misplaced} tâche{misplaced > 1 ? 's' : ''} {misplaced > 1 ? 'tombent' : 'tombe'} sur un barber absent
             (pause ou congé ajouté depuis). Cliquez sur « Générer planning » pour les redistribuer.
+          </p>
+        </div>
+      )}
+
+      {unassigned > 0 && (
+        <div className="flex items-start gap-2 bg-amber-500/10 border border-amber-500/30 text-amber-300 rounded-xl px-3 py-2.5 mb-4 text-xs">
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+          <p>
+            {unassigned} tâche{unassigned > 1 ? 's' : ''} sans personne : générez le planning.
           </p>
         </div>
       )}

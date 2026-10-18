@@ -515,7 +515,7 @@ export default function Clients() {
           }
 
           for (let i = 1; i < lines.length; i++) {
-            const values = lines[i].split(separator).map(v => v.replace(/"/g, '').trim());
+            const values = lines[i].split(separator).map(v => v.replace(/"/g, '').trim().replace(/^'/, ''));
             const email = values[emailIdx];
             if (!email) continue;
             importedClients.push({
@@ -526,7 +526,7 @@ export default function Clients() {
           }
         }
 
-        if (importedClients.length === 0) {
+        if (!Array.isArray(importedClients) || importedClients.length === 0) {
           toast.error('Aucun client trouvé dans le fichier');
           return;
         }
@@ -540,12 +540,27 @@ export default function Clients() {
         });
         const allClients = buildClients(await ensureAllUsers(), freshAppointments || appointments, employees);
         const existingEmails = new Set(allClients.map(c => c.email.toLowerCase()));
-        const newClients = importedClients.filter(
-          c => c.email && !existingEmails.has(c.email.toLowerCase())
-        );
+        // Email normalisé, valide et unique dans le fichier : « n/a », « - » ou la même adresse en deux
+        // casses ne créent plus de fiches fantômes (reprises ensuite par l'envoi « Tous les clients »)
+        const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        const seenEmails = new Set();
+        const newClients = [];
+        for (const c of (Array.isArray(importedClients) ? importedClients : [])) {
+          if (!c || typeof c !== 'object') continue;
+          const email = String(c?.email || '').trim().replace(/^'/, '').toLowerCase();
+          if (!EMAIL_RE.test(email) || existingEmails.has(email) || seenEmails.has(email)) continue;
+          seenEmails.add(email);
+          newClients.push({
+            ...c,
+            email,
+            nom: String(c.nom || c.name || '').replace(/^'/, ''),
+            telephone: String(c.telephone || c.phone || '').replace(/^'/, ''),
+          });
+        }
+        const skippedRows = importedClients.length - newClients.length;
 
         if (newClients.length === 0) {
-          toast.info('Tous les clients du fichier existent déjà');
+          toast.info(`Aucun nouveau client à importer (${skippedRows} ligne(s) ignorée(s) : adresse invalide, doublon ou client existant)`);
           return;
         }
 
@@ -588,7 +603,7 @@ export default function Clients() {
           importingRef.current = false;
           setImporting(null);
         }
-        if (failed === 0) toast.success(`${ok} client(s) importé(s)`);
+        if (failed === 0) toast.success(`${ok} client(s) importé(s)${skippedRows ? `, ${skippedRows} ligne(s) ignorée(s) (adresse invalide, doublon ou client existant)` : ''}`);
         else toast.warning(`${ok} importé(s), ${failed} en échec : réessayez l'import dans une minute (les clients déjà créés seront ignorés)`, { duration: 10000 });
       } catch (err) {
         toast.error(friendlyError(err, 'Erreur lors de l\'importation du fichier'));

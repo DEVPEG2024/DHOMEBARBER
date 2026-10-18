@@ -20,7 +20,7 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { inviteToSalonEvent, formatEventDate } from '@/lib/salonEventsApi';
 import LoadError, { queryFailed } from '@/components/shared/LoadError';
-import { CLIENTS_KEY, INPUT_CLASS, INVITE_MESSAGE_MAX, invalidateSalonEvents, countLabel, Spinner } from './shared';
+import { CLIENTS_KEY, INPUT_CLASS, INVITE_MESSAGE_MAX, invalidateSalonEvents, countLabel, Spinner, TwoTapButton } from './shared';
 
 const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
 
@@ -272,13 +272,25 @@ export default function InviteTab({ event, invites, onSent }) {
         </div>
       )}
 
-      <Button
-        className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
-        disabled={!canSend}
-        onClick={() => sendMutation.mutate()}
-      >
-        <Send className="w-4 h-4 mr-1.5" /> {sendLabel}
-      </Button>
+      {inviteAll || selected.size >= 5 ? (
+        <TwoTapButton
+          icon={Send}
+          label={sendLabel}
+          confirmLabel={count != null ? `Envoyer à ${countLabel(count, 'client', 'clients')} ?` : 'Envoyer à tous les clients ?'}
+          disabled={!canSend}
+          className="w-full justify-center py-2.5 text-sm border-primary bg-primary text-primary-foreground hover:bg-primary/90"
+          armedClassName="w-full justify-center py-2.5 text-sm border-amber-500 bg-amber-500 text-black animate-pulse"
+          onConfirm={() => sendMutation.mutate()}
+        />
+      ) : (
+        <Button
+          className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
+          disabled={!canSend}
+          onClick={() => sendMutation.mutate()}
+        >
+          <Send className="w-4 h-4 mr-1.5" /> {sendLabel}
+        </Button>
+      )}
     </div>
   );
 }

@@ -4,8 +4,9 @@ import { isUnclaimedLastMinute, isClientPlaceholder } from '@/components/agenda/
 import { isRescheduledCancel, cancellationActor } from '@/lib/cancellation';
 import { useQuery } from '@tanstack/react-query';
 import LoadError from '@/components/shared/LoadError';
-// Même CA par RDV que le tableau de bord (prestations + produit vendu, hors pourboire)
-import { revenueOf, round2 } from '@/lib/revenue';
+// Même CA par RDV que le tableau de bord (prestations + produit vendu, hors pourboire, hors part
+// réglée par carte cadeau : elle est comptée à la vente de la carte)
+import { revenueOf, giftPartOf, round2 } from '@/lib/revenue';
 import { TrendingUp, Calendar, Users, AlertTriangle, Target } from 'lucide-react';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
@@ -59,7 +60,9 @@ export default function Stats() {
     const completed = real.filter(a => a.status === 'completed');
     const cancelled = real.filter(a => a.status === 'cancelled');
     const noShows = real.filter(a => a.status === 'no_show');
-    const totalRevenue = round2(completed.reduce((sum, a) => sum + revenueOf(a), 0));
+    const netOf = (a) => revenueOf(a) - giftPartOf(a);
+    const totalRevenue = round2(completed.reduce((sum, a) => sum + netOf(a), 0));
+    const giftTotal = round2(completed.reduce((sum, a) => sum + giftPartOf(a), 0));
     const avgTicket = completed.length > 0 ? totalRevenue / completed.length : 0;
 
     // Monthly trend
@@ -67,7 +70,7 @@ export default function Stats() {
     completed.forEach(a => {
       const month = a.date?.substring(0, 7);
       if (!monthlyData[month]) monthlyData[month] = { month, revenue: 0, count: 0 };
-      monthlyData[month].revenue += revenueOf(a);
+      monthlyData[month].revenue += netOf(a);
       monthlyData[month].count++;
     });
     const monthly = Object.values(monthlyData)
@@ -93,14 +96,14 @@ export default function Stats() {
       const name = a.employee_name || 'Inconnu';
       if (!empStats[name]) empStats[name] = { name, count: 0, revenue: 0 };
       empStats[name].count++;
-      empStats[name].revenue += revenueOf(a);
+      empStats[name].revenue += netOf(a);
     });
     const perEmployee = Object.values(empStats)
       .map(e => ({ ...e, revenue: round2(e.revenue) }))
       .sort((a, b) => b.revenue - a.revenue);
 
     return {
-      totalRevenue, avgTicket, completed: completed.length,
+      totalRevenue, giftTotal, avgTicket, completed: completed.length,
       cancelRate: real.length > 0 ? ((cancelled.length / real.length) * 100).toFixed(1) : 0,
       noShowRate: real.length > 0 ? ((noShows.length / real.length) * 100).toFixed(1) : 0,
       monthly, topServices, perEmployee,
@@ -148,6 +151,10 @@ export default function Stats() {
     <div>
       {header}
 
+      <p className="text-[11px] text-muted-foreground -mt-2 mb-3">
+        CA hors pourboires et hors part réglée par carte cadeau (comptée à la vente de la carte)
+        {stats.giftTotal > 0 ? ` : ${stats.giftTotal.toFixed(0)}€ réglés par carte cadeau sur la période.` : '.'}
+      </p>
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-8">
         <StatBox title="CA Total" value={`${stats.totalRevenue.toFixed(0)}€`} icon={TrendingUp} />
         <StatBox title="RDV Complétés" value={stats.completed} icon={Calendar} />

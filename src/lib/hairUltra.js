@@ -15,8 +15,11 @@ export function hairUltraAvailable() {
   if (!availablePromise) {
     availablePromise = fetch(`${API_SERVER_URL}/api/apps/public/prod/public-settings/by-id/${resolvedAppId}`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((data) => !!data?.features?.hairUltra)
-      .catch(() => false);
+      .then((data) => {
+        if (!data) availablePromise = null;
+        return !!data?.features?.hairUltra;
+      })
+      .catch(() => { availablePromise = null; return false; });
   }
   return availablePromise;
 }

@@ -189,6 +189,13 @@ export default function AdminSalonEvents() {
         </div>
       )}
 
+      {!invitesQ.error && Array.isArray(invitesQ.data) && invitesQ.data.length >= 2000 && (
+        <div className="mb-4 flex items-start gap-2 rounded-xl border border-amber-500/25 bg-amber-500/10 p-3 text-xs text-amber-300">
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+          <span>Plus de 2000 invitations : les jauges des événements les plus anciens peuvent être sous-estimées. Ouvrez la liste des invités pour les chiffres exacts.</span>
+        </div>
+      )}
+
       {loading ? (
         <Spinner />
       ) : loadFailed ? (

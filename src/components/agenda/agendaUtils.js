@@ -272,7 +272,7 @@ export async function fetchLeaveConflicts(employeeId, startDate, endDate) {
   return rows
     .filter((a) => (a.status === 'confirmed' || a.status === 'pending')
       && !isBreak(a) && !isLastMinuteSlot(a) && !a.payment_method
-      && String(a.date || '').slice(0, 10) >= today)
+      && (String(a.date || '').slice(0, 10) > today || (appointmentEndParis(a) ?? Infinity) > Date.now()))
     .sort((a, b) => String(a.date).localeCompare(String(b.date)) || timeToMinutes(a.start_time) - timeToMinutes(b.start_time));
 }
 

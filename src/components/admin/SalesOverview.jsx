@@ -29,6 +29,7 @@ import { api } from '@/api/apiClient';
 import { TEXTILE_QUERY_KEY, fetchTextileOverview, ACTIVE_RESERVATION_STATUSES } from '@/lib/textileApi';
 import LoadError from '@/components/shared/LoadError';
 import { useAuth } from '@/lib/AuthContext';
+import { isValidityPassed, parisToday } from '@/lib/giftCardDebit';
 
 const ORDER_OPEN = ['pending', 'confirmed', 'ready'];
 const EVENT_OPEN = ['pending', 'quoted'];
@@ -193,6 +194,9 @@ export default function SalesOverview({ appointments }) {
     const sold = giftCards.filter((c) => c.validated_at || c.status === 'validated' || c.status === 'used');
     const soldDate = (c) => c.validated_at || c.created_at;
     const pendingCards = giftCards.filter((c) => c.status === 'pending');
+    const parisDay = parisToday();
+    const validatedCards = giftCards.filter((c) => c.status === 'validated');
+    const cardBalance = (c) => (c.remaining_balance != null ? c.remaining_balance : c.amount);
     // Moyen de paiement noté à la validation (cb / especes) ; les cartes d'avant : « non renseigné »
     const byPayment = (rows) => ({
       cb: sum(rows.filter((c) => c.payment_method === 'cb'), (c) => c.amount),
@@ -207,7 +211,9 @@ export default function SalesOverview({ appointments }) {
       monthCount: sold.filter((c) => isMonth(soldDate(c))).length,
       pendingCount: pendingCards.length,
       pendingAmount: sum(pendingCards, (c) => c.amount),
-      balance: sum(giftCards.filter((c) => c.status === 'validated'), (c) => (c.remaining_balance != null ? c.remaining_balance : c.amount)),
+      // Une carte dont la validité est passée n'est plus débitable : hors du solde à honorer
+      balance: sum(validatedCards.filter((c) => !isValidityPassed(c, parisDay)), cardBalance),
+      outdatedBalance: sum(validatedCards.filter((c) => isValidityPassed(c, parisDay)), cardBalance),
     };
 
     // ─── Privatisations ───
@@ -394,7 +400,7 @@ export default function SalesOverview({ appointments }) {
           <Mini label="Validées aujourd'hui" value={money('cartes', cartes.today)} icon={Euro} color={CHANNEL_COLORS.cartes} hint={failed.cartes || !cartes.today ? '' : payHint(cartes.todayBy)} />
           <Mini label="Validées ce mois" value={money('cartes', cartes.month)} icon={Euro} color={CHANNEL_COLORS.cartes} hint={failed.cartes ? '' : `${cartes.monthCount} carte${cartes.monthCount > 1 ? 's' : ''}`} />
           <Mini label="En attente de paiement" value={money('cartes', cartes.pendingAmount)} icon={Clock} color="#f59e0b" hint={failed.cartes ? '' : `${cartes.pendingCount} carte${cartes.pendingCount > 1 ? 's' : ''}`} />
-          <Mini label="Solde en circulation" value={money('cartes', cartes.balance)} icon={Wallet} color="#60a5fa" hint="reste à consommer" />
+          <Mini label="Solde en circulation" value={money('cartes', cartes.balance)} icon={Wallet} color="#60a5fa" hint={failed.cartes || !(cartes.outdatedBalance > 0) ? 'reste à consommer' : `+ ${eur(cartes.outdatedBalance)} échus à prolonger`} />
           {!failed.cartes && cartes.month > 0 && (
             <p className="col-span-2 text-[10px] text-muted-foreground px-1 break-words">Ventes du mois : {payHint(cartes.monthBy)}</p>
           )}

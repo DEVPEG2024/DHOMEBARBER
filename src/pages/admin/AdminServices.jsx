@@ -217,12 +217,12 @@ export default function AdminServices() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label className="text-xs">Durée (min)</Label>
-                  <Input type="number" value={editService.duration} onChange={e => setEditService({ ...editService, duration: parseInt(e.target.value) || 0 })}
+                  <Input type="number" min={5} max={600} step={5} value={editService.duration} onChange={e => setEditService({ ...editService, duration: parseInt(e.target.value) || 0 })}
                     className="bg-secondary border-border mt-1" />
                 </div>
                 <div>
                   <Label className="text-xs">Prix (€)</Label>
-                  <Input type="number" value={editService.price} onChange={e => setEditService({ ...editService, price: parseFloat(e.target.value) || 0 })}
+                  <Input type="number" min={0} step="0.5" value={editService.price} onChange={e => setEditService({ ...editService, price: parseFloat(e.target.value) || 0 })}
                     className="bg-secondary border-border mt-1" />
                 </div>
               </div>
@@ -244,6 +244,7 @@ export default function AdminServices() {
                 <Switch checked={editService.is_active} onCheckedChange={v => setEditService({ ...editService, is_active: v })} />
               </div>
               <Button className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
+                disabled={!String(editService.name || '').trim() || !(Number(editService.duration) >= 5) || !(Number(editService.price) >= 0)}
                 onClick={() => saveMutation.mutate(editService)}>
                 Sauvegarder
               </Button>

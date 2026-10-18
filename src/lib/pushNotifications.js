@@ -258,7 +258,9 @@ export function initNativePush() {
  * - rattrape le jeton obtenu avant la connexion (refusé en 401, jamais renvoyé jusqu'ici) ;
  * - rattrape les clients déjà touchés : autorisation accordée mais jeton jamais enregistré ;
  * - réattribue l'appareil quand un autre compte s'y connecte.
- * Ne demande jamais d'autorisation et ne crée pas d'abonnement web sans geste de l'utilisateur.
+ * Ne demande jamais d'autorisation. Web : si l'autorisation est déjà accordée mais que l'abonnement
+ * du navigateur a disparu (invalidé, coupé), il est recréé sans geste (jamais après « Désactiver »
+ * dans Paramètres : `dhb-push-optout` arrête tout avant).
  */
 // `userId` : compte qui ouvre la session (AuthContext). Indispensable à la connexion : le
 // propriétaire de l'appareil (`dhb-notif-owner`) n'est posé qu'ensuite, par un effet.
@@ -290,8 +292,24 @@ async function doSyncPushSubscription(userId) {
     // notification a été activée hors session, ou appartenant au compte précédent)
     if (!('serviceWorker' in navigator) || typeof Notification === 'undefined') return;
     if (Notification.permission !== 'granted') return;
-    const reg = await navigator.serviceWorker.getRegistration();
-    const subscription = await reg?.pushManager?.getSubscription();
+    let reg = await navigator.serviceWorker.getRegistration();
+    if (!reg) {
+      reg = await navigator.serviceWorker.register('/sw.js');
+      await navigator.serviceWorker.ready;
+    }
+    let subscription = await reg?.pushManager?.getSubscription();
+    if (!subscription && reg?.pushManager) {
+      // Abonnement perdu (coupé par un autre compte, invalidé par le navigateur) alors que la
+      // permission est accordée : recréé sans geste, sinon ce compte ne reçoit rien et aucune
+      // invite ne s'affiche
+      const vapidKey = await getVapidPublicKey();
+      if (vapidKey) {
+        subscription = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(vapidKey),
+        });
+      }
+    }
     if (subscription) {
       await apiRequest('POST', apiUrl('/push/subscribe'), subscription.toJSON());
     }
@@ -662,3 +680,12 @@ export async function getBadgeCount(userId) {
     .filter(entry => entry && !local.some(n => isSameNotification(n, entry)));
   return unread + pending.length;
 }
+
+// Le navigateur a invalidé l'abonnement (voir `pushsubscriptionchange` dans sw.js) : on le recrée
+try {
+  if (!isNative && typeof navigator !== 'undefined' && navigator.serviceWorker) {
+    navigator.serviceWorker.addEventListener('message', (event) => {
+      if (event.data?.type === 'PUSH_SUBSCRIPTION_CHANGED') syncPushSubscription().catch(() => {});
+    });
+  }
+} catch { /* service worker indisponible */ }

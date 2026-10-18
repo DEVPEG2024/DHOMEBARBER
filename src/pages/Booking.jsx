@@ -609,7 +609,7 @@ export default function Booking() {
   const sendRef = useRef(null);
 
   const urlParams = new URLSearchParams(window.location.search);
-  const preSelectedIds = urlParams.get('services')?.split(',') || [];
+  const preSelectedIds = (urlParams.get('services') || '').split(',').map(s => s.trim()).filter(Boolean);
   const preSelectedBarberId = urlParams.get('barber') || null;
   // « Déplacer » depuis Mes rendez-vous : l'ancien RDV n'est annulé qu'une fois le nouveau confirmé
   const rescheduleId = urlParams.get('reschedule') || null;
@@ -765,7 +765,12 @@ export default function Booking() {
   });
 
   const dayRows = dayQuery.data;
-  const appointments = useMemo(() => (dayRows || []).filter(blocksClient), [dayRows]);
+  // Déplacement : l'ancien RDV du client (annulé à la confirmation) ne bloque pas son nouveau créneau
+  // (le serveur l'ignore aussi). Un départ à la même heure reste refusé par le serveur.
+  const appointments = useMemo(
+    () => (dayRows || []).filter(blocksClient).filter(a => !(rescheduleId && String(a.id) === String(rescheduleId))),
+    [dayRows, rescheduleId],
+  );
 
   // Privatisations confirmées du jour : le salon n'accepte aucun RDV sur leur fenêtre. Un échec
   // de lecture ne bloque pas la réservation (le serveur revérifie et refuse en 409).
@@ -1329,7 +1334,7 @@ export default function Booking() {
         // Ancien RDV relu : sa durée allongée par le salon (« prévoir 1 h ») est reprise par
         // `totalDuration`, sinon les mêmes heures trop courtes revenaient
         queryClient.invalidateQueries({ queryKey: ['myAppointments'] });
-        toast.error(`${shown}. Pour décaler sur le même créneau ou juste à côté, appelez le salon au ${SALON_PHONE}.`, {
+        toast.error(`${shown}. Choisissez une autre heure (pas la même heure de départ), ou appelez le salon au ${SALON_PHONE}.`, {
           duration: 10000,
           action: { label: 'Appeler', onClick: () => { window.location.href = SALON_PHONE_HREF; } },
         });
@@ -1568,7 +1573,7 @@ export default function Booking() {
                 Ne pas déplacer
               </button>
               <span className="mt-1.5 block text-muted-foreground">
-                Pour décaler sur le même créneau ou juste à côté, appelez le salon au{' '}
+                Un décalage de quelques minutes est possible (pas la même heure de départ) ; en cas de souci, appelez le salon au{' '}
                 <a href={SALON_PHONE_HREF} className="font-semibold text-primary whitespace-nowrap">{SALON_PHONE}</a>.
               </span>
             </div>

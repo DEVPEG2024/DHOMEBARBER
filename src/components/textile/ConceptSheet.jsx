@@ -243,7 +243,7 @@ export default function ConceptSheet({
 
   const needsSize = sizes.length > 0 && selectedSize == null;
   const quotaReached = maxPerClient - myActiveQty <= 0;
-  const canReserve = live && !soldOut && !sizeSoldOut && !needsSize && !quotaReached && maxQty >= 1 && !reserving;
+  const canReserve = live && !soldOut && !sizeSoldOut && !needsSize && !quotaReached && maxQty >= 1 && !reserving && Number(concept.price) > 0;
   const total = (Number(concept.price) || 0) * quantity;
 
   useEffect(() => {
@@ -343,7 +343,7 @@ export default function ConceptSheet({
                 </p>
                 <h2 className="font-fut text-3xl font-extrabold uppercase leading-none text-foreground mt-1">{concept.name}</h2>
               </div>
-              <p className="font-fut text-3xl font-bold text-primary leading-none shrink-0">{formatPrice(concept.price)}</p>
+              <p className="font-fut text-3xl font-bold text-primary leading-none shrink-0">{Number(concept.price) > 0 ? formatPrice(concept.price) : <span className="text-lg">Prix à venir</span>}</p>
             </div>
 
             {concept.description && (

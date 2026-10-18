@@ -55,18 +55,19 @@ export function blocksClient(row) {
  * paraîtrait entièrement libre).
  * @returns {Promise<{ rows: object[], keys: string[] }>}
  */
-async function fetchBusy(employeeId, keys) {
+async function fetchBusy(employeeId, keys, excludeId = null) {
+  const keep = (row) => blocksClient(row) && !(excludeId != null && String(row.id) === String(excludeId));
   const load = (dates) => api.entities.Appointment.filter({ employee_id: employeeId, date: dates }, 'start_time', 1000);
   try {
     const rows = await load(keys);
-    return { rows: (rows || []).filter(blocksClient), keys };
+    return { rows: (rows || []).filter(keep), keys };
   } catch {
     // Filtre par liste de dates refusé : un jour à la fois, sur les 10 premiers jours seulement
     const rows = [];
     const loaded = keys.slice(0, FALLBACK_DAYS);
     for (const key of loaded) {
       const day = await load(key);
-      rows.push(...(day || []).filter(blocksClient));
+      rows.push(...(day || []).filter(keep));
     }
     return { rows, keys: loaded };
   }
@@ -117,7 +118,7 @@ export async function findRescheduleSlots({ appointment, employee, timeOffs = []
     : appointmentDuration(appointment);
   const target = toMinutes(appointment.start_time);
   const wanted = Array.from({ length: days }, (_, i) => parisDay(i));
-  const { rows: busy, keys: loadedKeys } = await fetchBusy(employee.id, wanted.map(d => d.key));
+  const { rows: busy, keys: loadedKeys } = await fetchBusy(employee.id, wanted.map(d => d.key), appointment.id);
   // Privatisations confirmées (salon fermé aux réservations sur leur fenêtre) ; lecture impossible :
   // aucune, le serveur refusera de toute façon un créneau privatisé
   let privates = [];

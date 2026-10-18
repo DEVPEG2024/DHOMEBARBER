@@ -42,11 +42,19 @@ export default function GalleryEditor({ employee }) {
   // une closure figée au début d'un envoi écraserait ce qui a changé entre-temps.
   const itemsRef = useRef(items);
   itemsRef.current = items;
+  // Légendes tapées mais pas encore enregistrées (urls) : une relecture du serveur ou la fin d'un
+  // enregistrement précédent ne doit pas les écraser (le champ reste actif pendant une sauvegarde).
+  const dirtyRef = useRef(new Set());
+  const keepTyped = (list) => (dirtyRef.current.size === 0 ? list : list.map((it) => {
+    if (!dirtyRef.current.has(it.url)) return it;
+    const local = itemsRef.current.find((l) => l.url === it.url);
+    return local ? { ...it, caption: local.caption } : it;
+  }));
 
   // Fiche rechargée ailleurs : on reprend la galerie du serveur, sauf pendant un envoi
   const serverKey = JSON.stringify(galleryOf(employee));
   useEffect(() => {
-    if (!busy) setItems(JSON.parse(serverKey));
+    if (!busy) setItems(keepTyped(JSON.parse(serverKey)));
   }, [serverKey]);
 
   // Galerie telle qu'elle est en base (lecture publique des barbers, `gallery` comprise)
@@ -80,22 +88,25 @@ export default function GalleryEditor({ employee }) {
       const base = await fetchServerGallery();
       const next = apply(base);
       if (!next) {
-        itemsRef.current = base;
-        setItems(base);
+        const kept = keepTyped(base);
+        itemsRef.current = kept;
+        setItems(kept);
         toast.error('La photo a déjà été retirée ou modifiée ailleurs');
         queryClient.invalidateQueries({ queryKey: ['employees'] });
         return false;
       }
       await api.entities.Employee.update(employee.id, { gallery: next });
       // Liste du serveur fusionnée : les photos ajoutées ailleurs apparaissent tout de suite
-      itemsRef.current = next;
-      setItems(next);
+      const kept = keepTyped(next);
+      itemsRef.current = kept;
+      setItems(kept);
       queryClient.invalidateQueries({ queryKey: ['employees'] });
       if (success) toast.success(success);
       return true;
     } catch (err) {
-      itemsRef.current = previous;
-      setItems(previous);
+      const kept = keepTyped(previous);
+      itemsRef.current = kept;
+      setItems(kept);
       toast.error(errorText(err, 'Galerie non enregistrée, réessayez'));
       queryClient.invalidateQueries({ queryKey: ['employees'] });
       return false;
@@ -168,9 +179,11 @@ export default function GalleryEditor({ employee }) {
   };
 
   const setCaption = (url, caption) => {
+    dirtyRef.current.add(url);
     setItems((list) => list.map((it) => (it.url === url ? { ...it, caption } : it)));
   };
   const commitCaption = (url) => {
+    dirtyRef.current.delete(url);
     const server = galleryOf(employee).find((it) => it.url === url);
     const local = items.find((it) => it.url === url);
     if (!local || (server && server.caption === local.caption.trim())) return;
@@ -190,7 +203,7 @@ export default function GalleryEditor({ employee }) {
           {items.length}/{GALLERY_MAX} photos · visibles sur le profil public
         </p>
         <Button type="button" size="sm" variant="outline" className="text-xs shrink-0"
-          onClick={() => inputRef.current?.click()} disabled={busy || items.length >= GALLERY_MAX}>
+          onClick={() => inputRef.current?.click()} disabled={sending || items.length >= GALLERY_MAX}>
           {uploading ? (
             <><Loader2 className="w-3 h-3 mr-1.5 animate-spin" />{uploading.done}/{uploading.total}</>
           ) : (
@@ -201,7 +214,7 @@ export default function GalleryEditor({ employee }) {
       </div>
 
       {items.length === 0 ? (
-        <button type="button" onClick={() => inputRef.current?.click()} disabled={busy}
+        <button type="button" onClick={() => inputRef.current?.click()} disabled={sending}
           className="w-full rounded-xl border border-dashed border-border py-8 text-center text-xs text-muted-foreground hover:border-primary/40 transition-colors">
           <ImagePlus className="w-6 h-6 mx-auto mb-2 opacity-50" />
           Ajoutez vos plus belles coupes
@@ -248,7 +261,7 @@ export default function GalleryEditor({ employee }) {
                 onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
                 placeholder="Légende…"
                 maxLength={GALLERY_CAPTION_MAX}
-                disabled={busy}
+                disabled={sending}
                 className="w-full bg-transparent px-2.5 py-2 text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none disabled:opacity-50"
               />
             </div>

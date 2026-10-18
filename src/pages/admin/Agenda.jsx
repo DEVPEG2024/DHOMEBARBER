@@ -1134,7 +1134,7 @@ function LastMinuteForm({ open, employees, timeOffs, defaultEmployeeId, defaultD
 
         {pendingLM.length > 0 && !sending && (
           <div className="rounded-xl border border-orange-500/30 bg-orange-500/10 px-3 py-2.5 space-y-2">
-            <p className="text-xs font-semibold text-orange-300">Bloqués dans l'agenda — déjà annoncés aux clients ? Renvoyer enverra un nouveau push à tous.</p>
+            <p className="text-xs font-semibold text-orange-300">Bloqués dans l'agenda — déjà annoncés aux clients ? Annoncer enverra un nouveau push à tous.</p>
             <div className="flex flex-wrap gap-2">
               {pendingLM.map((a) => {
                 const st = String(a.start_time).slice(0, 5);
@@ -1197,7 +1197,7 @@ function LastMinuteForm({ open, employees, timeOffs, defaultEmployeeId, defaultD
 
         {pushError && (pushUncertain ? (
           <div role="alert" className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-300">
-            Créneau bloqué. La notification est peut-être partie (la réponse du serveur n'est pas arrivée) : vérifiez auprès d'un client avant de la renvoyer.
+            Créneau bloqué. La notification est peut-être partie (la réponse du serveur n'est pas arrivée) : vérifiez auprès d'un client avant de la renvoyer (le serveur ne bloque les doublons que pendant 15 min).
           </div>
         ) : (
           <div role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs leading-relaxed text-red-300">
@@ -1206,7 +1206,7 @@ function LastMinuteForm({ open, employees, timeOffs, defaultEmployeeId, defaultD
         ))}
         {confirmResend && !sending && (
           <p role="status" className="text-xs leading-relaxed text-amber-300">
-            Le serveur ne renverra pas une notification déjà partie : touchez encore pour vérifier ou relancer l'envoi.
+            Si ce créneau a déjà été annoncé, tous les clients recevront la notification une seconde fois (le serveur ne bloque les doublons que pendant 15 min). Touchez encore pour envoyer.
           </p>
         )}
 

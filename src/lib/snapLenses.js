@@ -17,7 +17,8 @@ function publicSettings() {
   if (!settingsPromise) {
     settingsPromise = fetch(`${API_SERVER_URL}/api/apps/public/prod/public-settings/by-id/${resolvedAppId}`)
       .then((r) => (r.ok ? r.json() : null))
-      .catch(() => null);
+      .catch(() => null)
+      .then((d) => { if (!d) settingsPromise = null; return d; });
   }
   return settingsPromise;
 }

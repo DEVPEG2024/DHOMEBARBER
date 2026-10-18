@@ -98,6 +98,8 @@ export function splitOverview(data) {
 
   const featured = visibleDrops.find(d => d.status === 'live') || visibleDrops.find(d => d.status === 'teasing') || null;
   const featuredConcepts = featured ? conceptsByDrop.get(String(featured.id)) || [] : [];
+  const otherLive = visibleDrops.filter(d => d.status === 'live' && (!featured || d.id !== featured.id));
+  const otherLiveConceptCount = otherLive.reduce((s, d) => s + (conceptsByDrop.get(String(d.id)) || []).length, 0);
   const otherTeasing = visibleDrops.filter(d => d.status === 'teasing' && (!featured || d.id !== featured.id));
   const endedDrops = visibleDrops.filter(d => d.status === 'ended');
 
@@ -125,6 +127,8 @@ export function splitOverview(data) {
     featured,
     featuredConcepts,
     otherTeasing,
+    otherLive,
+    otherLiveConceptCount,
     endedDrops,
     labConcepts,
     labTotal,

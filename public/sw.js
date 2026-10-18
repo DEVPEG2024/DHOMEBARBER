@@ -338,3 +338,14 @@ self.addEventListener('message', (event) => {
     }
   }
 });
+
+// Abonnement push invalidé par le navigateur : le service worker n'a pas le jeton de session,
+// il prévient les pages ouvertes (qui rappellent syncPushSubscription). Sans page ouverte, la
+// prochaine ouverture de session recrée l'abonnement.
+self.addEventListener('pushsubscriptionchange', (event) => {
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+      list.forEach((c) => c.postMessage({ type: 'PUSH_SUBSCRIPTION_CHANGED' }));
+    }).catch(() => {})
+  );
+});

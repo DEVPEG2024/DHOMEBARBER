@@ -142,6 +142,9 @@ export default function ConceptDialog({ open, onOpenChange, concept, drops, defa
     if (form.price !== '' && !Number.isFinite(Number(String(form.price).replace(',', '.')))) {
       toast.error('Prix invalide'); return;
     }
+    if (form.drop_id && !(payload.price > 0)) {
+      toast.error('Indique un prix pour une pièce rattachée à un drop'); return;
+    }
     saveMutation.mutate(payload);
   };
 

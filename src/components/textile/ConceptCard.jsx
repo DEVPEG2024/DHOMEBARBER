@@ -137,7 +137,7 @@ function ConceptCard({
         <button type="button" onClick={() => onOpen?.(concept)} className="text-left">
           <p className="text-[10px] uppercase tracking-[0.18em] text-primary font-semibold">{categoryLabel(concept.category)}</p>
           <h3 className="text-sm font-semibold text-foreground leading-snug line-clamp-1 mt-0.5">{concept.name}</h3>
-          <p className="font-fut text-xl font-bold text-foreground leading-none mt-1">{formatPrice(concept.price)}</p>
+          <p className="font-fut text-xl font-bold text-foreground leading-none mt-1">{Number(concept.price) > 0 ? formatPrice(concept.price) : 'Prix à venir'}</p>
         </button>
 
         <div className="flex items-center justify-between gap-2 mt-2 min-h-[16px]">

@@ -535,7 +535,7 @@ export default function Settings() {
             </button>
           ) : (
             <div className="px-4 py-4 space-y-3">
-              <p className="text-sm text-red-300">Êtes-vous sûr de vouloir supprimer votre compte ? Vos rendez-vous à venir et vos commandes en cours seront annulés, et toutes vos données personnelles définitivement supprimées.</p>
+              <p className="text-sm text-red-300">Êtes-vous sûr de vouloir supprimer votre compte ? Vos rendez-vous à venir et vos commandes en cours seront annulés, et toutes vos données personnelles définitivement supprimées. Vos cartes cadeau déjà achetées restent valables avec leur code, mais vous ne pourrez plus les consulter : notez les codes avant de supprimer.</p>
               <div className="flex gap-2">
                 <button
                   onClick={() => setShowDeleteConfirm(false)}
