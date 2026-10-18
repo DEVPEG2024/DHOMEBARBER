@@ -10,6 +10,8 @@ import NotificationPrompt from '@/components/shared/NotificationPrompt';
 import { useMusic } from '@/lib/MusicContext';
 import ActivityBell from '@/components/admin-activity/ActivityBell';
 import { useUnreadActivity, useActivityToasts } from '@/lib/adminActivity';
+import { useQuery } from '@tanstack/react-query';
+import { api } from '@/api/apiClient';
 
 // All nav items with their default category
 const allNavItems = [
@@ -38,7 +40,7 @@ const allNavItems = [
   { path: '/admin/partners', icon: Handshake, label: 'Bons plans', adminOnly: true, category: 'Commerce' },
   { path: '/admin/team', icon: Users, label: 'Équipe', adminOnly: true, category: 'Équipe' },
   { path: '/admin/barber-accounts', icon: ShieldCheck, label: 'Comptes Barbers', adminOnly: true, category: 'Équipe' },
-  { path: '/admin/leave', icon: CalendarDays, label: 'Congés', adminOnly: true, category: 'Équipe' },
+  { path: '/admin/leave', icon: CalendarDays, label: 'Congés', adminOnly: true, category: 'Équipe', badge: 'leave' },
   { path: '/admin/cleaning', icon: Sparkles, label: 'Entretien', adminOnly: true, category: 'Équipe' },
   { path: '/admin/my-cleaning', icon: Sparkles, label: 'Entretien', barberOnly: true, alwaysShow: true, category: 'Mon espace' },
   { path: '/admin/my-leave', icon: CalendarDays, label: 'Mes Congés', barberOnly: true, alwaysShow: true, category: 'Mon espace' },
@@ -126,6 +128,16 @@ export default function AdminLayout() {
   const isAdmin = user?.role === 'admin';
   const { count: activityUnread } = useUnreadActivity();
   useActivityToasts();
+  // Demandes de congé en attente (admin) : pastille sur « Congés ». Préfixe ['timeOffs'] : les
+  // pages Congés / Mes congés la rafraîchissent en invalidant. Échec : pas de pastille, rien bloqué.
+  const { data: pendingLeaves } = useQuery({
+    queryKey: ['timeOffs', 'pending'],
+    queryFn: () => api.entities.TimeOff.filter({ status: 'pending' }, '-created_at', 100),
+    enabled: isAdmin,
+    refetchInterval: 60000,
+    staleTime: 60000,
+  });
+  const pendingLeaveCount = isAdmin && Array.isArray(pendingLeaves) ? pendingLeaves.length : 0;
 
   // Filter items by role/permissions
   const filteredItems = useMemo(() => {
@@ -331,6 +343,12 @@ export default function AdminLayout() {
                                 {entry.badge === 'activity' && isAdmin && activityUnread > 0 && (
                                   <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold leading-[18px] text-center shrink-0">
                                     {activityUnread > 99 ? '99+' : activityUnread}
+                                  </span>
+                                )}
+                                {entry.badge === 'leave' && pendingLeaveCount > 0 && (
+                                  <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold leading-[18px] text-center shrink-0"
+                                    aria-label={`${pendingLeaveCount} demande${pendingLeaveCount > 1 ? 's' : ''} de congé en attente`}>
+                                    {pendingLeaveCount > 99 ? '99+' : pendingLeaveCount}
                                   </span>
                                 )}
                               </Link>

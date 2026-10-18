@@ -546,7 +546,8 @@ export default function Clients() {
           <p className="text-[11px] uppercase tracking-[0.2em] text-primary font-medium mb-1">CRM</p>
           <h1 className="font-display text-2xl font-bold">Clients</h1>
           <p className="text-xs text-muted-foreground mt-1">
-            {hasNextPage ? 'Comptage des clients…' : `${clients.length} client${clients.length > 1 ? 's' : ''} enregistré${clients.length > 1 ? 's' : ''}`}
+            {/* Échec ou chargement : jamais « 0 client enregistré » au-dessus du message */}
+            {listFailed ? '—' : listLoading ? 'Chargement…' : hasNextPage ? 'Comptage des clients…' : `${clients.length} client${clients.length > 1 ? 's' : ''} enregistré${clients.length > 1 ? 's' : ''}`}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 justify-end">
@@ -676,9 +677,18 @@ export default function Clients() {
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold truncate">{client.name || client.email}</p>
                 {/* truncate : un email long passait sous « visites » sur téléphone */}
-                <p className="text-[10px] text-muted-foreground truncate" title={client.email}>{client.email}</p>
+                {/* Pastille d'absences sur la ligne de l'email : à 320 px elle écrasait le nom */}
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <p className="text-[10px] text-muted-foreground truncate min-w-0" title={client.email}>{client.email}</p>
+                  {client.noShows > 0 && (
+                    <Badge variant="outline" className="shrink-0 px-1.5 py-0 text-[9px] bg-red-500/10 text-red-400 border-red-500/20" title={`${client.noShows} absence(s)`}>
+                      <AlertTriangle className="w-2.5 h-2.5 mr-0.5" />
+                      {client.noShows}
+                    </Badge>
+                  )}
+                </div>
               </div>
-              <div className="flex items-center gap-3 text-xs shrink-0">
+              <div className="flex items-center gap-2 sm:gap-3 text-xs shrink-0">
                 <div className="text-center">
                   <p className="font-bold">{client.visits}</p>
                   <p className="text-[9px] text-muted-foreground">visites</p>
@@ -687,12 +697,6 @@ export default function Clients() {
                   <p className="font-bold text-primary">{client.totalSpent}€</p>
                   <p className="text-[9px] text-muted-foreground">dépensé</p>
                 </div>
-                {client.noShows > 0 && (
-                  <Badge variant="outline" className="text-[9px] bg-red-500/10 text-red-400 border-red-500/20">
-                    <AlertTriangle className="w-2.5 h-2.5 mr-0.5" />
-                    {client.noShows}
-                  </Badge>
-                )}
                 {isAdmin && !isStaffRole(client.role) && (
                   <Button
                     variant="ghost"

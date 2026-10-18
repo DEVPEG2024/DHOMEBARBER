@@ -117,7 +117,9 @@ const SALON_PHONE_RE = /0?6 ?66 ?08 ?36 ?05/;
  * Annulation posée par un déplacement fait par le client (« Client : déplacé au … ») : ce n'est
  * pas une annulation (même règle que la carte Gang, MOVED_REASON_RE côté serveur).
  */
-export const isRescheduledCancel = (a) => a?.status === 'cancelled' && /^client\s*:\s*d[ée]plac/i.test(String(a?.cancellation_reason || ''));
+// Forme exacte « Client : déplacé au … » (comme le serveur) : un motif libre tel que
+// « Déplacement professionnel » reste une annulation
+export const isRescheduledCancel = (a) => a?.status === 'cancelled' && /^client\s*:\s*d[ée]plac[ée]\s+au(\s|$)/i.test(String(a?.cancellation_reason || ''));
 
 export function friendlyCancelError(err, kind) {
   const status = err?.status;
@@ -190,5 +192,6 @@ export function cancelledByLabel(row, viewer, noun = 'commande') {
 
 /** Motif sans son préfixe « Client : » / « Salon : » ; « Salon » seul → ''. */
 export function cleanReason(reason) {
-  return String(reason || '').replace(/^(client|salon)\b\s*:?\s*/i, '').trim();
+  // « Client : « … » » : motif libre que le serveur a mis entre guillemets (il commençait par « déplacé au »)
+  return String(reason || '').replace(/^(client|salon)\b\s*:?\s*/i, '').trim().replace(/^«\s*([\s\S]*?)\s*»$/, '$1');
 }

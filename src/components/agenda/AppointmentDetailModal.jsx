@@ -7,7 +7,8 @@ import { api } from '@/api/apiClient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import AppointmentEditForm from './AppointmentEditForm';
-import { STATUS_META, invalidateAppointmentQueries, withLastMinuteMarker, stripLastMinuteMarker, isConvertedLastMinute, agendaErrorMessage, appointmentEndParis } from './agendaUtils';
+import { STATUS_META, invalidateAppointmentQueries, withLastMinuteMarker, stripLastMinuteMarker, isConvertedLastMinute, agendaErrorMessage, appointmentEndParis, slotIssues, aptDuration } from './agendaUtils';
+import { foldText } from './ClientAccountPicker';
 import { useAuth } from '@/lib/AuthContext';
 import { parisInstant } from '@/lib/calendarLinks';
 import { formatStaffReason, cancellationActor, cancelledByLabel, cleanReason, LAST_MINUTE_EXPIRED_REASON, ORDER_STATUSES, normalizeOrderStatus, invalidateOrderQueries } from '@/lib/cancellation';
@@ -111,7 +112,7 @@ function invalidateLinkedOrders(queryClient) {
 /** Passe une commande liée au RDV à « Retirée » : elle compte alors dans le CA de la boutique. */
 const deliverOrder = (order) => api.entities.Order.update(order.id, { status: 'delivered' });
 
-function ModalInner({ appointment, linkedOrders = [], onUpdate, onDelete, onEdit }) {
+function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, onDelete, onEdit }) {
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
@@ -128,17 +129,20 @@ function ModalInner({ appointment, linkedOrders = [], onUpdate, onDelete, onEdit
 
   const handleDeliver = async (order) => {
     setDeliveringId(String(order.id));
+    // Statut d'avant la remise (en attente, confirmée, prête) : rendu tel quel par « Annuler »
+    const previousStatus = normalizeOrderStatus(order.status);
+    const undoStatus = ['pending', 'confirmed', 'ready'].includes(previousStatus) ? previousStatus : 'ready';
     try {
       await deliverOrder(order);
       markDelivered([order.id]);
-      // Tap par erreur : retour à « prête » possible pendant 24 h (le serveur le refuse au-delà)
+      // Tap par erreur : retour au statut d'avant possible pendant 24 h (le serveur le refuse au-delà)
       toast.success('Produit remis et payé : compté dans la boutique', {
         duration: 8000,
         action: {
           label: 'Annuler',
           onClick: async () => {
             try {
-              await api.entities.Order.update(order.id, { status: 'ready' });
+              await api.entities.Order.update(order.id, { status: undoStatus });
               setDeliveredIds((prev) => { const next = new Set(prev); next.delete(String(order.id)); return next; });
               toast.success('Retrait annulé');
             } catch (e) {
@@ -205,8 +209,11 @@ function ModalInner({ appointment, linkedOrders = [], onUpdate, onDelete, onEdit
     staleTime: 5 * 60 * 1000,
   });
 
+  // Clients seulement (un compte de l'équipe serait refusé par le serveur), accents repliés
+  const searchKey = foldText(clientSearch);
   const filteredUsers = searchActive
-    ? allUsers.filter(u => u.full_name?.toLowerCase().includes(clientSearch.toLowerCase()) || u.email?.toLowerCase().includes(clientSearch.toLowerCase()))
+    ? allUsers.filter((u) => u?.email && (!u.role || u.role === 'user')
+        && (foldText(u.full_name).includes(searchKey) || foldText(u.email).includes(searchKey)))
     : [];
 
   const status = STATUS_META[appointment.status] || STATUS_META.confirmed;
@@ -225,8 +232,18 @@ function ModalInner({ appointment, linkedOrders = [], onUpdate, onDelete, onEdit
   // « Carte cadeau » ne débite pas la carte : le débit se fait depuis Cartes cadeau (qui clôture
   // le RDV), jamais par ce bouton (le solde restait entier et la carte resservait). Un RDV déjà
   // clôturé par le débit reste corrigeable sans nouveau débit.
-  const giftCardNeedsDebit = state.paymentMethod === 'carte_cadeau' && appointment.payment_method !== 'carte_cadeau';
-  const canValidate = !locked && !tipInvalid && state.paymentMethod && (tipValue === 0 || state.tipMethod) && !giftCardNeedsDebit;
+  // Débit déjà fait qui couvre tout le prix (clôture décochée ou échouée) : « Carte cadeau » clôture.
+  // Un débit partiel laisse le reste à encaisser en CB / espèces (le serveur refuse sinon).
+  const giftCovered = giftPaid > 0 && Math.round((Number(appointment.gift_card_amount) || 0) * 100) >= Math.round((serviceTotal + prodValue) * 100);
+  const giftCardNeedsDebit = state.paymentMethod === 'carte_cadeau' && appointment.payment_method !== 'carte_cadeau' && !giftCovered;
+  // 18 : last minute repris sans aucune prestation : pas d'encaissement à 0 €
+  const needsService = isLastMinute && !isCompleted && !appointment.services?.length && selectedServices.length === 0;
+  const canValidate = !locked && !tipInvalid && state.paymentMethod && (tipValue === 0 || state.tipMethod) && !giftCardNeedsDebit && !needsService;
+  // 14 : RDV d'un client encore à venir : on l'annule (le client peut être prévenu), on ne le supprime pas
+  const upcomingClient = !!appointment.client_email && ['confirmed', 'pending'].includes(appointment.status)
+    && parisInstant(String(appointment.date || '').slice(0, 10), String(appointment.start_time || '00:00').slice(0, 5)) > Date.now();
+  // 17 : contrôle du créneau avant de rétablir un RDV annulé (null, ou { clash, warnings })
+  const [restoreCheck, setRestoreCheck] = React.useState(null);
   // « Prévenir le client » : RDV d'un client, encore à venir (heure de Paris) ; sur un RDV passé,
   // aucun email ne part de toute façon
   const canNotifyCancel = !!appointment.client_email && ['confirmed', 'pending'].includes(appointment.status)
@@ -286,8 +303,70 @@ function ModalInner({ appointment, linkedOrders = [], onUpdate, onDelete, onEdit
     }
   };
 
+  /** Rétablit le RDV (confirmé, ou last minute s'il en était un) et rend compte des produits rouverts. */
+  const doRestore = async () => {
+    dispatch({ type: 'SAVING', value: true });
+    try {
+      const saved = await api.entities.Appointment.update(appointment.id, {
+        status: wasLastMinute ? 'last_minute' : 'confirmed',
+        cancellation_reason: null,
+      });
+      const restored = Number(saved?.linked_orders_restored) || 0;
+      const failed = Number(saved?.linked_orders_failed) || 0;
+      toast.success(restored > 0
+        ? `Rendez-vous rétabli, et ${restored} produit${restored > 1 ? 's' : ''} remis en commande`
+        : 'Rendez-vous rétabli');
+      if (failed > 0) {
+        toast.warning(`${failed} produit${failed > 1 ? 's' : ''} annulé${failed > 1 ? 's' : ''} avec ce RDV n'${failed > 1 ? 'ont' : 'a'} pas pu être rétabli${failed > 1 ? 's' : ''} (stock) : à reprendre dans Commandes.`, { duration: 10000 });
+      }
+      setRestoreCheck(null);
+      invalidateLinkedOrders(queryClient);
+      invalidateAppointmentQueries(queryClient);
+      onUpdate?.();
+    } catch (e) {
+      toast.error(errorMessage(e, 'Rétablissement impossible'));
+    } finally {
+      dispatch({ type: 'SAVING', value: false });
+    }
+  };
+
+  /** Avant de rétablir : le créneau a pu être repris par un autre client entre-temps. */
+  const checkRestore = async () => {
+    dispatch({ type: 'SAVING', value: true });
+    let issues;
+    try {
+      const date = String(appointment.date || '').slice(0, 10);
+      const [dayApts, timeOffs] = await Promise.all([
+        api.entities.Appointment.filter({ date, employee_id: appointment.employee_id }, 'start_time', 200),
+        queryClient.fetchQuery({ queryKey: ['timeOffs'], queryFn: () => api.entities.TimeOff.list('-start_date', 200) }),
+      ]);
+      const employee = employees.find((e) => String(e.id) === String(appointment.employee_id)) || { name: appointment.employee_name };
+      issues = slotIssues({
+        selfId: appointment.id,
+        date,
+        startTime: String(appointment.start_time || '').slice(0, 5),
+        duration: aptDuration(appointment),
+        employee,
+        employeeId: appointment.employee_id,
+        dayApts: dayApts || [],
+        timeOffs: timeOffs || [],
+      });
+    } catch (e) {
+      // Jamais de rétablissement à l'aveugle
+      toast.error(errorMessage(e, 'Impossible de vérifier le créneau : réessayez.'));
+      dispatch({ type: 'SAVING', value: false });
+      return;
+    }
+    dispatch({ type: 'SAVING', value: false });
+    if (issues.clash || issues.warnings.length > 0) {
+      setRestoreCheck(issues);
+      return;
+    }
+    await doRestore();
+  };
+
   const handleValidate = async () => {
-    if (giftCardNeedsDebit || tipInvalid) return;
+    if (giftCardNeedsDebit || tipInvalid || needsService) return;
     dispatch({ type: 'SAVING', value: true });
     try {
       const updateData = {
@@ -380,6 +459,9 @@ function ModalInner({ appointment, linkedOrders = [], onUpdate, onDelete, onEdit
             type="button"
             disabled={state.saving}
             onClick={async () => {
+              // Un créneau last minute que personne n'a pris (encore à venir) redevient un last
+              // minute ; un RDV client : créneau vérifié d'abord (checkRestore)
+              if (!lastMinuteOver) { await checkRestore(); return; }
               dispatch({ type: 'SAVING', value: true });
               try {
                 if (lastMinuteOver) {
@@ -394,13 +476,6 @@ function ModalInner({ appointment, linkedOrders = [], onUpdate, onDelete, onEdit
                   invalidateAppointmentQueries(queryClient);
                   return;
                 }
-                // Un créneau last minute que personne n'a pris (encore à venir) redevient un last minute
-                await api.entities.Appointment.update(appointment.id, {
-                  status: wasLastMinute ? 'last_minute' : 'confirmed',
-                  cancellation_reason: null,
-                });
-                toast.success('Rendez-vous rétabli');
-                onUpdate?.();
               } catch (e) {
                 toast.error(errorMessage(e, 'Rétablissement impossible'));
               } finally {
@@ -414,6 +489,37 @@ function ModalInner({ appointment, linkedOrders = [], onUpdate, onDelete, onEdit
           </button>
         )}
       </div>
+
+      {/* Rétablir : créneau repris entre-temps (même heure : impossible) ou chevauchement / congé / hors horaires */}
+      {isClosedOut && restoreCheck && (
+        <div role="status" className={`rounded-xl border p-3 space-y-2 text-xs ${restoreCheck.clash ? 'border-red-500/30 bg-red-500/10 text-red-200' : 'border-amber-500/30 bg-amber-500/10 text-amber-200'}`}>
+          {restoreCheck.clash ? (
+            <p className="break-words">{restoreCheck.clash} : déplacez ce rendez-vous (« Modifier / déplacer ») pour le rétablir.</p>
+          ) : (
+            <>
+              <p className="font-semibold">Avant de rétablir ce rendez-vous :</p>
+              <ul className="list-disc pl-4 space-y-0.5">
+                {restoreCheck.warnings.map((w) => <li key={w} className="break-words">{w}</li>)}
+              </ul>
+            </>
+          )}
+          {linkedOrders.length === 0 && (
+            <p className="text-[11px] opacity-80">Les produits annulés avec ce rendez-vous sont remis en commande s'il reste du stock.</p>
+          )}
+          <div className="flex gap-2">
+            <button type="button" onClick={() => setRestoreCheck(null)} disabled={state.saving}
+              className="flex-1 py-2 rounded-lg bg-white/5 border border-white/10 text-foreground disabled:opacity-60">
+              {restoreCheck.clash ? 'Fermer' : 'Annuler'}
+            </button>
+            {!restoreCheck.clash && (
+              <button type="button" onClick={doRestore} disabled={state.saving}
+                className="flex-1 py-2 rounded-lg bg-amber-500 text-black font-semibold disabled:opacity-60">
+                {state.saving ? 'Rétablissement…' : 'Rétablir quand même'}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Client : recherche / walk-in seulement sur un créneau last minute libre. Un rendez-vous saisi
           sans email (téléphone, sans rendez-vous) affiche simplement son client. */}
@@ -880,18 +986,27 @@ function ModalInner({ appointment, linkedOrders = [], onUpdate, onDelete, onEdit
                 <div role="status" className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs leading-relaxed text-amber-200 break-words min-w-0">
                   {isAdmin ? (
                     <>
-                      La carte cadeau se débite depuis Cartes cadeau : scanne le QR ou saisis le code, puis choisis ce rendez-vous. Il sera clôturé automatiquement.{' '}
+                      La carte cadeau se débite depuis Cartes cadeau : scannez le QR ou saisissez le code, puis choisissez ce rendez-vous (ou rattachez-y un débit déjà fait : historique de la carte → « Rattacher à un RDV »). Il sera clôturé automatiquement.{' '}
                       <Link to="/admin/gift-cards" className="font-semibold text-primary underline underline-offset-2 whitespace-nowrap">
                         Débiter la carte
                       </Link>
                     </>
                   ) : (
-                    <>Le débit de la carte cadeau se fait au comptoir par l'admin (Cartes cadeau). Laisse ce rendez-vous « À encaisser ».</>
+                    <>Le débit de la carte cadeau se fait au comptoir par l'admin (Cartes cadeau). Laissez ce rendez-vous « À encaisser ».</>
                   )}
                 </div>
               )}
+              {state.paymentMethod === 'carte_cadeau' && giftCovered && appointment.payment_method !== 'carte_cadeau' && (
+                <p role="status" className="mt-2 rounded-lg border border-green-500/30 bg-green-500/10 px-3 py-2 text-xs text-green-300">
+                  Déjà réglé par carte cadeau ({formatPrice(giftPaid)}) : vous pouvez clôturer.
+                </p>
+              )}
             </div>
           </div>
+
+          {needsService && state.paymentMethod && (
+            <p role="status" className="text-xs text-amber-300 text-center">Choisissez la prestation effectuée pour valider</p>
+          )}
 
           {/* Validate button */}
           {canValidate && (
@@ -944,7 +1059,7 @@ function ModalInner({ appointment, linkedOrders = [], onUpdate, onDelete, onEdit
                     onChange={(e) => setNotifyOnCancel(e.target.checked)}
                     className="mt-0.5 w-4 h-4 shrink-0 accent-red-500"
                   />
-                  <span className="min-w-0 break-words">Prévenir le client (email d'annulation)</span>
+                  <span className="min-w-0 break-words">Prévenir le client (notification + email)</span>
                 </label>
               )}
               <div className="flex gap-2">
@@ -996,7 +1111,7 @@ function ModalInner({ appointment, linkedOrders = [], onUpdate, onDelete, onEdit
                             await api.entities.Appointment.update(appointment.id, { status: 'confirmed' });
                             onUpdate?.();
                           } catch (e) {
-                            toast.error(errorMessage(e, 'Impossible d’annuler : rétablis le rendez-vous depuis sa fiche.'));
+                            toast.error(errorMessage(e, 'Impossible d’annuler : rétablissez le rendez-vous depuis sa fiche.'));
                           }
                         },
                       },
@@ -1052,15 +1167,20 @@ function ModalInner({ appointment, linkedOrders = [], onUpdate, onDelete, onEdit
         </div>
       )}
 
-      {/* Delete (deux taps : le premier ouvre la confirmation dans la fiche) */}
-      {confirmingDelete ? (
+      {/* Delete (deux taps : le premier ouvre la confirmation dans la fiche). RDV client à venir :
+          pas de suppression, on l'annule (le client peut être prévenu) */}
+      {upcomingClient ? (
+        <p className="mt-2 text-[11px] text-muted-foreground text-center break-words">
+          Pour retirer un rendez-vous client à venir, utilisez « Annuler » : le client pourra être prévenu.
+        </p>
+      ) : confirmingDelete ? (
         <div className="rounded-xl border border-red-500/25 bg-red-500/5 p-3 space-y-2.5 mt-2">
           <p className="text-sm font-semibold text-red-400 flex items-center gap-1.5">
             <Trash2 className="w-4 h-4 shrink-0" />
             Supprimer définitivement ce rendez-vous ?
           </p>
           <p className="text-xs text-muted-foreground">
-            Il disparaîtra de l'agenda et des statistiques. Pour libérer le créneau en gardant une trace, préférez « Annuler ».
+            Il disparaîtra de l'agenda et des statistiques, et le client n'est pas prévenu. Pour libérer le créneau en gardant une trace, préférez « Annuler ».
           </p>
           <div className="flex gap-2">
             <button
@@ -1128,6 +1248,7 @@ export default function AppointmentDetailModal({ appointment, employees = [], li
               <ModalInner
                 key={appointment.id}
                 appointment={appointment}
+                employees={employees}
                 linkedOrders={Array.isArray(linkedOrders) ? linkedOrders : undefined}
                 onEdit={() => setEditing(true)}
                 onUpdate={() => onChanged?.()}

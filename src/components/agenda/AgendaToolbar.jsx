@@ -11,6 +11,9 @@ const VIEWS = [
   { value: 'month', label: 'Mois' },
 ];
 
+// Majuscule à la première lettre seulement (« Samedi 18 octobre 2026 »), pas à chaque mot
+const upperFirst = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
+
 function titleFor(view, date) {
   if (view === 'day') return format(date, 'EEEE d MMMM yyyy', { locale: fr });
   if (view === 'week') {
@@ -52,11 +55,11 @@ export default function AgendaToolbar({ view, onViewChange, currentDate, onDateC
         <button
           type="button"
           onClick={openPicker}
-          className="relative flex-1 min-w-0 sm:flex-none sm:min-w-[210px] flex items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-semibold capitalize hover:bg-foreground/5 transition-colors"
+          className="relative flex-1 min-w-0 sm:flex-none sm:min-w-[210px] flex items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-semibold hover:bg-foreground/5 transition-colors"
           title="Choisir une date"
         >
           <CalendarDays className="w-3.5 h-3.5 text-primary shrink-0" />
-          <span className="truncate">{titleFor(view, currentDate)}</span>
+          <span className="truncate">{upperFirst(titleFor(view, currentDate))}</span>
           {loading && <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground shrink-0" aria-label="Chargement" />}
           <input
             ref={pickerRef}

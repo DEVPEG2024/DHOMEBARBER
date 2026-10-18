@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
-import { GripVertical, Loader2, AlertTriangle, Sparkles, Eye, EyeOff, Play, Save, Undo2 } from 'lucide-react';
+import { GripVertical, Loader2, AlertTriangle, Sparkles, Eye, EyeOff, Play, Save, Undo2, RefreshCw } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
@@ -10,6 +10,34 @@ import {
 } from '@/lib/snapLenses';
 import SnapPaletteEditor from './SnapPaletteEditor';
 import SnapBeardEditor from './SnapBeardEditor';
+
+const TOKEN_REFUSED = /unauthenticated|permission|401|403|invalid.*token|apitoken/i;
+
+/**
+ * Message en français pour un échec de lecture des lentilles chez Snap (démarrage du SDK Camera
+ * Kit). N'interpole jamais `err.message` (anglais : « Error occurred during Camera Kit
+ * bootstrapping. »). `token` n'est vrai que si le refus du jeton est reconnaissable : une coupure
+ * réseau ne doit pas pousser l'admin à remplacer un jeton valide.
+ */
+export function snapLensesError(err) {
+  const tokenMsg = { text: 'Snap refuse le jeton Camera Kit. Vérifiez-le dans l\'onglet Camera Kit.', token: true };
+  if (!err) return { text: 'Impossible de joindre Snap. Vérifiez la connexion, puis réessayez.', token: false };
+  const name = String(err.name || '');
+  if (name === 'ConfigurationError') return tokenMsg;
+  if (name === 'PlatformNotSupportedError') {
+    return { text: 'Ce navigateur ne permet pas de lire les lentilles Snap (WebGL / WebAssembly requis).', token: false };
+  }
+  const cause = err.cause && typeof err.cause === 'object' ? err.cause : null;
+  const status = Number(err.status || err.response?.status || cause?.status || cause?.response?.status) || 0;
+  if (status === 401 || status === 403) return tokenMsg;
+  const texts = [name, err.message, cause?.name, cause?.message].filter(Boolean).map(String);
+  if (cause?.name === 'ConfigurationError' || texts.some((t) => TOKEN_REFUSED.test(t))) return tokenMsg;
+  if (cause?.name === 'PlatformNotSupportedError') {
+    return { text: 'Ce navigateur ne permet pas de lire les lentilles Snap (WebGL / WebAssembly requis).', token: false };
+  }
+  // BootstrapError, réseau, délai, hors ligne…
+  return { text: 'Impossible de joindre Snap. Vérifiez la connexion, puis réessayez.', token: false };
+}
 
 const draftFrom = (config) => ({
   lenses: config?.lenses || {},
@@ -69,6 +97,8 @@ export default function SnapLensesTab({ config, lensesQuery, onSave, saving }) {
     beard_styles: draft.beard_styles,
   });
 
+  const lensesError = lensesQuery.error ? snapLensesError(lensesQuery.error) : null;
+
   const defaultKnown = !draft.default_lens || draft.default_lens === NO_DEFAULT_LENS || entries.some((e) => e.key === draft.default_lens);
 
   return (
@@ -90,11 +120,22 @@ export default function SnapLensesTab({ config, lensesQuery, onSave, saving }) {
             <Loader2 className="w-5 h-5 animate-spin text-primary" /> Chargement des lentilles depuis Snap…
           </div>
         )}
-        {lensesQuery.error && (
-          <p className="flex items-start gap-2 rounded-lg border border-red-500/25 bg-red-500/10 p-3 text-xs text-red-300">
+        {lensesError && (
+          <div role="alert" className="flex items-start gap-2 rounded-lg border border-red-500/25 bg-red-500/10 p-3 text-xs text-red-300">
             <AlertTriangle className="w-4 h-4 shrink-0" />
-            Impossible de joindre Camera Kit : {lensesQuery.error.message || 'erreur inconnue'}. Vérifiez le jeton dans l'onglet Camera Kit.
-          </p>
+            <div className="min-w-0">
+              <p>{lensesError.text}</p>
+              <button
+                type="button"
+                onClick={() => lensesQuery.refetch()}
+                disabled={lensesQuery.isFetching}
+                className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-red-500/30 px-2.5 py-1 text-[11px] font-semibold text-foreground disabled:opacity-60"
+              >
+                <RefreshCw className={`w-3 h-3 ${lensesQuery.isFetching ? 'animate-spin' : ''}`} aria-hidden="true" />
+                Réessayer
+              </button>
+            </div>
+          </div>
         )}
         {groupErrors.length > 0 && (
           <div className="mb-3 space-y-1">

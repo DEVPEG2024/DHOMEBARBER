@@ -12,10 +12,16 @@ import GiftCardDebitPanel from '@/components/giftcards-admin/GiftCardDebitPanel'
 import GiftCardHistory from '@/components/giftcards-admin/GiftCardHistory';
 import {
   giftCardState, giftCardBalance, formatEuro, formatDay, invalidateGiftCardQueries, fetchGiftCardByCode, friendlyGiftCardError,
-  patchGiftCardCache, fetchGiftCard, round2, parisToday,
+  patchGiftCardCache, fetchGiftCard, round2, parisToday, isValidityPassed,
 } from '@/lib/giftCardDebit';
 
 const PAYMENT_LABELS = { cb: 'CB', especes: 'Espèces' };
+
+/** Jour de Paris + 1 an (AAAA-MM-JJ) : validité d'une carte payée aujourd'hui (même calcul que le serveur). */
+function oneYearFromToday() {
+  const [y, m, d] = parisToday().split('-').map(Number);
+  return new Date(Date.UTC(y + 1, m - 1, d)).toISOString().slice(0, 10);
+}
 import LoadError from '@/components/shared/LoadError';
 import { useAndroidBack } from '@/lib/useAndroidBack';
 
@@ -108,7 +114,7 @@ function ValidateModal({ card, onClose, onCardChange }) {
       // La fiche reste ouverte : la carte, désormais payée, peut être débitée tout de suite
       onCardChange?.(saved && typeof saved === 'object' && saved.id
         ? saved
-        : { ...fresh, status: 'validated', remaining_balance: fresh.amount, payment_method: paymentMethod });
+        : { ...fresh, status: 'validated', remaining_balance: fresh.amount, payment_method: paymentMethod, valid_until: oneYearFromToday() });
     } catch (err) {
       toast.error('Erreur', { description: friendlyGiftCardError(err) });
     } finally {
@@ -277,6 +283,12 @@ function ValidateModal({ card, onClose, onCardChange }) {
                 <Banknote className="w-4 h-4" /> Espèces
               </button>
             </div>
+            {/* Validité : un an à compter du paiement (le serveur la recalcule à la validation) */}
+            <p className="text-[11px] text-muted-foreground" data-testid="gc-validity-after">
+              {isValidityPassed(card)
+                ? `Validité dépassée : elle sera remise à un an à compter d'aujourd'hui (jusqu'au ${formatDay(oneYearFromToday())}).`
+                : `Valable jusqu'au ${formatDay(oneYearFromToday())} une fois validée.`}
+            </p>
             <div className="grid grid-cols-2 gap-2 pt-1">
               {!confirmReject ? (
                 <button

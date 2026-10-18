@@ -1,8 +1,8 @@
 /**
  * Hooks React Query des événements du salon côté client : lecture de `GET /salon-events/mine`
- * (jamais de nouvelle tentative, erreur silencieuse : la page des privatisations doit rester
- * utilisable tant que le backend n'est pas déployé) et réponse à une invitation avec mise à jour
- * optimiste du cache, retour arrière et message du serveur en toast en cas d'erreur.
+ * (une nouvelle tentative en cas d'échec, sauf sur un 404 de route inconnue ; l'échec est affiché
+ * par la section, la page des privatisations restant utilisable) et réponse à une invitation avec
+ * mise à jour optimiste du cache, retour arrière et message du serveur en toast en cas d'erreur.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -14,7 +14,8 @@ export function useMySalonEvents(options = {}) {
     queryKey: SALON_EVENTS_QUERY_KEY,
     queryFn: fetchMySalonEvents,
     staleTime: 60_000,
-    retry: false,
+    // Une seule nouvelle tentative (réseau instable, 5xx), aucune sur une route inconnue (404)
+    retry: (count, err) => count < 1 && (err?.status ?? err?.response?.status) !== 404,
     ...options,
   });
 }

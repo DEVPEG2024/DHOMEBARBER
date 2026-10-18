@@ -11,6 +11,7 @@ import { renderGangStory, shareGangStory } from '@/lib/gangStory';
 import GangCard from '@/components/gang/GangCard';
 import { gangPalette } from '@/components/gang/gangTheme';
 import { GangBadgeUnlock } from '@/components/gang/GangBadges';
+import { useAndroidBack } from '@/lib/useAndroidBack';
 
 /* ────────────────────────────────────────────────────────────────────────────
  * Partage en story, commun à la révélation et à la page « Ta carte Gang ».
@@ -26,6 +27,8 @@ export function GangStoryFallback({ url, onClose }) {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [url, onClose]);
+  // Bouton retour d'Android : ferme l'image comme la croix (empilée au-dessus de la révélation)
+  useAndroidBack(!!url, onClose);
 
   if (!url) return null;
   return createPortal(
@@ -175,6 +178,9 @@ function LevelUpReveal({ card, firstCard, onClose, onSeeCard, onAction }) {
   // change quand la carte est rechargée (après « Partager », `markSeen` invalide la carte)
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  // Bouton retour d'Android : même fermeture que la croix (la révélation est marquée vue) ; sinon
+  // l'app se fermait depuis l'accueil et la révélation revenait au lancement suivant
+  useAndroidBack(true, () => onCloseRef.current());
   const storyOpenRef = useRef(storyOpen);
   storyOpenRef.current = storyOpen;
   const palette = gangPalette(card) || {};

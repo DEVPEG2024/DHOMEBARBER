@@ -98,7 +98,8 @@ export default function GuestsDialog({ event, initialTab, isAdmin, onClose }) {
         ) : tab === 'invite' ? (
           <InviteTab event={eventData} invites={invites} onSent={() => setTab('list')} />
         ) : (
-          <GuestListTab event={eventData} invites={invites} isLoading={guestsQ.isLoading} error={guestsQ.error} isAdmin={isAdmin} />
+          <GuestListTab event={eventData} invites={invites} isLoading={guestsQ.isLoading} error={guestsQ.error} isAdmin={isAdmin}
+            onRetry={guestsQ.refetch} retrying={guestsQ.isFetching} />
         )}
       </DialogContent>
     </Dialog>

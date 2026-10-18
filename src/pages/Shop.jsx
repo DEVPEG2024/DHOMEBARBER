@@ -378,6 +378,7 @@ export default function Shop() {
   };
 
   const closeCart = () => {
+    if (submittingRef.current) return; // envoi en cours : on attend la réponse (croix et retour Android)
     setShowCart(false);
     setOrderSuccess(false);
   };
@@ -554,7 +555,7 @@ export default function Shop() {
             style={{ scale: cartButtonScale }}
           >
             <Button className="w-full rounded-xl h-14 bg-primary text-primary-foreground shadow-lg shadow-primary/20"
-              onClick={() => setShowCart(true)}>
+              onClick={() => { setOrderSuccess(false); setShowCart(true); }}>
               <div className="flex items-center justify-between w-full px-2">
                 {/* Icône + quantité : rebondissent à l'arrivée d'une vignette */}
                 <motion.div className="flex items-center gap-2" style={{ scale: cartIconScale, transformOrigin: 'left center' }}>
@@ -677,7 +678,7 @@ export default function Shop() {
                   {/* Header */}
                   <div className="flex items-center justify-between px-5 py-3 border-b border-border">
                     <h3 className="font-display text-base font-bold">Votre commande</h3>
-                    <button onClick={closeCart} className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center">
+                    <button onClick={closeCart} disabled={ordering} aria-label="Fermer" className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center disabled:opacity-50">
                       <X className="w-4 h-4" />
                     </button>
                   </div>

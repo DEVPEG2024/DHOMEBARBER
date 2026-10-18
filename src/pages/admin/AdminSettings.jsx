@@ -46,10 +46,22 @@ export default function AdminSettings() {
     return () => clearTimeout(t);
   }, [confirmDeleteSkill]);
 
-  const { data: skillCategories = [] } = useQuery({
+  const {
+    data: skillCategories = [],
+    isPending: skillsPending,
+    isError: skillsError,
+    fetchStatus: skillsFetchStatus,
+    refetch: refetchSkills,
+    isFetching: skillsFetching,
+    error: skillsErr,
+  } = useQuery({
     queryKey: ['skillCategories'],
     queryFn: () => api.entities.SkillCategory.list('sort_order', 100),
   });
+  // Liste inconnue (chargement, ou échec sans données en cache) : ni « Aucune compétence », ni
+  // ajout, sinon l'admin recrée en double des compétences qui existent déjà (sort_order faussé)
+  const skillsUnavailable = skillsPending || (skillsError && skillCategories.length === 0);
+  const skillsFailed = (skillsError && skillCategories.length === 0) || (skillsPending && skillsFetchStatus === 'paused');
 
   const [editingSkill, setEditingSkill] = useState(null);
 
@@ -346,6 +358,13 @@ export default function AdminSettings() {
           <p className="text-xs text-muted-foreground mb-4">Les barbers pourront évaluer leur niveau sur chaque compétence</p>
 
           {/* Existing skills - drag & drop */}
+          {skillsFailed ? (
+            <LoadError compact what="les compétences" error={skillsErr} onRetry={refetchSkills} retrying={skillsFetching} className="mb-4" />
+          ) : skillsPending ? (
+            <div className="space-y-2 mb-4" aria-hidden="true">
+              {[0, 1, 2].map(i => <div key={i} className="h-11 rounded-xl bg-secondary/50 animate-pulse" />)}
+            </div>
+          ) : (
           <DragDropContext onDragEnd={handleSkillDragEnd}>
             <Droppable droppableId="skill-categories">
               {(provided) => (
@@ -461,13 +480,14 @@ export default function AdminSettings() {
                     )
                   ))}
                   {provided.placeholder}
-                  {skillCategories.length === 0 && (
+                  {!skillsUnavailable && skillCategories.length === 0 && (
                     <p className="text-xs text-muted-foreground text-center py-3">Aucune compétence configurée</p>
                   )}
                 </div>
               )}
             </Droppable>
           </DragDropContext>
+          )}
 
           {/* Add new skill */}
           <div className="border border-dashed border-border rounded-xl p-4 space-y-3">
@@ -513,10 +533,16 @@ export default function AdminSettings() {
             </div>
             <Button
               onClick={() => {
-                if (!newSkill.name.trim()) return toast.error('Nom requis');
+                // L'ordre dépend de la longueur réelle de la liste : rien tant qu'elle n'est pas chargée
+                if (skillsUnavailable) return;
+                const name = newSkill.name.trim();
+                if (!name) return toast.error('Nom requis');
+                if (skillCategories.some(c => String(c.name || '').trim().toLowerCase() === name.toLowerCase())) {
+                  return toast.error('Cette compétence existe déjà');
+                }
                 addSkillMutation.mutate({ ...newSkill, sort_order: skillCategories.length });
               }}
-              disabled={addSkillMutation.isPending}
+              disabled={addSkillMutation.isPending || skillsUnavailable}
               size="sm"
               className="bg-primary text-primary-foreground text-xs"
             >

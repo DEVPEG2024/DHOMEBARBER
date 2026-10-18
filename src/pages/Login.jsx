@@ -215,14 +215,22 @@ export default function Login() {
       setPassword('');
       setResendAt(0);
     } catch (err) {
-      toast.error(authErrorMessage(err, 'Erreur lors de la réinitialisation'));
+      const shown = authErrorMessage(err, 'Erreur lors de la réinitialisation');
+      toast.error(shown);
+      // Code refusé : champ vidé et « Renvoyer le code » tout de suite disponible
+      if (/invalide|expiré/i.test(shown)) {
+        setResetCode('');
+        setResendAt(0);
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-  const isAndroid = /Android/.test(navigator.userAgent);
+  const ua = navigator.userAgent || '';
+  // iPadOS (Safari) se présente comme un Mac : on le reconnaît à l'écran tactile
+  const isIOS = /iPad|iPhone|iPod/.test(ua) || (/Macintosh/.test(ua) && (navigator.maxTouchPoints || 0) > 1);
+  const isAndroid = /Android/.test(ua);
   const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
 
   const handleEnablePush = async () => {
@@ -272,7 +280,7 @@ export default function Login() {
                   <div className="text-xs text-muted-foreground mt-1 space-y-1.5">
                     {/* Icônes en ligne dans le texte (pas de flex : à 320 px chaque morceau devenait une colonne) */}
                     <p>
-                      1. Appuyez sur <Share className="w-3.5 h-3.5 inline-block align-[-2px] mx-0.5 text-blue-400" /> en bas du navigateur
+                      1. Appuyez sur <Share className="w-3.5 h-3.5 inline-block align-[-2px] mx-0.5 text-blue-400" /> dans la barre du navigateur (en bas sur iPhone, en haut sur iPad)
                     </p>
                     <p>
                       2. Sélectionnez <span className="font-semibold text-foreground">"Sur l'écran d'accueil"</span> <Plus className="w-3 h-3 inline-block align-[-1px] text-blue-400" />
@@ -509,7 +517,7 @@ export default function Login() {
             {resetStep === 'code' && (
               <>
                 <p className="text-center text-xs text-muted-foreground/70 mt-2">
-                  Un code à 6 chiffres a été envoyé à votre adresse email. Vérifiez aussi vos spams.
+                  Un code à 6 chiffres a été envoyé à votre adresse email. Vérifiez aussi vos spams. Si vous recevez plusieurs emails, utilisez le plus récent.
                 </p>
                 <div className="flex items-center justify-center gap-4 text-xs">
                   <button type="button" onClick={handleResendCode} disabled={loading || resendIn > 0}

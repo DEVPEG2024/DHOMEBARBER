@@ -37,13 +37,16 @@ export async function saveMove(queryClient, apt, fields, notifyClient) {
   }
 }
 
+// Majuscule à la première lettre seulement (« Mar. 20 oct. »), pas à chaque mot
+const upperFirst = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
+
 function Row({ label, date, start, end, barber, highlight = {} }) {
   const hl = (on) => (on ? 'text-primary font-bold' : '');
   return (
     <div className="flex items-baseline gap-2 text-sm">
       <span className="w-12 shrink-0 text-[11px] uppercase tracking-wide text-muted-foreground">{label}</span>
       <span className="min-w-0">
-        <span className={`capitalize ${hl(highlight.date)}`}>{shortDayLabel(date)}</span>
+        <span className={hl(highlight.date)}>{upperFirst(shortDayLabel(date))}</span>
         {' · '}
         <span className={`tabular-nums ${hl(highlight.time)}`}>{start} – {end}</span>
         {barber && <>{' · '}<span className={hl(highlight.barber)}>{barber}</span></>}

@@ -6,13 +6,15 @@ import { AppointmentCard, BreakCard, LastMinuteCard, NowLine, OffHoursShade, Dra
 import useBreakDrag from './useBreakDrag';
 import useCardDrag from './useCardDrag';
 import {
-  START_HOUR, TOTAL_HOURS, minutesToTime, layoutOverlaps, verticalPlacement,
+  START_HOUR, TOTAL_HOURS, minutesToTime, timeToMinutes, layoutOverlaps, verticalPlacement,
   workingWindow, isOnLeave, isBreak, isLastMinuteSlot, toDateStr,
 } from './agendaUtils';
 
 const HOUR_HEIGHT = 72;
 const MIN_CARD = 18; // px = 15 min (voir DayView)
 const MIN_CARD_MINUTES = Math.ceil((MIN_CARD / HOUR_HEIGHT) * 60);
+// En deçà, une pause se range avec les RDV (vue « Tous ») ; au-delà, c'est une journée bloquée
+const SHORT_BREAK_MINUTES = 180;
 
 function DragPreview({ startMin, endMin }) {
   const top = ((startMin - START_HOUR * 60) / 60) * HOUR_HEIGHT;
@@ -122,12 +124,17 @@ export default function WeekView({ currentDate, appointments, employees, employe
             // barber se place à côté du client d'un autre barber à la même heure au lieu de le
             // recouvrir sur toute la largeur (le compteur d'en-tête, lui, ne les compte pas)
             const lastMinutes = dayApts.filter(isLastMinuteSlot);
-            const meta = layoutOverlaps([...bookings, ...lastMinutes], MIN_CARD_MINUTES);
-            // Vue « Tous » : les pauses de plusieurs barbers à la même heure se partagent la largeur
-            // (entre elles seulement : une pause d'une journée ne rétrécit pas les RDV, dessinés
-            // au-dessus) au lieu de s'empiler, sinon seule celle du dessus peut être ouverte
+            // Vue « Tous » : une pause courte (< 3 h) entre dans la mise en page des RDV, elle se
+            // range à côté du client d'un autre barber au lieu d'être recouverte (donc impossible à
+            // ouvrir). Les longues (journée bloquée) se partagent la largeur entre elles seulement :
+            // elles ne rétrécissent pas les RDV, dessinés au-dessus
             const breaks = dayApts.filter(isBreak);
-            const breakMeta = single ? {} : layoutOverlaps(breaks, MIN_CARD_MINUTES);
+            const isShortBreak = (b) => timeToMinutes(b.end_time || b.start_time) - timeToMinutes(b.start_time) < SHORT_BREAK_MINUTES;
+            const shortBreaks = single ? [] : breaks.filter(isShortBreak);
+            const longBreaks = single ? [] : breaks.filter((b) => !isShortBreak(b));
+            const meta = layoutOverlaps([...bookings, ...lastMinutes, ...shortBreaks], MIN_CARD_MINUTES);
+            const breakMeta = single ? {} : layoutOverlaps(longBreaks, MIN_CARD_MINUTES);
+            const shortIds = new Set(shortBreaks.map((b) => b.id));
             const onLeaveEmps = employees.filter((emp) => isOnLeave(timeOffs, emp.id, dateStr));
             const singleOnLeave = single && onLeaveEmps.some((e) => String(e.id) === String(single.id));
             const preview = drag.previewFor(dateStr);
@@ -163,13 +170,15 @@ export default function WeekView({ currentDate, appointments, employees, employe
                   </div>
                 )}
 
-                {breaks.map((apt) => {
-                  const { col, cols } = breakMeta[apt.id] || { col: 0, cols: 1 };
+                {/* Longues d'abord : une pause courte posée sur une journée bloquée reste au-dessus, donc ouvrable */}
+                {(single ? breaks : [...longBreaks, ...shortBreaks]).map((apt) => {
+                  const { col, cols } = (shortIds.has(apt.id) ? meta : breakMeta)[apt.id] || { col: 0, cols: 1 };
                   const width = 100 / cols;
                   return (
                     <BreakCard key={apt.id} apt={apt} onSelect={selectBreak} dragProps={dragProps(apt)} ghosted={moving?.apt.id === apt.id}
                       resizeProps={onResizeRequest ? cardDrag.bindResize(apt) : null}
                       showBarber={!single}
+                      compact={!single && cols > 1}
                       barberName={nameOf(apt.employee_id) || apt.employee_name}
                       color={single ? undefined : colorOf(apt.employee_id)}
                       style={{

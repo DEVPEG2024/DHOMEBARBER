@@ -8,6 +8,7 @@ import {
   CreditCard, Banknote, Euro, Star, UserCheck, ArrowUpRight, ArrowDownRight, Coffee, Heart, ShoppingBag, Zap, Gift, Wifi
 } from 'lucide-react';
 import { useLiveCount } from '@/lib/useLiveCount';
+import { useAuth } from '@/lib/AuthContext';
 import { format, subDays, startOfDay, startOfMonth, endOfMonth, parseISO, isValid } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
@@ -79,6 +80,11 @@ function MiniCard({ label, value, icon: Icon, color }) {
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
+  // Liens vers l'agenda seulement si ce compte peut l'ouvrir (même règle que SalesOverview et le
+  // menu d'AdminLayout) : un barber avec Dashboard sans Agenda était renvoyé ici sans explication
+  const { user } = useAuth();
+  const perms = Array.isArray(user?.permissions) ? user.permissions : [];
+  const canAgenda = !user || user.role === 'admin' || perms.includes('agenda');
   const liveCount = useLiveCount();
   const [showExport, setShowExport] = React.useState(false);
   const [exportAmount, setExportAmount] = React.useState('');
@@ -440,17 +446,17 @@ export default function AdminDashboard() {
         <StatCard
           title="CA RDV Aujourd'hui"
           value={`${todayRevenue}€`}
-          subtitle={todayUnpaid > 0 ? `+ ${todayUnpaid}€ non encaissés ▸` : `${paidToday.length} RDV encaissés`}
+          subtitle={todayUnpaid > 0 ? `+ ${todayUnpaid}€ non encaissés${canAgenda ? ' ▸' : ''}` : `${paidToday.length} RDV encaissés`}
           icon={Euro}
           trend={revenueTrend}
-          onClick={todayUnpaid > 0 ? () => navigate('/admin/agenda') : undefined}
+          onClick={canAgenda && todayUnpaid > 0 ? () => navigate('/admin/agenda') : undefined}
         />
         <StatCard
           title="RDV Aujourd'hui"
           value={todayAppts.length}
           subtitle={`${completedToday.length} terminés · ${confirmedToday.length} à venir`}
           icon={Calendar}
-          onClick={confirmedToday.length > 0 ? () => navigate('/admin/agenda') : undefined}
+          onClick={canAgenda && confirmedToday.length > 0 ? () => navigate('/admin/agenda') : undefined}
         />
         <StatCard
           title="CA RDV du Mois"
@@ -517,13 +523,14 @@ export default function AdminDashboard() {
           (a.status === 'completed' && !a.payment_method)
         );
         if (toClose.length === 0) return null;
-        const totalToClose = round2(toClose.reduce((s, a) => s + (a.total_price || 0), 0));
+        // Hors part déjà payée par carte cadeau, produit compris : même montant que « non encaissés »
+        const totalToClose = round2(toClose.reduce((s, a) => s + outsideGift(a), 0));
         return (
-          <div onClick={() => navigate('/admin/agenda')}
-            className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl px-4 py-3 mb-4 flex items-center gap-3 cursor-pointer hover:bg-yellow-500/15 active:scale-[0.99] transition-all">
+          <div onClick={canAgenda ? () => navigate('/admin/agenda') : undefined}
+            className={`bg-yellow-500/10 border border-yellow-500/20 rounded-xl px-4 py-3 mb-4 flex items-center gap-3 ${canAgenda ? 'cursor-pointer hover:bg-yellow-500/15 active:scale-[0.99] transition-all' : ''}`}>
             <AlertTriangle className="w-4 h-4 text-yellow-400 shrink-0" />
             <p className="text-xs text-yellow-300">
-              <strong>{toClose.length} prestation{toClose.length > 1 ? 's' : ''}</strong> à clôturer ({totalToClose}€) — appuyez pour ouvrir l'agenda
+              <strong>{toClose.length} prestation{toClose.length > 1 ? 's' : ''}</strong> à clôturer ({totalToClose}€){canAgenda ? ' — appuyez pour ouvrir l\'agenda' : ''}
             </p>
           </div>
         );
@@ -698,8 +705,8 @@ export default function AdminDashboard() {
                 const emp = employees.find(e => String(e.id) === String(apt.employee_id));
                 return (
                   <div key={apt.id}
-                    onClick={() => { if (apt.status === 'confirmed') navigate('/admin/agenda'); }}
-                    className={`flex items-center gap-3 p-3 rounded-lg bg-secondary/50 ${apt.status === 'confirmed' ? 'cursor-pointer hover:bg-secondary/80 active:scale-[0.99] transition-all' : ''}`}>
+                    onClick={() => { if (canAgenda && apt.status === 'confirmed') navigate('/admin/agenda'); }}
+                    className={`flex items-center gap-3 p-3 rounded-lg bg-secondary/50 ${canAgenda && apt.status === 'confirmed' ? 'cursor-pointer hover:bg-secondary/80 active:scale-[0.99] transition-all' : ''}`}>
                     <div className="text-center min-w-[50px]">
                       <p className="text-sm font-bold text-primary">{apt.start_time}</p>
                       <p className="text-[10px] text-muted-foreground">{apt.end_time}</p>

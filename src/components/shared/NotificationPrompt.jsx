@@ -147,6 +147,7 @@ export default function NotificationPrompt() {
             className="fixed inset-0 z-[70] bg-black/70 backdrop-blur-sm"
             aria-hidden="true"
           />
+          {/* Hauteur bornée à l'écran et contenu qui défile : sur 320 × 568 la croix restait hors de l'écran */}
           <motion.div
             key="notif-sheet"
             role="dialog"
@@ -156,7 +157,7 @@ export default function NotificationPrompt() {
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: reduceMotion ? 0 : '100%', opacity: reduceMotion ? 0 : 1 }}
             transition={{ type: 'spring', damping: 28, stiffness: 300 }}
-            className="fixed inset-x-0 bottom-0 z-[70] mx-auto max-w-lg rounded-t-3xl border-t border-white/10 bg-background px-6 pt-8 pb-[calc(env(safe-area-inset-bottom)+1.5rem)]"
+            className="fixed inset-x-0 bottom-0 z-[70] mx-auto max-w-lg max-h-[calc(100dvh-env(safe-area-inset-top))] overflow-y-auto overscroll-contain rounded-t-3xl border-t border-white/10 bg-background px-6 pt-8 pb-[calc(env(safe-area-inset-bottom)+1.5rem)]"
           >
             <button
               type="button"
@@ -167,10 +168,10 @@ export default function NotificationPrompt() {
               <X className="w-4 h-4" />
             </button>
 
-            <div className="relative mx-auto mb-5 w-20 h-20">
+            <div className="relative mx-auto mb-5 w-20 h-20 [@media(max-height:600px)]:mb-3 [@media(max-height:600px)]:w-14 [@media(max-height:600px)]:h-14">
               <div className="absolute inset-0 rounded-3xl bg-primary/20 blur-xl" aria-hidden="true" />
               <motion.div
-                className="relative w-20 h-20 rounded-3xl bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-lg shadow-primary/30"
+                className="relative w-20 h-20 [@media(max-height:600px)]:w-14 [@media(max-height:600px)]:h-14 rounded-3xl bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-lg shadow-primary/30"
                 animate={reduceMotion ? undefined : { rotate: [0, -12, 10, -6, 4, 0] }}
                 transition={{ duration: 1.2, delay: 0.4, repeat: Infinity, repeatDelay: 2.5 }}
               >

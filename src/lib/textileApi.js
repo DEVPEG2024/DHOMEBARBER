@@ -34,11 +34,19 @@ export const cancelReservation = (reservationId) =>
  *    réservations payées passent à « prête ».
  */
 export const NOTIFY_AUDIENCES = ['subscribers', 'everyone', 'paid'];
-export const notifyDrop = (dropId, { audience = 'subscribers', everyone = false, message = '' } = {}) =>
+// `sendKey` : même clé pour un nouvel essai après une coupure → le serveur ne renvoie pas le push
+export const notifyDrop = (dropId, { audience = 'subscribers', everyone = false, message = '', sendKey = null } = {}) =>
   apiRequest('POST', apiUrl(`/textile/drops/${dropId}/notify`), {
     audience: everyone && audience === 'subscribers' ? 'everyone' : audience,
     message,
+    ...(sendKey ? { send_key: sendKey } : {}),
   });
+
+/** Clé d'un envoi de notification (anti-doublon côté serveur) */
+export function newSendKey() {
+  try { if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID(); } catch { /* repli */ }
+  return `k${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
 
 // ─── Constantes partagées ───
 export const TEXTILE_CATEGORIES = [

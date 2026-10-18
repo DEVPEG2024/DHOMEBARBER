@@ -9,6 +9,7 @@ import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import SalonEventsSection from '@/components/salon-events/SalonEventsSection';
 import LoadError from '@/components/shared/LoadError';
+import { formatPrice } from '@/components/services/serviceUtils';
 
 // Le salon reçoit exclusivement une clientèle masculine : pas d'EVJF dans les formules.
 const EVENT_TYPES = [
@@ -38,6 +39,7 @@ const STATUS_CONFIG = {
   accepted: { label: 'Devis accepté', color: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
   confirmed: { label: 'Confirmé', color: 'bg-green-500/10 text-green-400 border-green-500/20' },
   declined: { label: 'Refusé', color: 'bg-red-500/10 text-red-400 border-red-500/20' },
+  cancelled: { label: 'Annulée', color: 'bg-muted text-muted-foreground border-border' },
 };
 
 export default function Events() {
@@ -411,10 +413,13 @@ export default function Events() {
                         </p>
                       </div>
                     </div>
-                    <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${status.color}`}>
+                    <span className={`shrink-0 whitespace-nowrap text-[11px] font-semibold px-2.5 py-1 rounded-full border ${status.color}`}>
                       {status.label}
                     </span>
                   </div>
+                  {event.status === 'cancelled' && event.cancellation_reason && (
+                    <p className="text-xs text-muted-foreground mb-1 break-words">Motif : {event.cancellation_reason}</p>
+                  )}
                   {event.guest_count > 0 && (
                     <p className="text-xs text-muted-foreground">{event.guest_count} personne(s)</p>
                   )}
@@ -427,7 +432,7 @@ export default function Events() {
                           <Euro className={`w-4 h-4 ${isQuoted ? 'text-blue-400' : 'text-primary'}`} />
                           <span className="text-xs text-muted-foreground">Devis</span>
                         </div>
-                        <span className={`text-lg font-black ${isQuoted ? 'text-blue-400' : 'text-primary'}`}>{event.price}€</span>
+                        <span className={`text-lg font-black ${isQuoted ? 'text-blue-400' : 'text-primary'}`}>{formatPrice(event.price)}</span>
                       </div>
                       {event.admin_notes && (
                         <p className="text-xs text-muted-foreground mt-2 italic">"{event.admin_notes}"</p>
@@ -448,8 +453,13 @@ export default function Events() {
                     </div>
                   )}
 
+                  {/* Devis sans prix (en cours de modification par le salon) : rien à accepter */}
+                  {isQuoted && !(Number(event.price) > 0) && (
+                    <p className="mt-3 text-xs text-muted-foreground text-center">Devis en cours de mise à jour par le salon</p>
+                  )}
+
                   {/* Boutons accepter/refuser le devis (refus en deux taps) */}
-                  {isQuoted && (() => {
+                  {isQuoted && Number(event.price) > 0 && (() => {
                     const sending = answerQuote.isPending && String(answerQuote.variables?.id) === String(event.id);
                     const confirming = String(confirmDeclineId) === String(event.id);
                     if (confirming) {

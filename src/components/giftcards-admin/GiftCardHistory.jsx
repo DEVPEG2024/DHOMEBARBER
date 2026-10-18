@@ -1,11 +1,106 @@
 import React, { useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { History } from 'lucide-react';
+import { History, Link2, X } from 'lucide-react';
+import { toast } from 'sonner';
 import LoadError from '@/components/shared/LoadError';
 import {
   fetchGiftCardTransactions, giftCardTransactionsKey, formatEuro, formatParisDateTime,
-  canUndoTransaction, runGiftCardUndo,
+  canUndoTransaction, runGiftCardUndo, attachGiftCardDebit, fetchRecentAppointmentsToCash,
+  giftCardRecentAppointmentsKey, parisToday, appointmentDue, appointmentServicesLabel, formatDay,
+  closeAppointmentWithGiftCard, friendlyGiftCardError, round2,
 } from '@/lib/giftCardDebit';
+
+const lower = (v) => String(v || '').trim().toLowerCase();
+
+/**
+ * Rattacher un débit fait sans RDV (« Prestations », « Montant libre ») à un RDV des 7 derniers
+ * jours encore à encaisser : la part carte est portée sur le RDV (sinon il était encaissé une
+ * seconde fois en CB / espèces). Panneau dans la fiche, fermé par « Fermer ».
+ */
+function AttachPanel({ card, tx, onClose, onDone }) {
+  const queryClient = useQueryClient();
+  const today = parisToday();
+  const [sendingId, setSendingId] = useState(null);
+  const [attached, setAttached] = useState(null); // RDV rattaché, entièrement couvert : proposer la clôture
+  const q = useQuery({
+    queryKey: giftCardRecentAppointmentsKey(today),
+    queryFn: () => fetchRecentAppointmentsToCash(7, today),
+    staleTime: 30 * 1000,
+  });
+  const owner = [lower(card?.recipient_email), lower(card?.sender_email), lower(card?.recipient_name), lower(card?.sender_name)].filter(Boolean);
+  const isOwner = (a) => owner.includes(lower(a.client_email)) || owner.includes(lower(a.client_name));
+  const list = (Array.isArray(q.data) ? q.data : [])
+    .filter((a) => appointmentDue(a) + 0.005 >= Number(tx.amount))
+    .sort((a, b) => Number(isOwner(b)) - Number(isOwner(a)));
+
+  const attach = async (apt) => {
+    if (sendingId) return;
+    setSendingId(apt.id);
+    try {
+      await attachGiftCardDebit(card, tx.id, apt.id, queryClient);
+      toast.success(`${formatEuro(tx.amount)} rattachés au RDV de ${apt.client_name || 'ce client'}`);
+      if (round2(appointmentDue(apt) - Number(tx.amount)) <= 0) setAttached({ ...apt, gift_card_amount: round2((Number(apt.gift_card_amount) || 0) + Number(tx.amount)) });
+      else { onDone?.(); onClose(); }
+    } catch (err) {
+      toast.error('Rattachement impossible', { description: friendlyGiftCardError(err) });
+      q.refetch();
+    } finally {
+      setSendingId(null);
+    }
+  };
+  const close = async () => {
+    try {
+      await closeAppointmentWithGiftCard(attached, card, tx.amount, queryClient);
+      toast.success('RDV clôturé (carte cadeau)');
+    } catch (err) {
+      toast.error('Clôture impossible : faites-la dans l\'agenda', { description: friendlyGiftCardError(err) });
+    }
+    onDone?.();
+    onClose();
+  };
+
+  return (
+    <div className="mt-2 rounded-xl border border-primary/25 bg-primary/5 p-2.5 space-y-2" data-testid="gc-attach">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[11px] font-semibold text-foreground">Rattacher {formatEuro(tx.amount)} à un rendez-vous</p>
+        <button type="button" onClick={onClose} aria-label="Fermer" className="p-1 rounded-lg text-muted-foreground hover:text-foreground">
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
+      {attached ? (
+        <div className="space-y-2">
+          <p className="text-[11px] text-muted-foreground">Le RDV est entièrement réglé par carte cadeau : le clôturer maintenant ?</p>
+          <div className="flex gap-2">
+            <button type="button" onClick={close} className="flex-1 py-1.5 rounded-lg text-[11px] font-semibold text-white bg-primary">Clôturer le RDV</button>
+            <button type="button" onClick={() => { onDone?.(); onClose(); }} className="flex-1 py-1.5 rounded-lg text-[11px] text-muted-foreground bg-white/5 border border-white/10">Plus tard</button>
+          </div>
+        </div>
+      ) : q.isError && !q.data ? (
+        <LoadError compact what="les rendez-vous à encaisser" error={q.error} onRetry={q.refetch} retrying={q.isFetching} />
+      ) : q.isPending ? (
+        <p className="text-[11px] text-muted-foreground">Chargement…</p>
+      ) : list.length === 0 ? (
+        <p className="text-[11px] text-muted-foreground">Aucun rendez-vous des 7 derniers jours à encaisser pour ce montant.</p>
+      ) : (
+        <ul className="space-y-1.5 max-h-56 overflow-y-auto">
+          {list.map((a) => (
+            <li key={a.id}>
+              <button type="button" onClick={() => attach(a)} disabled={!!sendingId}
+                className={`w-full text-left rounded-lg border px-2.5 py-2 text-[11px] disabled:opacity-60 ${isOwner(a) ? 'border-primary/40 bg-primary/10' : 'border-white/10 bg-white/5'}`}>
+                <span className="block font-semibold text-foreground break-words">{a.client_name || 'Client'}{isOwner(a) ? ' · titulaire de la carte' : ''}</span>
+                <span className="block text-muted-foreground break-words">
+                  {formatDay(a.date)} · {String(a.start_time || '').slice(0, 5)}{a.employee_name ? ` · ${a.employee_name}` : ''}
+                  {appointmentServicesLabel(a) ? ` · ${appointmentServicesLabel(a)}` : ''} · reste {formatEuro(appointmentDue(a))}
+                </span>
+                {sendingId === a.id && <span className="block text-primary">Rattachement…</span>}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 const KIND_LABELS = { debit: 'Débit', credit: 'Crédit', undo: 'Annulation' };
 
@@ -33,6 +128,7 @@ export default function GiftCardHistory({ cardId, card, onCardChange }) {
   // Débit dont l'annulation attend sa confirmation, et celui en cours d'envoi
   const [confirmId, setConfirmId] = useState(null);
   const [undoingId, setUndoingId] = useState(null);
+  const [attachId, setAttachId] = useState(null);
   const undoingRef = useRef(false);
 
   const undo = async (tx) => {
@@ -97,6 +193,17 @@ export default function GiftCardHistory({ cardId, card, onCardChange }) {
                     {undone && <p className="text-[10px] text-amber-400">annulé</p>}
                   </div>
                 </div>
+                {isOut && !undone && !tx.appointment_id && tx.id && card?.status !== 'expired' && attachId !== tx.id && (
+                  <div className="mt-1.5 flex justify-end">
+                    <button type="button" onClick={() => { setAttachId(tx.id); setConfirmId(null); }}
+                      className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary hover:text-primary/80">
+                      <Link2 className="w-3 h-3" /> Rattacher à un RDV
+                    </button>
+                  </div>
+                )}
+                {attachId === tx.id && (
+                  <AttachPanel card={card} tx={tx} onClose={() => setAttachId(null)} onDone={() => refetch()} />
+                )}
                 {undoable && (
                   <div className="mt-1.5 flex flex-wrap items-center justify-end gap-2">
                     {confirmId !== tx.id ? (

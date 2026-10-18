@@ -117,12 +117,16 @@ function ResizeHandle({ edge, handlers }) {
   );
 }
 
-export function BreakCard({ apt, style, onSelect, dragProps, resizeProps, ghosted = false, showBarber = false, barberName, color }) {
+export function BreakCard({ apt, style, onSelect, dragProps, resizeProps, ghosted = false, showBarber = false, barberName, color, compact = false }) {
   const height = style.height || 0;
   // Vue Semaine « Tous » : prénom du barber visible (le title ne se voit pas au doigt) ;
-  // une pause sans barber est une pause du salon
+  // une pause sans barber est une pause du salon. `compact` (colonne partagée, ~20 px sur
+  // téléphone) : ni icône ni marges, initiale seulement — le prénom complet reste dans le title.
+  // Pleine largeur en vue « Tous » sur téléphone (~45 px) : ni icône ni marges non plus, pour le prénom
   const fullName = barberName || apt.employee_name || (apt.employee_id ? '' : 'Salon');
-  const firstName = showBarber ? String(fullName || '').trim().split(/\s+/)[0] : '';
+  const fullFirstName = showBarber ? String(fullName || '').trim().split(/\s+/)[0] : '';
+  const firstName = compact ? fullFirstName.slice(0, 1) : fullFirstName;
+  const padX = compact ? 'px-0.5' : showBarber ? 'px-0.5 sm:px-1.5' : 'px-1.5';
   return (
     <div
       data-block
@@ -139,12 +143,12 @@ export function BreakCard({ apt, style, onSelect, dragProps, resizeProps, ghoste
         ...NO_CALLOUT,
       }}
     >
-      <div className={`px-1.5 ${resizeProps && height >= 36 ? 'pt-2' : 'py-0.5'} flex items-center gap-1 min-w-0`}>
-        <Coffee className="w-3 h-3 text-slate-400 shrink-0" />
+      <div className={`${padX} ${resizeProps && height >= 36 ? 'pt-2' : 'py-0.5'} flex items-center gap-1 min-w-0`}>
+        {!compact && <Coffee className={`w-3 h-3 text-slate-400 shrink-0 ${showBarber ? 'hidden sm:block' : ''}`} />}
         <p className="text-[10px] font-bold text-slate-400 truncate">{firstName || `${apt.start_time} – ${apt.end_time}`}</p>
       </div>
       {firstName && height >= 30 && (
-        <p className="px-1.5 text-[9px] font-semibold text-slate-400/90 truncate">{apt.start_time} – {apt.end_time}</p>
+        <p className={`${padX} text-[9px] font-semibold text-slate-400/90 truncate`}>{apt.start_time} – {apt.end_time}</p>
       )}
       {/* Étirer la pause : haut = début, bas = fin (une pause très courte garde seulement le bas) */}
       {resizeProps && height >= 36 && <ResizeHandle edge="start" handlers={resizeProps.start} />}

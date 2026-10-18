@@ -323,21 +323,27 @@ export default function BarberSettings() {
   const {
     data: employees = [], isLoading: loadingEmployees, isError: employeesError, error: employeesErr,
     refetch: refetchEmployees, isFetching: employeesFetching,
+    isPending: employeesPending, fetchStatus: employeesFetchStatus,
   } = useQuery({
     queryKey: ['employees', 'me'], // liste complète : clé distincte des pages client
     queryFn: () => api.entities.Employee.list('-created_at', 100),
   });
+  // Hors ligne, React Query met la requête en pause (pending + paused, sans erreur ni chargement) :
+  // traitée comme un échec, sinon « Profil introuvable » s'affichait avec une liste jamais chargée
+  const employeesFailed = (employeesError && !employees.length) || (employeesPending && employeesFetchStatus === 'paused');
 
   // Erreur levée (plus avalée en liste vide) : une liste vide en cache faisait disparaître les
   // spécialités et enregistrer « Niveau d'expérience 0 »
   const {
     data: skillCategories = [], isSuccess: catsLoaded, isError: catsError, error: catsErr,
     refetch: refetchCats, isFetching: catsFetching,
+    isPending: catsPending, fetchStatus: catsFetchStatus,
   } = useQuery({
     queryKey: ['skillCategories'],
     queryFn: () => api.entities.SkillCategory.list('sort_order', 100),
     staleTime: 5 * 60 * 1000,
   });
+  const catsFailed = (catsError && !skillCategories.length) || (catsPending && catsFetchStatus === 'paused');
 
   const employee = findEmployee(employees, user);
   // Horaires : le serveur ne les accepte que de l'admin (ils fixent les créneaux réservables,
@@ -504,8 +510,9 @@ export default function BarberSettings() {
     }
   };
 
-  // Liste des fiches en échec (réseau faible) : jamais « Profil introuvable » avec des identifiants
-  if (employeesError && !employees.length) {
+  // Liste des fiches en échec (réseau faible) ou en pause (hors ligne) : jamais « Profil
+  // introuvable » avec des identifiants. Sans erreur (pause), LoadError lit navigator.onLine.
+  if (employeesFailed) {
     return (
       <div className="p-6">
         <LoadError what="ton profil" error={employeesErr} onRetry={refetchEmployees} retrying={employeesFetching} />
@@ -514,7 +521,7 @@ export default function BarberSettings() {
   }
 
   // Show debug info if employee not found
-  if (!loadingEmployees && !employee) {
+  if (!loadingEmployees && !employeesPending && !employee) {
     return (
       <div className="p-6">
         <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-5">
@@ -737,7 +744,7 @@ export default function BarberSettings() {
         </div>
 
         {/* Skills */}
-        {catsError && !skillCategories.length && (
+        {catsFailed && (
           <LoadError compact what="tes spécialités" error={catsErr} onRetry={refetchCats} retrying={catsFetching} />
         )}
         {skillCategories.length > 0 && (

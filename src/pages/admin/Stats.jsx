@@ -87,7 +87,7 @@ export default function Stats() {
     // Per employee
     const empStats = {};
     completed.forEach(a => {
-      const name = a.employee_name || 'N/A';
+      const name = a.employee_name || 'Inconnu';
       if (!empStats[name]) empStats[name] = { name, count: 0, revenue: 0 };
       empStats[name].count++;
       empStats[name].revenue += revenueOf(a);
@@ -106,7 +106,7 @@ export default function Stats() {
 
   const header = (
     <div className="mb-6">
-      <p className="text-[10px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Analytics</p>
+      <p className="text-[10px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Analyse</p>
       <h1 className="font-display text-2xl font-bold">Statistiques</h1>
       {capped && (
         <p className="text-[11px] text-amber-400 mt-1">
@@ -116,11 +116,27 @@ export default function Stats() {
     </div>
   );
 
-  if (appointmentsQuery.isError && !appointmentsQuery.data) {
+  // Échec sans donnée, ou requête en pause faute de réseau (en attente, pas en erreur) : jamais de
+  // « CA Total 0€ » trompeur, l'écran d'échec à la place (comme le tableau de bord et Clients).
+  const q = appointmentsQuery;
+  const failed = (q.isError && !q.data) || (q.isPending && q.fetchStatus === 'paused');
+  if (failed) {
     return (
       <div>
         {header}
-        <LoadError what="les statistiques" error={appointmentsQuery.error} onRetry={appointmentsQuery.refetch} retrying={appointmentsQuery.isFetching} />
+        <LoadError what="les statistiques" error={q.error} onRetry={q.refetch} retrying={q.isFetching} />
+      </div>
+    );
+  }
+
+  // Premier chargement : squelette plutôt que des zéros
+  if (q.isPending) {
+    return (
+      <div aria-busy="true">
+        {header}
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-8">
+          {[0, 1, 2, 3, 4, 5].map(i => <div key={i} className="h-[68px] rounded-xl border border-border bg-card animate-pulse" />)}
+        </div>
       </div>
     );
   }

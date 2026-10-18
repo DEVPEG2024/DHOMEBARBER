@@ -139,6 +139,8 @@ export default function MyReviews() {
   const setTab = (key) => setSearchParams(key === 'all' ? {} : { tab: key }, { replace: true });
   const queryClient = useQueryClient();
   const [showForm, setShowForm] = useState(false);
+  // Les avis sont réservés aux clients : un compte du salon publierait un faux avis « Client »
+  const canWrite = user?.role === 'user';
   const [rating, setRating] = useState(0);
   const [comment, setComment] = useState('');
   // Barber concerné (facultatif) : son nom part en `employee_name`, affiché « avec … » sur l'avis
@@ -181,7 +183,7 @@ export default function MyReviews() {
   const wantsWrite = searchParams.get('write') === '1';
   useEffect(() => {
     if (!wantsWrite || !reviewsLoaded) return;
-    if (!limitReached) setShowForm(true);
+    if (!limitReached && canWrite) setShowForm(true);
     setSearchParams({ tab: 'mine' }, { replace: true });
   }, [wantsWrite, reviewsLoaded, limitReached, setSearchParams]);
 
@@ -289,17 +291,21 @@ export default function MyReviews() {
               </div>
               <p className="text-sm font-semibold text-foreground mb-1">Pas encore d'avis</p>
               <p className="text-xs text-muted-foreground mb-5">Soyez le premier à partager votre expérience.</p>
-              <button type="button" onClick={() => { setTab('mine'); setShowForm(true); }}
-                className="px-5 py-2.5 rounded-xl bg-primary text-primary-foreground text-xs font-semibold">
-                Écrire un avis
-              </button>
+              {canWrite && (
+                <button type="button" onClick={() => { setTab('mine'); setShowForm(true); }}
+                  className="px-5 py-2.5 rounded-xl bg-primary text-primary-foreground text-xs font-semibold">
+                  Écrire un avis
+                </button>
+              )}
             </div>
           ) : (
             <>
-              <button type="button" onClick={() => { setTab('mine'); setShowForm(true); }}
-                className="w-full py-3 rounded-2xl border border-primary/20 bg-primary/5 text-primary text-sm font-semibold mb-4 hover:bg-primary/10 transition-colors">
-                Écrire un avis
-              </button>
+              {canWrite && (
+                <button type="button" onClick={() => { setTab('mine'); setShowForm(true); }}
+                  className="w-full py-3 rounded-2xl border border-primary/20 bg-primary/5 text-primary text-sm font-semibold mb-4 hover:bg-primary/10 transition-colors">
+                  Écrire un avis
+                </button>
+              )}
               <div className="space-y-3">
                 {allReviews.map((review, i) => <ReviewCard key={review.id} review={review} index={i} showAuthor />)}
               </div>
@@ -331,7 +337,11 @@ export default function MyReviews() {
             {Math.min(reviews.length, MAX_REVIEWS)}/{MAX_REVIEWS} avis publiés
           </p>
         )}
-        {limitReached ? (
+        {!canWrite ? (
+          <div className="w-full py-3 px-4 rounded-2xl border border-white/8 bg-white/4 text-center text-xs text-muted-foreground mb-6">
+            Les avis sont réservés aux clients ; gérez-les dans Admin → Avis.
+          </div>
+        ) : limitReached ? (
           <div className="w-full py-3 px-4 rounded-2xl border border-white/8 bg-white/4 text-center text-xs text-muted-foreground mb-6">
             Vous avez publié {MAX_REVIEWS} avis, le maximum par compte. Merci pour vos retours !
           </div>

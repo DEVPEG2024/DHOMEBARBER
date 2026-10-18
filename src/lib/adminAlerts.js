@@ -19,6 +19,7 @@ export const ALERT_GROUPS = [
   { title: 'Boutique et ventes', types: ['order_new', 'order_cancelled', 'giftcard_new', 'textile_reservation'] },
   { title: 'Événements', types: ['event_request', 'event_answer', 'salon_event_rsvp'] },
   { title: 'Clients', types: ['review_new', 'user_new', 'feedback_new', 'report_new'] },
+  { title: 'Équipe', types: ['cleaning_done'] },
 ];
 
 /** Préférences normalisées `{ type: false }` (seulement les types coupés). */

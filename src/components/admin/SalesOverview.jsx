@@ -9,7 +9,8 @@
  *    en cours = pending / confirmed / ready ;
  *  - Cartes cadeau : cartes `validated` / `used` (l'argent entre à la validation, date `validated_at`) ;
  *    en attente = `pending` ; solde en circulation = reste des cartes validées ;
- *  - Privatisations : événements `accepted` / `confirmed` avec un prix, à la date de l'événement ;
+ *  - Privatisations : événements `confirmed` (payés au salon) avec un prix, à la date de l'événement ;
+ *    `accepted` (devis accepté, pas encore payé) = à encaisser ; `cancelled` hors CA ;
  *    en attente = `pending` / `quoted` ;
  *  - Textile (précommandes) : réservations `paid` / `ready` / `picked_up` (prix × quantité) ;
  *    à payer = `reserved`, prêtes à retirer = `ready`.
@@ -31,7 +32,9 @@ import { useAuth } from '@/lib/AuthContext';
 
 const ORDER_OPEN = ['pending', 'confirmed', 'ready'];
 const EVENT_OPEN = ['pending', 'quoted'];
-const EVENT_WON = ['accepted', 'confirmed'];
+// Vente comptée au CA : privatisation confirmée (payée au salon) ; acceptée = encore à encaisser
+const EVENT_WON = ['confirmed'];
+const EVENT_UPCOMING = ['accepted', 'confirmed'];
 const TEXTILE_PAID = ACTIVE_RESERVATION_STATUSES.filter((s) => s !== 'reserved'); // paid, ready, picked_up
 
 const CHANNEL_COLORS = {
@@ -207,7 +210,8 @@ export default function SalesOverview({ appointments }) {
     // ─── Privatisations ───
     const won = events.filter((e) => EVENT_WON.includes(e.status) && Number(e.price) > 0);
     const openEvents = events.filter((e) => EVENT_OPEN.includes(e.status));
-    const upcoming = events.filter((e) => EVENT_WON.includes(e.status) && dayOf(e.date) >= today);
+    const upcoming = events.filter((e) => EVENT_UPCOMING.includes(e.status) && dayOf(e.date) >= today);
+    const acceptedEvents = events.filter((e) => e.status === 'accepted' && Number(e.price) > 0);
     const privatisations = {
       today: sum(won.filter((e) => isToday(e.date)), (e) => e.price),
       month: sum(won.filter((e) => isMonth(e.date)), (e) => e.price),
@@ -216,6 +220,8 @@ export default function SalesOverview({ appointments }) {
       quotedAmount: sum(events.filter((e) => e.status === 'quoted'), (e) => e.price),
       upcomingCount: upcoming.length,
       upcomingAmount: sum(upcoming, (e) => e.price),
+      acceptedCount: acceptedEvents.length,
+      acceptedAmount: sum(acceptedEvents, (e) => e.price),
     };
 
     // ─── Textile (précommandes) ───
@@ -391,10 +397,10 @@ export default function SalesOverview({ appointments }) {
 
         <ChannelPanel title="Privatisations" icon={PartyPopper} color={CHANNEL_COLORS.privatisations} to={canEvents ? '/admin/events' : null} failed={failed.privatisations}
           badge={!failed.privatisations && privatisations.openCount > 0 && <span className="ml-1 px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 text-[10px]">{privatisations.openCount} demande{privatisations.openCount > 1 ? 's' : ''}</span>}>
-          <Mini label="Événements du mois" value={money('privatisations', privatisations.month)} icon={Euro} color={CHANNEL_COLORS.privatisations} hint={failed.privatisations ? '' : `${privatisations.monthCount} accepté${privatisations.monthCount > 1 ? 's' : ''} / confirmé${privatisations.monthCount > 1 ? 's' : ''}`} />
+          <Mini label="Événements du mois" value={money('privatisations', privatisations.month)} icon={Euro} color={CHANNEL_COLORS.privatisations} hint={failed.privatisations ? '' : `${privatisations.monthCount} confirmé${privatisations.monthCount > 1 ? 's' : ''} (payé${privatisations.monthCount > 1 ? 's' : ''})`} />
           <Mini label="À venir" value={money('privatisations', privatisations.upcomingAmount)} icon={Timer} color="#60a5fa" hint={failed.privatisations ? '' : `${privatisations.upcomingCount} événement${privatisations.upcomingCount > 1 ? 's' : ''}`} />
           <Mini label="Devis en attente" value={money('privatisations', privatisations.quotedAmount)} icon={Clock} color="#f59e0b" hint="réponse du client attendue" />
-          <Mini label="Demandes à traiter" value={failed.privatisations ? '—' : privatisations.openCount} icon={Users} color="#f59e0b" />
+          <Mini label="Devis acceptés à encaisser" value={money('privatisations', privatisations.acceptedAmount)} icon={Users} color="#f59e0b" hint={failed.privatisations ? '' : `${privatisations.acceptedCount} privatisation${privatisations.acceptedCount > 1 ? 's' : ''} à confirmer au paiement`} />
         </ChannelPanel>
 
         <ChannelPanel title="Textile · drops" icon={Shirt} color={CHANNEL_COLORS.textile} to={canTextile ? '/admin/textile?tab=reservations' : null} failed={failed.textile}

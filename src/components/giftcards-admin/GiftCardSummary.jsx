@@ -28,7 +28,7 @@ export default function GiftCardSummary({ card }) {
         <div>
           <p className="text-[10px] uppercase tracking-wider text-white/40">Solde restant</p>
           <p className="text-2xl font-black text-white leading-tight" data-testid="gc-balance">
-            {formatEuro(balance)} <span className="text-sm font-semibold text-white/40">/ {formatEuro(amount)}</span>
+            {formatEuro(balance)} <span className="text-sm font-semibold text-white/40 whitespace-nowrap">/ {formatEuro(amount)}</span>
           </p>
         </div>
         <div className="text-right">

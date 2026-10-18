@@ -5,19 +5,22 @@ import { hapticFeedback } from '@/lib/capacitor';
 import { useMySalonEvents, useSalonEventRsvp } from './useSalonEvents';
 import { hasStarted, splitSalonEvents, useNow } from './salonEventUtils';
 import { useAndroidBack } from '@/lib/useAndroidBack';
+import LoadError from '@/components/shared/LoadError';
 import SalonEventCard from './SalonEventCard';
 import SalonEventSheet from './SalonEventSheet';
 
 /**
  * « Vos invitations » en tête de la page Événements : cartes des événements du salon à venir
  * (invitation nominative ou ouvert à tous), fiche en bottom sheet avec RSVP, et événements passés
- * / annulés repliés. Rend `null` sans aucun événement, pendant le chargement, ou si la route
- * `/salon-events/mine` échoue sans rien avoir chargé : la page des privatisations reste utilisable
- * quoi qu'il arrive. Un rechargement raté après coup ne masque pas les données déjà affichées.
+ * / annulés repliés. Si `/salon-events/mine` échoue sans rien avoir chargé (réseau, erreur
+ * serveur), affiche `LoadError` avec Réessayer : le client ne doit pas conclure qu'il n'a pas
+ * d'invitation. Rend `null` seulement sur un 404 (route inconnue), sans aucun événement ou pendant
+ * le chargement. Un rechargement raté après coup ne masque pas les données déjà affichées, et la
+ * page des privatisations reste utilisable dans tous les cas.
  */
 export default function SalonEventsSection() {
   const reduceMotion = useReducedMotion();
-  const { data } = useMySalonEvents();
+  const { data, isError, error, refetch, isFetching } = useMySalonEvents();
   const nowMs = useNow(60_000);
   const view = useMemo(() => splitSalonEvents(data, nowMs), [data, nowMs]);
   const { rsvp, pendingEventId } = useSalonEventRsvp();
@@ -38,7 +41,13 @@ export default function SalonEventsSection() {
   useAndroidBack(!!selected, () => setSelectedId(null));
 
   // Un rechargement en échec garde la section (et la fiche ouverte) tant que le cache a des données
-  if (!data || view.isEmpty) return null;
+  if (!data) {
+    if (isError && (error?.status ?? error?.response?.status) !== 404) {
+      return <LoadError what="vos invitations" error={error} onRetry={refetch} retrying={isFetching} compact className="mb-6" />;
+    }
+    return null;
+  }
+  if (view.isEmpty) return null;
 
   const open = (event) => {
     hapticFeedback();

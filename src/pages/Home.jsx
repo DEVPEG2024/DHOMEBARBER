@@ -437,7 +437,8 @@ export default function Home() {
   const products = useMemo(() => (productsData || []).filter(isShopProduct), [productsData]);
 
   const { data: posts = [] } = useQuery({
-    queryKey: ['latestPost'],
+    // Sous le préfixe ['posts'] : création, suppression, blocage ou modération dans le fil l'invalident aussi
+    queryKey: ['posts', 'latest'],
     queryFn: () => api.entities.Post.list('-created_at', 1),
   });
 

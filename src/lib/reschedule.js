@@ -112,6 +112,18 @@ export async function findRescheduleSlots({ appointment, employee, timeOffs = []
   const target = toMinutes(appointment.start_time);
   const wanted = Array.from({ length: days }, (_, i) => parisDay(i));
   const { rows: busy, keys: loadedKeys } = await fetchBusy(employee.id, wanted.map(d => d.key));
+  // Privatisations confirmées (salon fermé aux réservations sur leur fenêtre) ; lecture impossible :
+  // aucune, le serveur refusera de toute façon un créneau privatisé
+  let privates = [];
+  try {
+    privates = (await api.entities.Event.filter({ date: loadedKeys, status: 'confirmed' }, 'date', 200)) || [];
+  } catch { privates = []; }
+  const privatesByDate = new Map();
+  for (const ev of privates) {
+    const key = String(ev.date || '').slice(0, 10);
+    if (!privatesByDate.has(key)) privatesByDate.set(key, []);
+    privatesByDate.get(key).push(ev);
+  }
   // Repli jour par jour : on ne parcourt que les jours dont les RDV ont été chargés
   const loaded = new Set(loadedKeys);
   const calendar = wanted.filter(d => loaded.has(d.key));
@@ -124,7 +136,7 @@ export async function findRescheduleSlots({ appointment, employee, timeOffs = []
 
   const found = [];
   for (const { date, key } of calendar) {
-    const { slots } = analyzeDay(employee, date, byDate.get(key) || [], timeOffs, duration);
+    const { slots } = analyzeDay(employee, date, byDate.get(key) || [], timeOffs, duration, 30, privatesByDate.get(key) || []);
     // Le créneau actuel n'est pas proposé (il apparaîtrait comme pris de toute façon)
     const picks = slots
       .filter(t => !(key === appointment.date && t === appointment.start_time))

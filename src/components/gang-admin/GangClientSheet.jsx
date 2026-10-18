@@ -14,6 +14,7 @@ import { GangBadgeShield } from '@/components/gang/GangBadges';
 import { GANG_STAT_KEYS, GANG_STAT_LABELS, gangStatValue, isGangStatLow, GANG_LOW_COLOR, gangPalette } from '@/components/gang/gangTheme';
 import {
   useGangAdminClient, nudgeGangClient, gangAdminClientKey, GANG_ADMIN_CARDS_QUERY_KEY, GANG_ADMIN_OVERVIEW_QUERY_KEY,
+  removeGangClientFromLeaderboard, GANG_LEADERBOARD_QUERY_KEY,
 } from '@/lib/gangCardApi';
 import { hapticFeedback } from '@/lib/capacitor';
 import LoadError from '@/components/shared/LoadError';
@@ -57,6 +58,45 @@ function Fact({ label, value }) {
       <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
       <p className="text-sm font-semibold text-foreground truncate" title={typeof value === 'string' ? value : undefined}>{value}</p>
     </div>
+  );
+}
+
+/** « Retirer du classement » (Team of the Season) en deux taps ; message du serveur en cas d'échec */
+function RemoveFromLeaderboard({ account, onDone }) {
+  const queryClient = useQueryClient();
+  const [confirming, setConfirming] = useState(false);
+  const [sending, setSending] = useState(false);
+  const timer = useRef(null);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const run = async () => {
+    if (sending || !account?.id) return;
+    if (!confirming) {
+      hapticFeedback();
+      setConfirming(true);
+      clearTimeout(timer.current);
+      timer.current = setTimeout(() => setConfirming(false), 4000);
+      return;
+    }
+    clearTimeout(timer.current);
+    setConfirming(false);
+    setSending(true);
+    try {
+      await removeGangClientFromLeaderboard(account.id);
+      toast.success('Client retiré du classement');
+      queryClient.invalidateQueries({ queryKey: GANG_LEADERBOARD_QUERY_KEY });
+      onDone?.();
+    } catch (err) {
+      toast.error(err?.data?.error || (!err?.status ? 'Pas de connexion : rien n’a changé.' : 'Impossible de retirer ce client du classement.'));
+    } finally {
+      setSending(false);
+    }
+  };
+  return (
+    <button type="button" onClick={run} disabled={sending}
+      className={`inline-flex items-center gap-1 text-[11px] font-semibold disabled:opacity-60 ${confirming ? 'text-red-300' : 'text-red-400 hover:text-red-300'}`}>
+      {sending ? <Loader2 className="w-3 h-3 animate-spin" /> : <XCircle className="w-3 h-3" />}
+      {confirming ? 'Confirmer le retrait du classement' : 'Retirer du classement'}
+    </button>
   );
 }
 
@@ -164,6 +204,7 @@ function SheetBody({ data, cardSize, onNudged }) {
             {account.email}{account.phone ? ` · ${account.phone}` : ''}{since ? ` · inscrit le ${since}` : ''}
             {account.leaderboard_opt_in ? ' · dans le classement' : ''}
           </p>
+          {account.leaderboard_opt_in && <RemoveFromLeaderboard account={account} onDone={onNudged} />}
         </div>
       </div>
 

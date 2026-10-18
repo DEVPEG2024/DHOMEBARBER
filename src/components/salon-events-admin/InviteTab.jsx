@@ -19,6 +19,7 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { inviteToSalonEvent, formatEventDate } from '@/lib/salonEventsApi';
+import LoadError from '@/components/shared/LoadError';
 import { CLIENTS_KEY, INPUT_CLASS, INVITE_MESSAGE_MAX, invalidateSalonEvents, countLabel, Spinner } from './shared';
 
 const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
@@ -177,13 +178,18 @@ export default function InviteTab({ event, invites, onSent }) {
 
         {clientsQ.isLoading ? (
           <Spinner />
-        ) : clientsQ.error ? (
+        ) : clientsQ.error && clientsQ.error.status === 403 ? (
           <div className="mt-2 flex items-start gap-2 rounded-xl border border-border bg-secondary/40 p-3 text-xs text-muted-foreground">
             <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
             <span>
-              La liste des clients n'est pas accessible avec votre compte ({clientsQ.error.message}).
+              La liste des clients n'est pas accessible avec votre compte.
               Vous pouvez tout de même inviter tous les clients avec l'interrupteur ci-dessus.
             </span>
+          </div>
+        ) : clientsQ.error && !clientsQ.data ? (
+          <div className="mt-2 space-y-2">
+            <LoadError compact what="la liste des clients" error={clientsQ.error} onRetry={clientsQ.refetch} retrying={clientsQ.isFetching} />
+            <p className="text-[11px] text-muted-foreground">Vous pouvez tout de même inviter tous les clients avec l'interrupteur ci-dessus.</p>
           </div>
         ) : filtered.length === 0 ? (
           <p className="mt-3 text-center text-xs text-muted-foreground py-6">

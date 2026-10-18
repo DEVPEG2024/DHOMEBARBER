@@ -157,7 +157,7 @@ export default function EventCard({ event, stats = EMPTY_STATS, isAdmin, busy, i
               )}
               {canCancel && (
                 <TwoTapButton icon={Ban} label="Annuler" confirmLabel="Prévenir les invités et annuler ?" disabled={busy}
-                  title={`Les ${countLabel(stats.total - stats.declined, 'invité', 'invités')} qui n'ont pas refusé reçoivent un push d'annulation`}
+                  title={`Les ${countLabel(stats.total - stats.declined, 'invité', 'invités')} qui n'ont pas refusé sont prévenus de l'annulation (push et email)`}
                   onConfirm={() => onCancel(event)} />
               )}
               {canFinish && (

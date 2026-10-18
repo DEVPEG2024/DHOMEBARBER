@@ -18,8 +18,9 @@ export const inviteToSalonEvent = (eventId, { emails = [], all = false, message 
 
 export const fetchSalonEventGuests = (eventId) => apiRequest('GET', apiUrl(`/salon-events/${eventId}/guests`));
 
-export const remindSalonEvent = (eventId, { audience = 'accepted', message = '' } = {}) =>
-  apiRequest('POST', apiUrl(`/salon-events/${eventId}/remind`), { audience, message });
+// `sendKey` : même clé pour un nouvel essai après une coupure → le serveur ne renvoie pas le push
+export const remindSalonEvent = (eventId, { audience = 'accepted', message = '', sendKey = null } = {}) =>
+  apiRequest('POST', apiUrl(`/salon-events/${eventId}/remind`), { audience, message, ...(sendKey ? { send_key: sendKey } : {}) });
 
 // ─── Constantes ───
 export const SALON_EVENT_STATUSES = [

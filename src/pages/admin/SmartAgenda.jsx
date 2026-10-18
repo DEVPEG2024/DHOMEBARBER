@@ -16,6 +16,7 @@ import {
   toDateStr, parseDateParam, datesBetween, fetchAppointmentsForDates, isOnLeave, fetchLeaveConflicts, agendaErrorMessage,
 } from '@/components/agenda/agendaUtils';
 import LoadError from '@/components/shared/LoadError';
+import { revenueOf } from '@/lib/revenue';
 
 const DAY_NAMES_FR = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
 const EMPTY_TIME_OFF = { employee_id: '', start_date: '', end_date: '', reason: '', type: 'vacation' };
@@ -60,7 +61,9 @@ export default function SmartAgenda() {
   const appointments = apptsQuery.data ?? [];
   const isFetching = apptsQuery.isFetching;
   // Échec sans données : jamais de faux « 0 RDV / 0 € » (règle LoadError)
-  const apptsFailed = apptsQuery.isError && !apptsQuery.data;
+  // Hors connexion, React Query met la requête en pause (pending + paused, sans erreur) : c'est un
+  // échec aussi, sinon « 0 RDV » et « ✓ » s'affichaient sur toute la semaine
+  const apptsFailed = (apptsQuery.isError && !apptsQuery.data) || (apptsQuery.isPending && apptsQuery.fetchStatus === 'paused');
 
   const { data: employees = [] } = useQuery({
     queryKey: ['employees'],
@@ -91,10 +94,13 @@ export default function SmartAgenda() {
     onError: (e) => toast.error(agendaErrorMessage(e, 'Erreur lors de l\'enregistrement')),
   });
 
+  // Suppression en deux taps (la boîte native affichait « Cancel / Ok » en anglais sur iPhone)
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const deleteTimeOff = useMutation({
     mutationFn: (id) => api.entities.TimeOff.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['timeOffs'] });
+      setConfirmDeleteId(null);
       toast.success('Congé supprimé');
     },
     onError: (e) => toast.error(agendaErrorMessage(e, 'Erreur lors de la suppression')),
@@ -102,7 +108,8 @@ export default function SmartAgenda() {
 
   const weekStats = useMemo(() => weekDates.map((dayStr, i) => {
     const dayApts = appointments.filter((a) => a.date === dayStr && counts(a));
-    const revenue = dayApts.reduce((s, a) => s + (Number(a.grand_total || a.total_price) || 0), 0);
+    // CA hors pourboire, même calcul que le tableau de bord (total_price + product_price)
+    const revenue = dayApts.reduce((s, a) => s + revenueOf(a), 0);
     return { day: weekDays[i], dayStr, count: dayApts.length, revenue };
   }), [weekDates, appointments]);
 
@@ -421,15 +428,28 @@ export default function SmartAgenda() {
                     {t.reason && ` · ${t.reason}`}
                   </p>
                 </button>
-                <div className="flex shrink-0">
-                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openTimeOff(t)} aria-label="Modifier le congé">
-                    <Pencil className="w-3.5 h-3.5" />
-                  </Button>
-                  <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10" aria-label="Supprimer le congé"
-                    onClick={() => { if (window.confirm(`Supprimer le congé de ${t.employee_name || 'ce barber'} ?`)) deleteTimeOff.mutate(t.id); }}>
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </Button>
-                </div>
+                {confirmDeleteId === t.id ? (
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <Button size="sm" variant="destructive" className="h-8 px-2.5 text-xs" disabled={deleteTimeOff.isPending}
+                      onClick={() => deleteTimeOff.mutate(t.id)}>
+                      {deleteTimeOff.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Supprimer'}
+                    </Button>
+                    <Button size="sm" variant="outline" className="h-8 px-2.5 text-xs" disabled={deleteTimeOff.isPending}
+                      onClick={() => setConfirmDeleteId(null)}>
+                      Annuler
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex shrink-0">
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openTimeOff(t)} aria-label="Modifier le congé">
+                      <Pencil className="w-3.5 h-3.5" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10" aria-label={`Supprimer le congé de ${t.employee_name || 'ce barber'}`}
+                      onClick={() => setConfirmDeleteId(t.id)}>
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
+                )}
               </div>
             ))}
           </div>

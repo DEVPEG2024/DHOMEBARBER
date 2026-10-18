@@ -18,6 +18,7 @@ import { Sparkles, Shirt, ClipboardList, AlertTriangle } from 'lucide-react';
 import { api } from '@/api/apiClient';
 import { useAuth } from '@/lib/AuthContext';
 import { TEXTILE_QUERY_KEY, fetchTextileOverview } from '@/lib/textileApi';
+import { adminErrorMessage } from '@/lib/adminErrors';
 import { DROPS_KEY, CONCEPTS_KEY, RESERVATIONS_KEY } from '@/components/textile-admin/shared';
 import DropsTab from '@/components/textile-admin/DropsTab';
 import ConceptsTab from '@/components/textile-admin/ConceptsTab';
@@ -79,25 +80,35 @@ export default function AdminTextile() {
   const pendingReservations = useMemo(() => reservations.filter((r) => r.status === 'reserved').length, [reservations]);
   const counters = { drops: drops.length, concepts: concepts.length, reservations: pendingReservations };
 
+  // Hors connexion, React Query met la requête en pause (pending + paused, sans erreur) : c'est un
+  // échec aussi, sinon « Aucun drop pour le moment » et « Nouveau drop » s'affichaient
+  const paused = (q) => q.isPending && q.fetchStatus === 'paused';
+  const off = (q) => (q.isError && !q.data) || paused(q);
+  const offlineError = () => Object.assign(new Error('Failed to fetch'), { offline: true });
+  const errOf = (...qs) => qs.map((q) => q.error).find(Boolean) || offlineError();
+  const dropsFailed = off(dropsQ) && off(overviewQ) && !dropsQ.data && !overviewQ.data;
+  const conceptsFailed = off(conceptsQ) && off(overviewQ) && !conceptsQ.data && !overviewQ.data;
+  const reservationsFailed = off(reservationsQ) && !reservationsQ.data;
+  // Échec sans aucune donnée à montrer : LoadError dans l'onglet (jamais « Aucun drop » / « Aucune pièce »)
+  const dropsLoadError = dropsFailed ? errOf(dropsQ, overviewQ) : null;
+  const conceptsLoadError = conceptsFailed ? errOf(conceptsQ, overviewQ) : null;
+  const reservationsLoadError = reservationsFailed ? errOf(reservationsQ) : null;
   // Tant qu'une des deux sources d'un onglet charge et qu'on n'a encore rien à montrer, spinner
   // (sinon « Aucun drop » clignoterait avant l'arrivée de l'overview)
   const loadingByTab = {
-    drops: drops.length === 0 && (dropsQ.isLoading || overviewQ.isLoading),
-    concepts: concepts.length === 0 && (conceptsQ.isLoading || overviewQ.isLoading),
-    reservations: reservationsQ.isLoading,
+    drops: !dropsFailed && drops.length === 0 && (dropsQ.isLoading || overviewQ.isLoading),
+    concepts: !conceptsFailed && concepts.length === 0 && (conceptsQ.isLoading || overviewQ.isLoading),
+    reservations: !reservationsFailed && reservationsQ.isLoading,
   };
-  // Échec sans aucune donnée à montrer : LoadError dans l'onglet (jamais « Aucun drop » / « Aucune pièce »)
-  const dropsLoadError = dropsQ.isError && overviewQ.isError && !dropsQ.data && !overviewQ.data ? (dropsQ.error || overviewQ.error) : null;
-  const conceptsLoadError = conceptsQ.isError && overviewQ.isError && !conceptsQ.data && !overviewQ.data ? (conceptsQ.error || overviewQ.error) : null;
   const retryDrops = () => { dropsQ.refetch(); overviewQ.refetch(); };
   const retryConcepts = () => { conceptsQ.refetch(); overviewQ.refetch(); };
+  // Bandeau quand des données sont en cache : texte lisible (jamais « Failed to fetch » / « HTTP 503 »)
   const errorForTab = {
-    drops: dropsQ.error && overviewQ.error && !dropsLoadError ? (dropsQ.error.message || overviewQ.error.message) : null,
-    concepts: conceptsQ.error && overviewQ.error && !conceptsLoadError ? (conceptsQ.error.message || overviewQ.error.message) : null,
+    drops: dropsQ.error && overviewQ.error && !dropsLoadError ? adminErrorMessage(dropsQ.error || overviewQ.error, 'le serveur ne répond pas') : null,
+    concepts: conceptsQ.error && overviewQ.error && !conceptsLoadError ? adminErrorMessage(conceptsQ.error || overviewQ.error, 'le serveur ne répond pas') : null,
     // Sans donnée en cache, LoadError (dans l'onglet) remplace le bandeau : pas de doublon
-    reservations: reservationsQ.error && reservationsQ.data ? reservationsQ.error.message : null,
+    reservations: reservationsQ.error && reservationsQ.data ? adminErrorMessage(reservationsQ.error, 'le serveur ne répond pas') : null,
   }[tab];
-  const reservationsLoadError = reservationsQ.isError && !reservationsQ.data ? reservationsQ.error : null;
 
   return (
     <div>

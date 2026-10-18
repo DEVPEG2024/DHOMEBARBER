@@ -102,7 +102,7 @@ export default function AttendanceCheck({ user, onOpen }) {
                 setDone((d) => { const next = { ...d }; delete next[apt.id]; return next; });
                 refresh();
               } catch {
-                toast.error('Impossible d’annuler : rétablis le rendez-vous depuis sa fiche.');
+                toast.error('Impossible d’annuler : rétablissez le rendez-vous depuis sa fiche.');
               }
             },
           },
@@ -134,7 +134,7 @@ export default function AttendanceCheck({ user, onOpen }) {
     const ok = list.filter((_, i) => results[i].status === 'fulfilled');
     setDone((d) => ({ ...d, ...Object.fromEntries(ok.map((a) => [a.id, true])) }));
     if (ok.length === list.length) toast.success(`${ok.length} visite${ok.length > 1 ? 's' : ''} confirmée${ok.length > 1 ? 's' : ''}`);
-    else toast.error(`${list.length - ok.length} rendez-vous n’ont pas pu être confirmés : réessaie.`);
+    else toast.error(`${list.length - ok.length} rendez-vous n’ont pas pu être confirmés : réessayez.`);
     refresh();
   };
 

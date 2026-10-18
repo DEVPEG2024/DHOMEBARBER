@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import LoadError, { isNetworkError } from '@/components/shared/LoadError';
+import { formatPrice } from '@/components/services/serviceUtils';
 
 // Doit rester aligné sur EVENT_TYPES de src/pages/Events.jsx (pas d'EVJF : clientèle masculine).
 const EVENT_TYPES = {
@@ -37,7 +38,8 @@ const STATUS_CONFIG = {
   accepted: { label: 'Devis accepté', color: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20', icon: CheckCircle },
   confirmed: { label: 'Confirmé', color: 'bg-green-500/10 text-green-400 border-green-500/20', icon: CheckCircle },
   declined: { label: 'Refusé', color: 'bg-red-500/10 text-red-400 border-red-500/20', icon: XCircle },
-  // Posé par le serveur quand le client supprime son compte (demande en attente ou devis envoyé)
+  // Posé par le serveur quand le client supprime son compte (demande en attente ou devis envoyé),
+  // ou par le salon qui annule une privatisation acceptée / confirmée
   cancelled: { label: 'Annulée', color: 'bg-muted text-muted-foreground border-border', icon: XCircle },
 };
 
@@ -48,6 +50,13 @@ export default function AdminEvents() {
   const [editPrice, setEditPrice] = useState('');
   // Refus en deux taps : le refus envoie tout de suite un email définitif au client
   const [confirmDeclineId, setConfirmDeclineId] = useState(null);
+  // Suppression en deux taps (plus de boîte native, en anglais sur iPhone)
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  // Annulation d'une privatisation acceptée / confirmée : panneau avec motif facultatif
+  const [cancelId, setCancelId] = useState(null);
+  const [cancelReason, setCancelReason] = useState('');
+  // Nouveau prix sur un devis déjà envoyé : confirmation (le client reçoit un nouvel email)
+  const [confirmRequoteId, setConfirmRequoteId] = useState(null);
   const queryClient = useQueryClient();
 
   const { data, isError, error, refetch, isFetching } = useQuery({
@@ -78,6 +87,7 @@ export default function AdminEvents() {
     mutationFn: (id) => api.entities.Event.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['adminEvents'] });
+      setConfirmDeleteId(null);
       toast.success('Demande supprimée');
     },
     onError: (err) => toast.error(saveErrorMessage(err)),
@@ -111,14 +121,43 @@ export default function AdminEvents() {
 
   const handleSaveNotes = (event) => {
     if (busy) return;
+    const price = parseFloat(String(editPrice).replace(',', '.')) || null;
+    // Un devis envoyé garde un prix ; le changer renvoie le devis au client (après confirmation)
+    if (event.status === 'quoted') {
+      if (!price || price <= 0) {
+        toast.error('Un devis envoyé doit garder un prix');
+        return;
+      }
+      const changed = Number(price) !== Number(event.price);
+      if (changed && confirmRequoteId !== event.id) {
+        setConfirmRequoteId(event.id);
+        return;
+      }
+      setConfirmRequoteId(null);
+      updateMutation.mutate({
+        id: event.id,
+        data: { admin_notes: editNotes, price },
+        successMsg: changed ? 'Nouveau devis envoyé au client' : 'Notes sauvegardées',
+      });
+      return;
+    }
     updateMutation.mutate({
       id: event.id,
       data: {
         admin_notes: editNotes,
-        price: parseFloat(editPrice) || null,
+        price,
       },
       successMsg: 'Notes sauvegardées',
     });
+  };
+
+  const handleCancelPrivatisation = (event) => {
+    if (busy) return;
+    updateMutation.mutate({
+      id: event.id,
+      data: { status: 'cancelled', cancellation_reason: cancelReason.trim().slice(0, 300) || null },
+      successMsg: 'Privatisation annulée : le client est prévenu par email',
+    }, { onSuccess: () => { setCancelId(null); setCancelReason(''); } });
   };
 
   const filtered = filter === 'all' ? events : events.filter(e => e.status === filter);
@@ -183,12 +222,12 @@ export default function AdminEvents() {
               className="bg-card border border-border rounded-xl p-4"
             >
               {/* Header */}
-              <div className="flex items-start justify-between mb-3">
-                <div className="flex items-center gap-3">
+              <div className="flex items-start justify-between gap-2 mb-3">
+                <div className="flex items-center gap-3 min-w-0">
                   <span className="text-2xl">{type.emoji}</span>
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-sm font-semibold">{type.label}</p>
-                    <p className="text-[11px] text-muted-foreground">
+                    <p className="text-[11px] text-muted-foreground break-all">
                       {event.client_name}{event.client_email ? ` · ${event.client_email}` : ''}
                     </p>
                     {event.client_phone && (
@@ -196,7 +235,7 @@ export default function AdminEvents() {
                     )}
                   </div>
                 </div>
-                <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border flex items-center gap-1 ${status.color}`}>
+                <span className={`shrink-0 whitespace-nowrap text-[11px] font-semibold px-2.5 py-1 rounded-full border flex items-center gap-1 ${status.color}`}>
                   <StatusIcon className="w-3 h-3" />
                   {status.label}
                 </span>
@@ -246,8 +285,8 @@ export default function AdminEvents() {
                       className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm resize-none" />
                   </div>
                   <div className="flex gap-2">
-                    <Button size="sm" className="flex-1" disabled={busy} onClick={() => handleSaveNotes(event)}>
-                      Sauvegarder
+                    <Button size="sm" className="flex-1 whitespace-normal h-auto py-1.5" disabled={busy} onClick={() => handleSaveNotes(event)}>
+                      {confirmRequoteId === event.id ? 'Enregistrer et renvoyer le devis (le client reçoit un email)' : 'Sauvegarder'}
                     </Button>
                     <Button size="sm" variant="outline" onClick={() => setEditingId(null)}>
                       Annuler
@@ -261,7 +300,7 @@ export default function AdminEvents() {
                       <div>
                         {event.price && (
                           <p className="text-sm font-bold text-primary flex items-center gap-1">
-                            <Euro className="w-3.5 h-3.5" /> {event.price}€
+                            <Euro className="w-3.5 h-3.5" /> {formatPrice(event.price)}
                           </p>
                         )}
                         {event.admin_notes && (
@@ -309,7 +348,7 @@ export default function AdminEvents() {
                 {event.status === 'quoted' && (
                   <div className="flex-1 py-2 rounded-lg bg-blue-500/10 border border-blue-500/20 text-center">
                     <p className="text-xs text-blue-400 font-medium">En attente de réponse du client</p>
-                    <p className="text-[10px] text-muted-foreground mt-0.5">Devis : {event.price}€</p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">Devis : {formatPrice(event.price)}</p>
                   </div>
                 )}
                 {/* Accepted: client a accepté, confirmer après paiement */}
@@ -320,14 +359,38 @@ export default function AdminEvents() {
                     <CheckCircle className="w-3.5 h-3.5" /> Confirmer (payé au salon)
                   </Button>
                 )}
-                {/* Cancelled: annulée par la suppression du compte du client, rien à traiter */}
+                {/* Cancelled : annulée par le salon, ou par la suppression du compte du client */}
                 {event.status === 'cancelled' && (
-                  <div className="flex-1 py-2 rounded-lg bg-muted/50 border border-border text-center">
+                  <div className="flex-1 py-2 px-2 rounded-lg bg-muted/50 border border-border text-center min-w-0">
                     <p className="text-xs text-muted-foreground font-medium">
-                      {event.client_email ? 'Demande annulée' : 'Annulée : le client a supprimé son compte'}
+                      {!event.client_email ? 'Annulée : le client a supprimé son compte'
+                        : event.cancelled_at ? `Annulée par le salon le ${format(new Date(event.cancelled_at), 'd MMM yyyy', { locale: fr })}` : 'Demande annulée'}
                     </p>
+                    {event.cancellation_reason && <p className="text-[11px] text-muted-foreground mt-0.5 break-words">« {event.cancellation_reason} »</p>}
                   </div>
                 )}
+                {/* Acceptée ou confirmée : annulation (email + push au client), jamais de suppression */}
+                {(event.status === 'accepted' || event.status === 'confirmed') && (cancelId === event.id ? (
+                  <div className="w-full rounded-lg border border-red-500/25 bg-red-500/5 p-2.5 space-y-2">
+                    <p className="text-xs font-semibold text-red-400">Annuler cette privatisation ? Le client reçoit un email.</p>
+                    <input type="text" value={cancelReason} maxLength={300} onChange={(e) => setCancelReason(e.target.value)}
+                      placeholder="Motif (facultatif)" aria-label="Motif de l'annulation (facultatif)"
+                      className="w-full min-w-0 bg-secondary border border-border rounded-lg px-2.5 py-2 text-sm" />
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="outline" className="flex-1" disabled={busy} onClick={() => { setCancelId(null); setCancelReason(''); }}>
+                        Garder
+                      </Button>
+                      <Button size="sm" className="flex-1 bg-red-600 hover:bg-red-700 text-white" disabled={busy} onClick={() => handleCancelPrivatisation(event)}>
+                        {busy ? 'Annulation…' : 'Confirmer l\'annulation'}
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <Button size="sm" variant="outline" className="border-red-500/30 text-red-400 hover:bg-red-500/10 gap-1.5"
+                    disabled={busy} onClick={() => { setCancelId(event.id); setCancelReason(''); }}>
+                    <XCircle className="w-3.5 h-3.5" /> Annuler la privatisation
+                  </Button>
+                ))}
                 {/* Modifier le devis (pending ou quoted) */}
                 {!isEditing && (event.status === 'pending' || event.status === 'quoted') && (
                   <Button size="sm" variant="outline"
@@ -335,12 +398,26 @@ export default function AdminEvents() {
                     <Euro className="w-3.5 h-3.5 mr-1" /> {event.price ? 'Modifier' : 'Devis'}
                   </Button>
                 )}
-                <Button size="sm" variant="outline"
-                  className="border-red-500/20 text-red-400 hover:bg-red-500/10 hover:text-red-300 gap-1.5 px-3"
-                  disabled={deleteMutation.isPending}
-                  onClick={() => { if (window.confirm('Supprimer définitivement cette demande ?')) deleteMutation.mutate(event.id); }}>
-                  <Trash2 className="w-3.5 h-3.5" /> Supprimer
-                </Button>
+                {/* Suppression : seulement ce qui n'est pas une vente (en attente, devis, refusée, annulée) */}
+                {!['accepted', 'confirmed'].includes(event.status) && (confirmDeleteId === event.id ? (
+                  <>
+                    <Button size="sm" className="gap-1.5 bg-red-600 hover:bg-red-700 text-white whitespace-normal h-auto py-1.5"
+                      disabled={deleteMutation.isPending}
+                      onClick={() => deleteMutation.mutate(event.id)}>
+                      <Trash2 className="w-3.5 h-3.5 shrink-0" /> {deleteMutation.isPending ? 'Suppression…' : 'Supprimer définitivement'}
+                    </Button>
+                    <Button size="sm" variant="outline" disabled={deleteMutation.isPending} onClick={() => setConfirmDeleteId(null)}>
+                      Annuler
+                    </Button>
+                  </>
+                ) : (
+                  <Button size="sm" variant="outline"
+                    className="border-red-500/20 text-red-400 hover:bg-red-500/10 hover:text-red-300 gap-1.5 px-3"
+                    disabled={deleteMutation.isPending}
+                    onClick={() => setConfirmDeleteId(event.id)}>
+                    <Trash2 className="w-3.5 h-3.5" /> Supprimer
+                  </Button>
+                ))}
               </div>
             </motion.div>
           );

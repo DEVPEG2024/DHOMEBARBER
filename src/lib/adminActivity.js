@@ -50,6 +50,8 @@ export const ACTIVITY_TYPES = {
   appointment_cancelled: { label: 'Rendez-vous annulé', emoji: '❌', adminPath: '/admin/agenda', tone: 'red' },
   // Déplacement fait par le client (l'ancien RDV porte « Client : déplacé au … ») : pas une annulation
   appointment_moved: { label: 'Rendez-vous déplacé', emoji: '📅', adminPath: '/admin/agenda', tone: 'amber' },
+  // Réglage d'alerte seulement (push « Tâche ménage effectuée ») : action de l'équipe, jamais dans le fil
+  cleaning_done: { label: 'Ménage effectué', emoji: '🧹', adminPath: '/admin/cleaning', tone: 'green' },
   order_new: { label: 'Nouvelle commande', emoji: '🛍️', adminPath: '/admin/orders', tone: 'blue' },
   order_cancelled: { label: 'Commande annulée', emoji: '❌', adminPath: '/admin/orders', tone: 'red' },
   review_new: { label: 'Nouvel avis', emoji: '⭐', adminPath: '/admin/reviews', tone: 'amber' },
@@ -183,8 +185,10 @@ export async function fetchAdminActivity({ days = DEFAULT_DAYS } = {}) {
   ] = await Promise.all([
     staffPromise,
     // Pauses et last minute exclus par le serveur : ils n'entrent plus dans la limite de 300 (une
-    // pause récurrente en créait 27 d'un coup et faisait sortir des réservations du fil)
-    safe('Rendez-vous', failed, () => E.Appointment.filter({ status: ['confirmed', 'completed', 'cancelled', 'no_show'] }, '-created_date', 300)),
+    // pause récurrente en créait 27 d'un coup et faisait sortir des réservations du fil). Annulés
+    // exclus aussi : un import de clients crée des centaines de fiches « annulées » d'un coup ; les
+    // réservations annulées ensuite par le client sont reprises de `cancelledAppointments`.
+    safe('Rendez-vous', failed, () => E.Appointment.filter({ status: ['confirmed', 'completed', 'no_show'] }, '-created_date', 300)),
     cancelledPromise,
     safe('Commandes', failed, () => E.Order.list('-created_date', 200)),
     safe('Avis', failed, () => E.Review.list('-created_date', 200)),
@@ -233,8 +237,21 @@ export async function fetchAdminActivity({ days = DEFAULT_DAYS } = {}) {
     if (inWindow(toIso(last.created_date || last.created_at))) failed.push('Rendez-vous (plus de 300 sur la période : les plus anciens manquent)');
   }
 
-  // Rendez-vous réservés (y compris ceux déjà annulés depuis : la réservation a bien eu lieu)
+  // Rendez-vous réservés encore actifs (confirmés, terminés, absents) ; les réservations annulées
+  // depuis par le client sont ajoutées plus bas à partir de `cancelledAppointments`
   for (const apt of newAppointments) {
+    if (!isClientAppointment(apt, staffEmails) || isClientPlaceholder(apt)) continue;
+    push('appointment_new', apt, toIso(apt.created_date || apt.created_at), {
+      ...who(apt),
+      detail: join(serviceNames(apt), appointmentWhen(apt)),
+      amount: toNumber(apt.grand_total) ?? toNumber(apt.total_price),
+      link: appointmentLink(apt),
+    });
+  }
+
+  // Réservations faites puis annulées par le client : la réservation a bien eu lieu (une ligne
+  // annulée n'est plus dans `newAppointments`, donc jamais en double)
+  for (const apt of cancelledAppointments) {
     if (!isClientAppointment(apt, staffEmails) || isClientPlaceholder(apt)) continue;
     push('appointment_new', apt, toIso(apt.created_date || apt.created_at), {
       ...who(apt),

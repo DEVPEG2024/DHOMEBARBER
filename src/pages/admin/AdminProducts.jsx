@@ -93,7 +93,12 @@ export default function AdminProducts() {
           image_url: images[0] || '',
           images,
         };
-        if ((data.stock ?? null) !== data._initialStock) update.stock = data.stock;
+        // Le stock lu à l'ouverture part avec (`expected_stock`, comme Admin → Stock) : si une commande
+        // l'a décompté entre-temps, le serveur répond 409 au lieu d'écraser sa valeur (null = non suivi)
+        if ((data.stock ?? null) !== data._initialStock) {
+          update.stock = data.stock ?? null;
+          update.expected_stock = data._initialStock ?? null;
+        }
         return api.entities.Product.update(data.id, update);
       }
       const { _initialStock, ...rest } = data;
@@ -104,7 +109,20 @@ export default function AdminProducts() {
       setShowDialog(false);
       toast.success('Produit sauvegardé');
     },
-    onError: (err) => toast.error(errorText(err, 'Erreur lors de la sauvegarde')),
+    onError: (err, data) => {
+      if (err?.status === 409 && data?.id) {
+        // Stock changé entre-temps : la fiche reste ouverte avec la saisie ; sa base devient le stock
+        // actuel du serveur (relu), pour qu'un nouvel essai réfléchi passe au lieu d'un 409 en boucle
+        queryClient.invalidateQueries({ queryKey: ['products'] });
+        toast.error(errorText(err, 'Le stock a changé entre-temps : vérifiez avant d\'enregistrer'), { duration: 10000 });
+        api.entities.Product.filter({ id: data.id }, 'name', 1).then((rows) => {
+          const fresh = rows?.[0];
+          if (fresh) setEditProduct((p) => (p && String(p.id) === String(data.id) ? { ...p, _initialStock: fresh.stock ?? null } : p));
+        }).catch(() => {});
+        return;
+      }
+      toast.error(errorText(err, 'Erreur lors de la sauvegarde'));
+    },
   });
 
   const deleteMutation = useMutation({
@@ -381,7 +399,12 @@ export default function AdminProducts() {
                 </div>
                 <div>
                   <Label className="text-xs">Stock</Label>
-                  <Input type="number" value={editProduct.stock || 0} onChange={e => setEditProduct({ ...editProduct, stock: parseInt(e.target.value) || 0 })}
+                  {/* Champ vide = stock non suivi (null) : un produit non suivi ne passe plus à 0 en silence */}
+                  <Input type="number" min="0" step="1" placeholder="non suivi" value={editProduct.stock ?? ''}
+                    onChange={e => {
+                      const n = parseInt(e.target.value, 10);
+                      setEditProduct({ ...editProduct, stock: e.target.value === '' || !Number.isFinite(n) ? null : n });
+                    }}
                     className="bg-secondary border-border mt-1" />
                 </div>
               </div>

@@ -12,7 +12,7 @@ import {
   buildEntries, isColorLens, isBeardLens,
 } from '@/lib/snapLenses';
 import SnapStats from '@/components/snap-admin/SnapStats';
-import SnapLensesTab from '@/components/snap-admin/SnapLensesTab';
+import SnapLensesTab, { snapLensesError } from '@/components/snap-admin/SnapLensesTab';
 import SnapSetupTab, { EnvBadge } from '@/components/snap-admin/SnapSetupTab';
 
 /**
@@ -83,12 +83,13 @@ export default function AdminSnap() {
   const entries = useMemo(() => buildEntries(lenses, catalog), [lenses, catalog]);
   const declares = lenses.some((l) => isColorLens(l) || isBeardLens(l));
 
-  if (configQ.isLoading) {
+  if (!config) {
+    // Échec, ou requête en pause hors ligne (pending + fetchStatus 'paused', isLoading faux : sans
+    // cette garde `config.live` plantait toute l'admin) : LoadError avec Réessayer, jamais « … : Load failed »
+    if (configQ.isError || configQ.isPaused) {
+      return <LoadError what="la configuration des filtres" error={configQ.error} onRetry={() => configQ.refetch()} retrying={configQ.isFetching} />;
+    }
     return <div className="py-20 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>;
-  }
-  // Échec (ou hors ligne) : LoadError avec Réessayer, jamais « … : Load failed »
-  if (configQ.error && !configQ.data) {
-    return <LoadError what="la configuration des filtres" error={configQ.error} onRetry={() => configQ.refetch()} retrying={configQ.isFetching} />;
   }
 
   const status = config.live ? 'live' : config.configured ? 'off' : 'unconfigured';
@@ -175,7 +176,19 @@ export default function AdminSnap() {
                 lensesQ.isLoading
                   ? <li className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin" /> Lecture des lentilles chez Snap…</li>
                   : lensesQ.error
-                    ? <Check>Camera Kit refuse le jeton : {lensesQ.error.message || 'erreur inconnue'}.</Check>
+                    ? (() => {
+                      // Jamais le message anglais du SDK ; le jeton n'est accusé que si Snap l'a vraiment refusé
+                      const err = snapLensesError(lensesQ.error);
+                      return (
+                        <Check>
+                          {err.text}{' '}
+                          {err.token && <><button type="button" onClick={() => setTab('setup')} className="underline text-foreground">Ouvrir Camera Kit</button>{' · '}</>}
+                          <button type="button" onClick={() => lensesQ.refetch()} disabled={lensesQ.isFetching} className="underline text-foreground disabled:opacity-60">
+                            {lensesQ.isFetching ? 'Nouvel essai…' : 'Réessayer'}
+                          </button>
+                        </Check>
+                      );
+                    })()
                     : (
                       <>
                         <Check ok={entries.length > 0} warn={entries.length === 0}>

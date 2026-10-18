@@ -13,7 +13,7 @@
 // Mots bloqués, comparés mot à mot après normalisation (minuscules, sans accents, chiffres « leet »
 // remplacés), puis une seconde fois lettres doublées réduites (« fuuuck », « connnard »). Pas de
 // mot français courant ici : « retard », « con », « baiser » ou « Niger » ne doivent jamais bloquer,
-// ni un vrai nom de famille (Conard, Batard, Salaud, Bitte, Nègre, Fagot) ni « pédale », « chatte »
+// ni un vrai nom de famille (Conard, Batard, Salaud, Bitte, Nègre, Fagot, De Cock) ni « pédale », « chatte »
 // (l'animal), « tapette » (à mouches), « enfoiré » (« les Enfoirés », le concert des Restos du cœur),
 // « negro » (le Rio Negro) : ces mots ne sont bloqués que dans une insulte (PHRASES).
 const WORDS = [
@@ -26,7 +26,7 @@ const WORDS = [
   'chinetoque', 'bamboula', 'nigger', 'nigga', 'faggot', 'tranny',
   // Sexuel explicite
   'branlette', 'branleur', 'porno', 'porn', 'nudes', 'sodomie',
-  'fuck', 'fucking', 'motherfucker', 'bitch', 'cunt', 'whore', 'slut', 'pussy', 'cock',
+  'fuck', 'fucking', 'motherfucker', 'bitch', 'cunt', 'whore', 'slut', 'pussy',
   // Menaces
   'kys',
 ];
@@ -36,7 +36,7 @@ const PHRASES = [
   'nique ta mere', 'niquer ta mere', 'ta mere la pute', 'fils de pute', 'fille de pute',
   'va te faire foutre', 'va te faire enculer', 'je vais te tuer', 'je vais te buter',
   'je vais te defoncer', 'je vais te niquer', 'tue toi', 'suicide toi', 'va crever', 'creve sale',
-  'kill yourself', 'go die',
+  'kill yourself', 'go die', 'suck my cock', 'suck my dick', 'big cock', 'my cock',
   // Mots ordinaires ou noms de famille hors insulte, bloqués seulement dans ces tournures
   'sale pedale', 'grosse pedale', 'sale tapette', 'grosse tapette', 'sale batard', 'espece de batard',
   'espece de salaud', 'sale salaud', 'gros salaud', 'espece de conard', 'suce ma bite', 'grosse bite',
@@ -64,16 +64,24 @@ const squeeze = (word) => word.replace(/([a-z])\1+/g, '$1');
 
 const WORD_SET = new Set(WORDS.map(normalizeForFilter));
 // Formes réduites, sauf celles qui tombent sur un mot ordinaire ou un nom (nigger → niger,
-// connard → conard et faggot → fagot, des noms de famille, petasse → petase, le chapeau grec ;
+// connard → conard et faggot → fagot, des noms de famille, petasse → petase, le chapeau grec,
+// pute → « Putte », un nom de famille : « pute », « putes » et « fils de putte » restent bloqués ;
 // « connnard » ou « fagggot » restent bloqués : la normalisation les ramène à « connard », « faggot »)
-const SQUEEZED_SET = new Set([...WORD_SET].map(squeeze).filter((w) => !['niger', 'conard', 'fagot', 'petase'].includes(w)));
+const SQUEEZED_SET = new Set([...WORD_SET].map(squeeze).filter((w) => !['niger', 'conard', 'fagot', 'petase', 'pute'].includes(w)));
+// Expressions autorisées, retirées du texte avant la recherche (le groupe Suprême NTM, le groupe
+// Pussy Riot) : « ntm » seul ou « Suprême NTM fdp » restent refusés.
+const ALLOWED_PHRASES = ['supreme ntm', 'pussy riot'];
 const PHRASE_LIST = PHRASES.map(normalizeForFilter);
 // Mots assez longs pour être cherchés aussi lettres collées (« c.o.n.n.a.r.d », « s a l o p e »)
 const SPELLED = [...WORD_SET].filter((w) => w.length >= 6);
 
 /** Vrai si le texte, tel quel, contient un terme bloqué. */
 function matchesBlockedTerm(text) {
-  const norm = normalizeForFilter(text);
+  let norm = ` ${normalizeForFilter(text)} `;
+  for (const a of ALLOWED_PHRASES) {
+    while (norm.includes(` ${a} `)) norm = norm.replace(` ${a} `, ' ');
+  }
+  norm = norm.trim();
   if (!norm) return false;
   const tokens = norm.split(' ');
   const blocked = (t) => WORD_SET.has(t) || SQUEEZED_SET.has(squeeze(t));

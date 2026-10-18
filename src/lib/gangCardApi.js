@@ -65,6 +65,9 @@ export const fetchGangAdminOverview = () => apiRequest('GET', apiUrl('/gang-card
  * (`devices` = 0 : le client n'a pas activé les notifications). 409 si relancé il y a moins de 7 jours.
  */
 export const nudgeGangClient = (email) => apiRequest('POST', apiUrl('/gang-card/admin/nudge'), { email });
+/** L'admin retire un client de la Team of the Season (photo ou nom inadaptés) ; y revenir reste son choix. */
+export const removeGangClientFromLeaderboard = (id) =>
+  apiRequest('PUT', apiUrl(`/gang-card/admin/client/${encodeURIComponent(id)}/leaderboard`), { opt_in: false });
 
 export function useGangAdminOverview({ enabled = true } = {}) {
   return useQuery({

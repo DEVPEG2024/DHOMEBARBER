@@ -98,6 +98,14 @@ export default function AdminLeave() {
     }
   };
 
+  // « Demandé le » : instant (ISO en UTC) ramené au jour de Paris (00:40 le 19 = 19, pas 18)
+  const parisDayOf = (ts) => {
+    if (!ts) return '';
+    const d = new Date(ts);
+    if (Number.isNaN(d.getTime())) return String(ts).split('T')[0];
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+  };
+
   const formatDate = (dateStr) => {
     if (!dateStr) return '';
     try {
@@ -184,7 +192,7 @@ export default function AdminLeave() {
                       <p className="text-[10px] text-muted-foreground mt-0.5">Motif : {leave.reason}</p>
                     )}
                     <p className="text-[10px] text-muted-foreground/60 mt-1">
-                      Demandé le {formatDate(leave.requested_at?.split('T')[0] || leave.created_at?.split('T')[0])}
+                      Demandé le {formatDate(parisDayOf(leave.requested_at || leave.created_at))}
                     </p>
                   </div>
 

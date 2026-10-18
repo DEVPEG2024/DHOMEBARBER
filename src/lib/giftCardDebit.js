@@ -182,15 +182,55 @@ export async function debitGiftCard(card, { amount, appointmentId = null, servic
   };
 }
 
-/** Annule un débit (route serveur, 24 h au plus). Résout la carte à jour. */
-export async function undoGiftCardDebit(card, transaction) {
+/**
+ * Annulation côté serveur. Résout la réponse entière : `card`, et selon le serveur `returned`
+ * (montant réellement rendu) et `appointment` ({ closed, payment_method, … } du RDV rattaché).
+ */
+async function undoGiftCardDebitRaw(card, transaction) {
   if (!transaction || transaction.local || !transaction.id) throw localError('Ce débit ne peut pas être annulé ici.');
-  const data = await apiRequest(
+  return apiRequest(
     'POST',
     apiUrl(`/gift-cards/${encodeURIComponent(card.id)}/debit/${encodeURIComponent(transaction.id)}/undo`),
     {},
   );
+}
+
+/** Annule un débit (route serveur, 24 h au plus). Résout la carte à jour. */
+export async function undoGiftCardDebit(card, transaction) {
+  const data = await undoGiftCardDebitRaw(card, transaction);
   return data?.card || null;
+}
+
+/**
+ * Rattache à un RDV un débit fait sans RDV (modes « Prestations » / « Montant libre ») : la part
+ * carte est portée sur le RDV, qui ne sera plus encaissé une seconde fois en CB / espèces.
+ */
+export async function attachGiftCardDebit(card, transactionId, appointmentId, queryClient) {
+  const data = await apiRequest(
+    'POST',
+    apiUrl(`/gift-cards/${encodeURIComponent(card.id)}/debit/${encodeURIComponent(transactionId)}/attach`),
+    { appointment_id: appointmentId },
+  );
+  if (queryClient) {
+    invalidateGiftCardQueries(queryClient, card.id);
+    queryClient.invalidateQueries({ queryKey: ['giftCardTodayAppointments'] });
+    invalidateAppointmentQueries(queryClient);
+  }
+  return data;
+}
+
+// RDV des derniers jours encore à encaisser (rattachement d'un débit fait sans RDV)
+export const giftCardRecentAppointmentsKey = (day) => ['giftCardTodayAppointments', 'recent', day];
+export async function fetchRecentAppointmentsToCash(days = 7, today = parisToday()) {
+  const [y, m, d] = today.split('-').map(Number);
+  const keys = Array.from({ length: days }, (_, i) => new Date(Date.UTC(y, m - 1, d - i)).toISOString().slice(0, 10));
+  const rows = await api.entities.Appointment.filter({ date: keys, status: 'confirmed' }, '-date', 300);
+  return (Array.isArray(rows) ? rows : []).filter((a) => {
+    if (a.payment_method) return false;
+    if (appointmentGiftPaid(a) > 0 && appointmentDue(a) <= 0) return false;
+    const name = String(a.client_name || '').trim();
+    return !!(a.client_email || (name && name !== 'Last Minute'));
+  });
 }
 
 /** Délai pendant lequel le serveur accepte l'annulation d'un débit. */
@@ -355,15 +395,19 @@ export async function reopenAppointment(previous, queryClient) {
 /**
  * Annulation d'un débit depuis l'historique (état d'avant inconnu) : le RDV n'est rouvert que s'il
  * a bien été clôturé par ce débit (payé par carte cadeau, repère exact de la carte et du montant
- * dans la note interne). Résout vrai si le RDV a été rouvert.
+ * dans la note interne). Résout l'état : 'reopened' (rouvert), 'missing' (introuvable), 'open'
+ * (pas encaissé : débit partiel normal), ou { state: 'closed_other', apt } (encaissé autrement :
+ * CB, espèces, ou clôturé par une autre carte) : l'argent rendu reste alors à encaisser.
  */
 export async function reopenAppointmentAfterUndo(appointmentId, card, amount, queryClient) {
   const rows = await api.entities.Appointment.filter({ id: appointmentId }, null, 1);
   const apt = (Array.isArray(rows) ? rows : []).find((a) => String(a.id) === String(appointmentId));
-  if (!apt) return false;
+  if (!apt) return 'missing';
   const tag = giftCardNoteTag(card.code, amount);
   const notes = String(apt.internal_notes || '');
-  if (apt.payment_method !== 'carte_cadeau' || !notes.includes(tag)) return false;
+  const cashed = !!apt.payment_method || apt.status === 'completed' || apt.payment_status === 'paid';
+  if (!cashed) return 'open';
+  if (apt.payment_method !== 'carte_cadeau' || !notes.includes(tag)) return { state: 'closed_other', apt };
   await api.entities.Appointment.update(apt.id, {
     status: 'confirmed',
     payment_method: null,
@@ -372,8 +416,10 @@ export async function reopenAppointmentAfterUndo(appointmentId, card, amount, qu
     internal_notes: notes.replace(tag, '').replace(/\s{2,}/g, ' ').trim(),
   });
   if (queryClient) invalidateAppointmentQueries(queryClient);
-  return true;
+  return 'reopened';
 }
+
+const PAYMENT_LABEL = { cb: 'en CB', especes: 'en espèces', carte_cadeau: 'par une autre carte cadeau' };
 
 /**
  * Annule un débit et remet tout d'aplomb : solde (serveur), RDV clôturé par ce débit rouvert,
@@ -383,17 +429,25 @@ export async function reopenAppointmentAfterUndo(appointmentId, card, amount, qu
  */
 export async function runGiftCardUndo({ card, transaction, previousApt = null, queryClient, onCardChange }) {
   try {
-    const fresh = await undoGiftCardDebit(card, transaction);
+    const data = await undoGiftCardDebitRaw(card, transaction);
+    const fresh = data?.card || null;
+    // Montant réellement rendu (plafonné au montant initial de la carte)
+    const returned = data?.returned != null ? round2(data.returned)
+      : (fresh ? round2(giftCardBalance(fresh) - giftCardBalance(card)) : round2(transaction?.amount));
     let reopenFailed = false;
+    let closedOther = null;
     try {
       if (previousApt) await reopenAppointment(previousApt, queryClient);
       else if (transaction?.appointment_id) {
-        const reopened = await reopenAppointmentAfterUndo(transaction.appointment_id, card, transaction.amount, queryClient);
-        if (!reopened) reopenFailed = 'skip';
+        const state = await reopenAppointmentAfterUndo(transaction.appointment_id, card, transaction.amount, queryClient);
+        if (state && typeof state === 'object' && state.state === 'closed_other') closedOther = state.apt;
+        else if (state !== 'reopened') reopenFailed = 'skip';
       }
     } catch {
       reopenFailed = true;
     }
+    // La part carte du RDV a changé côté serveur : la fiche agenda doit relire le reste à encaisser
+    if (transaction?.appointment_id) invalidateAppointmentQueries(queryClient);
     if (fresh) {
       patchGiftCardCache(queryClient, fresh);
       onCardChange?.(fresh);
@@ -403,6 +457,18 @@ export async function runGiftCardUndo({ card, transaction, previousApt = null, q
     toast.success('Débit annulé', { description: fresh ? `Solde remis à ${formatEuro(giftCardBalance(fresh))}` : undefined });
     if (reopenFailed === true) {
       toast.warning('Solde remis, mais le RDV n\'a pas pu être rouvert : corrigez son encaissement dans l\'agenda (« Corriger l\'encaissement »).', { duration: 10000 });
+    } else if (closedOther) {
+      // RDV déjà encaissé autrement : ces euros ne sont plus payés par rien
+      const apt = closedOther;
+      const day = String(apt.date || '').slice(0, 10);
+      toast.warning(
+        `${formatEuro(returned)} rendus sur la carte, mais le RDV de ${apt.client_name || 'ce client'}${apt.start_time ? ` (${String(apt.start_time).slice(0, 5)})` : ''} reste encaissé ${PAYMENT_LABEL[apt.payment_method] || ''} : ces ${formatEuro(returned)} restent à encaisser. Corrigez son encaissement dans l'agenda (« Corriger l'encaissement »).`.replace(/\s+:/, ' :'),
+        {
+          duration: Infinity,
+          closeButton: true,
+          ...(day ? { action: { label: 'Ouvrir l\'agenda', onClick: () => window.location.assign(`/admin/agenda?view=day&date=${day}`) } } : {}),
+        },
+      );
     }
     return true;
   } catch (err) {

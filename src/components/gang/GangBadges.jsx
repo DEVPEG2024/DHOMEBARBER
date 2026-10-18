@@ -5,6 +5,7 @@ import { Lock, X, Check } from 'lucide-react';
 import { hapticFeedback } from '@/lib/capacitor';
 import { cn } from '@/lib/utils';
 import { GANG_SHIELD_PATH, GANG_INNER_SCALE } from './gangTheme';
+import { useAndroidBack } from '@/lib/useAndroidBack';
 
 /**
  * Écussons de la carte Gang (calculés par le serveur, `card.badges` : liste complète, verrouillés
@@ -177,6 +178,8 @@ export function GangBadgeUnlock({ badges, onDone, accent }) {
     if (index + 1 < list.length) setIndex(index + 1);
     else finish();
   }, [index, list.length, finish]);
+  // Bouton retour d'Android : même fermeture que la croix et Échap
+  useAndroidBack(open, finish);
 
   // Page figée derrière la révélation, Échap au clavier
   useEffect(() => {

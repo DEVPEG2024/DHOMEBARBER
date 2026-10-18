@@ -32,6 +32,18 @@ export function generateTimeSlots(start, end, interval = 30) {
   return slots;
 }
 
+/**
+ * Privatisation confirmée : tout le salon est réservé sur sa fenêtre (minutes depuis minuit).
+ * Mêmes fenêtres que le serveur (`EVENT_SLOT_WINDOWS` de lib/accessControl.js) ; un créneau
+ * absent ou inconnu vaut la journée complète.
+ */
+export const PRIVATE_WINDOWS = {
+  morning: [540, 840],
+  afternoon: [840, 1200],
+  full_day: [540, 1200],
+};
+export const privateWindow = (timeSlot) => PRIVATE_WINDOWS[timeSlot] || PRIVATE_WINDOWS.full_day;
+
 /** Congé approuvé du barber ce jour-là (`dateStr` = `yyyy-MM-dd`). */
 export function isOnLeave(employee, dateStr, timeOffs) {
   return (timeOffs || []).some(t =>
@@ -62,12 +74,14 @@ export function workingHoursOf(employee, date) {
  * @param {Array} timeOffs  congés (tous barbers, filtrés ici sur `employee_id`)
  * @param {number} totalDuration  durée totale des prestations en minutes
  * @param {number} [shortestDuration]  durée de la plus courte prestation choisie (diagnostic « durée »)
- * @returns {{ slots: string[], reason: null | 'leave' | 'off' | 'over' | 'duration' | 'full' }}
+ * @param {Array} [privateEvents]  privatisations confirmées de ce jour (`time_slot`, `status`)
+ * @returns {{ slots: string[], reason: null | 'leave' | 'off' | 'over' | 'duration' | 'full' | 'private' }}
  *   heures `HH:mm` triées ; sans créneau : `leave` congé, `off` ne travaille pas ce jour de la
  *   semaine, `over` plus aucune heure à venir (aujourd'hui), `duration` un créneau plus court
- *   existerait (c'est la durée des prestations qui bloque), `full` journée complète
+ *   existerait (c'est la durée des prestations qui bloque), `full` journée complète, `private`
+ *   salon privatisé sur toutes les heures restantes
  */
-export function analyzeDay(employee, date, appointmentsOfEmployee, timeOffs, totalDuration, shortestDuration = 30) {
+export function analyzeDay(employee, date, appointmentsOfEmployee, timeOffs, totalDuration, shortestDuration = 30, privateEvents = []) {
   if (!employee || !date) return { slots: [], reason: null };
   const dateStr = format(date, 'yyyy-MM-dd');
   if (isOnLeave(employee, dateStr, timeOffs)) return { slots: [], reason: 'leave' };
@@ -80,6 +94,10 @@ export function analyzeDay(employee, date, appointmentsOfEmployee, timeOffs, tot
       const [bh, bm] = apt.end_time.split(':').map(Number);
       return [ah * 60 + am, bh * 60 + bm];
     });
+  // Privatisations confirmées (le serveur refuse tout RDV client qui chevauche leur fenêtre)
+  const privates = (privateEvents || [])
+    .filter(ev => ev && (!ev.status || ev.status === 'confirmed') && (!ev.date || String(ev.date).slice(0, 10) === dateStr))
+    .map(ev => privateWindow(ev.time_slot));
   // Les créneaux déjà passés sont retirés : le serveur les refuse (« Ce créneau est déjà
   // passé »), les afficher mènerait droit à une erreur. La comparaison se fait sur l'instant
   // réel, donc elle reste juste quel que soit le fuseau de l'appareil.
@@ -98,8 +116,15 @@ export function analyzeDay(employee, date, appointmentsOfEmployee, timeOffs, tot
     if (slotEnd > closeMinutes) return false;
     return !busy.some(([aptStart, aptEnd]) => slotStart < aptEnd && slotEnd > aptStart);
   });
-  const slots = freeFor(totalDuration);
+  const outsidePrivate = (slot, duration) => {
+    const [sh, sm] = slot.split(':').map(Number);
+    const start = sh * 60 + sm;
+    return !privates.some(([ps, pe]) => start < pe && start + duration > ps);
+  };
+  const free = freeFor(totalDuration);
+  const slots = free.filter(slot => outsidePrivate(slot, totalDuration));
   if (slots.length > 0) return { slots, reason: null };
+  if (free.length > 0) return { slots: [], reason: 'private' };
   // Aucun créneau : la durée n'est en cause que si un créneau plus court (une demi-heure, ou la
   // plus courte des prestations choisies) tiendrait encore ce jour-là.
   const probe = Math.min(30, shortestDuration || 30);

@@ -400,12 +400,29 @@ function storeNotifications(owner, list) {
  * Compte connecté sur l'appareil (AuthContext : à l'ouverture de session, `null` à la
  * déconnexion). La première fois, l'ancienne liste commune est rattachée à ce compte puis effacée.
  */
+// Dernier compte parti de l'appareil (déconnexion, session coupée par le serveur) : à l'arrivée
+// d'un AUTRE compte, la file du service worker (pushs reçus app fermée, sans propriétaire) est
+// vidée sans rien ranger, sinon le nouveau compte lisait les rendez-vous du précédent
+const NOTIFS_LAST_OWNER_KEY = 'dhb-notif-last-owner';
+// Purge en cours : syncServiceWorkerNotifications et getBadgeCount l'attendent avant de lire
+let swQueuePurge = Promise.resolve();
+
 export function setNotificationsOwner(userId) {
   if (userId == null || userId === '') {
+    const leaving = readLocal(NOTIFS_OWNER_KEY);
+    if (leaving) writeLocal(NOTIFS_LAST_OWNER_KEY, leaving);
     writeLocal(NOTIFS_OWNER_KEY, null);
     return;
   }
   const owner = String(userId);
+  const previousOwner = readLocal(NOTIFS_OWNER_KEY);
+  if (!previousOwner) {
+    const last = readLocal(NOTIFS_LAST_OWNER_KEY);
+    if (last && last !== owner && !isNative) {
+      swQueuePurge = readServiceWorkerNotifications(true).then(() => undefined, () => undefined);
+    }
+  }
+  writeLocal(NOTIFS_LAST_OWNER_KEY, null);
   writeLocal(NOTIFS_OWNER_KEY, owner);
   const legacy = readLocal(NOTIFS_LEGACY_KEY);
   if (legacy != null) {
@@ -514,6 +531,7 @@ async function readServiceWorkerNotifications(consume) {
 export async function syncServiceWorkerNotifications(userId) {
   const owner = ownerOr(userId);
   if (isNative || !owner) return 0;
+  await swQueuePurge;
   const items = await readServiceWorkerNotifications(true);
   if (!items.length) return 0;
   const before = readNotifications(owner);
@@ -530,6 +548,7 @@ export async function getBadgeCount(userId) {
   const local = readNotifications(userId);
   const unread = local.filter(n => !n.read).length;
   if (isNative || !ownerOr(userId)) return unread;
+  await swQueuePurge;
   const pending = (await readServiceWorkerNotifications(false))
     .map(normalizeEntry)
     .filter(entry => entry && !local.some(n => isSameNotification(n, entry)));

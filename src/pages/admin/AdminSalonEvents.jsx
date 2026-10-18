@@ -94,7 +94,7 @@ export default function AdminSalonEvents() {
         toast.success(openInvites ? 'Événement publié : envoyez maintenant les invitations' : 'Événement publié (personne n\'est prévenu tant que vous n\'invitez pas)');
         if (openInvites) setGuestsTarget({ id, initialTab: 'invite', snapshot: { ...snapshot, status: 'published' } });
       } else if (status === 'cancelled') {
-        toast.success('Événement annulé : les invités qui n\'avaient pas refusé reçoivent un push');
+        toast.success('Événement annulé : les invités qui n\'avaient pas refusé sont prévenus par push et par email');
       } else if (status === 'done') {
         toast.success('Événement terminé');
       } else {
@@ -178,13 +178,13 @@ export default function AdminSalonEvents() {
       {eventsQ.error && !loadFailed && (
         <div className="mb-4 flex items-start gap-2 rounded-xl border border-red-500/25 bg-red-500/10 p-3 text-xs text-red-300">
           <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-          <span>Impossible de charger les événements : {eventsQ.error.message}</span>
+          <span>Impossible de charger les événements : {adminErrorMessage(eventsQ.error, 'le serveur ne répond pas')}</span>
         </div>
       )}
       {!eventsQ.error && invitesQ.error && (
         <div className="mb-4 flex items-start gap-2 rounded-xl border border-amber-500/25 bg-amber-500/10 p-3 text-xs text-amber-300">
           <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-          <span>Les jauges d'invités ne sont pas disponibles : {invitesQ.error.message}</span>
+          <span>Les jauges d'invités ne sont pas disponibles : {adminErrorMessage(invitesQ.error, 'le serveur ne répond pas')}</span>
         </div>
       )}
 

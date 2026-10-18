@@ -61,8 +61,21 @@ if (!isNative && 'serviceWorker' in navigator) {
       updateBadge();
     }
 
+    // Toucher une notification : navigation dans l'app, sans rechargement (une saisie en cours
+    // n'est pas perdue), et rien du tout si l'adresse visée est déjà ouverte. Chemin, requête et
+    // fragment comparés : /admin/agenda?date=… doit encore changer de jour. Même garde que
+    // pushNotifications.js côté natif (« / » mais pas « // »)
     if (event.data?.type === 'NAVIGATE') {
-      window.location.href = event.data.url;
+      const url = event.data.url;
+      if (typeof url === 'string' && url.startsWith('/') && !url.startsWith('//')) {
+        const current = window.location.pathname + window.location.search + window.location.hash;
+        if (url !== current) {
+          window.history.pushState({}, '', url);
+          window.dispatchEvent(new PopStateEvent('popstate'));
+        }
+      } else if (typeof url === 'string' && url) {
+        window.location.href = url; // URL absolue ou inattendue : comportement d'avant
+      }
     }
   });
 

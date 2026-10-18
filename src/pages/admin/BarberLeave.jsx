@@ -12,6 +12,7 @@ import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import LoadError from '@/components/shared/LoadError';
+import { agendaErrorMessage } from '@/components/agenda/agendaUtils';
 
 const LEAVE_TYPES = [
   { value: 'vacation', label: 'Vacances' },
@@ -76,10 +77,38 @@ export default function BarberLeave() {
       setForm({ start_date: '', end_date: '', type: 'vacation', reason: '' });
       setShowForm(false);
     } catch (err) {
-      toast.error('Erreur lors de l\'envoi de la demande');
+      // Message du serveur (« Aucun profil barber associé à ce compte »…), sinon le repli
+      toast.error(agendaErrorMessage(err, 'Erreur lors de l\'envoi de la demande'));
     } finally {
       setSaving(false);
     }
+  };
+
+  // Retirer sa demande encore en attente (erreur de date, changement d'avis) : deux taps
+  const [confirmWithdrawId, setConfirmWithdrawId] = useState(null);
+  const [withdrawingId, setWithdrawingId] = useState(null);
+  const handleWithdraw = async (leave) => {
+    if (withdrawingId) return;
+    setWithdrawingId(leave.id);
+    try {
+      await api.entities.TimeOff.delete(leave.id);
+      toast.success('Demande retirée');
+      setConfirmWithdrawId(null);
+    } catch (err) {
+      toast.error(agendaErrorMessage(err, 'Impossible de retirer la demande'));
+    } finally {
+      setWithdrawingId(null);
+      // Le statut a pu changer entre-temps (traitée par l'admin) : liste relue dans tous les cas
+      queryClient.invalidateQueries({ queryKey: ['timeOffs'] });
+    }
+  };
+
+  // « Demandé le » : instant (ISO en UTC) ramené au jour de Paris (00:40 le 19 = 19, pas 18)
+  const parisDayOf = (ts) => {
+    if (!ts) return '';
+    const d = new Date(ts);
+    if (Number.isNaN(d.getTime())) return String(ts).split('T')[0];
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
   };
 
   const formatDate = (dateStr) => {
@@ -195,10 +224,32 @@ export default function BarberLeave() {
                       <p className="text-[10px] text-muted-foreground mt-0.5">{leave.reason}</p>
                     )}
                     <p className="text-[10px] text-muted-foreground/60 mt-1">
-                      Demandé le {formatDate(leave.requested_at?.split('T')[0] || leave.created_at?.split('T')[0])}
+                      Demandé le {formatDate(parisDayOf(leave.requested_at || leave.created_at))}
                     </p>
                   </div>
                 </div>
+                {leave.status === 'pending' && (
+                  confirmWithdrawId === leave.id ? (
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <span className="text-xs text-foreground">Confirmer le retrait ?</span>
+                      <Button size="sm" variant="destructive" className="h-8 text-xs" disabled={withdrawingId === leave.id}
+                        onClick={() => handleWithdraw(leave)}>
+                        {withdrawingId === leave.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Retirer'}
+                      </Button>
+                      <Button size="sm" variant="outline" className="h-8 text-xs" disabled={withdrawingId === leave.id}
+                        onClick={() => setConfirmWithdrawId(null)}>
+                        Annuler
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="mt-3 flex justify-end">
+                      <Button size="sm" variant="ghost" className="h-8 text-xs text-red-400 hover:bg-red-500/10"
+                        onClick={() => setConfirmWithdrawId(leave.id)}>
+                        Retirer la demande
+                      </Button>
+                    </div>
+                  )
+                )}
               </motion.div>
             );
           })}

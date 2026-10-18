@@ -637,6 +637,13 @@ export default function Feed() {
   const [blockTarget, setBlockTarget] = useState(null);
   const [blocking, setBlocking] = useState(false);
   const [handlingReport, setHandlingReport] = useState(null);
+  // « Supprimer le contenu » en deux taps (publication, photo, commentaires et réactions effacés)
+  const [confirmReportDelete, setConfirmReportDelete] = useState(null);
+  useEffect(() => {
+    if (!confirmReportDelete || handlingReport) return undefined;
+    const t = setTimeout(() => setConfirmReportDelete(null), 4000);
+    return () => clearTimeout(t);
+  }, [confirmReportDelete, handlingReport]);
 
   // Android : le bouton retour ferme la fenêtre du dessus (comme sa croix), sans quitter le fil
   useAndroidBack(showComposer, () => setShowComposer(false));
@@ -1006,6 +1013,7 @@ export default function Feed() {
       queryClient.invalidateQueries({ queryKey: ['postReports'] });
     } finally {
       setHandlingReport(null);
+      setConfirmReportDelete(null);
     }
   };
 
@@ -1163,10 +1171,28 @@ export default function Feed() {
                     >
                       <Check className="w-3.5 h-3.5" /> Clore
                     </button>
+                  ) : confirmReportDelete === r.id ? (
+                  <>
+                  <span className="self-center text-xs text-foreground">Supprimer ?</span>
+                  <button
+                    onClick={() => handleReport(r, 'delete')}
+                    disabled={handlingReport === r.id}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-red-500 text-white text-xs font-semibold hover:bg-red-600 transition-colors disabled:opacity-50"
+                  >
+                    {handlingReport === r.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />} Oui, supprimer
+                  </button>
+                  <button
+                    onClick={() => setConfirmReportDelete(null)}
+                    disabled={handlingReport === r.id}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-secondary text-muted-foreground text-xs font-semibold hover:text-foreground transition-colors disabled:opacity-50"
+                  >
+                    Non
+                  </button>
+                  </>
                   ) : (
                   <>
                   <button
-                    onClick={() => handleReport(r, 'delete')}
+                    onClick={() => { hapticFeedback(); setConfirmReportDelete(r.id); }}
                     disabled={handlingReport === r.id}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-red-500/15 text-red-400 text-xs font-semibold hover:bg-red-500/25 transition-colors disabled:opacity-50"
                   >

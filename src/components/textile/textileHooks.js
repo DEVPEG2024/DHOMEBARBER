@@ -143,6 +143,14 @@ export function useTextileActions() {
       invalidate();
     },
     onError: (err) => {
+      // Réseau coupé ou délai dépassé : la précommande a peut-être été enregistrée (réponse
+      // perdue). On ne dit pas « réessaie » : la vue est relue, le serveur rend la même
+      // précommande à un nouvel essai (pas de doublon)
+      if (!err?.status) {
+        toast.error('La réservation a peut-être été enregistrée : vérifiez Mes réservations avant de réessayer.', { duration: 10000 });
+        invalidate();
+        return;
+      }
       toast.error(errorMessage(err, 'Réservation impossible'));
       // Stock pris entre-temps (409) : on recharge pour afficher le vrai restant
       if (err?.status === 409) invalidate();

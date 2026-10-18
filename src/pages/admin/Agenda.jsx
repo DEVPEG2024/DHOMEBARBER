@@ -28,7 +28,7 @@ import {
   BARBER_COLORS, timeToMinutes, toDateStr, parseDateParam, visibleRange, datesBetween,
   fetchAppointmentsForDates, agendaQueryKey, invalidateAppointmentQueries,
   isBreak, isLastMinuteSlot, slotIssues, aptDuration, isUnclaimedLastMinute,
-  isCancelledLike, minutesToTime, agendaErrorMessage, appointmentEndParis, isClientPlaceholder,
+  isCancelledLike, minutesToTime, agendaErrorMessage, appointmentEndParis, isClientPlaceholder, shortDayLabel,
 } from '@/components/agenda/agendaUtils';
 
 const VIEWS = ['day', 'week', 'month'];
@@ -58,6 +58,10 @@ const SWIPE_MAX_MS = 600;
 const LINKED_ORDERS_MAX_IDS = 100;
 const NO_LINKED_ORDERS = new Map();
 
+// Privatisations (mêmes libellés que la page Privatisations de l'admin)
+const PRIVATE_TYPES = { evjg: 'EVJG', anniversaire: 'Anniversaire', team_building: 'Team Building', autre: 'Événement privé' };
+const PRIVATE_SLOTS = { morning: 'matinée 9h-14h', afternoon: 'après-midi 14h-20h', full_day: 'journée 9h-20h' };
+
 export default function Agenda() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -83,6 +87,16 @@ export default function Agenda() {
       return next;
     }, { replace: true });
   }, [setSearchParams]);
+
+  // Passage de minuit : si l'adresse montrait le jour qui vient de finir (« Aujourd'hui », retour
+  // depuis demain, lien du planning), elle suit le nouveau jour ; une date choisie volontairement
+  // dans le passé ou le futur reste inchangée. Vue et barber conservés, historique intact (replace).
+  const prevTodayKeyRef = useRef(parisTodayKey);
+  useEffect(() => {
+    const prev = prevTodayKeyRef.current;
+    prevTodayKeyRef.current = parisTodayKey;
+    if (prev !== parisTodayKey && dateParam === prev) updateParams({ date: parisTodayKey });
+  }, [parisTodayKey, dateParam, updateParams]);
 
   const setView = useCallback((v) => {
     try { localStorage.setItem(VIEW_STORAGE_KEY, v); } catch { /* navigation privée */ }
@@ -114,6 +128,18 @@ export default function Agenda() {
     placeholderData: keepPreviousData, // la grille ne clignote pas à vide pendant le chargement
     refetchInterval: 60000, // une réservation client apparaît sans recharger la page
   });
+
+  // Privatisations confirmées de la période : le salon est réservé (le serveur refuse les RDV
+  // clients sur leur fenêtre) ; l'équipe le voit d'un coup d'œil, sans blocage pour elle
+  const { data: privateEvents = [] } = useQuery({
+    queryKey: ['agendaPrivateEvents', dates[0], dates[dates.length - 1]],
+    queryFn: () => api.entities.Event.filter({ date: dates, status: 'confirmed' }, 'date', 100),
+    staleTime: 60000,
+  });
+  const privateInView = useMemo(
+    () => (Array.isArray(privateEvents) ? privateEvents : []).filter((ev) => dateSet.has(String(ev.date || '').slice(0, 10))),
+    [privateEvents, dateSet],
+  );
 
   // Période précédente et suivante préchargées : les flèches et le glissé répondent tout de suite
   useEffect(() => {
@@ -590,6 +616,17 @@ export default function Agenda() {
           Last Minute
         </button>
       </div>
+
+      {privateInView.length > 0 && (
+        <div role="status" className="mb-3 space-y-1">
+          {privateInView.map((ev) => (
+            <p key={ev.id} className="rounded-xl border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-xs text-violet-200 break-words">
+              🔒 Privatisation : {PRIVATE_TYPES[ev.event_type] || 'Privatisation'} · {PRIVATE_SLOTS[ev.time_slot] || PRIVATE_SLOTS.full_day}
+              {view !== 'day' ? ` · ${shortDayLabel(ev.date)}` : ''}{ev.client_name ? ` · ${ev.client_name}` : ''}
+            </p>
+          ))}
+        </div>
+      )}
 
       {isError && (
         <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2">

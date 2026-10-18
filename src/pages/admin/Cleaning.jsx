@@ -95,6 +95,11 @@ export default function Cleaning() {
     enabled: showHistory,
   });
   const history = Array.isArray(historyQuery.data) ? historyQuery.data : [];
+  // Hors connexion : requête en pause (pending + paused) = échec, pas « Aucune tâche effectuée »
+  // (repliée : fetchStatus 'idle', rien à signaler)
+  const historyFailed = (historyQuery.isError && !historyQuery.data) || (historyQuery.isPending && historyQuery.fetchStatus === 'paused');
+  // Suppression d'une tâche en deux taps (la boîte native était en anglais sur iPhone)
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
   // Mutations
   const saveMutation = useMutation({
@@ -117,6 +122,7 @@ export default function Cleaning() {
     mutationFn: (id) => api.entities.CleaningTask.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['cleaningTasks'] });
+      setConfirmDeleteId(null);
       toast.success('Tâche supprimée');
     },
     onError: actionError,
@@ -229,16 +235,29 @@ export default function Cleaning() {
                   <p className="text-sm font-semibold">{task.name}</p>
                   {task.description && <p className="text-[11px] text-muted-foreground">{task.description}</p>}
                 </div>
-                <div className="flex gap-1">
-                  <Button variant="ghost" size="icon" className="h-8 w-8"
-                    onClick={() => { setEditTask({ ...task }); setShowDialog(true); }}>
-                    <Pencil className="w-3.5 h-3.5" />
-                  </Button>
-                  <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10"
-                    onClick={() => { if (window.confirm('Supprimer cette tâche ?')) deleteMutation.mutate(task.id); }}>
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </Button>
-                </div>
+                {confirmDeleteId === task.id ? (
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <Button size="sm" variant="destructive" className="h-8 px-2.5 text-xs" disabled={deleteMutation.isPending}
+                      onClick={() => deleteMutation.mutate(task.id)}>
+                      {deleteMutation.isPending ? 'Suppression…' : 'Supprimer'}
+                    </Button>
+                    <Button size="sm" variant="outline" className="h-8 px-2.5 text-xs" disabled={deleteMutation.isPending}
+                      onClick={() => setConfirmDeleteId(null)}>
+                      Annuler
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex gap-1 shrink-0">
+                    <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="Modifier la tâche"
+                      onClick={() => { setEditTask({ ...task }); saveMutation.reset(); setShowDialog(true); }}>
+                      <Pencil className="w-3.5 h-3.5" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10" aria-label="Supprimer la tâche"
+                      onClick={() => setConfirmDeleteId(task.id)}>
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -382,7 +401,7 @@ export default function Cleaning() {
         {showHistory && (
           <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}
             className="mt-2 bg-card border border-border rounded-xl overflow-hidden">
-            {historyQuery.isError && !historyQuery.data ? (
+            {historyFailed ? (
               <LoadError compact what="l'historique" error={historyQuery.error} onRetry={historyQuery.refetch} retrying={historyQuery.isFetching} className="m-2" />
             ) : historyQuery.isLoading ? (
               <p className="text-xs text-muted-foreground text-center py-6">Chargement…</p>
@@ -449,9 +468,10 @@ export default function Cleaning() {
                 <Label className="text-xs">Active</Label>
                 <Switch checked={editTask.is_active} onCheckedChange={v => setEditTask({ ...editTask, is_active: v })} />
               </div>
-              <Button className="w-full" onClick={() => saveMutation.mutate(editTask)}
-                disabled={!editTask.name}>
-                Sauvegarder
+              {/* Double tap sur réseau lent : une seule tâche créée */}
+              <Button className="w-full" onClick={() => { if (saveMutation.isPending) return; saveMutation.mutate(editTask); }}
+                disabled={!editTask.name || saveMutation.isPending}>
+                {saveMutation.isPending ? 'Enregistrement…' : 'Sauvegarder'}
               </Button>
             </div>
           )}

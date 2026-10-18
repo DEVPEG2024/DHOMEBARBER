@@ -39,6 +39,9 @@ export default function Team() {
   const [originalEmployee, setOriginalEmployee] = useState(null);
   const openToken = React.useRef(0);
   const [showDialog, setShowDialog] = useState(false);
+  // Photo en cours d'envoi (compression + upload) : « Sauvegarder » attend, sinon la fiche partait
+  // sans elle ; la photo d'une fiche fermée ou changée n'est jamais posée sur une autre
+  const [photoUploading, setPhotoUploading] = useState(false);
   const [cropSrc, setCropSrc] = useState(null);
   const [showCrop, setShowCrop] = useState(false);
   // Fiche dont on édite les réalisations (id : la fiche affichée suit le cache rechargé)
@@ -99,6 +102,7 @@ export default function Team() {
   const openNew = () => {
     const nextColor = BARBER_COLORS[employees.length % BARBER_COLORS.length];
     openToken.current++;
+    setPhotoUploading(false);
     setOriginalEmployee(null);
     setEditEmployee({ name: '', title: '', bio: '', email: '', phone: '', is_active: true, working_hours: defaultHours, color: nextColor });
     setShowDialog(true);
@@ -109,6 +113,7 @@ export default function Team() {
   const openEdit = async (emp) => {
     setConfirmDeleteId(null);
     const token = ++openToken.current;
+    setPhotoUploading(false);
     const initial = { ...emp, working_hours: emp.working_hours || defaultHours };
     setOriginalEmployee(emp);
     setEditEmployee(initial);
@@ -117,8 +122,19 @@ export default function Team() {
       const rows = await api.entities.Employee.filter({ id: emp.id }, null, 1);
       const fresh = Array.isArray(rows) ? rows[0] : null;
       if (!fresh || token !== openToken.current) return;
+      const freshForm = { ...fresh, working_hours: fresh.working_hours || defaultHours };
+      setEditEmployee((cur) => {
+        if (!cur) return cur;
+        if (sameValue(cur, initial)) return freshForm;
+        // Déjà touché : on part de la ligne fraîche et on ne garde que les champs modifiés par
+        // l'admin (sinon photo, vidéo et horaires du cache périmé partaient comme « modifiés »)
+        const next = { ...freshForm };
+        for (const key of FORM_FIELDS) {
+          if (!sameValue(cur[key], initial[key])) next[key] = cur[key];
+        }
+        return next;
+      });
       setOriginalEmployee(fresh);
-      setEditEmployee((cur) => (cur && sameValue(cur, initial) ? { ...fresh, working_hours: fresh.working_hours || defaultHours } : cur));
     } catch { /* hors ligne : la fiche du cache reste, la sauvegarde ne renvoie que les champs changés */ }
   };
 
@@ -200,7 +216,7 @@ export default function Team() {
             </div>
             {confirmDeleteId === emp.id && (
               <p className="text-[11px] text-muted-foreground mt-2">
-                Suppression définitive. Pour le retirer de la réservation sans rien perdre, passez plutôt sa fiche en Inactif.
+                Suppression définitive. Pour le retirer de la réservation sans rien perdre, passez plutôt sa fiche en Inactif (il perd aussi l'accès à l'app).
               </p>
             )}
           </div>
@@ -208,7 +224,7 @@ export default function Team() {
       </div>
       )}
 
-      <Dialog open={showDialog} onOpenChange={setShowDialog}>
+      <Dialog open={showDialog} onOpenChange={(o) => { if (!o) { openToken.current++; setPhotoUploading(false); } setShowDialog(o); }}>
         <DialogContent className="bg-card border-border max-w-md max-h-[90vh] overflow-y-auto overflow-x-hidden grid-cols-[minmax(0,1fr)]">
           <DialogHeader>
             <DialogTitle className="font-display">{editEmployee?.id ? 'Modifier' : 'Nouveau'} Collaborateur</DialogTitle>
@@ -227,8 +243,8 @@ export default function Team() {
                     </span>
                   )}
                 </div>
-                <label className="cursor-pointer">
-                  <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                <label className={photoUploading ? 'pointer-events-none opacity-60' : 'cursor-pointer'}>
+                  <input type="file" accept="image/*" className="hidden" disabled={photoUploading} onChange={(e) => {
                     const file = e.target.files[0];
                     if (!file) return;
                     const reader = new FileReader();
@@ -237,7 +253,7 @@ export default function Team() {
                     e.target.value = '';
                   }} />
                   <span className="flex items-center gap-1.5 text-xs text-primary border border-primary/30 bg-primary/5 hover:bg-primary/10 px-3 py-1.5 rounded-lg transition-all cursor-pointer">
-                    <Upload className="w-3 h-3" /> Changer la photo
+                    <Upload className="w-3 h-3" /> {photoUploading ? 'Envoi de la photo…' : 'Changer la photo'}
                   </span>
                 </label>
                 <p className="text-[10px] text-muted-foreground text-center">Format portrait (1748 × 2480), buste centré, fond sombre</p>
@@ -320,10 +336,15 @@ export default function Team() {
                 <Label className="text-xs">Actif</Label>
                 <Switch checked={editEmployee.is_active} onCheckedChange={v => setEditEmployee({ ...editEmployee, is_active: v })} />
               </div>
+              {editEmployee.id && (
+                <p className="text-[11px] text-muted-foreground -mt-2">
+                  Inactif retire aussi l'accès de ce barber à l'app (agenda, clients). Pour un départ définitif, supprimez son compte dans Comptes barbers.
+                </p>
+              )}
               <Button className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
-                disabled={saveMutation.isPending}
-                onClick={() => { if (saveMutation.isPending) return; saveMutation.mutate(editEmployee); }}>
-                {saveMutation.isPending ? 'Enregistrement…' : 'Sauvegarder'}
+                disabled={saveMutation.isPending || photoUploading}
+                onClick={() => { if (saveMutation.isPending || photoUploading) return; saveMutation.mutate(editEmployee); }}>
+                {photoUploading ? 'Envoi de la photo…' : saveMutation.isPending ? 'Enregistrement…' : 'Sauvegarder'}
               </Button>
             </div>
           )}
@@ -352,11 +373,16 @@ export default function Team() {
         cropShape="rect"
         aspect={BARBER_PHOTO_RATIO}
         onCropComplete={async (croppedFile) => {
+          const token = openToken.current;
+          setPhotoUploading(true);
           try {
             const { file_url } = await api.integrations.Core.UploadFile({ file: croppedFile });
-            setEditEmployee(prev => ({ ...prev, photo_url: file_url }));
-          } catch {
-            toast.error('Erreur lors de l\'upload de la photo');
+            if (token === openToken.current) setEditEmployee(prev => (prev ? { ...prev, photo_url: file_url } : prev));
+            else toast.warning('Photo non enregistrée : la fiche a été fermée ou changée');
+          } catch (err) {
+            toast.error(serverText(err, 'Impossible d\'envoyer la photo. Vérifiez la connexion et réessayez.'));
+          } finally {
+            if (token === openToken.current) setPhotoUploading(false);
           }
         }}
       />

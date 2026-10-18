@@ -68,6 +68,7 @@ function mergeDayReasons(reasons) {
   if (reasons.every(r => r === 'off')) return 'closed';
   if (reasons.every(r => r === 'off' || r === 'leave')) return 'nobody';
   if (reasons.includes('duration')) return 'duration';
+  if (reasons.includes('private')) return 'private';
   if (reasons.every(r => r === 'off' || r === 'leave' || r === 'over')) return 'over';
   return 'full';
 }
@@ -96,6 +97,8 @@ function emptyDayMessage(reason, { barberName, date, totalDuration, serviceCount
       return { title: 'Aucun barber ne travaille ce jour-là', hint: 'Choisissez une autre date.' };
     case 'over':
       return { title: 'Plus aucun créneau aujourd\'hui', hint: 'La journée est terminée : choisissez une autre date.' };
+    case 'private':
+      return { title: 'Le salon est privatisé ce jour-là', hint: 'Choisissez une autre date, ou une heure en dehors de la privatisation.' };
     case 'duration':
       return {
         title: 'Pas de créneau assez long ce jour-là',
@@ -597,12 +600,12 @@ export default function Booking() {
   });
   const myAppointments = myAppointmentsQuery.data || EMPTY_LIST;
   // Délai d'annulation du salon (mêmes requête et cache que Mes rendez-vous) : un RDV qui entre
-  // dans ce délai ne se déplace plus en ligne (le serveur refuserait d'annuler l'ancien)
+  // dans ce délai ne se déplace plus en ligne (le serveur refuserait d'annuler l'ancien), et un
+  // RDV pris à moins de N heures ne pourra plus être annulé ni déplacé en ligne (bandeau)
   const settingsQuery = useQuery({
     queryKey: ['salonSettings'],
     staleTime: 5 * 60 * 1000,
     queryFn: () => api.entities.SalonSettings.list(),
-    enabled: !!rescheduleId,
   });
   const cancelHours = parseInt(settingsQuery.data?.[0]?.cancellation_hours, 10) || 0;
   /** Le RDV commence-t-il dans moins de `cancelHours` heures (calculé à l'instant `nowMs`) ? */
@@ -696,13 +699,24 @@ export default function Booking() {
   const dayRows = dayQuery.data;
   const appointments = useMemo(() => (dayRows || []).filter(blocksClient), [dayRows]);
 
+  // Privatisations confirmées du jour : le salon n'accepte aucun RDV sur leur fenêtre. Un échec
+  // de lecture ne bloque pas la réservation (le serveur revérifie et refuse en 409).
+  const privateEventsQuery = useQuery({
+    queryKey: ['privateEvents', selectedDateStr],
+    queryFn: () => api.entities.Event.filter({ date: selectedDateStr, status: 'confirmed' }, 'date', 50),
+    enabled: slotsEnabled,
+    staleTime: 60 * 1000,
+  });
+  const privateEvents = privateEventsQuery.data || EMPTY_LIST;
+
   // Créneaux calculables seulement quand RDV, pauses et congés sont là : sans eux, toute la
   // journée paraîtrait libre. Chargement → squelette ; échec (sans données) → écran d'erreur.
   // « Peu importe » : la liste des barbers fait aussi partie du calcul
   const slotQueries = anyBarber
     ? [dayQuery, timeOffsQuery, employeesQuery]
     : [dayQuery, timeOffsQuery];
-  const slotsLoading = slotsEnabled && slotQueries.some(q => q.isPending);
+  const slotsLoading = slotsEnabled && (slotQueries.some(q => q.isPending)
+    || (privateEventsQuery.isPending && privateEventsQuery.fetchStatus !== 'paused'));
   const slotsFailedQuery = slotsEnabled && !slotsLoading
     ? slotQueries.find(q => q.isError && q.data === undefined) || null
     : null;
@@ -816,7 +830,7 @@ export default function Booking() {
     if (!selectedDate || !slotsReady) return { options: [], reason: null };
     if (!anyBarber) {
       if (!selectedEmployee) return { options: [], reason: null };
-      const { slots, reason } = analyzeDay(selectedEmployee, selectedDate, appointments, timeOffs, totalDuration, shortestDuration);
+      const { slots, reason } = analyzeDay(selectedEmployee, selectedDate, appointments, timeOffs, totalDuration, shortestDuration, privateEvents);
       return { options: slots.map(time => ({ time, employee: selectedEmployee })), reason };
     }
     const byEmployee = new Map();
@@ -829,7 +843,7 @@ export default function Booking() {
     const reasons = [];
     const ordered = [...employees].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
     for (const emp of ordered) {
-      const { slots, reason } = analyzeDay(emp, selectedDate, byEmployee.get(String(emp.id)) || [], timeOffs, totalDuration, shortestDuration);
+      const { slots, reason } = analyzeDay(emp, selectedDate, byEmployee.get(String(emp.id)) || [], timeOffs, totalDuration, shortestDuration, privateEvents);
       if (reason) reasons.push(reason);
       for (const time of slots) {
         if (!firstAvailable.has(time)) firstAvailable.set(time, emp);
@@ -839,7 +853,24 @@ export default function Booking() {
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([time, employee]) => ({ time, employee }));
     return { options, reason: options.length > 0 ? null : mergeDayReasons(reasons) };
-  }, [anyBarber, selectedEmployee, selectedDate, slotsReady, appointments, timeOffs, totalDuration, shortestDuration, employees]);
+  }, [anyBarber, selectedEmployee, selectedDate, slotsReady, appointments, timeOffs, totalDuration, shortestDuration, employees, privateEvents]);
+
+  // L'heure choisie est-elle encore réservable ? (prestation ajoutée après coup, créneau pris entre-
+  // temps) null = on ne sait pas encore (chargement) : on ne tranche pas.
+  const selectedSlotValid = useMemo(() => {
+    if (!selectedTime || !selectedDate || !slotsReady) return null;
+    if (!anyBarber) return slotOptions.some(o => o.time === selectedTime);
+    if (!selectedEmployee) return false;
+    // « Peu importe » : le barber retenu doit encore être libre à cette heure (pas forcément le
+    // premier de l'union, sinon un autre barber « passerait devant » à tort)
+    const own = appointments.filter(a => String(a.employee_id) === String(selectedEmployee.id));
+    return analyzeDay(selectedEmployee, selectedDate, own, timeOffs, totalDuration, shortestDuration, privateEvents).slots.includes(selectedTime);
+  }, [selectedTime, selectedDate, slotsReady, anyBarber, selectedEmployee, slotOptions, appointments, timeOffs, totalDuration, shortestDuration, privateEvents]);
+
+  // RDV qui commence dans moins de `cancelHours` heures : il ne pourra plus être annulé ni déplacé
+  // en ligne. Rien tant que les paramètres du salon ne sont pas chargés.
+  const lateBooking = !!selectedDate && !!selectedTime && cancelHours > 0 && !settingsQuery.isPending
+    && parisInstant(format(selectedDate, 'yyyy-MM-dd'), selectedTime) - Date.now() < cancelHours * 3600 * 1000;
 
   // Lien Last Minute : à l'arrivée sur l'étape Date & Heure, l'heure du lien est choisie si elle
   // figure parmi les créneaux calculés pour les prestations choisies (sinon rien, sans erreur)
@@ -926,9 +957,16 @@ export default function Booking() {
     hapticFeedback();
   };
 
-  // Redirection de l'écran de succès : annulée si la page est quittée avant (bouton retour…)
+  // Redirection de l'écran de succès : annulée si la page est quittée avant (bouton retour…).
+  // `mountedRef` : la page est-elle encore affichée ? TanStack Query exécute le onSuccess du hook
+  // même après le démontage : sans ce repère, un retour pendant l'envoi ramenait de force sur
+  // « Mes rendez-vous » 4 s plus tard, depuis la page où se trouvait le client.
   const successTimer = useRef(null);
-  useEffect(() => () => clearTimeout(successTimer.current), []);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; clearTimeout(successTimer.current); };
+  }, []);
 
   /** Étape 2 : barber précis (quitte le mode « peu importe »). Le créneau est réinitialisé si le barber change. */
   const chooseBarber = (emp) => {
@@ -1038,7 +1076,20 @@ export default function Booking() {
           await api.entities.Order.create({ items, appointment_id: created.id });
           addon = { ok: true, count };
         } catch (err) {
-          addon = { ok: false, count, message: serverMessage(err, 'le serveur n\'a pas répondu') };
+          if (created?.id && (isNetworkError(err) || err?.timeout)) {
+            // Réponse perdue : la commande a peut-être été créée. Un seul nouvel essai, sans risque
+            // (le serveur rend la commande existante pour le même rendez-vous)
+            try {
+              await api.entities.Order.create({ items, appointment_id: created.id });
+              addon = { ok: true, count };
+            } catch (err2) {
+              addon = (isNetworkError(err2) || err2?.timeout)
+                ? { ok: false, uncertain: true, count }
+                : { ok: false, count, message: serverMessage(err2, 'le serveur n\'a pas répondu') };
+            }
+          } else {
+            addon = { ok: false, count, message: serverMessage(err, 'le serveur n\'a pas répondu') };
+          }
         }
       }
       return { created, previous, addon };
@@ -1058,14 +1109,23 @@ export default function Booking() {
       const plural = addon?.count > 1;
       if (addon?.ok) {
         toast.success(plural ? 'Rendez-vous confirmé, vos produits vous attendront !' : 'Rendez-vous confirmé, votre produit vous attendra !');
+      } else if (addon?.uncertain) {
+        // Ne pas renvoyer vers la Boutique : la commande est peut-être déjà enregistrée
+        toast.warning(`Rendez-vous confirmé. Connexion perdue pendant l'ajout ${plural ? 'des produits' : 'du produit'} : ${plural ? 'ils ont' : 'il a'} peut-être été enregistré${plural ? 's' : ''}. Vérifiez dans Mes commandes avant de recommander.`, { duration: 10000 });
       } else if (addon) {
         // Le message dit déjà que le rendez-vous est confirmé : pas de second toast
         toast.warning(
           `Rendez-vous confirmé, mais ${plural ? 'les produits n\'ont pas pu être ajoutés' : 'le produit n\'a pas pu être ajouté'} : ${addon.message}. Vous pouvez ${plural ? 'les' : 'le'} commander dans la Boutique.`,
           { duration: 10000 },
         );
-      } else {
+      } else if (mountedRef.current) {
         toast.success('Rendez-vous confirmé !');
+      }
+      if (!mountedRef.current) {
+        // Page quittée pendant l'envoi : ni écran de succès ni redirection forcée
+        if (!addon) toast.success('Rendez-vous confirmé !', { action: { label: 'Voir', onClick: () => navigate('/appointments') } });
+        if (previous) cancelPreviousAppointment(previous); // indispensable même hors de la page
+        return;
       }
       // Explosion de lames, puis la liste des rendez-vous
       setSuccess(true);
@@ -1077,8 +1137,8 @@ export default function Booking() {
     },
     onError: (err) => {
       // Réseau coupé pendant l'envoi : le rendez-vous a peut-être été créé (réponse perdue). Le
-      // serveur reconnaît le même envoi pendant 10 minutes et ne le crée pas deux fois : on reste
-      // sur la confirmation, l'heure choisie gardée.
+      // serveur reconnaît le même envoi (même compte, barber, jour, heure et prestations, quel
+      // que soit le délai) et ne le crée pas deux fois : on reste sur la confirmation, l'heure gardée.
       if (isNetworkError(err)) {
         toast.error('Connexion perdue : votre rendez-vous a peut-être été enregistré. Vérifiez Mes rendez-vous ou touchez de nouveau « Confirmer » (il ne sera pas créé deux fois).', { duration: 10000 });
         queryClient.invalidateQueries({ queryKey: ['myAppointments'] });
@@ -1136,22 +1196,36 @@ export default function Booking() {
     // Lien avec un barber : attendre de savoir s'il est encore là pour décider de l'étape suivante
     if (step === 0) return selectedServices.length > 0 && !barberParamPending;
     if (step === 1) return !!selectedEmployee || anyBarber;
-    if (step === 2) return !!selectedDate && !!selectedTime;
+    if (step === 2) return !!selectedDate && !!selectedTime && selectedSlotValid === true;
     return true;
   };
+
+  // Heure choisie devenue impossible (prestation ajoutée après coup, créneau pris entre-temps) :
+  // retirée dès que les créneaux à jour sont là, avec un mot ; retour au choix de l'heure
+  useEffect(() => {
+    if (selectedSlotValid !== false || createAppointment.isPending || success) return;
+    const old = selectedTime;
+    setSelectedTime(null);
+    if (anyBarber) setSelectedEmployee(null);
+    toast.info(`${old} n'est plus disponible pour vos prestations : choisissez une autre heure.`);
+    if (step === 3) { setDirection(-1); setStep(2); }
+  }, [selectedSlotValid]);
 
   const hasRecap = selectedServices.length > 0 || !!selectedEmployee || anyBarber || !!selectedTime;
   // « Confirmer » : sélection complète, et RDV à déplacer identifié (ou écarté) avant l'envoi
   // Comptes de l'équipe : ils réservent depuis l'agenda (le serveur refuse un RDV à leur propre
   // email). La navigation dans les étapes reste possible pour prévisualiser la page.
   const isStaffAccount = user?.role === 'admin' || user?.role === 'barber';
-  const canConfirm = !!selectedEmployee && !!selectedDate && !!selectedTime && !reschedulePending && !rescheduleTooLate && !isStaffAccount;
+  const canConfirm = !!selectedEmployee && !!selectedDate && !!selectedTime && !reschedulePending && !rescheduleTooLate && !isStaffAccount
+    && selectedSlotValid !== false;
 
   // Bouton retour d'Android : étape précédente (même règle que « Retour ») au lieu de quitter la
   // page et de perdre la sélection ; sur l'écran de succès, « Mes rendez-vous » tout de suite (sans
   // retour arrière suivi d'une redirection surprise). Sans effet sur le web et iOS.
   useAndroidBack(step > 0 && !success && !createAppointment.isPending,
     () => goToStep((step === 2 && skipBarberStep) ? 0 : step - 1));
+  // Pendant l'envoi : le retour est ignoré (il quittait la page en pleine confirmation)
+  useAndroidBack(createAppointment.isPending, () => {});
   useAndroidBack(success, () => {
     clearTimeout(successTimer.current);
     navigate('/appointments', { replace: true });
@@ -1614,6 +1688,14 @@ export default function Booking() {
             </motion.div>
           )}
         </AnimatePresence>
+
+        {step === 3 && lateBooking && !rescheduleTooLate && (
+          <div role="status" className="mt-6 p-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 text-xs text-amber-200 leading-relaxed">
+            Ce rendez-vous commence dans moins de {cancelHours} h : il ne pourra plus être annulé ni déplacé en ligne.
+            En cas d'empêchement, appelez le salon au{' '}
+            <a href={SALON_PHONE_HREF} className="font-semibold text-amber-100 underline whitespace-nowrap">{SALON_PHONE}</a>.
+          </div>
+        )}
 
         {/* Navigation */}
         <div className="flex gap-3 mt-6 pb-6">

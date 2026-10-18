@@ -255,7 +255,7 @@ export default function EventDialog({ open, onOpenChange, event }) {
           </div>
           {rescheduled && (
             <Notice icon={CalendarClock}>
-              L'horaire d'un événement publié change : les invités reçoivent un push « 📅 {form.title.trim() || 'Événement'} : nouvel horaire ».
+              L'horaire d'un événement publié change : les invités reçoivent un push « 📅 {form.title.trim() || 'Événement'} : nouvel horaire » et un email.
             </Notice>
           )}
 
@@ -309,7 +309,7 @@ export default function EventDialog({ open, onOpenChange, event }) {
           )}
           {cancelsNow && (
             <Notice icon={Bell} tone="danger">
-              Annuler envoie immédiatement un push « ❌ {form.title.trim() || 'Événement'} est annulé » à tous les invités qui n'ont pas refusé.
+              Annuler envoie immédiatement un push « ❌ {form.title.trim() || 'Événement'} est annulé » et un email à tous les invités qui n'ont pas refusé.
             </Notice>
           )}
 

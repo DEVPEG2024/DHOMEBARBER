@@ -780,12 +780,18 @@ export default function Appointments() {
                       <p className="text-xs text-muted-foreground">Aucun créneau libre dans les 3 prochaines semaines : choisissez une date plus lointaine ci-dessous.</p>
                     ) : (
                       <div className="space-y-2">
+                        {cancelHours > 0 && suggestionsByDay.some(day => day.slots.some(slot => parisInstant(slot.date, slot.time) - Date.now() < cancelHours * 3600 * 1000)) && (
+                          <p className="text-[11px] text-amber-300 leading-relaxed">
+                            Les créneaux marqués d'un point commencent dans moins de {cancelHours} h : une fois déplacé, le rendez-vous ne pourra plus être modifié ni annulé en ligne.
+                          </p>
+                        )}
                         {suggestionsByDay.map(day => (
                           <div key={day.date} className="flex items-center gap-2 min-w-0">
                             <span className="w-20 shrink-0 text-[11px] font-semibold text-muted-foreground first-letter:uppercase">{day.label}</span>
                             <div className="flex flex-wrap gap-2">
                               {day.slots.map(slot => {
                                 const active = chosenSlot && chosenSlot.date === slot.date && chosenSlot.time === slot.time;
+                                const soon = cancelHours > 0 && parisInstant(slot.date, slot.time) - Date.now() < cancelHours * 3600 * 1000;
                                 return (
                                   <button
                                     key={slot.time}
@@ -800,6 +806,7 @@ export default function Appointments() {
                                     }`}
                                   >
                                     {slot.time}
+                                    {soon && <span aria-label={`moins de ${cancelHours} h : ne pourra plus être modifié en ligne`} title={`Moins de ${cancelHours} h : ne pourra plus être modifié en ligne`} className="ml-1 text-amber-300">•</span>}
                                   </button>
                                 );
                               })}

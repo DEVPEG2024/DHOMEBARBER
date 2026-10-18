@@ -17,6 +17,7 @@ import ActivityRow, { ActivityRowSkeleton } from '@/components/admin-activity/Ac
 import { groupByDay, normalizeSearch } from '@/components/admin-activity/activityUi';
 import AlertSettingsDialog from '@/components/admin-activity/AlertSettingsDialog';
 import { useAdminAlertPrefs } from '@/lib/adminAlerts';
+import LoadError from '@/components/shared/LoadError';
 
 export default function AdminActivity() {
   const navigate = useNavigate();
@@ -81,6 +82,12 @@ export default function AdminActivity() {
   }
 
   const loading = activityQ.isLoading;
+  // Échec sans donnée, ou requête en pause faute de réseau (en attente, pas en erreur) : écran
+  // d'échec à la place des compteurs à 0 et de « Aucune action client… »
+  const activityFailed = (activityQ.isError && !activityQ.data)
+    || (activityQ.isPending && activityQ.fetchStatus === 'paused');
+  // Rien trouvé alors que des sources ont échoué : le vide n'est pas sûr
+  const partialEmpty = !activityFailed && events.length === 0 && failedSources.length > 0;
   const hasFilters = typeFilter !== 'all' || unreadOnly || search.trim();
 
   return (
@@ -90,7 +97,7 @@ export default function AdminActivity() {
           <p className="text-[11px] uppercase tracking-[0.2em] text-primary font-medium mb-1">Clients</p>
           <h1 className="font-display text-2xl font-bold">Activité clients</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            {loading ? 'Chargement…' : unreadCount === 0 ? 'Aucune action non lue.' : `${unreadCount} action${unreadCount > 1 ? 's' : ''} non lue${unreadCount > 1 ? 's' : ''}.`}
+            {loading ? 'Chargement…' : activityFailed ? 'Activité non chargée.' : unreadCount === 0 ? 'Aucune action non lue.' : `${unreadCount} action${unreadCount > 1 ? 's' : ''} non lue${unreadCount > 1 ? 's' : ''}.`}
           </p>
         </div>
         <div className="flex items-center gap-1 shrink-0">
@@ -125,6 +132,8 @@ export default function AdminActivity() {
           <span className="block text-[11px] text-muted-foreground">
             {alertPrefs.isLoading
               ? 'Chargement…'
+              : alertPrefs.isError
+                ? 'Réglages non chargés · réessayer'
               : silencedCount === 0
                 ? 'Toutes les actions vous notifient · choisir lesquelles'
                 : `${silencedCount} type${silencedCount > 1 ? 's' : ''} noté${silencedCount > 1 ? 's' : ''} sans notification · modifier`}
@@ -141,13 +150,11 @@ export default function AdminActivity() {
         </div>
       )}
 
-      {activityQ.isError && !activityQ.data && (
-        <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200 flex gap-2 items-center justify-between">
-          <span>Impossible de charger l'activité.</span>
-          <Button size="sm" variant="ghost" onClick={() => activityQ.refetch()}>Réessayer</Button>
-        </div>
+      {activityFailed && (
+        <LoadError what="l'activité" error={activityQ.error} onRetry={() => activityQ.refetch()} retrying={activityQ.isFetching} />
       )}
 
+      {!activityFailed && (<>
       {loading ? (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mb-5">
           {[0, 1, 2, 3].map(i => <div key={i} className="h-[76px] rounded-2xl border border-border bg-card animate-pulse" />)}
@@ -176,7 +183,11 @@ export default function AdminActivity() {
         <div className="rounded-2xl border border-dashed border-border p-8 text-center">
           <Inbox className="w-8 h-8 mx-auto text-muted-foreground mb-2" />
           <p className="text-sm font-semibold text-foreground">
-            {hasFilters ? 'Aucune action ne correspond aux filtres.' : 'Aucune action client sur les 14 derniers jours.'}
+            {hasFilters
+              ? 'Aucune action ne correspond aux filtres.'
+              : partialEmpty
+                ? 'Aucune action trouvée dans les sources chargées.'
+                : 'Aucune action client sur les 14 derniers jours.'}
           </p>
           {hasFilters && (
             <Button
@@ -205,6 +216,7 @@ export default function AdminActivity() {
           ))}
         </div>
       )}
+      </>)}
     </div>
   );
 }

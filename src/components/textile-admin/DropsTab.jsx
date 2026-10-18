@@ -70,7 +70,7 @@ function OpenNowDialog({ drop, onClose, onConfirm, pending }) {
  * (elles restent votables, sans drop) ou être supprimées avec lui. Les réservations existantes
  * sont conservées dans l'onglet Réservations (elles gardent le nom de la pièce).
  */
-function DeleteDropDialog({ drop, pieces, reservationsCount, onClose, onConfirm, pending }) {
+function DeleteDropDialog({ drop, pieces, reservationsCount, activeCount = 0, onClose, onConfirm, pending }) {
   const [mode, setMode] = useState('labo');
   if (!drop) return null;
   const n = pieces.length;
@@ -89,10 +89,15 @@ function DeleteDropDialog({ drop, pieces, reservationsCount, onClose, onConfirm,
         <div className="space-y-3 text-sm">
           <p className="text-muted-foreground">
             Le drop est effacé définitivement et n'apparaît plus nulle part, ni dans l'admin ni dans « Drops passés » côté client.
-            {reservationsCount > 0 && (
+            {reservationsCount > 0 && activeCount === 0 && (
               <> Les {reservationsCount} réservation{reservationsCount > 1 ? 's' : ''} déjà prises restent consultables dans l'onglet Réservations.</>
             )}
           </p>
+          {activeCount > 0 && (
+            <p role="status" className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">
+              {activeCount} précommande{activeCount > 1 ? 's' : ''} en cours (à payer, payée{activeCount > 1 ? 's' : ''} ou prête{activeCount > 1 ? 's' : ''}) : terminez le drop ou annulez-les dans l'onglet Réservations avant de le supprimer.
+            </p>
+          )}
           {n > 0 ? (
             <div className="space-y-1.5">
               {choices.map((c) => {
@@ -111,7 +116,7 @@ function DeleteDropDialog({ drop, pieces, reservationsCount, onClose, onConfirm,
           )}
           <div className="flex gap-2 pt-1">
             <Button variant="outline" className="flex-1" onClick={onClose} disabled={pending}>Annuler</Button>
-            <Button className="flex-1 bg-red-500 hover:bg-red-600 text-white" onClick={() => onConfirm(n > 0 && mode === 'delete')} disabled={pending}>
+            <Button className="flex-1 bg-red-500 hover:bg-red-600 text-white" onClick={() => onConfirm(n > 0 && mode === 'delete')} disabled={pending || activeCount > 0}>
               <Trash2 className="w-4 h-4 mr-1.5" /> {pending ? 'Suppression…' : 'Supprimer le drop'}
             </Button>
           </div>
@@ -171,12 +176,14 @@ export default function DropsTab({ drops, concepts, reservations, isAdmin, isLoa
     onError: (err) => toast.error(adminErrorMessage(err, 'Erreur lors du changement de statut')),
   });
 
-  // Suppression : les pièces d'abord si demandé (une par une, le serveur n'a pas de suppression
-  // en lot), puis le drop lui-même (ses pièces restantes passent au Labo : drop_id → NULL)
+  // Suppression : le drop d'abord (ses pièces passent au Labo : drop_id → NULL ; un refus 409
+  // « précommandes en cours » ne laisse ainsi aucune pièce effacée), puis les pièces si demandé
+  // (une par une, le serveur n'a pas de suppression en lot)
   const deleteMutation = useMutation({
     mutationFn: async ({ id, pieceIds }) => {
+      const out = await api.entities.TextileDrop.delete(id);
       for (const pieceId of pieceIds) await api.entities.TextileConcept.delete(pieceId);
-      return api.entities.TextileDrop.delete(id);
+      return out;
     },
     onSuccess: (_data, { pieceIds, keptPieces }) => {
       invalidateTextile(queryClient);
@@ -333,6 +340,7 @@ export default function DropsTab({ drops, concepts, reservations, isAdmin, isLoa
             drop={deleteTarget}
             pieces={deleteTarget ? (concepts || []).filter((c) => String(c.drop_id) === String(deleteTarget.id)) : []}
             reservationsCount={deleteTarget ? (reservations || []).filter((r) => String(r.drop_id) === String(deleteTarget.id)).length : 0}
+            activeCount={deleteTarget ? (reservations || []).filter((r) => String(r.drop_id) === String(deleteTarget.id) && ['reserved', 'paid', 'ready'].includes(r.status)).length : 0}
             onClose={() => setDeleteTarget(null)}
             pending={deleteMutation.isPending}
             onConfirm={confirmDelete}

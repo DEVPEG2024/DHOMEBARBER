@@ -57,12 +57,14 @@ function AppointmentRow({ apt, selected, highlighted, onSelect }) {
           </p>
         </div>
         <div className="text-right shrink-0">
-          <p className="text-sm font-bold text-foreground">{formatEuro(appointmentDue(apt))}</p>
-          {appointmentGiftPaid(apt) > 0 && (
-            <p className="text-[10px] text-amber-300">dont {formatEuro(appointmentGiftPaid(apt))} déjà payés par carte</p>
-          )}
+          <p className="text-sm font-bold text-foreground whitespace-nowrap">{formatEuro(appointmentDue(apt))}</p>
         </div>
       </div>
+      {appointmentGiftPaid(apt) > 0 && (
+        <p className="mt-1 text-[10px] text-amber-300">
+          {formatEuro(appointmentGiftPaid(apt))} déjà payés par carte · reste {formatEuro(appointmentDue(apt))}
+        </p>
+      )}
     </button>
   );
 }
@@ -79,6 +81,9 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
   const today = parisToday();
   const [mode, setMode] = useState('appointments');
   const [selectedAptId, setSelectedAptId] = useState(null);
+  // « Prestations » / « Montant libre » : RDV du jour auquel rattacher le débit (facultatif). Sans
+  // rattachement, la somme compterait deux fois si le RDV était ensuite encaissé en CB / espèces.
+  const [attachAptId, setAttachAptId] = useState(null);
   const [selectedServiceIds, setSelectedServiceIds] = useState(() => new Set());
   const [freeAmount, setFreeAmount] = useState('');
   const [confirming, setConfirming] = useState(false);
@@ -133,7 +138,10 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
 
   const resetConfirm = () => setConfirming(false);
 
-  const pickMode = (key) => { setMode(key); resetConfirm(); };
+  const pickMode = (key) => { setMode(key); setAttachAptId(null); resetConfirm(); };
+  const attachedApt = mode !== 'appointments' && attachAptId
+    ? appointments.find((a) => String(a.id) === String(attachAptId)) || null
+    : null;
 
   const toggleService = (id) => {
     resetConfirm();
@@ -182,14 +190,14 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
     const shouldClose = !!apt && fullyCovered && closeApt;
     // Montant demandé (et non débité) : relu après une réponse perdue, le solde baisse et le débit
     // recalculé changerait ; la même référence fait alors refuser un second débit (ref_mismatch)
-    const refKey = [mode, requested, apt?.id ?? '', [...selectedServiceIds].sort().join(',')].join('|');
+    const refKey = [mode, requested, apt?.id ?? '', [...selectedServiceIds].sort().join(','), attachedApt?.id ?? ''].join('|');
     if (clientRefRef.current.key !== refKey || !clientRefRef.current.ref) {
       clientRefRef.current = { key: refKey, ref: newClientRef() };
     }
     try {
       const { card: fresh, transaction } = await debitGiftCard(card, {
         amount: debit,
-        appointmentId: apt?.id ?? null,
+        appointmentId: apt?.id ?? attachedApt?.id ?? null,
         services: selectedServices.map((s) => ({ id: s.id, name: s.name, price: Number(s.price) || 0 })),
         note: buildNote(),
         clientRef: clientRefRef.current.ref,
@@ -245,6 +253,7 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
       if (['appointment_already_paid', 'appointment_closed'].includes(err?.data?.code)) {
         queryClient.invalidateQueries({ queryKey: giftCardTodayAppointmentsKey(today) });
         setSelectedAptId(null);
+        setAttachAptId(null);
       }
       // Refus (solde changé, carte annulée ou épuisée ailleurs) ou réponse perdue : carte relue
       if (noAnswer || err?.status === 409 || err?.local) {
@@ -405,14 +414,26 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
         </div>
       )}
 
-      {/* Débit hors RDV alors qu'un client a rendez-vous aujourd'hui : sans rattachement, le tableau
-          de bord compterait la part carte deux fois (vente de la carte + RDV encaissé en entier) */}
+      {/* Débit hors RDV alors qu'un client a rendez-vous aujourd'hui : rattachement facultatif au
+          RDV (la part carte y est portée ; sans lui, le tableau de bord la compterait deux fois) */}
       {(mode === 'services' || mode === 'free') && appointments.length > 0 && (
-        <div role="status" className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs leading-relaxed text-amber-200 break-words min-w-0">
-          Ce client a un rendez-vous aujourd'hui ? Débitez depuis « RDV du jour » : le montant est alors rattaché au RDV et le tableau de bord ne le compte pas deux fois.{' '}
-          <button type="button" onClick={() => pickMode('appointments')} className="font-semibold text-primary underline underline-offset-2 whitespace-nowrap">
-            Voir les RDV du jour
-          </button>
+        <div className="rounded-xl border border-white/10 bg-white/5 p-2.5 space-y-1.5 min-w-0" data-testid="gc-attach-today">
+          <p className="text-[11px] font-semibold text-foreground">Rattacher à un RDV du jour <span className="font-normal text-muted-foreground">(facultatif)</span></p>
+          <div className="flex flex-wrap gap-1.5">
+            <button type="button" onClick={() => { setAttachAptId(null); resetConfirm(); }}
+              className={`px-2.5 py-1 rounded-lg text-[11px] border ${!attachAptId ? 'bg-primary/15 border-primary/50 text-foreground' : 'bg-white/5 border-white/10 text-muted-foreground'}`}>
+              Aucun
+            </button>
+            {appointments.map((a) => (
+              <button key={a.id} type="button" onClick={() => { setAttachAptId(a.id); resetConfirm(); }}
+                className={`px-2.5 py-1 rounded-lg text-[11px] border text-left break-words max-w-full ${String(attachAptId) === String(a.id) ? 'bg-primary/15 border-primary/50 text-foreground' : 'bg-white/5 border-white/10 text-muted-foreground'}`}>
+                {String(a.start_time || '').slice(0, 5)} · {a.client_name || 'Client'} · reste {formatEuro(appointmentDue(a))}
+              </button>
+            ))}
+          </div>
+          {attachedApt && debit > appointmentDue(attachedApt) + 0.005 && (
+            <p className="text-[11px] text-amber-300">Le débit dépasse le reste dû de ce RDV ({formatEuro(appointmentDue(attachedApt))}) : il sera refusé.</p>
+          )}
         </div>
       )}
 

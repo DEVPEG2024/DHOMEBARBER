@@ -8,7 +8,7 @@ import React, { useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import {
-  Search, Phone, Mail, ClipboardList, CheckCircle2, PackageCheck, Ban, StickyNote, Clock, Pencil, Package,
+  Search, Phone, Mail, ClipboardList, CheckCircle2, PackageCheck, Ban, StickyNote, Clock, Pencil, Package, RotateCcw,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { adminErrorMessage } from '@/lib/adminErrors';
@@ -80,9 +80,26 @@ export default function ReservationsTab({ reservations, isLoading, error = null,
 
   const updateMutation = useMutation({
     mutationFn: ({ id, data }) => api.entities.TextileReservation.update(id, data),
-    onSuccess: (_data, { data, successMessage }) => {
+    onSuccess: (_data, { id, data, successMessage, prev }) => {
       invalidateTextile(queryClient, 'textileReservations');
-      toast.success(successMessage || (data.status ? 'Statut mis à jour' : 'Note enregistrée'));
+      const message = successMessage || (data.status ? 'Statut mis à jour' : 'Note enregistrée');
+      // Changement de statut tapé par erreur : « Annuler » dans le toast remet le statut précédent.
+      // Pas depuis / vers annulée ou expirée : le serveur refuse de rouvrir une réservation dont
+      // la pièce est revenue en vente.
+      const undoable = data.status && prev && prev !== data.status
+        && !['cancelled', 'expired'].includes(prev) && !['cancelled', 'expired'].includes(data.status);
+      if (!undoable) {
+        toast.success(message);
+        return;
+      }
+      toast.success(message, {
+        // Revenir à « prête » renvoie la notification au client (le serveur la pousse à chaque passage)
+        ...(prev === 'ready' ? { description: 'Annuler remettra « Prête » et préviendra de nouveau le client.' } : {}),
+        action: {
+          label: 'Annuler',
+          onClick: () => updateMutation.mutate({ id, data: { status: prev }, successMessage: 'Statut rétabli' }),
+        },
+      });
     },
     onError: (err) => {
       toast.error(adminErrorMessage(err, 'Erreur lors de la mise à jour'));
@@ -122,7 +139,7 @@ export default function ReservationsTab({ reservations, isLoading, error = null,
     ...RESERVATION_STATUSES.map((s) => ({ key: s.value, label: `${FILTER_LABELS[s.value] || s.label} (${counts[s.value] || 0})` })),
   ];
 
-  const setStatus = (r, status, successMessage) => updateMutation.mutate({ id: r.id, data: { status }, successMessage });
+  const setStatus = (r, status, successMessage, prev = r.status) => updateMutation.mutate({ id: r.id, data: { status }, successMessage, prev });
   const saveNotes = (r, notes) => updateMutation.mutate({ id: r.id, data: { notes: notes || null }, successMessage: 'Note enregistrée' });
 
   return (
@@ -255,16 +272,39 @@ export default function ReservationsTab({ reservations, isLoading, error = null,
                         className="border-blue-500/30 text-blue-400 hover:bg-blue-500/10"
                         onClick={() => setStatus(r, 'paid', 'Précommande payée, à fabriquer à la fin du drop')} />
                     )}
+                    {/* Le client reçoit un push au passage à « prête » : deux taps pour l'envoyer */}
                     {r.status === 'paid' && (
-                      <ActionButton icon={Package} label="Prête" disabled={busy}
+                      <TwoTapButton icon={Package} label="Prête" confirmLabel="Prévenir le client ?" disabled={busy}
                         className="border-violet-500/30 text-violet-400 hover:bg-violet-500/10"
-                        onClick={() => setStatus(r, 'ready', 'Pièce prête : le client reçoit une notification pour venir la retirer')} />
+                        armedClassName="border-violet-500 bg-violet-500 text-white animate-pulse"
+                        onConfirm={() => setStatus(r, 'ready', 'Pièce prête : le client reçoit une notification pour venir la retirer')} />
                     )}
-                    <ActionButton icon={PackageCheck} label="Retirée" disabled={busy}
-                      className="border-green-500/30 text-green-400 hover:bg-green-500/10"
-                      onClick={() => setStatus(r, 'picked_up', 'Pièce retirée, précommande terminée')} />
+                    {/* Non payée : jamais « Retirée » d'un tap (elle compterait dans le CA encaissé) */}
+                    {r.status === 'reserved' ? (
+                      <TwoTapButton icon={PackageCheck} label="Encaisser et remettre" confirmLabel="Payée et remise au client ?" disabled={busy}
+                        className="border-green-500/30 text-green-400 hover:bg-green-500/10"
+                        armedClassName="border-green-500 bg-green-500 text-white animate-pulse"
+                        onConfirm={() => setStatus(r, 'picked_up', 'Précommande encaissée et remise au client')} />
+                    ) : (
+                      <ActionButton icon={PackageCheck} label="Retirée" disabled={busy}
+                        className="border-green-500/30 text-green-400 hover:bg-green-500/10"
+                        onClick={() => setStatus(r, 'picked_up', 'Pièce retirée, précommande terminée')} />
+                    )}
+                    {/* Retour en arrière sans notification (seul le passage à « prête » en envoie une) */}
+                    {r.status === 'ready' && (
+                      <ActionButton icon={RotateCcw} label="Revenir à Payée" disabled={busy}
+                        onClick={() => setStatus(r, 'paid', 'Statut rétabli : payée')} />
+                    )}
                     <TwoTapButton icon={Ban} label="Annuler" confirmLabel="Confirmer l'annulation ?" disabled={busy}
                       onConfirm={() => setStatus(r, 'cancelled', 'Réservation annulée, le stock est libéré')} />
+                  </div>
+                )}
+                {/* Retirée par erreur : retour à « payée » (sans notification ; « Prête » la renverrait) */}
+                {r.status === 'picked_up' && (
+                  <div className="flex flex-wrap gap-1.5 mt-3">
+                    <ActionButton icon={RotateCcw} label="Revenir à Payée" disabled={busy}
+                      title="Remet la précommande en « payée », sans notifier le client"
+                      onClick={() => setStatus(r, 'paid', 'Statut rétabli : payée')} />
                   </div>
                 )}
               </motion.div>

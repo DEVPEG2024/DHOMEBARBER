@@ -5,7 +5,7 @@
  * = audience `accepted`, message facultatif ≤ 200), retrait d'une invitation (admin, deux taps) et
  * export CSV (utils/exportCSV.js).
  */
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Phone, Mail, Users, UserCheck, UserX, Clock, Armchair, BellRing, Download, Trash2, AlertTriangle, Bell,
@@ -16,6 +16,8 @@ import { api } from '@/api/apiClient';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { remindSalonEvent } from '@/lib/salonEventsApi';
+import { newSendKey } from '@/lib/textileApi';
+import LoadError from '@/components/shared/LoadError';
 import { exportToCSV } from '@/utils/exportCSV';
 import {
   INVITE_STATUS_STYLES, inviteLabel, StatusPill, TwoTapButton, ActionButton, Spinner, EmptyState,
@@ -43,10 +45,15 @@ function Counter({ icon: Icon, value, label, className = '' }) {
  * @param {Error|null} props.error
  * @param {boolean} props.isAdmin   Retrait d'une invitation réservé à l'admin (DELETE entité)
  */
-export default function GuestListTab({ event, invites, isLoading, error, isAdmin }) {
+export default function GuestListTab({ event, invites, isLoading, error, isAdmin, onRetry, retrying = false }) {
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState('all');
   const [remindMessage, setRemindMessage] = useState('');
+  // Clé d'envoi par audience : gardée après une réponse perdue (pas de second push), renouvelée
+  // après un succès ou un changement de message
+  const sendKeys = useRef({});
+  const keyFor = (audience) => { if (!sendKeys.current[audience]) sendKeys.current[audience] = newSendKey(); return sendKeys.current[audience]; };
+  const [uncertainAudience, setUncertainAudience] = useState(null);
 
   const rows = useMemo(() => {
     const list = Array.isArray(invites) ? [...invites] : [];
@@ -64,9 +71,11 @@ export default function GuestListTab({ event, invites, isLoading, error, isAdmin
   const capacity = Number(event.capacity) || 0;
 
   const remindMutation = useMutation({
-    mutationFn: (audience) => remindSalonEvent(event.id, { audience, message: remindMessage.trim() }),
+    mutationFn: (audience) => remindSalonEvent(event.id, { audience, message: remindMessage.trim(), sendKey: keyFor(audience) }),
     onSuccess: (data, audience) => {
       invalidateSalonEvents(queryClient, event.id);
+      delete sendKeys.current[audience];
+      setUncertainAudience(null);
       const sent = Number(data?.sent) || 0;
       const recipients = Number(data?.recipients) || 0;
       const who = audience === 'pending' ? 'sans réponse' : 'participants';
@@ -76,7 +85,15 @@ export default function GuestListTab({ event, invites, isLoading, error, isAdmin
       if (Number(data?.failed) > 0) toast.warning(`${data.failed} envoi${data.failed > 1 ? 's' : ''} en échec`);
     },
     // Coupure réseau : l'envoi est peut-être parti, avertir sans inviter à renvoyer
-    onError: (err) => (isUncertainSend(err) ? toast.warning : toast.error)(adminErrorMessage(err, "Erreur lors de l'envoi du rappel", { sending: true }), { duration: 10000 }),
+    onError: (err, audience) => {
+      if (isUncertainSend(err)) {
+        setUncertainAudience(audience);
+        invalidateSalonEvents(queryClient, event.id);
+        toast.warning("Réponse non reçue : un nouvel essai ne renverra pas le rappel s'il est déjà parti.", { duration: 10000 });
+        return;
+      }
+      toast.error(adminErrorMessage(err, "Erreur lors de l'envoi du rappel"), { duration: 10000 });
+    },
   });
 
   const removeMutation = useMutation({
@@ -140,12 +157,17 @@ export default function GuestListTab({ event, invites, isLoading, error, isAdmin
         </div>
         <Textarea
           value={remindMessage}
-          onChange={(e) => setRemindMessage(e.target.value.slice(0, REMIND_MESSAGE_MAX))}
+          onChange={(e) => { setRemindMessage(e.target.value.slice(0, REMIND_MESSAGE_MAX)); sendKeys.current = {}; setUncertainAudience(null); }}
           placeholder={`Message facultatif, sinon « ⏰ Rappel : ${event.title} »`}
           rows={2}
           maxLength={REMIND_MESSAGE_MAX}
           className={INPUT_CLASS}
         />
+        {uncertainAudience && (
+          <p role="status" className="text-[11px] text-amber-300">
+            Réponse non reçue : un nouvel essai ne renverra pas le rappel s'il est déjà parti.
+          </p>
+        )}
         <div className="flex flex-wrap gap-1.5">
           <TwoTapButton icon={BellRing} label={`Relancer les sans réponse (${stats.pending})`} confirmLabel="Envoyer la relance ?"
             disabled={busy || !isPublished || stats.pending === 0}
@@ -178,11 +200,14 @@ export default function GuestListTab({ event, invites, isLoading, error, isAdmin
         ))}
       </div>
 
-      {error ? (
+      {error && rows.length > 0 && (
         <div className="flex items-start gap-2 rounded-xl border border-red-500/25 bg-red-500/10 p-3 text-xs text-red-300">
           <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-          <span>Impossible de charger les invités : {error.message}</span>
+          <span>Impossible de recharger les invités : {adminErrorMessage(error, 'le serveur ne répond pas')}</span>
         </div>
+      )}
+      {error && rows.length === 0 ? (
+        <LoadError compact what="les invités" error={error} onRetry={onRetry} retrying={retrying} />
       ) : isLoading ? (
         <Spinner />
       ) : filtered.length === 0 ? (

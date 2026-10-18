@@ -7,7 +7,7 @@
  *    réservations payées passent à « prête » dans le même geste (le drop est une précommande :
  *    fabrication à la fin du drop, puis retrait au salon).
  */
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Send, Bell, Users, PackageCheck, Check } from 'lucide-react';
 import { toast } from 'sonner';
@@ -16,7 +16,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { notifyDrop } from '@/lib/textileApi';
+import { notifyDrop, newSendKey } from '@/lib/textileApi';
 import { invalidateTextile, INPUT_CLASS } from './shared';
 
 const MESSAGE_MAX = 200;
@@ -58,6 +58,11 @@ export default function NotifyDialog({ drop, reservations = [], onClose }) {
   const [message, setMessage] = useState('');
   const [audience, setAudience] = useState('subscribers');
   const [result, setResult] = useState(null);
+  // Clé d'envoi : gardée après une réponse perdue (le nouvel essai ne renvoie pas le push),
+  // renouvelée à l'ouverture, au changement d'audience ou de message, et après un succès
+  const sendKeyRef = useRef(newSendKey());
+  const [uncertain, setUncertain] = useState(false);
+  const renewKey = () => { sendKeyRef.current = newSendKey(); setUncertain(false); };
 
   // Clients distincts ayant payé (ou dont la pièce est déjà prête) sur ce drop
   const paidClients = useMemo(() => {
@@ -75,15 +80,17 @@ export default function NotifyDialog({ drop, reservations = [], onClose }) {
     if (drop) {
       setMessage('');
       setResult(null);
+      renewKey();
       // Drop terminé (ou déjà passé par l'ouverture) : l'usage naturel est d'annoncer les commandes prêtes
       setAudience(drop.status === 'ended' && paidClients > 0 ? 'paid' : 'subscribers');
     }
   }, [drop]);
 
   const sendMutation = useMutation({
-    mutationFn: () => notifyDrop(drop.id, { audience, message: message.trim() }),
+    mutationFn: () => notifyDrop(drop.id, { audience, message: message.trim(), sendKey: sendKeyRef.current }),
     onSuccess: (data) => {
       setResult(data || {});
+      renewKey();
       invalidateTextile(queryClient, 'textileDrops', 'textileReservations');
       const sent = Number(data?.sent) || 0;
       const marked = Number(data?.marked) || 0;
@@ -96,7 +103,16 @@ export default function NotifyDialog({ drop, reservations = [], onClose }) {
       );
     },
     // Coupure réseau : l'envoi est peut-être parti, avertir sans inviter à renvoyer
-    onError: (err) => (isUncertainSend(err) ? toast.warning : toast.error)(adminErrorMessage(err, "Erreur lors de l'envoi", { sending: true }), { duration: 10000 }),
+    onError: (err) => {
+      if (isUncertainSend(err)) {
+        setUncertain(true);
+        // L'audience « payé » a pu passer des réservations à « Prête » : vue relue
+        invalidateTextile(queryClient, 'textileDrops', 'textileReservations');
+        toast.warning("Réponse non reçue : un nouvel essai ne renverra pas le push s'il est déjà parti.", { duration: 10000 });
+        return;
+      }
+      toast.error(adminErrorMessage(err, "Erreur lors de l'envoi"), { duration: 10000 });
+    },
   });
 
   if (!drop) return null;
@@ -153,7 +169,7 @@ export default function NotifyDialog({ drop, reservations = [], onClose }) {
                   <button
                     key={a.key}
                     type="button"
-                    onClick={() => { setAudience(a.key); setResult(null); }}
+                    onClick={() => { setAudience(a.key); setResult(null); renewKey(); }}
                     className={`w-full text-left rounded-xl border p-3 flex items-start gap-3 transition-colors ${
                       active ? 'border-primary/50 bg-primary/10' : 'border-border bg-secondary/40 hover:bg-secondary'
                     }`}
@@ -197,7 +213,7 @@ export default function NotifyDialog({ drop, reservations = [], onClose }) {
             </div>
             <Textarea
               value={message}
-              onChange={(e) => setMessage(e.target.value.slice(0, MESSAGE_MAX))}
+              onChange={(e) => { setMessage(e.target.value.slice(0, MESSAGE_MAX)); renewKey(); }}
               placeholder={defaultBody}
               rows={3}
               maxLength={MESSAGE_MAX}
@@ -205,6 +221,11 @@ export default function NotifyDialog({ drop, reservations = [], onClose }) {
             />
           </div>
 
+          {uncertain && !result && (
+            <p role="status" className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">
+              Réponse non reçue : un nouvel essai ne renverra pas le push s'il est déjà parti.
+            </p>
+          )}
           {result && (
             <div className="rounded-xl border border-green-500/25 bg-green-500/10 p-3 text-xs text-green-300">
               <span className="font-semibold">{Number(result.sent) || 0} envoyée{(Number(result.sent) || 0) > 1 ? 's' : ''}</span>

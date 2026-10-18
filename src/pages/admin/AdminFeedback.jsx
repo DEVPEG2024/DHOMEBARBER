@@ -11,6 +11,11 @@ import { api } from '@/api/apiClient';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import LoadError, { isNetworkError } from '@/components/shared/LoadError';
+import { useAndroidBack } from '@/lib/useAndroidBack';
+
+// Capture affichée seulement si elle vient de l'app (…/api/media/<uuid>) : une URL tierce
+// enregistrée avant le contrôle du serveur ferait charger un pisteur par le navigateur de l'admin
+const isAppMedia = (url) => /^https:\/\/[^/]+\/api\/media\/[0-9a-f-]{36}$/i.test(String(url || ''));
 import {
   FEEDBACK_QUERY_KEY, FEEDBACK_ADMIN_QUERY_KEY, FEEDBACK_TYPES, FEEDBACK_STATUSES,
   fetchAllFeedback, areaLabel, formatFeedbackDate, isBackendMissing,
@@ -42,6 +47,9 @@ function FeedbackItem({ item, onUpdate, onDelete, busy }) {
   const [reply, setReply] = useState(item.admin_reply || '');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [zoom, setZoom] = useState(false);
+  // Bouton retour d'Android : ferme la capture en grand au lieu de quitter la page
+  useAndroidBack(zoom, () => setZoom(false));
+  const shotOk = isAppMedia(item.screenshot_url);
   const t = FEEDBACK_TYPES[item.type] || FEEDBACK_TYPES.idea;
   const ctx = item.context && typeof item.context === 'object' ? item.context : {};
   const area = areaLabel(item.area);
@@ -80,11 +88,13 @@ function FeedbackItem({ item, onUpdate, onDelete, busy }) {
         )}
       </div>
 
-      {item.screenshot_url && (
+      {item.screenshot_url && (shotOk ? (
         <button type="button" onClick={() => setZoom(true)} className="block">
           <img src={item.screenshot_url} alt="Capture du client" className="w-24 h-36 object-cover rounded-xl border border-border" />
         </button>
-      )}
+      ) : (
+        <p className="text-[11px] text-muted-foreground">Capture non affichée (lien externe)</p>
+      ))}
 
       <div className="space-y-2">
         <Textarea
@@ -119,7 +129,7 @@ function FeedbackItem({ item, onUpdate, onDelete, busy }) {
         </div>
       </div>
 
-      {zoom && (
+      {zoom && shotOk && (
         <div className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-4" role="dialog" aria-modal="true">
           <button type="button" onClick={() => setZoom(false)} aria-label="Fermer" className="absolute top-4 right-4 w-11 h-11 rounded-full bg-white/10 text-white flex items-center justify-center">
             <X className="w-5 h-5" />
