@@ -1,10 +1,10 @@
 import React, { useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { History, Link2, X, Undo2 } from 'lucide-react';
+import { History, Link2, X, Undo2, ShoppingBag, CheckCircle2, Ban, XCircle, CalendarClock } from 'lucide-react';
 import { toast } from 'sonner';
 import LoadError, { isNetworkError } from '@/components/shared/LoadError';
 import {
-  fetchGiftCardTransactions, giftCardTransactionsKey, formatEuro, formatParisDateTime,
+  fetchGiftCardHistory, buildGiftCardTimeline, giftCardTransactionsKey, formatEuro, formatParisDateTime,
   canUndoTransaction, runGiftCardUndo, attachGiftCardDebit, fetchRecentAppointmentsToCash,
   giftCardRecentAppointmentsKey, parisToday, appointmentDue, appointmentPrice, appointmentServicesLabel, formatDay,
   closeAppointmentWithGiftCard, friendlyGiftCardError, round2, fetchAppointmentById,
@@ -245,7 +245,9 @@ function CreditPanel({ card, tx, max, onClose, onDone }) {
   );
 }
 
-const KIND_LABELS = { debit: 'Débit', credit: 'Crédit', undo: 'Annulation' };
+const KIND_LABELS = { debit: 'Débit', credit: 'Rendu sur la carte', undo: 'Débit annulé' };
+const PAYMENT_LABELS = { cb: 'CB', especes: 'espèces' };
+const VISIBLE_ROWS = 15;
 
 function describe(tx) {
   if (tx.note) return tx.note;
@@ -255,19 +257,53 @@ function describe(tx) {
   return '';
 }
 
+/** Ligne de la vie de la carte (commande, vente, rejet, annulation, prolongation) : libellé, détail, montant. */
+export function lifecycleRow(entry) {
+  const amount = entry.amount != null ? formatEuro(entry.amount) : null;
+  switch (entry.type) {
+    case 'created':
+      return { icon: ShoppingBag, tone: 'text-muted-foreground', label: 'Commandée', detail: entry.who ? `par ${entry.who}` : '', amount, amountTone: 'text-foreground' };
+    case 'validated':
+      return {
+        icon: CheckCircle2, tone: 'text-green-400', label: 'Payée et validée',
+        detail: [PAYMENT_LABELS[entry.payment_method] ? `réglée en ${PAYMENT_LABELS[entry.payment_method]}` : '', entry.who ? `par ${entry.who}` : ''].filter(Boolean).join(' · '),
+        amount, amountTone: 'text-green-400',
+      };
+    case 'rejected':
+      return { icon: Ban, tone: 'text-red-400', label: 'Demande rejetée', detail: entry.who ? `par ${entry.who}` : '', amount: null };
+    case 'cancelled':
+      return {
+        icon: XCircle, tone: 'text-red-400', label: 'Carte annulée',
+        detail: [entry.amount ? `solde perdu ${formatEuro(entry.amount)}` : '', entry.who ? `par ${entry.who}` : ''].filter(Boolean).join(' · '),
+        amount: null,
+      };
+    case 'extended':
+      return {
+        icon: CalendarClock, tone: 'text-primary', label: 'Validité prolongée',
+        detail: [entry.detail?.to ? `jusqu'au ${formatDay(entry.detail.to)}${entry.detail?.from ? ` (au lieu du ${formatDay(entry.detail.from)})` : ''}` : '', entry.who ? `par ${entry.who}` : ''].filter(Boolean).join(' · '),
+        amount: null,
+      };
+    default:
+      return { icon: History, tone: 'text-muted-foreground', label: 'Opération', detail: '', amount };
+  }
+}
+
 /**
- * Historique des mouvements d'une carte (`GET /gift-cards/:id/transactions`). Rien seulement si la
- * route n'existe pas (null) ; en cas d'échec, LoadError (jamais rien : l'admin croirait la carte
- * jamais débitée). Un débit de moins de 24 h s'annule ici, en deux taps.
+ * Historique complet d'une carte : commande, vente, mouvements de solde, rejet, annulation,
+ * prolongation (`GET /gift-cards/:id/transactions`). Rien seulement si la route n'existe pas
+ * (null) ; en cas d'échec, LoadError (jamais rien : l'admin croirait la carte jamais débitée). Un
+ * débit de moins de 24 h s'annule ici, en deux taps.
  */
 export default function GiftCardHistory({ cardId, card, onCardChange }) {
   const queryClient = useQueryClient();
-  const { data, isError, error, refetch, isFetching } = useQuery({
+  const { data: history, isError, error, refetch, isFetching } = useQuery({
     queryKey: giftCardTransactionsKey(cardId),
-    queryFn: () => fetchGiftCardTransactions(cardId),
+    queryFn: () => fetchGiftCardHistory(cardId),
     retry: false,
     staleTime: 30 * 1000,
   });
+  const data = history ? history.transactions : history;
+  const [showAll, setShowAll] = useState(false);
   // Débit dont l'annulation attend sa confirmation, et celui en cours d'envoi
   const [confirmId, setConfirmId] = useState(null);
   const [undoingId, setUndoingId] = useState(null);
@@ -309,18 +345,53 @@ export default function GiftCardHistory({ cardId, card, onCardChange }) {
       </div>
     );
   }
-  if (!Array.isArray(data)) return null;
+  if (history === null) return null;
+  if (!Array.isArray(data)) {
+    return (
+      <div className="mt-4" data-testid="gc-history-loading">
+        <p className="text-xs font-semibold text-foreground flex items-center gap-1.5 mb-2">
+          <History className="w-3.5 h-3.5 text-muted-foreground" /> Historique
+        </p>
+        <div className="h-12 rounded-xl bg-white/5 animate-pulse" />
+      </div>
+    );
+  }
+
+  const timeline = buildGiftCardTimeline(card, data, history.events);
+  const rows = showAll ? timeline : timeline.slice(0, VISIBLE_ROWS);
 
   return (
     <div className="mt-4" data-testid="gc-history">
       <p className="text-xs font-semibold text-foreground flex items-center gap-1.5 mb-2">
         <History className="w-3.5 h-3.5 text-muted-foreground" /> Historique
       </p>
-      {data.length === 0 ? (
-        <p className="text-xs text-muted-foreground">Aucun mouvement pour l'instant.</p>
+      {timeline.length === 0 ? (
+        <p className="text-xs text-muted-foreground">Aucune opération pour l'instant.</p>
       ) : (
         <ul className="space-y-1.5">
-          {data.slice(0, 20).map((tx) => {
+          {rows.map((entry) => {
+            if (!entry.tx) {
+              const row = lifecycleRow(entry);
+              const Icon = row.icon;
+              return (
+                <li key={entry.key} className="rounded-xl bg-white/[0.03] border border-white/10 px-3 py-2" data-testid={`gc-history-${entry.type}`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex items-start gap-2">
+                      <Icon className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${row.tone}`} />
+                      <div className="min-w-0">
+                        <p className="text-xs font-medium text-foreground">
+                          {row.label}
+                          <span className="text-muted-foreground font-normal"> · {entry.at ? formatParisDateTime(entry.at) : 'date non notée'}</span>
+                        </p>
+                        {row.detail && <p className="text-[11px] text-muted-foreground break-words">{row.detail}</p>}
+                      </div>
+                    </div>
+                    {row.amount && <p className={`text-sm font-bold shrink-0 ${row.amountTone}`}>{row.amount}</p>}
+                  </div>
+                </li>
+              );
+            }
+            const tx = entry.tx;
             const isOut = tx.kind === 'debit';
             const undone = !!tx.undone_at;
             const who = tx.staff_name || tx.staff_email;
@@ -401,6 +472,12 @@ export default function GiftCardHistory({ cardId, card, onCardChange }) {
             );
           })}
         </ul>
+      )}
+      {timeline.length > VISIBLE_ROWS && (
+        <button type="button" onClick={() => setShowAll((v) => !v)}
+          className="mt-2 w-full py-2 rounded-xl text-[11px] font-semibold text-muted-foreground hover:text-foreground bg-white/5">
+          {showAll ? 'Afficher moins' : `Afficher tout l'historique (${timeline.length})`}
+        </button>
       )}
     </div>
   );

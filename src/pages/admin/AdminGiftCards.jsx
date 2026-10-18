@@ -4,12 +4,14 @@ import { api } from '@/api/apiClient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Gift, CheckCircle2, XCircle, Clock, Search, X, Ban, CreditCard, Banknote, ScanLine, Camera, Trash2, AlertTriangle, ChevronDown } from 'lucide-react';
+import { Gift, CheckCircle2, XCircle, Clock, Search, X, Ban, CreditCard, Banknote, ScanLine, Camera, AlertTriangle, ChevronDown, History, LayoutList } from 'lucide-react';
 import { toast } from 'sonner';
 import jsQR from 'jsqr';
 import GiftCardSummary from '@/components/giftcards-admin/GiftCardSummary';
 import GiftCardDebitPanel from '@/components/giftcards-admin/GiftCardDebitPanel';
 import GiftCardHistory from '@/components/giftcards-admin/GiftCardHistory';
+import GiftCardDeletePanel from '@/components/giftcards-admin/GiftCardDeletePanel';
+import GiftCardJournal from '@/components/giftcards-admin/GiftCardJournal';
 import {
   giftCardState, giftCardBalance, formatEuro, formatDay, invalidateGiftCardQueries, fetchGiftCardByCode, friendlyGiftCardError,
   patchGiftCardCache, fetchGiftCard, round2, parisToday, isValidityPassed,
@@ -233,7 +235,6 @@ function ValidateModal({ card, onClose, onCardChange }) {
   const queryClient = useQueryClient();
   const [paymentMethod, setPaymentMethod] = useState('');
   const [loading, setLoading] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmReject, setConfirmReject] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [showDetails, setShowDetails] = useState(card.status === 'pending');
@@ -243,9 +244,6 @@ function ValidateModal({ card, onClose, onCardChange }) {
   const showDebit = state === 'debitable' || debitResultShown;
   // Bouton retour d'Android : ferme la fenêtre (montée seulement ouverte) au lieu de quitter la page
   useAndroidBack(true, onClose);
-  // Suppression réservée aux cartes jamais payées (sinon la vente sortait du CA et l'historique des
-  // débits disparaissait) ; le serveur refuse aussi (409)
-  const neverPaid = card.status === 'pending' || (card.status === 'expired' && !card.validated_at);
 
   /**
    * Relit la carte avant de la valider ou de la rejeter : la liste n'est pas rechargée toute seule
@@ -334,20 +332,6 @@ function ValidateModal({ card, onClose, onCardChange }) {
     }
   };
 
-  const handleDelete = async () => {
-    setLoading(true);
-    try {
-      await api.entities.GiftCard.delete(card.id);
-      toast.success('Carte supprimée');
-      invalidateGiftCardQueries(queryClient, card.id);
-      onClose();
-    } catch (err) {
-      toast.error('Erreur', { description: friendlyGiftCardError(err) });
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const statusConf = statusConfOf(card);
   const StatusIcon = statusConf.icon;
 
@@ -403,8 +387,9 @@ function ValidateModal({ card, onClose, onCardChange }) {
           />
         )}
 
-        {/* Historique des mouvements (si le serveur le fournit) : un débit erroné s'y annule (24 h) */}
-        {card.status !== 'pending' && <GiftCardHistory cardId={card.id} card={card} onCardChange={onCardChange} />}
+        {/* Historique complet (commande, vente, mouvements, annulation, prolongation) : un débit
+            erroné s'y annule (24 h) */}
+        <GiftCardHistory cardId={card.id} card={card} onCardChange={onCardChange} />
 
         {/* Status + détails */}
         <div className="mt-4">
@@ -543,35 +528,9 @@ function ValidateModal({ card, onClose, onCardChange }) {
           </div>
         )}
 
-        {/* Delete : carte jamais payée seulement */}
-        {neverPaid && (
-        <div className="mt-4 pt-4 border-t border-border">
-          {!confirmDelete ? (
-            <button
-              onClick={() => setConfirmDelete(true)}
-              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-medium text-red-400/60 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-            >
-              <Trash2 className="w-3.5 h-3.5" /> Supprimer cette carte
-            </button>
-          ) : (
-            <div className="flex gap-2">
-              <button
-                onClick={() => setConfirmDelete(false)}
-                className="flex-1 py-2.5 rounded-xl text-xs font-medium text-muted-foreground bg-white/5 hover:bg-white/10 transition-colors"
-              >
-                Annuler
-              </button>
-              <button
-                onClick={handleDelete}
-                disabled={loading}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold text-white bg-red-500 hover:bg-red-600 transition-colors disabled:opacity-50"
-              >
-                <Trash2 className="w-3.5 h-3.5" /> Confirmer
-              </button>
-            </div>
-          )}
-        </div>
-        )}
+        {/* Suppression définitive (toute carte) : carte, mouvements et historique effacés, après un
+            récapitulatif lu sur le serveur (vente retirée du CA, RDV payés par la carte) */}
+        {!debitResultShown && <GiftCardDeletePanel card={card} onDeleted={onClose} />}
       </motion.div>
     </div>
   );
@@ -828,6 +787,29 @@ export default function AdminGiftCards() {
     }
   }, [queryClient]);
 
+  // Onglets : liste des cartes, ou journal de toutes les opérations (?tab=history)
+  const tab = searchParams.get('tab') === 'history' ? 'history' : 'cards';
+  const setTab = (key) => setSearchParams(prev => {
+    const next = new URLSearchParams(prev);
+    if (key === 'history') next.set('tab', 'history');
+    else next.delete('tab');
+    return next;
+  }, { replace: true });
+
+  // Ligne du journal touchée : la fiche de sa carte (relue si elle n'est pas dans la liste chargée)
+  const openFromJournal = useCallback(async (info) => {
+    if (!info?.id) return;
+    const known = giftCardsRef.current.find(c => String(c.id) === String(info.id));
+    if (known) { setSelectedCard(known); return; }
+    try {
+      const fresh = await fetchGiftCard(info.id);
+      if (fresh) setSelectedCard(fresh);
+      else toast.error('Carte introuvable', { description: 'Elle a peut-être été supprimée.' });
+    } catch (err) {
+      toast.error('Carte introuvable', { description: friendlyGiftCardError(err) });
+    }
+  }, []);
+
   // QR code lu par l'appareil photo du téléphone : ?scan=DHB-XXXX-XXXX
   const scanParam = searchParams.get('scan');
   useEffect(() => {
@@ -912,6 +894,32 @@ export default function AdminGiftCards() {
         </motion.button>
       </div>
 
+      {/* Onglets */}
+      <div className="flex gap-1.5 mb-5" role="tablist">
+        {[
+          { key: 'cards', label: 'Cartes', icon: LayoutList },
+          { key: 'history', label: 'Historique', icon: History },
+        ].map(t => (
+          <button
+            key={t.key}
+            type="button"
+            role="tab"
+            aria-selected={tab === t.key}
+            onClick={() => setTab(t.key)}
+            className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-semibold transition-all ${
+              tab === t.key ? 'bg-primary text-primary-foreground' : 'bg-card border border-border text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <t.icon className="w-3.5 h-3.5" />
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'history' ? (
+        <GiftCardJournal onOpenCard={openFromJournal} />
+      ) : (
+      <>
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-5">
         <div className="bg-card rounded-2xl border border-border p-4">
@@ -1011,6 +1019,8 @@ export default function AdminGiftCards() {
             );
           })}
         </div>
+      )}
+      </>
       )}
 
       {/* Scan loading overlay */}

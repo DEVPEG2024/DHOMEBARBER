@@ -297,9 +297,109 @@ export async function fetchGiftCardTransactions(cardId) {
 
 export const giftCardTransactionsKey = (cardId) => ['giftCardTransactions', String(cardId)];
 
+const byNewest = (a, b) => String(b.created_at || '').localeCompare(String(a.created_at || ''));
+
+/**
+ * Historique complet d'une carte pour l'admin : mouvements de solde et vie de la carte (rejet,
+ * annulation, prolongation, depuis le 18 oct. 2026). `null` si la route n'existe pas.
+ */
+export async function fetchGiftCardHistory(cardId) {
+  try {
+    const data = await apiRequest('GET', apiUrl(`/gift-cards/${encodeURIComponent(cardId)}/transactions`));
+    const transactions = Array.isArray(data) ? data : data?.transactions || [];
+    const events = Array.isArray(data?.events) ? data.events : [];
+    return { transactions: [...transactions].sort(byNewest), events: [...events].sort(byNewest) };
+  } catch (err) {
+    if (isMissingRoute(err)) return null;
+    throw err;
+  }
+}
+
+/**
+ * Lignes de l'historique d'une carte, plus récente d'abord : commande, vente (validation),
+ * mouvements (`tx` : la transaction d'origine, avec ses actions), rejet, annulation, prolongation.
+ * Une carte annulée avant le 18 oct. 2026 n'a pas d'événement daté : ligne « date non notée » en tête.
+ */
+export function buildGiftCardTimeline(card, transactions = [], events = []) {
+  if (!card) return [];
+  const out = [];
+  if (card.created_at) {
+    out.push({ key: `created:${card.id}`, type: 'created', at: card.created_at, amount: Number(card.amount) || 0, who: card.sender_name || null });
+  }
+  if (card.validated_at) {
+    out.push({
+      key: `validated:${card.id}`, type: 'validated', at: card.validated_at, amount: Number(card.amount) || 0,
+      who: card.validated_by || null, payment_method: card.payment_method || null,
+    });
+  }
+  for (const tx of transactions) {
+    out.push({ key: `tx:${tx.id}`, type: tx.kind, at: tx.created_at, amount: Number(tx.amount) || 0, who: tx.staff_name || tx.staff_email || null, tx });
+  }
+  for (const ev of events) {
+    out.push({
+      key: `ev:${ev.id}`, type: ev.kind, at: ev.created_at, amount: ev.amount == null ? null : Number(ev.amount),
+      who: ev.staff_name || null, detail: ev.detail || null,
+    });
+  }
+  out.sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0));
+  if (card.status === 'expired' && !events.some((e) => e.kind === 'cancelled' || e.kind === 'rejected')) {
+    out.unshift({ key: `end:${card.id}`, type: card.validated_at ? 'cancelled' : 'rejected', at: null, amount: null, who: null });
+  }
+  return out;
+}
+
+// ─── Journal de toutes les cartes (Admin → Cartes cadeau → Historique) ───
+export const giftCardJournalKey = ['giftCardJournal'];
+
+/** Une page du journal : `{ entries, has_more }` ; `null` si la route n'existe pas encore. */
+export async function fetchGiftCardJournal({ before = null, limit = 100 } = {}) {
+  const qs = new URLSearchParams({ limit: String(limit) });
+  if (before) qs.set('before', before);
+  try {
+    const data = await apiRequest('GET', apiUrl(`/gift-cards/journal?${qs}`));
+    return { entries: Array.isArray(data?.entries) ? data.entries : [], has_more: !!data?.has_more };
+  } catch (err) {
+    if (isMissingRoute(err)) return null;
+    throw err;
+  }
+}
+
+// ─── Suppression définitive ───
+/**
+ * Ce que la suppression effacerait : `{ card, transactions, events, sale, appointments }`.
+ * `null` si le serveur ne connaît pas encore la route.
+ */
+export async function fetchGiftCardDeletionPreview(cardId) {
+  try {
+    return await apiRequest('GET', apiUrl(`/gift-cards/${encodeURIComponent(cardId)}/deletion`));
+  } catch (err) {
+    if (isMissingRoute(err)) return null;
+    throw err;
+  }
+}
+
+/**
+ * Supprime la carte, ses mouvements et son historique (part carte retirée des RDV, RDV clôturé par
+ * elle rouvert). `expect` = nombre de mouvements vus dans l'aperçu : 409 `changed` s'il a bougé.
+ */
+export async function deleteGiftCardForever(cardId, expect, queryClient) {
+  const qs = expect == null ? '' : `?expect=${encodeURIComponent(String(expect))}`;
+  const data = await apiRequest('DELETE', apiUrl(`/gift-cards/${encodeURIComponent(cardId)}${qs}`));
+  if (queryClient) {
+    queryClient.setQueryData(['adminGiftCards'], (list) =>
+      Array.isArray(list) ? list.filter((c) => String(c.id) !== String(cardId)) : list);
+    invalidateGiftCardQueries(queryClient, cardId);
+    if (data?.appointments?.length) {
+      invalidateAppointmentQueries(queryClient);
+      queryClient.invalidateQueries({ queryKey: ['giftCardTodayAppointments'] });
+    }
+  }
+  return data;
+}
+
 /** Après un débit / une annulation : listes de cartes, tableau de bord, activité, historique. */
 export function invalidateGiftCardQueries(queryClient, cardId) {
-  for (const queryKey of [['adminGiftCards'], ['dashboard', 'giftCards'], ['adminActivity'], ['giftCards']]) {
+  for (const queryKey of [['adminGiftCards'], ['dashboard', 'giftCards'], ['adminActivity'], ['giftCards'], giftCardJournalKey]) {
     queryClient.invalidateQueries({ queryKey });
   }
   if (cardId != null) queryClient.invalidateQueries({ queryKey: giftCardTransactionsKey(cardId) });
