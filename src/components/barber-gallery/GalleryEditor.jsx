@@ -1,10 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, ImagePlus, Loader2, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/api/apiClient';
 import { Button } from '@/components/ui/button';
-import { GALLERY_CAPTION_MAX, GALLERY_MAX, galleryOf } from '@/lib/barberGallery';
+import { GALLERY_CAPTION_MAX, GALLERY_MAX, activeServicesQuery, galleryOf } from '@/lib/barberGallery';
 
 // Photos envoyées par lot : le serveur limite les envois du staff à 60 par quart d'heure et par
 // compte (routes/upload.js). Un lot de 10 laisse de la marge pour les autres écrans.
@@ -28,6 +28,9 @@ const errorText = (err, fallback) => {
 export default function GalleryEditor({ employee }) {
   const queryClient = useQueryClient();
   const inputRef = useRef(null);
+  // Prestations proposables sous chaque photo (« Réserver cette prestation » sur le profil)
+  const servicesQuery = useQuery(activeServicesQuery(api));
+  const services = Array.isArray(servicesQuery.data) ? servicesQuery.data : [];
   const [items, setItems] = useState(() => galleryOf(employee));
   const [uploading, setUploading] = useState(null); // { done, total }
   const [saving, setSaving] = useState(false);
@@ -196,6 +199,22 @@ export default function GalleryEditor({ employee }) {
     );
   };
 
+  // Prestation montrée par la photo : enregistrée tout de suite, comme les autres gestes
+  const setService = (url, serviceId) => {
+    const service = services.find((s) => String(s.id) === String(serviceId));
+    save(
+      (base) => (base.some((it) => it.url === url)
+        ? base.map((it) => {
+          if (it.url !== url) return it;
+          const rest = { ...it };
+          delete rest.service_id;
+          return serviceId ? { ...rest, service_id: String(serviceId) } : rest;
+        })
+        : null),
+      { success: service ? `Photo liée à « ${service.name} »` : 'Prestation retirée de la photo' },
+    );
+  };
+
   return (
     <div>
       <div className="flex items-center justify-between gap-3 mb-3">
@@ -264,12 +283,34 @@ export default function GalleryEditor({ employee }) {
                 disabled={sending}
                 className="w-full bg-transparent px-2.5 py-2 text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none disabled:opacity-50"
               />
+              {(() => {
+                // Prestation retirée du catalogue depuis : signalée, le client ne la voit plus
+                const linked = item.service_id ? services.find((s) => String(s.id) === String(item.service_id)) : null;
+                const stale = !!item.service_id && servicesQuery.isSuccess && !linked;
+                return (
+                  <select
+                    value={item.service_id && (linked || !servicesQuery.isSuccess) ? item.service_id : ''}
+                    onChange={(e) => setService(item.url, e.target.value)}
+                    disabled={sending || !servicesQuery.isSuccess}
+                    aria-label="Prestation montrée par la photo"
+                    className={`w-full border-t border-border bg-transparent px-2 py-2 text-[11px] focus:outline-none disabled:opacity-50 ${item.service_id && !stale ? 'text-primary' : 'text-muted-foreground'}`}
+                  >
+                    <option value="">{stale ? 'Prestation retirée : en choisir une' : 'Prestation (pour réserver)…'}</option>
+                    {services.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                );
+              })()}
             </div>
           ))}
         </div>
       )}
 
       <p className="text-[10px] text-muted-foreground mt-3">
+        Liez chaque photo à sa prestation : sur votre profil, le client la réserve d'un tap depuis la photo.
+      </p>
+      <p className="text-[10px] text-muted-foreground mt-1">
         Demandez toujours l'accord du client avant de publier une photo où il est reconnaissable.
       </p>
     </div>

@@ -1,9 +1,13 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { ChevronLeft, ChevronRight, Images, X } from 'lucide-react';
+import { CalendarPlus, ChevronLeft, ChevronRight, Images, X } from 'lucide-react';
+import { api } from '@/api/apiClient';
 import { hapticFeedback } from '@/lib/capacitor';
-import { GALLERY_PREVIEW, galleryOf } from '@/lib/barberGallery';
+import { GALLERY_PREVIEW, activeServicesQuery, bookingLinkFor, galleryOf } from '@/lib/barberGallery';
+import { formatDuration, formatPrice } from '@/components/services/serviceUtils';
 import { useAndroidBack } from '@/lib/useAndroidBack';
 
 const SWIPE_OFFSET = 60;
@@ -15,7 +19,7 @@ const SWIPE_VELOCITY = 450;
  * ils remonteraient au bloc glissable du profil et feraient changer de barber. Les touches sont
  * écoutées en capture pour la même raison (BarberProfile écoute ← / → sur window).
  */
-function Lightbox({ items, index, onIndex, onClose }) {
+function Lightbox({ items, index, onIndex, onClose, barberName, serviceOf, onBook }) {
   const reduce = useReducedMotion();
   const [dir, setDir] = useState(0);
   const count = items.length;
@@ -48,6 +52,7 @@ function Lightbox({ items, index, onIndex, onClose }) {
   }, []);
 
   if (!item) return null;
+  const service = serviceOf(item);
 
   return createPortal(
     <motion.div
@@ -100,8 +105,24 @@ function Lightbox({ items, index, onIndex, onClose }) {
         )}
       </div>
 
-      <div className="px-5 pt-3 pb-[max(env(safe-area-inset-bottom),20px)] min-h-[64px] text-center">
+      {/* Réserver depuis la photo : la prestation qu'elle montre (si le barber l'a indiquée et
+          qu'elle est encore au catalogue), sinon ce barber seul */}
+      <div className="px-5 pt-3 pb-[max(env(safe-area-inset-bottom),20px)] text-center space-y-2.5">
         {item.caption && <p className="text-sm text-white/90">{item.caption}</p>}
+        {service && (
+          <p className="text-xs text-white/60">
+            {service.name} · {formatPrice(service.price)}{service.duration ? ` · ${formatDuration(service.duration)}` : ''}
+          </p>
+        )}
+        <button
+          type="button"
+          onClick={() => onBook(service)}
+          data-testid="gallery-book"
+          className="w-full max-w-sm mx-auto flex items-center justify-center gap-2 py-3 rounded-2xl bg-primary text-primary-foreground text-sm font-semibold active:scale-[0.98] transition-transform"
+        >
+          <CalendarPlus className="w-4 h-4" />
+          {service ? 'Réserver cette prestation' : `Réserver avec ${barberName || 'ce barber'}`}
+        </button>
       </div>
     </motion.div>,
     document.body,
@@ -110,12 +131,24 @@ function Lightbox({ items, index, onIndex, onClose }) {
 
 /**
  * Réalisations d'un barber sur son profil public : grille de vignettes carrées (les 9 premières,
- * puis « Voir les N photos »), tap = visionneuse. Rien n'est affiché sans photo.
+ * puis « Voir les N photos »), tap = visionneuse avec « Réserver cette prestation » (prix sur la
+ * vignette d'une photo liée à une prestation). Rien n'est affiché sans photo.
  */
 export default function BarberGallery({ employee, delay = 0 }) {
+  const navigate = useNavigate();
   const items = galleryOf(employee);
   const [open, setOpen] = useState(null); // index affiché, null = fermé
   const [expanded, setExpanded] = useState(false);
+  // Catalogue (même clé que la réservation) : la prestation d'une photo n'est proposée que si elle
+  // est encore active ; sinon, réservation avec ce barber seul
+  const servicesQuery = useQuery({ ...activeServicesQuery(api), enabled: items.some((it) => it.service_id) });
+  const services = Array.isArray(servicesQuery.data) ? servicesQuery.data : [];
+  const serviceOf = (item) => (item?.service_id ? services.find((s) => String(s.id) === String(item.service_id)) || null : null);
+  const book = (service) => {
+    hapticFeedback();
+    setOpen(null);
+    navigate(bookingLinkFor(employee, service));
+  };
   // Bouton retour d'Android : ferme la visionneuse au lieu de quitter le profil
   useAndroidBack(open != null, () => setOpen(null));
   if (items.length === 0) return null;
@@ -145,6 +178,11 @@ export default function BarberGallery({ employee, delay = 0 }) {
             aria-label={item.caption || `Réalisation ${i + 1}`}
           >
             <img src={item.url} alt="" loading="lazy" decoding="async" draggable={false} className="w-full h-full object-cover" />
+            {serviceOf(item) && (
+              <span className="absolute bottom-1 left-1 rounded-md bg-black/65 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                {formatPrice(serviceOf(item).price)}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -156,7 +194,8 @@ export default function BarberGallery({ employee, delay = 0 }) {
       )}
       <AnimatePresence>
         {open !== null && (
-          <Lightbox items={items} index={open} onIndex={setOpen} onClose={() => setOpen(null)} />
+          <Lightbox items={items} index={open} onIndex={setOpen} onClose={() => setOpen(null)}
+            barberName={employee?.name} serviceOf={serviceOf} onBook={book} />
         )}
       </AnimatePresence>
     </motion.div>
