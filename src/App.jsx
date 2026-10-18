@@ -59,6 +59,8 @@ const Notifications = React.lazy(() => import('@/pages/admin/Notifications'));
 const SmartAgenda = React.lazy(() => import('@/pages/admin/SmartAgenda'));
 const Cleaning = React.lazy(() => import('@/pages/admin/Cleaning'));
 const BarberCleaning = React.lazy(() => import('@/pages/admin/BarberCleaning'));
+// Tableau de bord « Mon espace » d'un barber (page d'arrivée des barbers, 18 oct. 2026)
+const BarberHome = React.lazy(() => import('@/pages/admin/BarberHome'));
 const BarberAccounts = React.lazy(() => import('@/pages/admin/BarberAccounts'));
 const AdminLeave = React.lazy(() => import('@/pages/admin/AdminLeave'));
 const BarberLeave = React.lazy(() => import('@/pages/admin/BarberLeave'));
@@ -79,13 +81,10 @@ const LazyFallback = () => (
   </div>
 );
 
-// Page d'arrivée d'un barber : la première section à laquelle il a droit
-function barberHomePath(user) {
-  const perms = user?.permissions || [];
-  // Pas de /admin/services : la page est réservée à l'admin (une ancienne permission
-  // « services » en base mène donc à l'entretien plutôt qu'à une page refusée)
-  const permToPath = { agenda: '/admin/agenda', dashboard: '/admin', clients: '/admin/clients' };
-  return permToPath[perms[0]] || '/admin/my-cleaning';
+// Page d'arrivée d'un barber : son tableau de bord « Mon espace » (18 oct. 2026), d'où il
+// rejoint agenda, entretien, congés… Avant : la première section à laquelle il avait droit.
+function barberHomePath() {
+  return '/admin/me';
 }
 
 // Paramètre `redirect` de /login : chemin interne uniquement (jamais « //autre-site »
@@ -119,7 +118,7 @@ function RequireAuth() {
 
   // Redirect barbers to admin interface
   if (user?.role === 'barber') {
-    return <Navigate to={barberHomePath(user)} replace />;
+    return <Navigate to={barberHomePath()} replace />;
   }
 
   // Admin can browse client pages freely (e.g. "Retour au salon")
@@ -174,7 +173,7 @@ function GuestOnly() {
     const redirect = safeRedirect(searchParams.get('redirect'));
     if (redirect) return <Navigate to={redirect} replace />;
     if (user?.role === 'admin') return <Navigate to="/admin" replace />;
-    if (user?.role === 'barber') return <Navigate to={barberHomePath(user)} replace />;
+    if (user?.role === 'barber') return <Navigate to={barberHomePath()} replace />;
     return <Navigate to="/" replace />;
   }
 
@@ -263,6 +262,7 @@ const AppRoutes = () => {
           <Route path="/admin/notifications" element={<Suspense fallback={<LazyFallback />}><Notifications /></Suspense>} />
           <Route path="/admin/cleaning" element={<Suspense fallback={<LazyFallback />}><Cleaning /></Suspense>} />
           <Route path="/admin/my-cleaning" element={<Suspense fallback={<LazyFallback />}><BarberCleaning /></Suspense>} />
+          <Route path="/admin/me" element={<Suspense fallback={<LazyFallback />}><BarberHome /></Suspense>} />
           <Route path="/admin/smart-agenda" element={<Suspense fallback={<LazyFallback />}><SmartAgenda /></Suspense>} />
           <Route path="/admin/barber-accounts" element={<Suspense fallback={<LazyFallback />}><BarberAccounts /></Suspense>} />
           <Route path="/admin/leave" element={<Suspense fallback={<LazyFallback />}><AdminLeave /></Suspense>} />

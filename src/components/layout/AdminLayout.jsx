@@ -2,7 +2,7 @@ import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { Outlet, Link, useLocation, Navigate } from 'react-router-dom';
 import {
   LayoutDashboard, Calendar, Users, Scissors, UserCircle,
-  BarChart3, Settings, Menu, X, ChevronLeft, ChevronDown, ShoppingBag, Star, Bell, Brain, Sun, Moon, ClipboardList, ShieldCheck, Sparkles, CalendarDays, Newspaper, Warehouse, PartyPopper, LogOut, Gift, GripVertical, Shirt, Camera, Handshake, Volume2, VolumeX, Bug, Activity, IdCard } from 'lucide-react';
+  BarChart3, Settings, Menu, X, ChevronLeft, ChevronDown, ShoppingBag, Star, Bell, Brain, Sun, Moon, ClipboardList, ShieldCheck, Sparkles, CalendarDays, Newspaper, Warehouse, PartyPopper, LogOut, Gift, GripVertical, Shirt, Camera, Handshake, Volume2, VolumeX, Bug, Activity, IdCard, Home } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { useTheme } from '@/lib/ThemeContext';
 import { useAuth } from '@/lib/AuthContext';
@@ -15,6 +15,8 @@ import { api } from '@/api/apiClient';
 
 // All nav items with their default category
 const allNavItems = [
+  // Tableau de bord du barber : en tête, c'est aussi sa page d'arrivée et la cible de la redirection
+  { path: '/admin/me', icon: Home, label: 'Mon espace', barberOnly: true, alwaysShow: true },
   { path: '/admin', icon: LayoutDashboard, label: 'Dashboard', exact: true, perm: 'dashboard' },
   // Activité clients : chronologie des actions des clients (RDV, commandes, avis…), admin seulement,
   // pastille du nombre d'actions non lues (src/lib/adminActivity.js)
