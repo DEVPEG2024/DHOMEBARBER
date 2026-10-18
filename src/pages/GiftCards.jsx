@@ -14,7 +14,13 @@ import LoadError, { isNetworkError, queryFailed } from '@/components/shared/Load
 import WalletButtons from '@/components/giftcards/WalletButtons';
 import { useAndroidBack } from '@/lib/useAndroidBack';
 
-const LOGO_URL = '/logo.png';
+// Logo de la carte : emblème recadré, centré dans un carré de 168 px (html2canvas ignore object-fit :
+// un carré n'est jamais déformé dans le PDF), 13 Ko, intégré au bundle en data URL (`?inline`).
+// `/logo.png` (1024 × 1024, 1,5 Mo, ~ 4 Mo une fois décodé) pour une vignette de 48 px arrivait en
+// dernier sur un réseau mobile (carré vide le temps du téléchargement) et pouvait manquer à la capture
+// html2canvas du PDF si elle partait avant son décodage. Une data URL ne dépend d'aucun réseau ; la
+// capture attend en plus le décodage de toutes les images de la carte (imagesReady).
+import LOGO_URL from '@/assets/logo-card.png?inline';
 
 /** Montant d'une carte : en euros entiers, borné. */
 const AMOUNT_MIN = 10;
@@ -114,6 +120,20 @@ function fitEllipsisForCapture(doc) {
   });
 }
 
+/**
+ * Attend que chaque image d'une carte soit chargée et décodée avant la capture html2canvas : sous
+ * WebKit (iPhone) une image pas encore décodée sort vide dans le PDF. Jamais bloquant (2 s au plus).
+ */
+function imagesReady(node) {
+  const imgs = [...(node?.querySelectorAll('img') || [])];
+  const one = (img) => new Promise((resolve) => {
+    if (img.complete) { resolve(); return; }
+    img.addEventListener('load', resolve, { once: true });
+    img.addEventListener('error', resolve, { once: true });
+  }).then(() => (img.naturalWidth && img.decode ? img.decode().catch(() => {}) : undefined));
+  return Promise.race([Promise.all(imgs.map(one)), new Promise((r) => setTimeout(r, 2000))]);
+}
+
 // Premium gift card visual component (FRONT)
 function GiftCardVisual({ card, cardRef, compact = false }) {
   const status = cardStatus(card);
@@ -164,7 +184,7 @@ function GiftCardVisual({ card, cardRef, compact = false }) {
             <p className="text-[10px] tracking-[0.3em] uppercase text-white/40 font-medium">Carte Cadeau</p>
             <p className="text-[10px] text-white/30 font-mono mt-0.5">{card.code}</p>
           </div>
-          <img src={LOGO_URL} alt="D'Home Barber" className="w-12 h-12 object-contain opacity-90" />
+          <img src={LOGO_URL} alt="D'Home Barber" width={48} height={48} decoding="sync" draggable={false} className="w-12 h-12 shrink-0 object-contain opacity-90" />
         </div>
 
         {/* Center - Amount */}
@@ -434,6 +454,7 @@ function GiftCardDetailModal({ card, onClose }) {
     if (!canShare || downloading || !cardRef.current || !backRef.current) return;
     setDownloading(true);
     try {
+      await Promise.all([imagesReady(cardRef.current), imagesReady(backRef.current)]);
       // Front
       const frontCanvas = await html2canvas(cardRef.current, { scale: 3, backgroundColor: null, useCORS: true, onclone: fitEllipsisForCapture });
       const frontImg = frontCanvas.toDataURL('image/png');
