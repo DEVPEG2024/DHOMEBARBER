@@ -2,7 +2,7 @@ import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { Outlet, Link, useLocation, Navigate } from 'react-router-dom';
 import {
   LayoutDashboard, Calendar, Users, Scissors, UserCircle,
-  BarChart3, Settings, Menu, X, ChevronLeft, ChevronDown, ShoppingBag, Star, Bell, Brain, Sun, Moon, ClipboardList, ShieldCheck, Sparkles, CalendarDays, Newspaper, Warehouse, PartyPopper, LogOut, Gift, GripVertical, Shirt, Camera, Handshake, Volume2, VolumeX, Bug, Activity, IdCard, Home } from 'lucide-react';
+  BarChart3, Settings, Menu, X, ChevronLeft, ChevronDown, ShoppingBag, Star, Bell, Brain, Sun, Moon, ClipboardList, ShieldCheck, Sparkles, CalendarDays, Newspaper, Warehouse, PartyPopper, LogOut, Gift, GripVertical, Shirt, Camera, Handshake, Volume2, VolumeX, Bug, Activity, IdCard, Home, TrendingUp } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { useTheme } from '@/lib/ThemeContext';
 import { useAuth } from '@/lib/AuthContext';
@@ -21,6 +21,8 @@ const allNavItems = [
   // Activité clients : chronologie des actions des clients (RDV, commandes, avis…), admin seulement,
   // pastille du nombre d'actions non lues (src/lib/adminActivity.js)
   { path: '/admin/activity', icon: Activity, label: 'Activité clients', adminOnly: true, badge: 'activity' },
+  // Trafic de l'app (mesure d'audience interne, src/lib/analytics.js) : admin seulement
+  { path: '/admin/traffic', icon: TrendingUp, label: 'Trafic', adminOnly: true },
   { path: '/admin/agenda', icon: Calendar, label: 'Agenda', perm: 'agenda' },
   // Écritures réservées à l'admin côté serveur : ces pages ne s'ouvrent plus par une permission
   // barber (une ancienne permission en base n'y donne plus accès, la garde de route redirige)

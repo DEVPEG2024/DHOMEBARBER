@@ -9,6 +9,7 @@ import { hapticFeedback } from '@/lib/capacitor';
 import { GALLERY_PREVIEW, activeServicesQuery, bookingLinkFor, galleryOf } from '@/lib/barberGallery';
 import { formatDuration, formatPrice } from '@/components/services/serviceUtils';
 import { useAndroidBack } from '@/lib/useAndroidBack';
+import { track } from '@/lib/analytics';
 
 const SWIPE_OFFSET = 60;
 const SWIPE_VELOCITY = 450;
@@ -146,6 +147,7 @@ export default function BarberGallery({ employee, delay = 0 }) {
   const serviceOf = (item) => (item?.service_id ? services.find((s) => String(s.id) === String(item.service_id)) || null : null);
   const book = (service) => {
     hapticFeedback();
+    track('gallery_book', { barber_id: String(employee?.id || ''), with_service: !!service });
     setOpen(null);
     navigate(bookingLinkFor(employee, service));
   };
@@ -173,7 +175,7 @@ export default function BarberGallery({ employee, delay = 0 }) {
           <button
             key={item.url}
             type="button"
-            onClick={() => { hapticFeedback(); setOpen(i); }}
+            onClick={() => { hapticFeedback(); setOpen(i); track('gallery_open', { barber_id: String(employee?.id || '') }); }}
             className="relative aspect-square rounded-lg overflow-hidden bg-white/5 active:scale-[0.97] transition-transform"
             aria-label={item.caption || `Réalisation ${i + 1}`}
           >

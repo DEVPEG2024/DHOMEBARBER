@@ -3,7 +3,8 @@ import { useAuth } from '@/lib/AuthContext';
 import { api, apiRequest, apiUrl } from '@/api/apiClient';
 import { isPushSupported, isSubscribed, subscribeToPush, unsubscribeFromPush, getPushPermission, syncPushSubscription } from '@/lib/pushNotifications';
 import { motion } from 'framer-motion';
-import { User, Mail, Phone, Bell, Shield, ChevronRight, Cake, Trash2, Ban, Pencil, Settings as SettingsIcon, Megaphone } from 'lucide-react';
+import { User, Mail, Phone, Bell, Shield, ChevronRight, Cake, Trash2, Ban, Pencil, Settings as SettingsIcon, Megaphone, BarChart3 } from 'lucide-react';
+import { isAnalyticsOptedOut, setAnalyticsOptOut } from '@/lib/analytics';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
@@ -130,6 +131,14 @@ export default function Settings() {
   // commandes ne sont pas concernés.
   const [marketingOverride, setMarketingOverride] = useState(null);
   const [marketingSaving, setMarketingSaving] = useState(false);
+  // Mesure d'audience interne (Admin → Trafic) : refus mémorisé sur l'appareil
+  const [analyticsOn, setAnalyticsOn] = useState(() => !isAnalyticsOptedOut());
+  const toggleAnalytics = () => {
+    const next = !analyticsOn;
+    setAnalyticsOptOut(!next);
+    setAnalyticsOn(next);
+    toast.success(next ? 'Mesure d\'audience réactivée' : 'Mesure d\'audience désactivée sur cet appareil');
+  };
   const marketingEnabled = marketingOverride ?? (user?.marketing_emails !== false);
   const toggleMarketing = async () => {
     if (!user?.id || marketingSaving) return;
@@ -442,6 +451,26 @@ export default function Settings() {
             </div>
             <div className={`w-11 h-6 rounded-full transition-colors relative shrink-0 ${marketingEnabled ? 'bg-primary' : 'bg-muted'}`}>
               <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${marketingEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+            </div>
+          </button>
+          {/* Mesure d'audience interne (pages vues, temps passé) : refus à tout moment (CNIL) */}
+          <button
+            onClick={toggleAnalytics}
+            role="switch"
+            aria-checked={analyticsOn}
+            className="flex items-center justify-between w-full px-4 py-3.5 hover:bg-white/5 transition-colors border-t border-white/5"
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+                <BarChart3 className="w-4 h-4 text-primary" />
+              </div>
+              <div className="text-left min-w-0">
+                <p className="text-sm font-semibold text-foreground">Mesure d'audience</p>
+                <p className="text-[11px] text-muted-foreground">Statistiques internes du salon (pages vues, temps passé), jamais partagées</p>
+              </div>
+            </div>
+            <div className={`w-11 h-6 rounded-full transition-colors relative shrink-0 ${analyticsOn ? 'bg-primary' : 'bg-muted'}`}>
+              <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${analyticsOn ? 'translate-x-5' : 'translate-x-0.5'}`} />
             </div>
           </button>
         </motion.div>

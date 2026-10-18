@@ -1,11 +1,12 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
-import { api } from '@/api/apiClient';
+import { api, apiRequest, apiUrl } from '@/api/apiClient';
+import { trackPostView } from '@/lib/analytics';
 import { fetchPublicBarbers } from '@/lib/publicBarbers';
 import { useQuery, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { motion, AnimatePresence, useScroll, useTransform } from 'framer-motion';
-import { Send, Heart, Trash2, Loader2, Camera, MessageCircle, Plus, X, MoreHorizontal, Flag, Ban, ShieldAlert, Check } from 'lucide-react';
+import { Send, Heart, Trash2, Loader2, Camera, MessageCircle, Plus, X, MoreHorizontal, Flag, Ban, ShieldAlert, Check, Eye } from 'lucide-react';
 import LegalLink from '@/components/shared/LegalLink';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -234,10 +235,35 @@ function EmojiBurst({ emoji, onDone }) {
   );
 }
 
+/**
+ * Publication vue (mesure d'audience, Admin → Trafic) : au moins 60 % à l'écran pendant 1 s,
+ * une fois par session et par publication (src/lib/analytics.js).
+ */
+function usePostSeen(ref, postId) {
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || !postId || typeof IntersectionObserver === 'undefined') return undefined;
+    let timer = null;
+    const io = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting && entry.intersectionRatio >= 0.6) {
+        if (!timer) timer = setTimeout(() => { trackPostView(postId); io.disconnect(); }, 1000);
+      } else if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+    }, { threshold: [0, 0.6, 1] });
+    io.observe(el);
+    return () => { if (timer) clearTimeout(timer); io.disconnect(); };
+  }, [ref, postId]);
+}
+
 function PostCard({
   post, currentUser, onLike, onDelete, likes, comments, onComment, onDeleteComment, getAuthorPhoto, onOpenMenu,
   likesFailed = false, commentsFailed = false, onRetryLikes, onRetryComments, likesRetrying = false, commentsRetrying = false,
+  viewCount = null,
 }) {
+  const cardRef = useRef(null);
+  usePostSeen(cardRef, post.id);
   const [showComments, setShowComments] = useState(false);
   const [showReactions, setShowReactions] = useState(false);
   const [commentText, setCommentText] = useState('');
@@ -364,6 +390,7 @@ function PostCard({
 
   return (
     <motion.div
+      ref={cardRef}
       initial={{ opacity: 0, y: 15 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -10 }}
@@ -387,7 +414,15 @@ function PostCard({
               </span>
             )}
           </div>
-          <p className="text-[11px] text-muted-foreground">{timeAgo(post.created_at)}</p>
+          <p className="text-[11px] text-muted-foreground">
+            {timeAgo(post.created_at)}
+            {/* Admin : personnes (clients) qui ont vu la publication (Admin → Trafic) */}
+            {viewCount != null && (
+              <span className="ml-1.5 inline-flex items-center gap-1 text-primary/80" data-testid="post-views" title="Clients qui ont vu cette publication">
+                · <Eye className="w-3 h-3" aria-hidden="true" /> {viewCount} vue{viewCount > 1 ? 's' : ''}
+              </span>
+            )}
+          </p>
         </div>
         {isOwner ? (
           confirmDelete ? (
@@ -761,6 +796,19 @@ export default function Feed() {
     (!!row.author_key && blockedKeys.has(row.author_key)) ||
     (!!row.author_email && blockedEmails.has(String(row.author_email).toLowerCase()));
   const visiblePosts = posts.filter(p => !isBlocked(p));
+
+  // Admin : nombre de clients qui ont vu chaque publication (mesure d'audience)
+  const viewIds = user?.role === 'admin' ? visiblePosts.map(p => String(p.id)).slice(0, 200) : [];
+  const { data: postViewCounts } = useQuery({
+    queryKey: ['postViewCounts', viewIds.join(',')],
+    enabled: viewIds.length > 0,
+    refetchInterval: 60 * 1000,
+    staleTime: 30 * 1000,
+    queryFn: async () => {
+      const data = await apiRequest('GET', apiUrl(`/analytics/post-views?ids=${viewIds.join(',')}`));
+      return data?.counts || {};
+    },
+  });
   const visibleComments = comments.filter(c => !isBlocked(c));
 
   // La clé publique arrive par /me : si l'objet utilisateur ne l'a pas encore
@@ -1434,6 +1482,7 @@ export default function Feed() {
                   onRetryComments={refetchComments}
                   likesRetrying={likesFetching}
                   commentsRetrying={commentsFetching}
+                  viewCount={postViewCounts ? (postViewCounts[String(post.id)]?.clients ?? 0) : null}
                 />
               </GlassCard>
             ))}

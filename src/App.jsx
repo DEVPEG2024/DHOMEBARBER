@@ -1,4 +1,4 @@
-import React, { Suspense, useLayoutEffect } from 'react';
+import React, { Suspense, useEffect, useLayoutEffect } from 'react';
 import { Toaster as SonnerToaster } from "@/components/ui/sonner"
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClientInstance } from '@/lib/query-client'
@@ -30,6 +30,7 @@ import BarberProfile from '@/pages/BarberProfile';
 import Feed from '@/pages/Feed';
 import Events from '@/pages/Events';
 import GiftCards from '@/pages/GiftCards';
+import { initAnalytics, trackPage } from '@/lib/analytics';
 
 // Essayage couleur (lazy : embarque MediaPipe)
 const TryOn = React.lazy(() => import('@/pages/TryOn'));
@@ -73,6 +74,7 @@ const AdminSnap = React.lazy(() => import('@/pages/admin/AdminSnap'));
 const AdminPartners = React.lazy(() => import('@/pages/admin/AdminPartners'));
 const AdminFeedback = React.lazy(() => import('@/pages/admin/AdminFeedback'));
 const AdminActivity = React.lazy(() => import('@/pages/admin/AdminActivity'));
+const AdminTraffic = React.lazy(() => import('@/pages/admin/AdminTraffic'));
 const AdminGangCards = React.lazy(() => import('@/pages/admin/AdminGangCards'));
 
 const LazyFallback = () => (
@@ -198,6 +200,14 @@ function ScrollToTop() {
   return null;
 }
 
+// Mesure d'audience (Admin → Trafic, src/lib/analytics.js) : chaque changement de page
+function AnalyticsTracker() {
+  const { pathname } = useLocation();
+  useEffect(() => { initAnalytics(); }, []);
+  useEffect(() => { trackPage(pathname); }, [pathname]);
+  return null;
+}
+
 const AppRoutes = () => {
   const { isLoadingAuth } = useAuth();
 
@@ -276,6 +286,7 @@ const AppRoutes = () => {
           <Route path="/admin/partners" element={<Suspense fallback={<LazyFallback />}><AdminPartners /></Suspense>} />
           <Route path="/admin/feedback" element={<Suspense fallback={<LazyFallback />}><AdminFeedback /></Suspense>} />
           <Route path="/admin/activity" element={<Suspense fallback={<LazyFallback />}><AdminActivity /></Suspense>} />
+          <Route path="/admin/traffic" element={<Suspense fallback={<LazyFallback />}><AdminTraffic /></Suspense>} />
           <Route path="/admin/gang-cards" element={<Suspense fallback={<LazyFallback />}><AdminGangCards /></Suspense>} />
           <Route path="/admin/my-settings" element={<Suspense fallback={<LazyFallback />}><BarberSettings /></Suspense>} />
           {/* Historique des notifications reçues par un barber (/notifications est une page client) */}
@@ -297,6 +308,7 @@ function App() {
             <QueryClientProvider client={queryClientInstance}>
               <Router>
                 <ScrollToTop />
+                <AnalyticsTracker />
                 <AppRoutes />
                 {/* Dans le Router : le bouton lit la route (masqué sur l'accueil, intégré au hero) */}
                 <MusicToggle />

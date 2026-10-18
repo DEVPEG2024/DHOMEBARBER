@@ -1,6 +1,7 @@
 import { apiRequest, apiUrl, getToken } from '@/api/apiClient';
 import { Capacitor } from '@capacitor/core';
 import { PushNotifications } from '@capacitor/push-notifications';
+import { noteSource } from '@/lib/analytics';
 
 const isNative = Capacitor.isNativePlatform();
 
@@ -240,6 +241,8 @@ export function initNativePush() {
       // Reçue app fermée ou en arrière-plan : « pushNotificationReceived » n'a rien vu, on la
       // range ici (dédoublonnée si elle avait déjà été reçue au premier plan).
       addNotification({ ...nativeEntry(action.notification), read: true });
+      // Mesure d'audience : la session vient d'une notification
+      noteSource('push');
       const url = action.notification?.data?.url;
       if (typeof url === 'string' && url.startsWith('/') && !url.startsWith('//')) {
         window.history.pushState({}, '', url);

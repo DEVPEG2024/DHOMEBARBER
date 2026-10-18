@@ -24,6 +24,7 @@ import { addonItems, addonTotal, suggestAddonProducts } from '@/lib/appointmentP
 import { formatPrice } from '@/components/shop/productUtils';
 import ProductAddon, { addonMaxQuantity, addonProductsQuery } from '@/components/booking/ProductAddon';
 import GalleryQuickStep from '@/components/booking/GalleryQuickStep';
+import { track } from '@/lib/analytics';
 
 const STEPS = ['services', 'barber', 'datetime', 'confirm'];
 const STEP_LABELS = ['Prestations', 'Barber', 'Date & Heure', 'Confirmation'];
@@ -1165,6 +1166,11 @@ export default function Booking() {
     hapticFeedback();
   };
 
+  // Mesure d'audience : étapes atteintes (parcours de réservation d'Admin → Trafic)
+  useEffect(() => {
+    track('booking_step', { step: STEPS[step], from_gallery: fromGallery });
+  }, [step]);
+
   // Redirection de l'écran de succès : annulée si la page est quittée avant (bouton retour…).
   // `mountedRef` : la page est-elle encore affichée ? TanStack Query exécute le onSuccess du hook
   // même après le démontage : sans ce repère, un retour pendant l'envoi ramenait de force sur
@@ -1320,6 +1326,13 @@ export default function Booking() {
     },
     onSuccess: ({ created, previous, addon }) => {
       setUncertainSend(null);
+      // Mesure d'audience : un rendez-vous réservé (un renvoi reconnu par le serveur ne compte pas)
+      if (!created?.duplicate) {
+        track('booking_done', {
+          services: liveSelected.length, products: addon?.ok ? addon.count : 0,
+          from_gallery: fromGallery, reschedule: !!previous,
+        });
+      }
       queryClient.invalidateQueries({ queryKey: ['appointments-day'] });
       queryClient.invalidateQueries({ queryKey: ['myAppointments'] });
       queryClient.invalidateQueries({ queryKey: ['appointments'] }); // « Comme la dernière fois » / prochain RDV de l'accueil

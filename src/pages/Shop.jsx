@@ -17,6 +17,7 @@ import { formatPrice, productCategoryLabel, productImages, stockInfo, isShopProd
 import LoadError, { isNetworkError, queryFailed } from '@/components/shared/LoadError';
 import { useAndroidBack } from '@/lib/useAndroidBack';
 import { normalizeOrderStatus } from '@/lib/cancellation';
+import { track } from '@/lib/analytics';
 
 /** Vol de la vignette produit vers le panier : taille du disque (px) et durée (s). */
 const FLY_SIZE = 56;
@@ -346,6 +347,7 @@ export default function Shop() {
       return;
     }
     updateCart(product.id, qty, limit);
+    track('cart_add', { quantity: qty });
     if (reduceMotion) return;
     const r = source?.getBoundingClientRect?.();
     if (!r) return;
@@ -572,6 +574,7 @@ export default function Shop() {
 
       const total = Number(res?.total_price);
       setSuccessTotal(Number.isFinite(total) && total > 0 ? total : null);
+      if (!res?.duplicate) track('order_done', { total: Number.isFinite(total) ? total : 0 });
       setCart({});
       setNotes('');
       setOrderSuccess(true);
