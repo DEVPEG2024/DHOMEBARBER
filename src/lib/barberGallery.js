@@ -32,7 +32,12 @@ export const activeServicesQuery = (api) => ({
 export function bookingLinkFor(employee, service) {
   const params = new URLSearchParams();
   if (employee?.id) params.set('barber', String(employee.id));
-  if (service?.id) params.set('services', String(service.id));
+  // Prestation de la photo : la réservation s'ouvre sur son écran court (compléments, produits,
+  // puis créneaux du barber), voir GalleryQuickStep
+  if (service?.id) {
+    params.set('services', String(service.id));
+    params.set('from', 'gallery');
+  }
   const q = params.toString();
   return q ? `/booking?${q}` : '/booking';
 }

@@ -55,8 +55,10 @@ const cheapest = (list) => [...list].sort((a, b) => (Number(a.price) || 0) - (Nu
  * @param {Error|null} [props.error]  Échec du chargement des prestations (sans données) : écran d'erreur
  * @param {() => void} [props.onRetry]  « Réessayer » de l'écran d'erreur
  * @param {boolean} [props.retrying]
+ * @param {boolean} [props.suggestionsOnly]  Seulement la rangée de suggestions (réservation depuis
+ *   une photo de la galerie : la prestation est déjà choisie, on propose ses compléments)
  */
-export default function ServicePicker({ services = [], selectedIds, onToggle, onSwap, loading = false, error = null, onRetry, retrying = false }) {
+export default function ServicePicker({ services = [], selectedIds, onToggle, onSwap, loading = false, error = null, onRetry, retrying = false, suggestionsOnly = false }) {
   const favorites = useFavorites();
   const { user } = useAuth();
   // Seul le staff reçoit les `services` des RDV terminés : pour un client (ou un visiteur), la
@@ -150,7 +152,7 @@ export default function ServicePicker({ services = [], selectedIds, onToggle, on
     () => [{ id: 'all', label: 'Tout', count: visibleCount }, ...groups.map(g => ({ id: g.id, label: g.name, count: g.services.length }))],
     [groups, visibleCount],
   );
-  const showChips = groups.length > 1;
+  const showChips = groups.length > 1 && !suggestionsOnly;
 
   const formulas = useMemo(() => (query ? [] : services.filter(isFormula)), [services, query]);
 
@@ -255,6 +257,57 @@ export default function ServicePicker({ services = [], selectedIds, onToggle, on
     return <Plus className="w-3.5 h-3.5 text-primary" aria-hidden="true" />;
   };
 
+  const suggestionsBlock = (
+    <AnimatePresence initial={false}>
+      {suggestions.length > 0 && (
+        <motion.div
+          key="suggestions"
+          layout
+          initial={reduceMotion ? false : { opacity: 0, y: -6 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -6 }}
+          transition={{ duration: 0.3, ease: EASE }}
+          className="mb-4"
+        >
+          <p className="text-[11px] uppercase tracking-[0.2em] text-primary font-semibold mb-2 flex items-center gap-1.5">
+            <Sparkles className="w-3 h-3" aria-hidden="true" />
+            {selectedServices.length === 0 ? 'Les plus demandées' : suggestionsOnly ? 'Pour compléter' : 'Suggestions pour vous'}
+          </p>
+          <div className="flex gap-2 overflow-x-auto scrollbar-hide -mx-4 px-4 pb-1">
+            <AnimatePresence initial={false}>
+              {suggestions.map((sug) => (
+                <motion.button
+                  key={sug.key}
+                  type="button"
+                  layout
+                  initial={reduceMotion ? false : { opacity: 0, scale: 0.92 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.92 }}
+                  whileTap={{ scale: 0.96 }}
+                  transition={{ type: 'spring', stiffness: 420, damping: 30 }}
+                  onClick={() => applySuggestion(sug)}
+                  className={`shrink-0 max-w-[260px] text-left rounded-2xl border px-3.5 py-2.5 min-h-[56px] flex items-center gap-2.5 ${
+                    sug.accent ? 'border-amber-500/40 bg-amber-500/10' : 'border-border bg-card hover:border-primary/40'
+                  }`}
+                >
+                  <span className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${sug.accent ? 'bg-amber-500/20 text-amber-300' : 'bg-primary/10'}`}>
+                    <SugIcon icon={sug.icon} />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-xs font-semibold text-foreground truncate">{sug.label}</span>
+                    <span className="block text-[11px] text-muted-foreground truncate">{sug.sub}</span>
+                  </span>
+                </motion.button>
+              ))}
+            </AnimatePresence>
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+
+  if (suggestionsOnly) return suggestionsBlock;
+
   return (
     <div>
       {/* Recherche */}
@@ -282,52 +335,7 @@ export default function ServicePicker({ services = [], selectedIds, onToggle, on
       </div>
 
       {/* Suggestions : suivent la sélection */}
-      <AnimatePresence initial={false}>
-        {suggestions.length > 0 && (
-          <motion.div
-            key="suggestions"
-            layout
-            initial={reduceMotion ? false : { opacity: 0, y: -6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -6 }}
-            transition={{ duration: 0.3, ease: EASE }}
-            className="mb-4"
-          >
-            <p className="text-[11px] uppercase tracking-[0.2em] text-primary font-semibold mb-2 flex items-center gap-1.5">
-              <Sparkles className="w-3 h-3" aria-hidden="true" />
-              {selectedServices.length === 0 ? 'Les plus demandées' : 'Suggestions pour vous'}
-            </p>
-            <div className="flex gap-2 overflow-x-auto scrollbar-hide -mx-4 px-4 pb-1">
-              <AnimatePresence initial={false}>
-                {suggestions.map((sug) => (
-                  <motion.button
-                    key={sug.key}
-                    type="button"
-                    layout
-                    initial={reduceMotion ? false : { opacity: 0, scale: 0.92 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.92 }}
-                    whileTap={{ scale: 0.96 }}
-                    transition={{ type: 'spring', stiffness: 420, damping: 30 }}
-                    onClick={() => applySuggestion(sug)}
-                    className={`shrink-0 max-w-[260px] text-left rounded-2xl border px-3.5 py-2.5 min-h-[56px] flex items-center gap-2.5 ${
-                      sug.accent ? 'border-amber-500/40 bg-amber-500/10' : 'border-border bg-card hover:border-primary/40'
-                    }`}
-                  >
-                    <span className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${sug.accent ? 'bg-amber-500/20 text-amber-300' : 'bg-primary/10'}`}>
-                      <SugIcon icon={sug.icon} />
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block text-xs font-semibold text-foreground truncate">{sug.label}</span>
-                      <span className="block text-[11px] text-muted-foreground truncate">{sug.sub}</span>
-                    </span>
-                  </motion.button>
-                ))}
-              </AnimatePresence>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {suggestionsBlock}
 
       {/* Favoris du client (hors recherche et pendant le chargement) */}
       {!query && !loading && (

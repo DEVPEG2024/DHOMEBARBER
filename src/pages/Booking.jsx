@@ -23,6 +23,7 @@ import { analyzeDay, isOnLeave, parisDay, workingHoursOf } from '@/lib/slots';
 import { addonItems, addonTotal, suggestAddonProducts } from '@/lib/appointmentProducts';
 import { formatPrice } from '@/components/shop/productUtils';
 import ProductAddon, { addonMaxQuantity, addonProductsQuery } from '@/components/booking/ProductAddon';
+import GalleryQuickStep from '@/components/booking/GalleryQuickStep';
 
 const STEPS = ['services', 'barber', 'datetime', 'confirm'];
 const STEP_LABELS = ['Prestations', 'Barber', 'Date & Heure', 'Confirmation'];
@@ -602,6 +603,8 @@ export default function Booking() {
   const [anyBarber, setAnyBarber] = useState(false);
   // Produits de la boutique ajoutés au rendez-vous : `{ [productId]: quantité }`
   const [addonSelection, setAddonSelection] = useState({});
+  // Arrivée depuis une photo de la galerie : « Changer de prestation » rouvre le catalogue complet
+  const [fullPicker, setFullPicker] = useState(false);
   // Dernier envoi dont la réponse s'est perdue (réseau coupé à la confirmation) : le rendez-vous a
   // peut-être été créé. Tant que la sélection est la même, l'heure reste choisie et « Confirmer »
   // reste affiché : le nouvel essai rend le RDV existant (doublon reconnu par le serveur).
@@ -612,6 +615,8 @@ export default function Booking() {
   const urlParams = new URLSearchParams(window.location.search);
   const preSelectedIds = (urlParams.get('services') || '').split(',').map(s => s.trim()).filter(Boolean);
   const preSelectedBarberId = urlParams.get('barber') || null;
+  // Lien « Réserver cette prestation » d'une photo des réalisations (BarberGallery)
+  const fromGallery = urlParams.get('from') === 'gallery';
   // « Déplacer » depuis Mes rendez-vous : l'ancien RDV n'est annulé qu'une fois le nouveau confirmé
   const rescheduleId = urlParams.get('reschedule') || null;
   // Lien d'une notification Last Minute (`/booking?barber=…&date=AAAA-MM-JJ&time=HH:MM`) : avec un
@@ -703,6 +708,17 @@ export default function Booking() {
     const list = servicesData || EMPTY_LIST;
     return selectedServices.map(s => list.find(x => String(x.id) === String(s.id)) || s);
   }, [selectedServices, servicesData]);
+
+  // Depuis une photo de la galerie : écran court (prestation choisie, compléments, produits) puis
+  // les créneaux du barber. Prestation de la photo retirée du catalogue, déplacement ou
+  // « Changer de prestation » : le sélecteur complet, comme avant.
+  const preSelectedKey = preSelectedIds.join(',');
+  const galleryAvailable = useMemo(
+    () => fromGallery && (servicesData || EMPTY_LIST).some(s => preSelectedKey.split(',').includes(String(s.id))),
+    [fromGallery, servicesData, preSelectedKey],
+  );
+  const galleryFocus = fromGallery && !fullPicker && !rescheduleId && preSelectedIds.length > 0
+    && ((servicesPending && !servicesPaused) || galleryAvailable);
 
   const employeesQuery = useQuery({
     queryKey: ['employees'],
@@ -1565,7 +1581,7 @@ export default function Booking() {
 
           <AnimatePresence mode="wait" initial={false}>
             <motion.div key={step} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }}>
-              <h1 className="font-display text-2xl font-bold text-foreground">{STEP_LABELS[step]}</h1>
+              <h1 className="font-display text-2xl font-bold text-foreground">{step === 0 && galleryFocus ? 'Votre prestation' : STEP_LABELS[step]}</h1>
               <p className="text-xs text-muted-foreground mt-1">
                 Étape {step + 1} sur {STEPS.length}
                 {skipBarberStep && selectedEmployee ? ` · avec ${selectedEmployee.name}` : anyBarber && step === 2 ? ' · premier créneau disponible' : ''}
@@ -1649,7 +1665,24 @@ export default function Booking() {
         <div className="relative">
         <AnimatePresence mode="popLayout" custom={direction} initial={false}>
           {/* Step 1: Services */}
-          {step === 0 && (
+          {step === 0 && galleryFocus && (
+            <motion.div key="gallery-quick" custom={direction} variants={stepVariants} initial="enter" animate="center" exit="exit" transition={stepTransition}>
+              <GalleryQuickStep
+                catalog={services}
+                selected={liveSelected}
+                photoServiceIds={preSelectedIds}
+                loading={servicesPending || selectedServices.length === 0}
+                barber={selectedEmployee || preSelectedBarber}
+                onToggle={toggleService}
+                onSwap={swapServices}
+                onChangeServices={() => { hapticFeedback(); setFullPicker(true); }}
+                addonsEnabled={addonsEnabled}
+                addonSelection={addonSelection}
+                onAddonChange={setAddonSelection}
+              />
+            </motion.div>
+          )}
+          {step === 0 && !galleryFocus && (
             <motion.div key="services" custom={direction} variants={stepVariants} initial="enter" animate="center" exit="exit" transition={stepTransition}>
               <p className="text-xs text-muted-foreground mb-4">Choisissez une ou plusieurs prestations : le total et la durée se calculent tout seuls.</p>
               {/* Même sélecteur que la page Prestations (catégories, formules, recherche) + suggestions selon la sélection */}
@@ -1868,8 +1901,10 @@ export default function Booking() {
                 </AnimatePresence>
               </div>
 
-              {/* Produits de la boutique à ajouter (pas pour un déplacement : ceux de l'ancien RDV suivent) */}
-              {addonsEnabled && (
+              {/* Produits de la boutique à ajouter (pas pour un déplacement : ceux de l'ancien RDV suivent).
+                  Déjà proposés avant le créneau quand la réservation vient d'une photo : le
+                  récapitulatif ci-dessus les reprend */}
+              {addonsEnabled && !galleryFocus && (
                 <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="empty:hidden">
                   <ProductAddon services={selectedServices} selection={addonSelection} onChange={setAddonSelection} />
                 </motion.div>
@@ -1934,6 +1969,10 @@ export default function Booking() {
                     {selectedServices.length > 0 && (
                       <Chip key="services" icon={Scissors}>{selectedServices.length} prestation{selectedServices.length > 1 ? 's' : ''}</Chip>
                     )}
+                    {/* Produits ajoutés avant le créneau (réservation depuis une photo de la galerie) */}
+                    {addonLines.length > 0 && (
+                      <Chip key="products" icon={ShoppingBag}>{addonLines.reduce((n, it) => n + it.quantity, 0)} produit{addonLines.reduce((n, it) => n + it.quantity, 0) > 1 ? 's' : ''}</Chip>
+                    )}
                     {selectedEmployee && <Chip key="barber" icon={User}>{selectedEmployee.name}</Chip>}
                     {!selectedEmployee && anyBarber && <Chip key="any-barber" icon={Users}>Premier dispo</Chip>}
                     {selectedDate && <Chip key="date" icon={Calendar}>{upperFirst(format(selectedDate, 'EEE d MMM', { locale: fr }))}</Chip>}
@@ -1941,7 +1980,7 @@ export default function Booking() {
                 </div>
               </div>
               <div className="text-right shrink-0">
-                <AnimatedNumber value={totalPrice} suffix="€" className="block text-lg font-bold text-primary tabular-nums leading-tight" />
+                <AnimatedNumber value={totalPrice + addonSum} suffix="€" className="block text-lg font-bold text-primary tabular-nums leading-tight" />
                 <p className="text-[10px] text-muted-foreground"><AnimatedNumber value={totalDuration} suffix=" min" /></p>
               </div>
             </motion.div>
@@ -2011,7 +2050,9 @@ export default function Booking() {
                   ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/25 hover:bg-primary/90'
                   : 'bg-white/5 border border-white/10 text-muted-foreground cursor-not-allowed'
               }`}>
-              Suivant <ChevronRight className="w-4 h-4" />
+              {step === 0 && galleryFocus && skipBarberStep && selectedEmployee
+                ? `Choisir mon créneau avec ${selectedEmployee.name}`
+                : 'Suivant'} <ChevronRight className="w-4 h-4" />
             </motion.button>
           ) : (
             <span className={`flex-1 rounded-2xl ${canConfirm ? 'pulse-cta' : ''}`}>
