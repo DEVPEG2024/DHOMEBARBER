@@ -193,6 +193,11 @@ body.keyboard-open {
   bottom: var(--keyboard-overlap, 0px);
   max-height: calc(92vh - var(--keyboard-overlap, 0px));
 }
+/* Barre de la réservation (components/booking/BookingBar.jsx) : masquée pendant la saisie de la
+   note, sinon elle remonterait au-dessus du clavier et recouvrirait le champ */
+body.keyboard-open .booking-bar {
+  display: none;
+}
 /* Page de connexion : le logo se replie quand le clavier est ouvert, le formulaire reste entier
    sur un écran court (iPhone SE, iPad en mode compatibilité) */
 .login-logo {

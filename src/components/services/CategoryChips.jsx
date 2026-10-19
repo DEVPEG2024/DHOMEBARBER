@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 
 /**
- * Chips de catégories collantes (fond flouté), « Tout » en tête, compteur par catégorie.
+ * Chips de rubriques collantes (fond flouté), compteur par rubrique (pas de chip « Tout »).
  * Le fond de la chip active glisse d'une chip à l'autre (`layoutId`), et la chip active est
  * ramenée au centre de la rangée quand elle change (défilement de la page ou tap).
  * Hauteur visible 40 px, zone de tap étendue à 48 px par un pseudo-élément.

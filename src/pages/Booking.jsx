@@ -3,32 +3,51 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api } from '@/api/apiClient';
 import { fetchPublicBarbers } from '@/lib/publicBarbers';
 import { useAuth } from '@/lib/AuthContext';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { motion, AnimatePresence, animate, useReducedMotion } from 'framer-motion';
-import { ChevronLeft, ChevronRight, Check, Calendar, CalendarPlus, Clock, User, Users, Scissors, ShoppingBag, Sparkles } from 'lucide-react';
+import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
+import { Calendar, CalendarPlus, Check, ChevronDown, Info, MessageSquare, Scissors, ShoppingBag } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
-import { format, addDays, addMonths, isBefore, isSameDay } from 'date-fns';
+import { format, addDays, addMonths } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import ServicePicker from '@/components/services/ServicePicker';
-import EmployeeCard from '@/components/shared/EmployeeCard';
 import LoadError, { isNetworkError } from '@/components/shared/LoadError';
 import { hapticFeedback, isNative } from '@/lib/capacitor';
 import { blocksClient, checkOldCancelled, appointmentDuration } from '@/lib/reschedule';
 import { useAndroidBack } from '@/lib/useAndroidBack';
-import { BARBER_PHOTO_ASPECT } from '@/lib/barberPhoto';
 import { appointmentEvent, openCalendar, parisInstant } from '@/lib/calendarLinks';
 import { SALON_PHONE, SALON_PHONE_HREF, useCancelFeatures } from '@/lib/cancellation';
-import { analyzeDay, isOnLeave, parisDay, workingHoursOf } from '@/lib/slots';
+import { analyzeDay, parisDay } from '@/lib/slots';
+import {
+  dateFromKey, dayOptions, pickNextOptions, rowsByDate, weekDays, weekKeyOf,
+} from '@/lib/availability';
 import { addonItems, addonTotal, suggestAddonProducts } from '@/lib/appointmentProducts';
 import { formatPrice } from '@/components/shop/productUtils';
+import { formatDuration } from '@/components/services/serviceUtils';
 import ProductAddon, { addonMaxQuantity, addonProductsQuery } from '@/components/booking/ProductAddon';
 import GalleryQuickStep from '@/components/booking/GalleryQuickStep';
+import BookingSteps from '@/components/booking/BookingSteps';
+import BookingBar from '@/components/booking/BookingBar';
+import BarberStrip from '@/components/booking/BarberStrip';
+import NextSlots from '@/components/booking/NextSlots';
+import WeekCalendar from '@/components/booking/WeekCalendar';
+import SlotGroups from '@/components/booking/SlotGroups';
+import ConfirmSummary from '@/components/booking/ConfirmSummary';
 import { track } from '@/lib/analytics';
 
-const STEPS = ['services', 'barber', 'datetime', 'confirm'];
-const STEP_LABELS = ['Prestations', 'Barber', 'Date & Heure', 'Confirmation'];
-const STEP_ICONS = [Scissors, User, Calendar, Check];
+/**
+ * Étapes du parcours (refonte du 19 oct. 2026 : barber, jour et heure sur un seul écran). Les noms
+ * `datetime` / `confirm` sont ceux que lit le parcours de réservation d'Admin → Trafic
+ * (`FUNNEL` de lib/analytics.js du backend) : ne pas les renommer.
+ */
+const STEPS = ['services', 'datetime', 'confirm'];
+const STEP_TITLES = ['Choisissez votre prestation', 'Choisissez votre créneau', 'Vérifiez et confirmez'];
+/** Prochaines disponibilités : nombre de semaines chargées dès l'ouverture de la page (C2). */
+const PRELOAD_WEEKS = 2;
+/** Date limite du délai d'annulation, heure de Paris (même format que Mes rendez-vous). */
+const PARIS_DEADLINE = new Intl.DateTimeFormat('fr-FR', {
+  timeZone: 'Europe/Paris', weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit',
+});
 
 // Étapes qui glissent dans le sens de la navigation (suivant → entre par la droite)
 const stepVariants = {
@@ -37,7 +56,6 @@ const stepVariants = {
   exit: (dir) => ({ opacity: 0, x: dir >= 0 ? -40 : 40 }),
 };
 const stepTransition = { x: { type: 'spring', stiffness: 380, damping: 34 }, opacity: { duration: 0.18 } };
-const springy = { type: 'spring', stiffness: 420, damping: 30 };
 /** Durée de l'écran de succès avant la redirection vers Mes rendez-vous (ms). */
 const SUCCESS_DURATION = 4200;
 
@@ -60,21 +78,6 @@ const CALENDAR_TARGETS = [
 const NOTES_MAX = 1000;
 /** Refus 400 du serveur qui portent sur le créneau lui-même (assertSlotAvailable) : passé, horaires, fermeture, congé. */
 const SLOT_REFUSED_RE = /déjà passé|ne reçoit pas à cette heure|ferme à|absent ce jour/i;
-
-/**
- * « Peu importe » : raison commune quand aucun barber n'a de créneau.
- * Tous en repos → salon fermé ; repos et congés → personne ne travaille ; un barber qui aurait un
- * créneau plus court → durée ; sinon journée terminée (aujourd'hui) ou complète.
- */
-function mergeDayReasons(reasons) {
-  if (reasons.length === 0) return 'full';
-  if (reasons.every(r => r === 'off')) return 'closed';
-  if (reasons.every(r => r === 'off' || r === 'leave')) return 'nobody';
-  if (reasons.includes('duration')) return 'duration';
-  if (reasons.includes('private')) return 'private';
-  if (reasons.every(r => r === 'off' || r === 'leave' || r === 'over')) return 'over';
-  return 'full';
-}
 
 /** « 35 min », « 1 h », « 1 h30 ». */
 function formatMinutes(total) {
@@ -115,52 +118,6 @@ function emptyDayMessage(reason, { barberName, date, totalDuration, serviceCount
   }
 }
 
-/** Repères discrets du bandeau de dates : jours où l'on sait d'avance qu'il n'y a aucun créneau. */
-const DAY_MARKS = {
-  off: { label: 'repos', title: 'ne travaille pas' },
-  leave: { label: 'congé', title: 'en congé' },
-  closed: { label: 'fermé', title: 'salon fermé' },
-};
-
-/** Nombre qui glisse de l'ancienne valeur à la nouvelle (écrit dans le DOM, sans re-render). */
-function AnimatedNumber({ value, suffix = '', className }) {
-  const ref = useRef(null);
-  const previous = useRef(value);
-  const reduceMotion = useReducedMotion();
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return undefined;
-    const from = previous.current;
-    previous.current = value;
-    if (reduceMotion || from === value) { el.textContent = `${value}${suffix}`; return undefined; }
-    const controls = animate(from, value, {
-      duration: 0.6,
-      ease: [0.16, 1, 0.3, 1],
-      onUpdate: (v) => { el.textContent = `${Math.round(v)}${suffix}`; },
-    });
-    return () => controls.stop();
-  }, [value, suffix, reduceMotion]);
-
-  return <span ref={ref} className={className}>{value}{suffix}</span>;
-}
-
-const Chip = React.forwardRef(function Chip({ icon: Icon, children }, ref) {
-  return (
-    <motion.span
-      ref={ref}
-      layout
-      initial={{ opacity: 0, scale: 0.8 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.8 }}
-      transition={springy}
-      className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-white/5 border border-white/10 text-foreground/90"
-    >
-      {Icon && <Icon className="w-3 h-3 text-primary" />}
-      {children}
-    </motion.span>
-  );
-});
 
 /** Lame de rasoir métallique (double tranchant), rendu acier brossé avec reflet. */
 function SteelBlade({ width = 32 }) {
@@ -239,63 +196,6 @@ function BladeBurst({ reduceMotion }) {
           <SteelBlade width={b.width} />
         </motion.span>
       ))}
-    </div>
-  );
-}
-
-/**
- * Carte « Peu importe » (étape 2) : premier créneau disponible, tous barbers confondus.
- * Même gabarit qu'`EmployeeCard` (halo, cadre au ratio photo, titre, sous-titre, coche).
- */
-function AnyBarberCard({ selected, onClick }) {
-  return (
-    <div className="relative group">
-      <div
-        className={`absolute -bottom-2 left-1/2 -translate-x-1/2 w-3/4 h-8 rounded-full transition-opacity duration-500 ${
-          selected ? 'opacity-60' : 'opacity-25 group-hover:opacity-40'
-        }`}
-        style={{
-          background: 'radial-gradient(ellipse, rgba(34,197,94,0.5) 0%, rgba(34,197,94,0.15) 50%, transparent 80%)',
-          filter: 'blur(12px)',
-        }}
-      />
-      <motion.button
-        type="button"
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        whileTap={{ scale: 0.96 }}
-        onClick={onClick}
-        aria-pressed={selected}
-        className={`w-full cursor-pointer rounded-2xl border p-3 text-center transition-all duration-300 relative overflow-hidden ${
-          selected
-            ? 'border-primary/40 bg-primary/8 shadow-lg shadow-primary/15'
-            : 'border-white/8 bg-white/4 backdrop-blur-xl hover:bg-white/8 hover:border-white/15'
-        }`}
-      >
-        {selected && (
-          <div className="absolute inset-0 bg-gradient-to-b from-primary/5 to-transparent pointer-events-none" />
-        )}
-        {/* Cadre au même ratio que les photos des barbers, pour aligner la grille */}
-        <div
-          className={`w-full rounded-xl overflow-hidden mb-3 flex flex-col items-center justify-center gap-2.5 bg-gradient-to-b from-primary/15 to-primary/5 border border-primary/15 transition-all duration-300 ${
-            selected ? 'ring-2 ring-primary ring-offset-2 ring-offset-background' : ''
-          }`}
-          style={{ aspectRatio: BARBER_PHOTO_ASPECT }}
-        >
-          <div className="w-14 h-14 rounded-full bg-primary/15 border border-primary/25 flex items-center justify-center">
-            <Users className="w-6 h-6 text-primary" />
-          </div>
-          <span className="text-[10px] uppercase tracking-[0.2em] text-primary/70">Tous barbers</span>
-        </div>
-        <h3 className="font-semibold text-sm text-foreground">Peu importe</h3>
-        <p className="text-[11px] text-muted-foreground uppercase tracking-wider mt-0.5">Premier créneau dispo</p>
-        {selected && (
-          <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }}
-            className="absolute top-2.5 right-2.5 w-5 h-5 bg-primary rounded-full flex items-center justify-center">
-            <Check className="w-3 h-3 text-primary-foreground" />
-          </motion.div>
-        )}
-      </motion.button>
     </div>
   );
 }
@@ -477,111 +377,22 @@ function serverMessage(err, fallback) {
 
 /** Horizon de réservation proposé au client, en mois à partir d'aujourd'hui. */
 const BOOKING_MONTHS_AHEAD = 3;
-/** Marge gauche de la bande de dates (`px-4`), retirée lors des défilements programmés. */
-const STRIP_PADDING = 16;
 
 /**
- * Bande de dates de l'étape 3 (≈ 90 jours) avec des raccourcis par mois : le mois visible est
- * suivi au défilement, un tap sur un mois amène son premier jour en tête de bande.
- * `marks` (Map `yyyy-MM-dd` → clé de `DAY_MARKS`) atténue les jours sans créneau connu d'avance
- * (repos, congé, salon fermé) ; ils restent cliquables, la page explique alors pourquoi.
+ * Barber de la dernière visite du client (RDV confirmé ou terminé déjà commencé), s'il figure
+ * encore parmi les barbers réservables ; sinon `null`.
  */
-function DateStrip({ dates, selectedDate, onSelect, marks }) {
-  const reduceMotion = useReducedMotion();
-  const stripRef = useRef(null);
-  const dayRefs = useRef([]);
-  const frame = useRef(0);
-
-  // Index du premier jour de chaque mois de la plage
-  const months = useMemo(() => dates.reduce((acc, date, i) => {
-    const key = format(date, 'yyyy-MM');
-    if (!acc.length || acc[acc.length - 1].key !== key) {
-      const label = format(date, 'LLLL', { locale: fr });
-      acc.push({ key, index: i, label: label.charAt(0).toUpperCase() + label.slice(1) });
-    }
-    return acc;
-  }, []), [dates]);
-
-  const [visibleMonth, setVisibleMonth] = useState(() => format(selectedDate || dates[0], 'yyyy-MM'));
-
-  const scrollToIndex = (index, smooth) => {
-    const strip = stripRef.current;
-    const day = dayRefs.current[index];
-    if (!strip || !day) return;
-    strip.scrollTo({ left: Math.max(0, day.offsetLeft - STRIP_PADDING), behavior: smooth && !reduceMotion ? 'smooth' : 'auto' });
-  };
-
-  // Retour sur l'étape avec une date déjà choisie : la ramener à l'écran
-  useEffect(() => {
-    if (!selectedDate) return;
-    const index = dates.findIndex(d => isSameDay(d, selectedDate));
-    if (index > 0) scrollToIndex(Math.max(0, index - 1), false);
-  }, []);
-
-  useEffect(() => () => cancelAnimationFrame(frame.current), []);
-
-  const onScroll = () => {
-    cancelAnimationFrame(frame.current);
-    frame.current = requestAnimationFrame(() => {
-      const strip = stripRef.current;
-      if (!strip) return;
-      const edge = strip.scrollLeft + STRIP_PADDING;
-      const first = dayRefs.current.findIndex(el => el && el.offsetLeft + el.offsetWidth / 2 > edge);
-      if (first >= 0) setVisibleMonth(format(dates[first], 'yyyy-MM'));
-    });
-  };
-
-  return (
-    <>
-      <div className="flex gap-2 mb-3 overflow-x-auto -mx-4 px-4 scrollbar-hide">
-        {months.map(m => {
-          const active = m.key === visibleMonth;
-          return (
-            <button
-              key={m.key}
-              type="button"
-              onClick={() => { setVisibleMonth(m.key); scrollToIndex(m.index, true); hapticFeedback(); }}
-              className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors duration-300 ${
-                active
-                  ? 'bg-primary/15 text-primary border border-primary/40'
-                  : 'bg-white/5 border border-white/10 text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              {m.label}
-            </button>
-          );
-        })}
-      </div>
-      <div ref={stripRef} onScroll={onScroll} className="relative flex gap-2 overflow-x-auto pb-2 -mx-4 px-4 scrollbar-hide">
-        {dates.map((date, i) => {
-          const active = selectedDate && isSameDay(date, selectedDate);
-          const mark = DAY_MARKS[marks?.get(format(date, 'yyyy-MM-dd'))] || null;
-          return (
-            <motion.button
-              key={date.toISOString()}
-              ref={el => { dayRefs.current[i] = el; }}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: mark && !active ? 0.45 : 1, y: 0 }}
-              transition={{ delay: Math.min(i, 10) * 0.03, duration: 0.3, ease: 'easeOut' }}
-              whileTap={{ scale: 0.94 }}
-              onClick={() => onSelect(date)}
-              aria-label={`${format(date, 'EEEE d MMMM', { locale: fr })}${mark ? ` · ${mark.title}` : ''}`}
-              className={`flex-shrink-0 w-16 py-3 rounded-2xl text-center transition-colors duration-300 ${
-                active
-                  ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/25'
-                  : 'backdrop-blur-xl bg-white/5 border border-white/10 text-foreground hover:bg-white/10'
-              }`}
-            >
-              <p className="text-[11px] uppercase opacity-70">{format(date, 'EEE', { locale: fr })}</p>
-              <p className="text-lg font-bold leading-tight">{format(date, 'd')}</p>
-              {/* Jour sans créneau connu d'avance : « repos » / « congé » / « fermé » à la place du mois */}
-              <p className={`text-[11px] ${mark ? 'opacity-80 italic' : 'opacity-60'}`}>{mark ? mark.label : format(date, 'MMM', { locale: fr })}</p>
-            </motion.button>
-          );
-        })}
-      </div>
-    </>
-  );
+function lastVisitBarber(appointments, employees) {
+  const now = Date.now();
+  const past = (appointments || [])
+    .filter(a => a && ['confirmed', 'completed'].includes(a.status) && a.date && a.employee_id != null
+      && parisInstant(a.date, a.start_time || '00:00') <= now)
+    .sort((a, b) => `${b.date} ${b.start_time || ''}`.localeCompare(`${a.date} ${a.start_time || ''}`));
+  for (const apt of past) {
+    const emp = employees.find(e => String(e.id) === String(apt.employee_id));
+    if (emp) return emp;
+  }
+  return null;
 }
 
 export default function Booking() {
@@ -737,16 +548,13 @@ export default function Booking() {
     [selectedEmployee, employees],
   );
 
-  // Barber passé dans l'URL (« Comme la dernière fois », relance « il est temps de revenir ») :
-  // on ne saute l'étape 2 que s'il figure parmi les barbers actifs. Introuvable (parti du salon,
-  // désactivé, lien abîmé) → l'étape de choix du barber revient, prestations présélectionnées.
+  // Barber passé dans l'URL (« Comme la dernière fois », relance « il est temps de revenir », photo
+  // de la galerie) : présélectionné s'il figure parmi les barbers actifs. Introuvable (parti du
+  // salon, désactivé, lien abîmé) → « Peu importe » et un mot qui l'explique sur l'écran Créneau.
   const preSelectedBarber = useMemo(
     () => (preSelectedBarberId ? employees.find(e => String(e.id) === String(preSelectedBarberId)) || null : null),
     [employees, preSelectedBarberId],
   );
-  const skipBarberStep = !!preSelectedBarber;
-  // Pendant le chargement des barbers, l'indicateur d'étapes part du principe que le lien est bon
-  const barberParamPending = !!preSelectedBarberId && employeesPending;
   const missingBarber = !!preSelectedBarberId && !employeesPending && !preSelectedBarber;
 
   const timeOffsQuery = useQuery({
@@ -756,12 +564,20 @@ export default function Booking() {
   });
   const timeOffs = timeOffsQuery.data || EMPTY_LIST;
 
-  // Lignes du jour servant au calcul des créneaux : une seule requête, sans filtre de statut (tous
-  // les barbers en mode « peu importe », sinon ceux du barber choisi). Le serveur dit lesquelles
-  // occupent le créneau (`blocks_client` : RDV, pauses, terminés, absents, last minute rattachés
-  // à un client) ; ne charger que confirmés et pauses proposait des heures qu'il refusait (409).
-  // Le client ne reçoit que les colonnes de créneau (employee_id, date, start_time, end_time, status).
+  // Jour de Paris (et non celui de l'appareil), recalculé au retour au premier plan : l'app
+  // laissée ouverte la veille ne propose plus la date d'hier en tête.
+  const [todayKey, setTodayKey] = useState(() => parisDay(0).key);
+  const tomorrowKey = useMemo(() => format(addDays(dateFromKey(todayKey), 1), 'yyyy-MM-dd'), [todayKey]);
+  // Horizon de réservation : jours d'aujourd'hui (compris) à `horizonKey` (exclu)
+  const horizonKey = useMemo(() => format(addMonths(dateFromKey(todayKey), BOOKING_MONTHS_AHEAD), 'yyyy-MM-dd'), [todayKey]);
+  const firstWeekKey = useMemo(() => weekKeyOf(dateFromKey(todayKey)), [todayKey]);
+  const lastWeekKey = useMemo(() => weekKeyOf(addDays(dateFromKey(horizonKey), -1)), [horizonKey]);
+  // Semaine affichée par le calendrier de l'écran Créneau (suit le jour choisi, flèches sinon)
+  const [visibleWeekKey, setVisibleWeekKey] = useState(null);
+  const shownWeekKey = visibleWeekKey && visibleWeekKey >= firstWeekKey && visibleWeekKey <= lastWeekKey ? visibleWeekKey : firstWeekKey;
+
   const selectedDateStr = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : null;
+  const selectedWeekKey = selectedDate ? weekKeyOf(selectedDate) : null;
   const selectedServiceKey = useMemo(() => serviceKey(selectedServices), [selectedServices]);
   // Même sélection que l'envoi dont la réponse s'est perdue (barber, jour, heure, prestations)
   const uncertainMatch = !!uncertainSend && !!selectedEmployee
@@ -769,39 +585,66 @@ export default function Booking() {
     && uncertainSend.date === selectedDateStr
     && uncertainSend.time === selectedTime
     && uncertainSend.services === selectedServiceKey;
-  const slotScope = anyBarber ? 'all' : (selectedEmployee?.id ?? null);
-  const slotsEnabled = !!selectedDate && (anyBarber || !!selectedEmployee);
-  const fetchDayAppointments = () => {
-    if (!slotsEnabled) return Promise.resolve([]);
-    const filter = { date: selectedDateStr };
-    if (!anyBarber) filter.employee_id = selectedEmployee.id;
-    // Limite explicite : la limite par défaut du serveur pourrait tronquer la journée
-    return api.entities.Appointment.filter(filter, 'start_time', 1000);
-  };
 
-  const dayQuery = useQuery({
-    queryKey: ['appointments-day', selectedDateStr, slotScope],
-    queryFn: fetchDayAppointments,
-    enabled: slotsEnabled,
+  // Lignes servant au calcul des créneaux, chargées **par semaine et pour tous les barbers** :
+  // changer de barber ou de jour ne recharge rien, et les places de chaque jour se calculent
+  // d'avance. Sans filtre de statut : le serveur dit lesquelles occupent le créneau (`blocks_client` :
+  // RDV, pauses, terminés, absents, last minute rattachés à un client) ; ne charger que confirmés et
+  // pauses proposait des heures qu'il refusait (409). Le client ne reçoit que les colonnes de
+  // créneau. Les deux premières semaines sont chargées dès l'ouverture de la page (prochaines
+  // disponibilités), puis la semaine affichée et celle du jour choisi. Clé sous le préfixe
+  // `appointments-day` : Mes rendez-vous l'invalide après une annulation.
+  const weekKeys = useMemo(() => {
+    const keys = [];
+    for (let i = 0; i < PRELOAD_WEEKS; i += 1) keys.push(format(addDays(dateFromKey(firstWeekKey), 7 * i), 'yyyy-MM-dd'));
+    for (const k of [shownWeekKey, selectedWeekKey]) if (k && !keys.includes(k)) keys.push(k);
+    return keys;
+  }, [firstWeekKey, shownWeekKey, selectedWeekKey]);
+  const weekQueries = useQueries({
+    queries: weekKeys.map(weekKey => ({
+      queryKey: ['appointments-day', 'week', weekKey],
+      // Limite explicite : la limite par défaut du serveur pourrait tronquer la semaine
+      queryFn: () => api.entities.Appointment.filter({ date: weekDays(weekKey).map(d => d.key) }, 'start_time', 2000),
+      staleTime: 30 * 1000,
+    })),
   });
+  // Privatisations confirmées de la semaine : le salon n'accepte aucun RDV sur leur fenêtre. Un
+  // échec de lecture ne bloque pas la réservation (le serveur revérifie et refuse en 409).
+  const privateQueries = useQueries({
+    queries: weekKeys.map(weekKey => ({
+      queryKey: ['privateEvents', 'week', weekKey],
+      queryFn: () => api.entities.Event.filter({ date: weekDays(weekKey).map(d => d.key), status: 'confirmed' }, 'date', 50),
+      staleTime: 60 * 1000,
+    })),
+  });
+  const weekQueryOf = (weekKey) => weekQueries[weekKeys.indexOf(weekKey)] || null;
+  const privateQueryOf = (weekKey) => privateQueries[weekKeys.indexOf(weekKey)] || null;
 
-  const dayRows = dayQuery.data;
-  // Déplacement : l'ancien RDV du client (annulé à la confirmation) ne bloque pas son nouveau créneau
-  // (le serveur l'ignore aussi). Un départ à la même heure reste refusé par le serveur.
-  const appointments = useMemo(
-    () => (dayRows || []).filter(blocksClient).filter(a => !(rescheduleId && String(a.id) === String(rescheduleId))),
-    [dayRows, rescheduleId],
+  // Lignes et privatisations de toutes les semaines chargées, par jour. Déplacement : l'ancien RDV
+  // du client (annulé à la confirmation) ne bloque pas son nouveau créneau (le serveur l'ignore
+  // aussi) ; un départ à la même heure reste refusé par le serveur.
+  // Empreinte des données chargées (taille fixe pour les dépendances des `useMemo`)
+  const weekStamp = `${weekKeys.join(',')}#${weekQueries.map(q => q.dataUpdatedAt).join(',')}`;
+  const privateStamp = `${weekKeys.join(',')}#${privateQueries.map(q => q.dataUpdatedAt).join(',')}`;
+  const allRowsByDate = useMemo(
+    () => rowsByDate(weekQueries.flatMap(q => (Array.isArray(q.data) ? q.data : []))),
+    [weekStamp],
+  );
+  const blockingByDate = useMemo(() => {
+    const map = new Map();
+    for (const [key, rows] of allRowsByDate) {
+      map.set(key, rows.filter(blocksClient).filter(a => !(rescheduleId && String(a.id) === String(rescheduleId))));
+    }
+    return map;
+  }, [allRowsByDate, rescheduleId]);
+  const privatesByDate = useMemo(
+    () => rowsByDate(privateQueries.flatMap(q => (Array.isArray(q.data) ? q.data : []))),
+    [privateStamp],
   );
 
-  // Privatisations confirmées du jour : le salon n'accepte aucun RDV sur leur fenêtre. Un échec
-  // de lecture ne bloque pas la réservation (le serveur revérifie et refuse en 409).
-  const privateEventsQuery = useQuery({
-    queryKey: ['privateEvents', selectedDateStr],
-    queryFn: () => api.entities.Event.filter({ date: selectedDateStr, status: 'confirmed' }, 'date', 50),
-    enabled: slotsEnabled,
-    staleTime: 60 * 1000,
-  });
-  const privateEvents = privateEventsQuery.data || EMPTY_LIST;
+  const dayRows = selectedDateStr && weekQueryOf(selectedWeekKey)?.data ? (allRowsByDate.get(selectedDateStr) || EMPTY_LIST) : undefined;
+  const appointments = (selectedDateStr && blockingByDate.get(selectedDateStr)) || EMPTY_LIST;
+  const privateEvents = (selectedDateStr && privatesByDate.get(selectedDateStr)) || EMPTY_LIST;
 
   // Après une réponse perdue : ses propres RDV du jour, relus (et repris automatiquement au retour
   // du réseau) pour savoir si l'envoi a bien été enregistré
@@ -829,21 +672,30 @@ export default function Booking() {
       && serviceKey(r.services) === selectedServiceKey) || null;
   }, [dayRows, uncertainRows, user?.email, selectedEmployee, selectedTime, selectedDateStr, selectedServiceKey]);
 
-  // Créneaux calculables seulement quand RDV, pauses et congés sont là : sans eux, toute la
-  // journée paraîtrait libre. Chargement → squelette ; échec (sans données) → écran d'erreur.
-  // « Peu importe » : la liste des barbers fait aussi partie du calcul
-  const slotQueries = anyBarber
-    ? [dayQuery, timeOffsQuery, employeesQuery]
-    : [dayQuery, timeOffsQuery];
-  // Requête en pause hors connexion : pas un chargement (squelette sans fin) mais un échec
-  const slotsLoading = slotsEnabled && (slotQueries.some(q => q.isPending && !isPausedQuery(q))
-    || (privateEventsQuery.isPending && privateEventsQuery.fetchStatus !== 'paused'));
-  const slotsFailedQuery = slotsEnabled && !slotsLoading
-    ? slotQueries.find(q => (q.isError && q.data === undefined) || isPausedQuery(q)) || null
-    : null;
-  const slotsReady = slotsEnabled && !slotsLoading && !slotsFailedQuery;
+  // Créneaux d'une semaine calculables seulement quand ses RDV et pauses, les congés et les barbers
+  // sont là : sans eux, toute la journée paraîtrait libre. Chargement → squelette ; échec (sans
+  // données) → écran d'erreur. Requête en pause hors connexion : pas un chargement (squelette sans
+  // fin) mais un échec. Privatisations : on attend leur lecture, son échec ne bloque pas.
+  const baseSlotQueries = [timeOffsQuery, employeesQuery];
+  const failedOf = (queries) => queries.find(q => q && ((q.isError && q.data === undefined) || isPausedQuery(q))) || null;
+  const weekState = (weekKey) => {
+    const rowsQuery = weekQueryOf(weekKey);
+    const privQuery = privateQueryOf(weekKey);
+    if (!rowsQuery) return 'loading';
+    const queries = [rowsQuery, ...baseSlotQueries];
+    if (queries.some(q => q.isPending && !isPausedQuery(q)) || (privQuery && privQuery.isPending && privQuery.fetchStatus !== 'paused')) return 'loading';
+    return failedOf(queries) ? 'failed' : 'ready';
+  };
+  const slotsEnabled = !!selectedDate && (anyBarber || !!selectedEmployee);
+  const selectedWeekState = slotsEnabled ? weekState(selectedWeekKey) : null;
+  const slotsLoading = selectedWeekState === 'loading';
+  const slotsFailedQuery = selectedWeekState === 'failed' ? failedOf([weekQueryOf(selectedWeekKey), ...baseSlotQueries]) : null;
+  const slotsReady = selectedWeekState === 'ready';
+  const slotsRetrying = [weekQueryOf(selectedWeekKey), ...baseSlotQueries].some(q => q?.isFetching);
   const retrySlots = () => {
-    for (const q of slotQueries) if (q.isError || q.data === undefined) q.refetch();
+    for (const q of [weekQueryOf(selectedWeekKey), privateQueryOf(selectedWeekKey), ...baseSlotQueries]) {
+      if (q && (q.isError || q.data === undefined)) q.refetch();
+    }
   };
 
   React.useEffect(() => {
@@ -854,10 +706,40 @@ export default function Booking() {
     }
   }, [services]);
 
-  // Barber de l'URL trouvé parmi les actifs : présélectionné, l'étape 2 est sautée
-  React.useEffect(() => {
-    if (preSelectedBarber && !selectedEmployee) setSelectedEmployee(preSelectedBarber);
-  }, [preSelectedBarber]);
+  // Lien avec des prestations (« Réserver » de la page Prestations, « Comme la dernière fois »,
+  // relance, « Déplacer ») : toutes retrouvées dans le catalogue → directement l'écran Créneau.
+  // Une prestation retirée : on reste sur le choix des prestations (bandeau « vérifiez »).
+  // La réservation depuis une photo de la galerie garde son écran court.
+  const autoAdvanced = useRef(false);
+  useEffect(() => {
+    if (autoAdvanced.current || step !== 0 || fromGallery || preSelectedIds.length === 0 || !servicesData) return;
+    autoAdvanced.current = true;
+    const found = servicesData.filter(s => preSelectedIds.includes(String(s.id)));
+    if (found.length > 0 && found.length === new Set(preSelectedIds).size) {
+      setDirection(1);
+      setStep(1);
+    }
+  }, [servicesData, galleryFocus, step]);
+
+  // Barber présélectionné à l'arrivée (une fois) : celui du lien s'il est réservable, sinon celui de
+  // la dernière visite du client, sinon « Peu importe ». Attend la session, les barbers et, pour un
+  // client connecté, ses rendez-vous (sans eux, on ne connaît pas son barber habituel).
+  const usualBarber = useMemo(() => lastVisitBarber(myAppointments, employees), [myAppointments, employees]);
+  const [barberReady, setBarberReady] = useState(false);
+  useEffect(() => {
+    if (barberReady || employeesPending) return;
+    if (preSelectedBarber) {
+      setAnyBarber(false);
+      setSelectedEmployee(preSelectedBarber);
+      setBarberReady(true);
+      return;
+    }
+    if (isLoadingAuth || (myAppointmentsQuery.isPending && myAppointmentsQuery.fetchStatus === 'fetching')) return;
+    setBarberReady(true);
+    if (selectedEmployee || anyBarber) return;
+    if (usualBarber && !missingBarber) setSelectedEmployee(usualBarber);
+    else setAnyBarber(true);
+  }, [barberReady, employeesPending, preSelectedBarber, isLoadingAuth, myAppointmentsQuery.isPending, myAppointmentsQuery.fetchStatus, usualBarber, missingBarber]);
 
   const catalogDuration = liveSelected.reduce((sum, s) => sum + (s.duration || 0), 0);
   // Déplacement avec les mêmes prestations : la durée allongée par le salon (« prévoir 1 h ») est
@@ -911,9 +793,6 @@ export default function Booking() {
   // Plus courte prestation choisie : sert à dire si c'est la durée qui empêche tout créneau
   const shortestDuration = liveSelected.reduce((min, s) => Math.min(min, s.duration || 30), 30);
 
-  // Jour de Paris (et non celui de l'appareil), recalculé au retour au premier plan : l'app
-  // laissée ouverte la veille ne propose plus la date d'hier en tête.
-  const [todayKey, setTodayKey] = useState(() => parisDay(0).key);
   // Horloge à la minute : les créneaux du jour (calculés sur Date.now() par analyzeDay) sont
   // recalculés, une heure passée pendant que la page reste ouverte n'est plus proposée
   const [nowTick, setNowTick] = useState(() => Date.now());
@@ -935,26 +814,19 @@ export default function Booking() {
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, []);
 
-  const dates = useMemo(() => {
-    const [y, m, d0] = todayKey.split('-').map(Number);
-    const today = new Date(y, m - 1, d0, 12); // midi : même jour du calendrier, sans saut à l'heure d'été
-    const end = addMonths(today, BOOKING_MONTHS_AHEAD);
-    const d = [];
-    for (let day = today; isBefore(day, end); day = addDays(day, 1)) d.push(day);
-    return d;
-  }, [todayKey]);
-
-  // Lien Last Minute : date du lien sélectionnée si elle figure dans le bandeau (sinon rien)
+  // Lien Last Minute : date du lien sélectionnée si elle est dans l'horizon de réservation (sinon rien)
   useEffect(() => {
     if (presetApplied.current.date || !presetDateKey || !preSelectedBarber) return;
     presetApplied.current.date = true;
-    const match = selectedDate ? null : dates.find(d => format(d, 'yyyy-MM-dd') === presetDateKey);
-    if (match) setSelectedDate(match);
-    else {
+    const inRange = presetDateKey >= todayKey && presetDateKey < horizonKey;
+    if (!selectedDate && inRange) {
+      setSelectedDate(dateFromKey(presetDateKey));
+      setVisibleWeekKey(weekKeyOf(dateFromKey(presetDateKey)));
+    } else {
       presetApplied.current.time = true;
       if (presetTime && !selectedDate) setPresetMiss('gone');
     }
-  }, [preSelectedBarber, dates]);
+  }, [preSelectedBarber, todayKey]);
 
   // Jour changé pendant la réservation : une date choisie désormais passée est retirée
   useEffect(() => {
@@ -962,45 +834,66 @@ export default function Booking() {
     setSelectedDate(null);
     setSelectedTime(null);
     if (anyBarber) setSelectedEmployee(null);
-    if (step === 3) { setDirection(-1); setStep(2); }
+    if (step === 2) { setDirection(-1); setStep(1); }
   }, [todayKey]);
 
   /**
-   * Créneaux affichés à l'étape 3 : `options` = `{ time, employee }` triés par heure, et `reason`
-   * quand il n'y en a aucun (voir `analyzeDay`), pour expliquer pourquoi.
-   * - Barber précis : ses créneaux (`analyzeDay`).
-   * - « Peu importe » : union des créneaux de tous les barbers actifs ; RDV du jour regroupés par
-   *   `employee_id` (comparés en string) ; pour une même heure on garde le premier barber dans
-   *   l'ordre `sort_order`. Sans créneau, raisons des barbers fusionnées (`mergeDayReasons`).
+   * Créneaux d'un jour (`dayOptions`, lib/availability.js) pour le barber choisi, ou union de tous
+   * les barbers en « peu importe » (premier barber libre retenu pour chaque heure), avec la raison
+   * quand il n'y en a aucun (`analyzeDay` / `mergeDayReasons`).
    */
+  const scopeEmployee = anyBarber ? null : liveEmployee;
+  // Barber connu (ou « peu importe » avec la liste des barbers) : les places peuvent se calculer
+  const scopeReady = anyBarber ? !employeesPending : !!liveEmployee;
+  const optionsForDay = (date, key) => dayOptions({
+    date,
+    employee: scopeEmployee,
+    employees,
+    rows: blockingByDate.get(key) || EMPTY_LIST,
+    timeOffs,
+    totalDuration,
+    shortestDuration,
+    privateEvents: privatesByDate.get(key) || EMPTY_LIST,
+  });
   const { options: slotOptions, reason: emptyReason } = useMemo(() => {
-    if (!selectedDate || !slotsReady) return { options: [], reason: null };
-    if (!anyBarber) {
-      if (!liveEmployee) return { options: [], reason: null };
-      const { slots, reason } = analyzeDay(liveEmployee, selectedDate, appointments, timeOffs, totalDuration, shortestDuration, privateEvents);
-      return { options: slots.map(time => ({ time, employee: liveEmployee })), reason };
-    }
-    const byEmployee = new Map();
-    for (const apt of appointments) {
-      const key = String(apt.employee_id);
-      if (!byEmployee.has(key)) byEmployee.set(key, []);
-      byEmployee.get(key).push(apt);
-    }
-    const firstAvailable = new Map();
-    const reasons = [];
-    const ordered = [...employees].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-    for (const emp of ordered) {
-      const { slots, reason } = analyzeDay(emp, selectedDate, byEmployee.get(String(emp.id)) || [], timeOffs, totalDuration, shortestDuration, privateEvents);
-      if (reason) reasons.push(reason);
-      for (const time of slots) {
-        if (!firstAvailable.has(time)) firstAvailable.set(time, emp);
+    if (!selectedDate || !slotsReady || !scopeReady) return { options: [], reason: null };
+    return optionsForDay(selectedDate, selectedDateStr);
+  }, [scopeEmployee, scopeReady, selectedDate, selectedDateStr, slotsReady, blockingByDate, privatesByDate, timeOffs, totalDuration, shortestDuration, employees, nowTick]);
+
+  // Places de chaque jour de la semaine affichée (calendrier de l'écran Créneau) : jours passés et
+  // hors horizon inactifs ; semaine pas encore chargée → attente ; lecture en échec → inconnu
+  const shownWeekState = weekState(shownWeekKey);
+  const calendarDays = useMemo(() => weekDays(shownWeekKey).map(({ date, key }) => {
+    if (key < todayKey) return { date, key, status: 'past' };
+    if (key >= horizonKey) return { date, key, status: 'beyond' };
+    if (shownWeekState === 'failed') return { date, key, status: 'unknown' };
+    if (!scopeReady || shownWeekState !== 'ready') return { date, key, status: 'loading' };
+    const { options, reason } = optionsForDay(date, key);
+    return options.length > 0 ? { date, key, status: 'open', count: options.length } : { date, key, status: 'empty', reason };
+  }), [shownWeekKey, shownWeekState, todayKey, horizonKey, scopeEmployee, scopeReady, blockingByDate, privatesByDate, timeOffs, totalDuration, shortestDuration, employees, nowTick]);
+  const calendarLabel = useMemo(() => {
+    const days = weekDays(shownWeekKey);
+    const first = days[0].date;
+    const last = days[6].date;
+    if (first.getMonth() === last.getMonth()) return format(first, 'LLLL yyyy', { locale: fr });
+    return `${format(first, 'LLL', { locale: fr })} – ${format(last, 'LLL yyyy', { locale: fr })}`;
+  }, [shownWeekKey]);
+
+  // Prochaines disponibilités : premiers créneaux des deux premières semaines (deux par jour au
+  // plus). `null` tant qu'elles ne sont pas chargées ; une semaine en échec est simplement sautée.
+  const preloadStates = weekKeys.slice(0, PRELOAD_WEEKS).map(weekState);
+  const nextItems = useMemo(() => {
+    if (!scopeReady || preloadStates.includes('loading')) return null;
+    const days = [];
+    weekKeys.slice(0, PRELOAD_WEEKS).forEach((weekKey, i) => {
+      if (preloadStates[i] !== 'ready') return;
+      for (const { date, key } of weekDays(weekKey)) {
+        if (key < todayKey || key >= horizonKey) continue;
+        days.push({ date, key, options: optionsForDay(date, key).options });
       }
-    }
-    const options = [...firstAvailable.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([time, employee]) => ({ time, employee }));
-    return { options, reason: options.length > 0 ? null : mergeDayReasons(reasons) };
-  }, [anyBarber, liveEmployee, selectedDate, slotsReady, appointments, timeOffs, totalDuration, shortestDuration, employees, privateEvents, nowTick]);
+    });
+    return pickNextOptions(days, { limit: 6, perDay: 2 });
+  }, [preloadStates.join(','), weekKeys.join(','), todayKey, horizonKey, scopeEmployee, scopeReady, blockingByDate, privatesByDate, timeOffs, totalDuration, shortestDuration, employees, nowTick]);
 
   // L'heure choisie est-elle encore réservable ? (prestation ajoutée après coup, créneau pris entre-
   // temps) null = on ne sait pas encore (chargement) : on ne tranche pas.
@@ -1067,7 +960,7 @@ export default function Booking() {
   // figure parmi les créneaux calculés pour les prestations choisies (sinon rien, sans erreur)
   useEffect(() => {
     if (presetApplied.current.time || !presetTime || !presetApplied.current.date) return;
-    if (step !== 2 || !slotsReady || !selectedDate || !selectedEmployee || selectedServices.length === 0) return;
+    if (step !== 1 || !slotsReady || !selectedDate || !selectedEmployee || selectedServices.length === 0) return;
     presetApplied.current.time = true;
     if (anyBarber || selectedTime) return;
     if (format(selectedDate, 'yyyy-MM-dd') !== presetDateKey) return;
@@ -1078,7 +971,7 @@ export default function Booking() {
     const passed = parisInstant(presetDateKey, presetTime) < Date.now();
     const shortLength = Math.min(30, shortestDuration || 30);
     const fitsShort = !passed && shortLength < totalDuration
-      && analyzeDay(liveEmployee, selectedDate, appointments, timeOffs, shortLength, shortestDuration, privateEvents).slots.includes(presetTime);
+      && analyzeDay(liveEmployee, selectedDate, appointments.filter(a => String(a.employee_id) === String(liveEmployee.id)), timeOffs, shortLength, shortestDuration, privateEvents).slots.includes(presetTime);
     setPresetMiss(fitsShort ? 'duration' : 'gone');
   }, [step, slotsReady, slotOptions, selectedDate, selectedEmployee]);
 
@@ -1091,55 +984,20 @@ export default function Booking() {
   }, [selectedServiceKey]);
   useEffect(() => { if (selectedTime) setPresetMiss(null); }, [selectedTime]);
 
-  /**
-   * Repères du bandeau de dates (`yyyy-MM-dd` → `off` / `leave` / `closed`) : seulement ce qui est
-   * sûr sans charger les rendez-vous (horaires de la semaine, congés approuvés). Un jour complet
-   * n'est pas marqué : il faudrait les rendez-vous de chaque jour pour le savoir.
-   */
-  const dayMarks = useMemo(() => {
-    const marks = new Map();
-    if (!anyBarber && !selectedEmployee) return marks;
-    if (anyBarber && employees.length === 0) return marks;
-    for (const date of dates) {
-      const dateStr = format(date, 'yyyy-MM-dd');
-      const statusOf = (emp) => (isOnLeave(emp, dateStr, timeOffs) ? 'leave' : workingHoursOf(emp, date) ? null : 'off');
-      if (!anyBarber) {
-        const status = statusOf(liveEmployee);
-        if (status) marks.set(dateStr, status);
-        continue;
-      }
-      // « Peu importe » : marqué seulement si aucun barber ne travaille ce jour-là
-      const statuses = employees.map(statusOf);
-      if (statuses.every(Boolean)) marks.set(dateStr, statuses.every(s => s === 'off') ? 'closed' : 'leave');
-    }
-    return marks;
-  }, [anyBarber, selectedEmployee, liveEmployee, employees, timeOffs, dates]);
+  // Écran Créneau sans jour choisi : le premier jour qui a de la place (dans les deux premières
+  // semaines) est choisi d'office, ses heures s'affichent tout de suite. Rien ne bouge si le client
+  // a déjà un jour (lien Last Minute, retour depuis la confirmation, changement de barber).
+  useEffect(() => {
+    if (step !== 1 || selectedDate || !nextItems || nextItems.length === 0) return;
+    setSelectedDate(nextItems[0].date);
+    setVisibleWeekKey(weekKeyOf(nextItems[0].date));
+  }, [step, selectedDate, nextItems]);
 
-  // Ajout d'une prestation : la page descend jusqu'au récapitulatif et au bouton « Suivant »
-  // (avec une longue carte, ils restaient hors de l'écran, sous la liste).
   const reduceMotion = useReducedMotion();
-  const scrollToBottomRef = useRef(false);
-  useEffect(() => {
-    if (!scrollToBottomRef.current) return undefined;
-    scrollToBottomRef.current = false;
-    const raf = requestAnimationFrame(() => {
-      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: reduceMotion ? 'auto' : 'smooth' });
-    });
-    return () => cancelAnimationFrame(raf);
-  }, [selectedServices]);
-
-  // Barber du lien introuvable : à l'arrivée sur l'étape 2 (depuis « Suivant », en bas de page),
-  // remonter pour que le message qui l'explique et toute la liste des barbers soient à l'écran
-  useEffect(() => {
-    if (step !== 1 || !missingBarber) return undefined;
-    const raf = requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: reduceMotion ? 'auto' : 'smooth' }));
-    return () => cancelAnimationFrame(raf);
-  }, [step]);
 
   const toggleService = (service) => {
     hapticFeedback();
     const same = (s) => String(s.id) === String(service.id);
-    if (!selectedServices.some(same)) scrollToBottomRef.current = true;
     setRetiredNotice(false);
     setSelectedServices(prev =>
       prev.some(same)
@@ -1148,10 +1006,10 @@ export default function Booking() {
     );
   };
 
-  // Suggestion du sélecteur (ex. passer à une formule) : retire et ajoute en un seul rendu
+  // Suggestion du sélecteur (ex. passer à une formule) ou prestation et compléments ajoutés depuis
+  // la fiche : retire et ajoute en un seul rendu
   const swapServices = (remove, add) => {
     const removeIds = new Set(remove.map(s => String(s.id)));
-    if (add.length > 0) scrollToBottomRef.current = true;
     setRetiredNotice(false);
     setSelectedServices(prev => {
       const kept = prev.filter(s => !removeIds.has(String(s.id)));
@@ -1164,6 +1022,8 @@ export default function Booking() {
     setDirection(next > step ? 1 : -1);
     setStep(next);
     hapticFeedback();
+    // Chaque étape s'ouvre en haut de page (le catalogue a pu être défilé loin)
+    requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'auto' }));
   };
 
   // Mesure d'audience : étapes atteintes (parcours de réservation d'Admin → Trafic)
@@ -1182,30 +1042,69 @@ export default function Booking() {
     return () => { mountedRef.current = false; clearTimeout(successTimer.current); };
   }, []);
 
-  /** Étape 2 : barber précis (quitte le mode « peu importe »). Le créneau est réinitialisé si le barber change. */
-  const chooseBarber = (emp) => {
-    setAnyBarber(false);
-    if (String(selectedEmployee?.id) !== String(emp.id)) setSelectedTime(null);
-    setSelectedEmployee(emp);
-    hapticFeedback();
-    setTimeout(() => goToStep(2), 250);
+  /**
+   * Action principale du catalogue (« Choisir » d'une ligne, d'une carte « Les plus demandées » ou de
+   * la fiche d'une prestation) : exactement ces prestations, puis l'écran Créneau.
+   */
+  const pickServices = (list) => {
+    if (!Array.isArray(list) || list.length === 0) return;
+    const seen = new Set();
+    setSelectedServices(list.filter(s => s && !seen.has(String(s.id)) && seen.add(String(s.id))));
+    setRetiredNotice(false);
+    goToStep(1);
   };
 
-  /** Étape 2 : « peu importe » → le barber sera déterminé par le créneau choisi à l'étape 3. */
+  /** Écran Créneau, barber précis (quitte « peu importe ») : l'heure est gardée si ce barber l'a encore. */
+  const chooseBarber = (emp) => {
+    hapticFeedback();
+    if (!anyBarber && String(selectedEmployee?.id) === String(emp.id)) return;
+    setAnyBarber(false);
+    setSelectedEmployee(emp);
+    if (String(selectedEmployee?.id) !== String(emp.id)) setSelectedTime(null);
+  };
+
+  /** Écran Créneau, « peu importe » : le barber sera celui du créneau choisi. */
   const chooseAnyBarber = () => {
+    hapticFeedback();
+    if (anyBarber) return;
     setAnyBarber(true);
     setSelectedEmployee(null);
     setSelectedTime(null);
-    hapticFeedback();
-    setTimeout(() => goToStep(2), 250);
   };
 
-  /** Étape 3 : créneau choisi ; en mode « peu importe », le barber disponible devient le barber retenu. */
-  const chooseSlot = (time, employee) => {
-    if (anyBarber && employee) setSelectedEmployee(employee);
-    setSelectedTime(time);
+  /** Jour du calendrier : ses heures s'affichent dessous (l'heure choisie sur un autre jour est retirée). */
+  const chooseDay = (day) => {
     hapticFeedback();
-    setTimeout(() => goToStep(3), 250);
+    if (selectedDateStr === day.key) return;
+    setSelectedDate(day.date);
+    setSelectedTime(null);
+    setPresetMiss(null);
+    if (anyBarber) setSelectedEmployee(null);
+  };
+
+  /** Heure choisie ; en « peu importe », le barber libre à cette heure devient le barber retenu. */
+  const chooseSlot = (option) => {
+    if (anyBarber && option.employee) setSelectedEmployee(option.employee);
+    setSelectedTime(option.time);
+    hapticFeedback();
+  };
+
+  /** « Prochaines disponibilités » : jour, heure (et barber en « peu importe ») d'un coup. */
+  const chooseNext = (item) => {
+    hapticFeedback();
+    setSelectedDate(item.date);
+    setVisibleWeekKey(weekKeyOf(item.date));
+    setPresetMiss(null);
+    if (anyBarber && item.employee) setSelectedEmployee(item.employee);
+    setSelectedTime(item.time);
+  };
+
+  /** Flèches du calendrier : semaine précédente / suivante, dans l'horizon de réservation. */
+  const shiftWeek = (delta) => {
+    hapticFeedback();
+    const next = format(addDays(dateFromKey(shownWeekKey), 7 * delta), 'yyyy-MM-dd');
+    if (next < firstWeekKey || next > lastWeekKey) return;
+    setVisibleWeekKey(next);
   };
 
   /**
@@ -1445,7 +1344,7 @@ export default function Booking() {
         }
         setSelectedTime(null);
         if (anyBarber) setSelectedEmployee(null);
-        goToStep(2);
+        goToStep(1);
       } else if (err?.status === 400) {
         // Autres refus (plafond de rendez-vous, prestation, note) : on reste sur la confirmation
         queryClient.invalidateQueries({ queryKey: ['appointments-day'] });
@@ -1454,10 +1353,8 @@ export default function Booking() {
   });
 
   const canNext = () => {
-    // Lien avec un barber : attendre de savoir s'il est encore là pour décider de l'étape suivante
-    if (step === 0) return selectedServices.length > 0 && !barberParamPending;
-    if (step === 1) return !!selectedEmployee || anyBarber;
-    if (step === 2) return !!selectedDate && !!selectedTime && selectedSlotValid === true;
+    if (step === 0) return selectedServices.length > 0;
+    if (step === 1) return !!selectedEmployee && !!selectedDate && !!selectedTime && selectedSlotValid === true;
     return true;
   };
 
@@ -1469,10 +1366,8 @@ export default function Booking() {
     setSelectedTime(null);
     if (anyBarber) setSelectedEmployee(null);
     toast.info(`${old} n'est plus disponible pour vos prestations : choisissez une autre heure.`);
-    if (step === 3) { setDirection(-1); setStep(2); }
+    if (step === 2) { setDirection(-1); setStep(1); }
   }, [selectedSlotValid]);
-
-  const hasRecap = selectedServices.length > 0 || !!selectedEmployee || anyBarber || !!selectedTime;
   // « Confirmer » : sélection complète, et RDV à déplacer identifié (ou écarté) avant l'envoi
   // Comptes de l'équipe : ils réservent depuis l'agenda (le serveur refuse un RDV à leur propre
   // email). La navigation dans les étapes reste possible pour prévisualiser la page.
@@ -1486,8 +1381,7 @@ export default function Booking() {
   // Bouton retour d'Android : étape précédente (même règle que « Retour ») au lieu de quitter la
   // page et de perdre la sélection ; sur l'écran de succès, « Mes rendez-vous » tout de suite (sans
   // retour arrière suivi d'une redirection surprise). Sans effet sur le web et iOS.
-  useAndroidBack(step > 0 && !success && !createAppointment.isPending,
-    () => goToStep((step === 2 && skipBarberStep) ? 0 : step - 1));
+  useAndroidBack(step > 0 && !success && !createAppointment.isPending, () => goToStep(step - 1));
   // Pendant l'envoi : le retour est ignoré (il quittait la page en pleine confirmation)
   useAndroidBack(createAppointment.isPending, () => {});
   useAndroidBack(success, () => {
@@ -1503,7 +1397,7 @@ export default function Booking() {
       date: selectedDate,
       totalDuration,
       serviceCount: selectedServices.length,
-      canChangeBarber: !skipBarberStep,
+      canChangeBarber: true,
     })
     : null;
 
@@ -1527,78 +1421,46 @@ export default function Booking() {
     });
   }, [success, createdAppointment, selectedEmployee, selectedDate, selectedTime, liveSelected, totalDuration, totalPrice]);
 
+  // Récapitulatifs de la barre du bas et de la confirmation
+  const serviceCountLabel = `${liveSelected.length} prestation${liveSelected.length > 1 ? 's' : ''}`;
+  const servicesTitle = liveSelected.length === 1 ? liveSelected[0].name : serviceCountLabel;
+  const durationPrice = `${formatDuration(totalDuration)} · ${formatPrice(totalPrice)}`;
+  const endTime = selectedTime ? (() => {
+    const [h, m] = selectedTime.split(':').map(Number);
+    const end = h * 60 + m + totalDuration;
+    return `${String(Math.floor(end / 60) % 24).padStart(2, '0')}:${String(end % 60).padStart(2, '0')}`;
+  })() : null;
+  // Heure limite du délai d'annulation (heure de Paris), pour ne pas la découvrir trop tard
+  const cancelDeadline = selectedDateStr && selectedTime && cancelHours > 0 && !lateBooking
+    ? PARIS_DEADLINE.format(new Date(parisInstant(selectedDateStr, selectedTime) - cancelHours * 3600 * 1000)).replace(', ', ' à ')
+    : null;
+  const selectedDayLabel = selectedDate ? upperFirst(format(selectedDate, 'EEEE d MMMM', { locale: fr })) : '';
+  const [addonsOpen, setAddonsOpen] = useState(false);
+  const [noteOpen, setNoteOpen] = useState(false);
+  const showAddons = addonsEnabled && !galleryFocus && addonProducts.length > 0;
+  const barberLabel = (liveEmployee || selectedEmployee)?.name;
+
   return (
-    <div className="min-h-screen relative overflow-hidden">
-      {/* Ambient background blobs */}
-      <div className="fixed inset-0 pointer-events-none overflow-hidden">
+    <div className="min-h-screen relative overflow-x-clip">
+      {/* Halos d'ambiance */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden" aria-hidden="true">
         <div className="absolute -top-32 -left-32 w-96 h-96 bg-primary/10 rounded-full blur-3xl" />
         <div className="absolute top-1/2 -right-32 w-80 h-80 bg-accent/8 rounded-full blur-3xl" />
-        <div className="absolute -bottom-20 left-1/4 w-72 h-72 bg-primary/6 rounded-full blur-3xl" />
       </div>
 
-      <div className="relative max-w-lg mx-auto px-4 py-6">
-        {/* Header */}
-        <div className="mb-8">
-          <p className="text-[11px] uppercase tracking-[0.3em] text-primary/70 font-medium mb-2 flex items-center gap-2">
-            <Sparkles className="w-3 h-3" />
-            Réservation
-          </p>
-
-          {/* Step indicators : halo qui glisse d'une étape à l'autre, coches à ressort, lignes qui se remplissent */}
-          <div className="flex items-center gap-2 mb-6">
-            {STEPS.map((_, i) => {
-              if (i === 1 && (skipBarberStep || barberParamPending)) return null;
-              const Icon = STEP_ICONS[i];
-              const done = i < step;
-              const active = i === step;
-              return (
-                <React.Fragment key={i}>
-                  <motion.div
-                    animate={{ scale: active ? 1.1 : 1 }}
-                    transition={springy}
-                    className={`relative flex items-center justify-center w-8 h-8 rounded-full border transition-colors duration-300 ${
-                      done ? 'bg-primary border-primary' :
-                      active ? 'bg-primary/10 border-primary' :
-                      'bg-white/5 border-white/10'
-                    }`}
-                  >
-                    {active && (
-                      <motion.span layoutId="step-halo" transition={springy} className="absolute -inset-1.5 rounded-full border border-primary/40" />
-                    )}
-                    <AnimatePresence mode="wait" initial={false}>
-                      {done ? (
-                        <motion.span key="done" initial={{ scale: 0, rotate: -90 }} animate={{ scale: 1, rotate: 0 }} exit={{ scale: 0 }} transition={{ type: 'spring', stiffness: 500, damping: 22 }} className="flex">
-                          <Check className="w-3.5 h-3.5 text-primary-foreground" />
-                        </motion.span>
-                      ) : (
-                        <motion.span key="icon" initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.6, opacity: 0 }} transition={{ duration: 0.15 }} className="flex">
-                          <Icon className={`w-3.5 h-3.5 ${active ? 'text-primary' : 'text-muted-foreground/40'}`} />
-                        </motion.span>
-                      )}
-                    </AnimatePresence>
-                  </motion.div>
-                  {i < STEPS.length - 1 && !(i === 0 && (skipBarberStep || barberParamPending)) && (
-                    <div className="flex-1 h-px bg-white/10 relative overflow-hidden">
-                      <motion.div
-                        initial={false}
-                        animate={{ scaleX: i < step ? 1 : 0 }}
-                        transition={{ duration: 0.45, ease: [0.4, 0, 0.2, 1] }}
-                        className="absolute inset-0 bg-primary origin-left"
-                      />
-                    </div>
-                  )}
-                </React.Fragment>
-              );
-            })}
-          </div>
+      <div className="relative max-w-lg mx-auto px-4 pt-5 pb-48">
+        {/* En-tête : retour, progression en trois étapes, titre */}
+        <div className="mb-6">
+          <BookingSteps step={step} onBack={() => goToStep(step - 1)} backDisabled={createAppointment.isPending} />
 
           <AnimatePresence mode="wait" initial={false}>
-            <motion.div key={step} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }}>
-              <h1 className="font-display text-2xl font-bold text-foreground">{step === 0 && galleryFocus ? 'Votre prestation' : STEP_LABELS[step]}</h1>
-              <p className="text-xs text-muted-foreground mt-1">
-                Étape {step + 1} sur {STEPS.length}
-                {skipBarberStep && selectedEmployee ? ` · avec ${selectedEmployee.name}` : anyBarber && step === 2 ? ' · premier créneau disponible' : ''}
-              </p>
+            <motion.div key={step} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }} className="mt-4">
+              <h1 className="font-display text-[26px] leading-tight font-bold text-foreground">
+                {step === 0 && galleryFocus ? 'Votre prestation' : STEP_TITLES[step]}
+              </h1>
+              {step === 0 && !galleryFocus && (
+                <p className="text-sm text-muted-foreground mt-1">Touchez « Choisir » : vous choisirez ensuite le barber et l'heure.</p>
+              )}
             </motion.div>
           </AnimatePresence>
 
@@ -1677,7 +1539,7 @@ export default function Booking() {
 
         <div className="relative">
         <AnimatePresence mode="popLayout" custom={direction} initial={false}>
-          {/* Step 1: Services */}
+          {/* Étape 1 : prestations (écran court depuis une photo de la galerie) */}
           {step === 0 && galleryFocus && (
             <motion.div key="gallery-quick" custom={direction} variants={stepVariants} initial="enter" animate="center" exit="exit" transition={stepTransition}>
               <GalleryQuickStep
@@ -1697,8 +1559,8 @@ export default function Booking() {
           )}
           {step === 0 && !galleryFocus && (
             <motion.div key="services" custom={direction} variants={stepVariants} initial="enter" animate="center" exit="exit" transition={stepTransition}>
-              <p className="text-xs text-muted-foreground mb-4">Choisissez une ou plusieurs prestations : le total et la durée se calculent tout seuls.</p>
-              {/* Même sélecteur que la page Prestations (catégories, formules, recherche) + suggestions selon la sélection */}
+              {/* Même catalogue que la page Prestations : « Choisir » mène au créneau, la sélection
+                  multiple passe par « Ajouter » et la barre du bas */}
               <ServicePicker
                 services={services}
                 loading={servicesPending && !servicesPaused}
@@ -1708,376 +1570,333 @@ export default function Booking() {
                 selectedIds={selectedServices.map(s => String(s.id))}
                 onToggle={toggleService}
                 onSwap={swapServices}
+                onPick={pickServices}
+                pickLabel="Choisir"
               />
             </motion.div>
           )}
 
-          {/* Step 2: Employee */}
+          {/* Étape 2 : barber, jour et heure sur le même écran */}
           {step === 1 && (
-            <motion.div key="barber" custom={direction} variants={stepVariants} initial="enter" animate="center" exit="exit" transition={stepTransition}>
-              <p className="text-xs text-muted-foreground mb-4">Choisissez votre barber, ou prenez le premier créneau disponible.</p>
-              {/* Lien (relance, « Comme la dernière fois ») vers un barber qui n'est plus réservable */}
-              {missingBarber && (
-                <p role="status" className="mb-4 px-4 py-3 rounded-2xl bg-amber-500/10 border border-amber-500/25 text-xs leading-relaxed text-amber-200/90">
-                  Le barber de votre lien n'est plus disponible à la réservation : choisissez-en un autre, ou prenez le premier créneau disponible.
-                </p>
-              )}
-              <div className="grid grid-cols-2 gap-3">
-                <motion.div key="any-barber" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: 'easeOut' }}>
-                  <AnyBarberCard selected={anyBarber} onClick={chooseAnyBarber} />
-                </motion.div>
-                {employees.map((emp, i) => (
-                  <motion.div key={emp.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: (i + 1) * 0.05, duration: 0.3, ease: 'easeOut' }}>
-                    <EmployeeCard employee={emp} selected={!anyBarber && String(selectedEmployee?.id) === String(emp.id)} onClick={chooseBarber} />
-                  </motion.div>
-                ))}
-                {/* Barbers en cours de chargement : cases d'attente plutôt qu'une liste qui paraît vide */}
-                {employeesPending && !employeesPaused && [0, 1, 2].map(i => (
-                  <div key={`barber-skeleton-${i}`} aria-hidden="true" className="rounded-2xl bg-white/5 border border-white/10 animate-pulse" style={{ aspectRatio: BARBER_PHOTO_ASPECT }} />
-                ))}
+            <motion.div key="datetime" custom={direction} variants={stepVariants} initial="enter" animate="center" exit="exit" transition={stepTransition}
+              className="space-y-6">
+              {/* Prestations choisies */}
+              <div className="flex items-center gap-3 p-3 rounded-2xl border border-border bg-card">
+                <span className="w-10 h-10 shrink-0 rounded-xl bg-primary/12 text-primary flex items-center justify-center" aria-hidden="true">
+                  <Scissors className="w-[18px] h-[18px]" />
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-foreground line-clamp-2 break-words">
+                    {liveSelected.length > 1 ? liveSelected.map(s => s.name).join(' + ') : liveSelected[0]?.name}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{durationPrice}</p>
+                </div>
+                <button type="button" onClick={() => goToStep(0)}
+                  className="shrink-0 min-h-[44px] px-2 text-[13px] font-semibold text-primary hover:text-primary/80">
+                  Modifier
+                </button>
               </div>
-              {/* Barbers impossibles à charger : seule « Peu importe » resterait, sans explication */}
-              {((employeesQuery.isError && !employeesQuery.data) || employeesPaused) && (
-                <LoadError
-                  what="les barbers"
-                  error={employeesQuery.error}
-                  onRetry={employeesQuery.refetch}
-                  retrying={employeesQuery.isFetching}
-                  compact
-                  className="mt-4"
-                />
-              )}
-            </motion.div>
-          )}
 
-          {/* Step 3: Date & Time */}
-          {step === 2 && (
-            <motion.div key="datetime" custom={direction} variants={stepVariants} initial="enter" animate="center" exit="exit" transition={stepTransition}>
-              <div className="mb-6">
-                <p className="text-sm font-medium mb-3 flex items-center gap-2 text-foreground/80">
-                  <Calendar className="w-4 h-4 text-primary" /> Choisir une date
-                </p>
-                <DateStrip
-                  key={todayKey}
-                  dates={dates}
-                  selectedDate={selectedDate}
-                  onSelect={(date) => { setSelectedDate(date); setSelectedTime(null); setPresetMiss(null); if (anyBarber) setSelectedEmployee(null); hapticFeedback(); }}
-                  marks={dayMarks}
+              {/* Avec qui ? */}
+              <section aria-labelledby="barber-strip-title">
+                <h2 id="barber-strip-title" className="text-[15px] font-semibold text-foreground mb-1">Avec qui ?</h2>
+                {/* Lien (relance, « Comme la dernière fois ») vers un barber qui n'est plus réservable */}
+                {missingBarber && (
+                  <p role="status" className="my-2 px-3.5 py-3 rounded-2xl bg-amber-500/10 border border-amber-500/25 text-xs leading-relaxed text-amber-200/90">
+                    Le barber de votre lien n'est plus disponible à la réservation : choisissez-en un autre, ou prenez le premier créneau disponible.
+                  </p>
+                )}
+                <BarberStrip
+                  employees={employees}
+                  anyBarber={anyBarber}
+                  selectedId={selectedEmployee?.id}
+                  usualId={usualBarber?.id}
+                  loading={employeesPending && !employeesPaused}
+                  onAny={chooseAnyBarber}
+                  onSelect={chooseBarber}
                 />
-              </div>
+                {/* Barbers impossibles à charger : seule « Peu importe » resterait, sans explication */}
+                {((employeesQuery.isError && !employeesQuery.data) || employeesPaused) && (
+                  <LoadError what="les barbers" error={employeesQuery.error} onRetry={employeesQuery.refetch}
+                    retrying={employeesQuery.isFetching} compact className="mt-3" />
+                )}
+              </section>
+
+              {/* Prochaines disponibilités : jour, heure et barber en un tap */}
+              <NextSlots
+                items={nextItems || EMPTY_LIST}
+                loading={nextItems === null && !((employeesQuery.isError && !employeesQuery.data) || employeesPaused)}
+                todayKey={todayKey}
+                tomorrowKey={tomorrowKey}
+                selectedKey={selectedDateStr}
+                selectedTime={selectedTime}
+                showBarber={anyBarber}
+                onSelect={chooseNext}
+              />
 
               {/* Lien Last Minute dont l'heure n'est pas proposée : on dit pourquoi */}
               {presetMiss && presetTime && !selectedTime && (!selectedDate || selectedDateStr === presetDateKey) && (
-                <div role="status" className="mb-4 rounded-2xl border border-amber-500/25 bg-amber-500/10 px-3.5 py-3 text-xs leading-relaxed text-amber-200/90 break-words">
+                <div role="status" className="rounded-2xl border border-amber-500/25 bg-amber-500/10 px-3.5 py-3 text-xs leading-relaxed text-amber-200/90 break-words">
                   {presetMiss === 'duration'
                     ? `Le créneau Last Minute de ${presetTime} est trop court pour vos prestations : choisissez une prestation plus courte ou une autre heure.`
                     : `Le créneau Last Minute de ${presetTime} n'est plus disponible : choisissez une autre heure.`}
                 </div>
               )}
 
-              {selectedDate && (
-                <motion.div key={selectedDate.toISOString()} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-                  <p className="text-sm font-medium mb-3 flex items-center gap-2 text-foreground/80">
-                    <Clock className="w-4 h-4 text-primary" /> Créneaux disponibles
-                    {anyBarber && <span className="text-[11px] font-normal text-muted-foreground">· tous barbers</span>}
+              {/* Semaine : places de chaque jour */}
+              <WeekCalendar
+                days={calendarDays}
+                selectedKey={selectedDateStr}
+                label={calendarLabel}
+                canPrev={shownWeekKey > firstWeekKey}
+                canNext={shownWeekKey < lastWeekKey}
+                onPrev={() => shiftWeek(-1)}
+                onNext={() => shiftWeek(1)}
+                onSelect={chooseDay}
+              />
+
+              {/* Rien dans les deux prochaines semaines : on le dit (les flèches mènent plus loin) */}
+              {!selectedDate && nextItems && nextItems.length === 0 && (
+                <div className="rounded-2xl border border-border bg-card p-6 text-center">
+                  <p className="text-sm text-muted-foreground">
+                    {anyBarber ? 'Aucune place dans les deux prochaines semaines.' : `${barberLabel || 'Ce barber'} n'a plus de place dans les deux prochaines semaines.`}
                   </p>
-                  {slotsLoading ? (
-                    <div className="grid grid-cols-3 gap-2" aria-busy="true" aria-label="Chargement des créneaux">
-                      {Array.from({ length: 9 }, (_, i) => (
-                        <div key={i} className="h-12 rounded-xl bg-white/5 border border-white/10 animate-pulse" />
+                  <p className="mt-2 text-xs text-muted-foreground/80">
+                    {anyBarber ? 'Regardez les semaines suivantes avec les flèches.' : 'Choisissez « Peu importe », un autre barber, ou les semaines suivantes.'}
+                  </p>
+                </div>
+              )}
+
+              {/* Heures du jour choisi */}
+              {selectedDate && (
+                <section aria-labelledby="day-slots-title">
+                  <div className="flex items-baseline justify-between gap-2 mb-3">
+                    <h2 id="day-slots-title" className="text-[15px] font-semibold text-foreground">{selectedDayLabel}</h2>
+                    {slotsReady && slotOptions.length > 0 && (
+                      <span className="text-xs text-muted-foreground text-right">
+                        {slotOptions.length} créneau{slotOptions.length > 1 ? 'x' : ''}{anyBarber ? ', tous barbers' : barberLabel ? ` avec ${barberLabel}` : ''}
+                      </span>
+                    )}
+                  </div>
+                  {slotsLoading || (!scopeReady && !slotsFailedQuery) ? (
+                    <div className="grid grid-cols-4 gap-2" aria-busy="true" aria-label="Chargement des créneaux">
+                      {Array.from({ length: 8 }, (_, i) => (
+                        <div key={i} className="h-[52px] rounded-xl bg-card border border-border animate-pulse" />
                       ))}
                     </div>
                   ) : slotsFailedQuery ? (
-                    <LoadError
-                      what="les créneaux"
-                      error={slotsFailedQuery.error}
-                      onRetry={retrySlots}
-                      retrying={slotQueries.some(q => q.isFetching)}
-                      compact
-                    />
+                    <LoadError what="les créneaux" error={slotsFailedQuery.error} onRetry={retrySlots} retrying={slotsRetrying} compact />
                   ) : slotOptions.length > 0 ? (
-                    <div className="grid grid-cols-3 gap-2">
-                      {slotOptions.map(({ time, employee }, i) => {
-                        const active = selectedTime === time;
-                        return (
-                          <motion.button
-                            key={time}
-                            layoutId={`slot-${time}`}
-                            initial={{ opacity: 0, y: 8, scale: 0.95 }}
-                            animate={{ opacity: 1, y: 0, scale: 1 }}
-                            transition={{ delay: Math.min(i, 14) * 0.025, duration: 0.28, ease: 'easeOut', layout: springy }}
-                            whileTap={{ scale: 0.94 }}
-                            onClick={() => chooseSlot(time, employee)}
-                            className={`py-3 rounded-xl text-sm font-semibold transition-colors duration-300 ${
-                              active
-                                ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/25'
-                                : 'backdrop-blur-xl bg-white/5 border border-white/10 text-foreground hover:bg-white/10'
-                            }`}
-                          >
-                            {time}
-                            {/* « Peu importe » : nom du premier barber disponible à cette heure */}
-                            {anyBarber && employee && (
-                              <span className={`block text-[10px] font-medium leading-tight mt-0.5 px-1 truncate ${active ? 'text-primary-foreground/80' : 'text-muted-foreground'}`}>
-                                {employee.name}
-                              </span>
-                            )}
-                          </motion.button>
-                        );
-                      })}
-                    </div>
+                    <SlotGroups
+                      options={slotOptions}
+                      selectedTime={selectedTime}
+                      selectedEmployeeId={selectedEmployee?.id}
+                      showBarber={anyBarber}
+                      onSelect={chooseSlot}
+                    />
                   ) : emptyMessage && (
-                    <div className="backdrop-blur-xl bg-white/5 border border-white/10 rounded-2xl p-8 text-center">
+                    <div className="rounded-2xl border border-border bg-card p-6 text-center">
                       <p className="text-sm text-muted-foreground">{emptyMessage.title}</p>
                       <p className="mt-2 text-xs text-muted-foreground/80">{emptyMessage.hint}</p>
                     </div>
                   )}
-                </motion.div>
+                </section>
               )}
             </motion.div>
           )}
 
-          {/* Step 4: Confirm */}
-          {step === 3 && (
+          {/* Étape 3 : confirmation */}
+          {step === 2 && (
             <motion.div key="confirm" custom={direction} variants={stepVariants} initial="enter" animate="center" exit="exit" transition={stepTransition}
               className="space-y-4">
-              {/* Summary card */}
-              <div className="backdrop-blur-xl bg-white/5 border border-white/10 rounded-2xl p-5 space-y-4">
-                {[
-                  { icon: User, label: anyBarber ? 'Barber · premier disponible' : 'Barber', value: selectedEmployee?.name },
-                  {
-                    icon: Calendar,
-                    label: 'Date & Heure',
-                    value: (
-                      <>
-                        {selectedDate ? format(selectedDate, 'EEEE d MMMM', { locale: fr }) : ''}
-                        {selectedTime && (
-                          <>
-                            {' '}à{' '}
-                            <motion.span
-                              layoutId={`slot-${selectedTime}`}
-                              transition={springy}
-                              className="inline-block px-1.5 py-0.5 rounded-md bg-primary/15 text-primary font-bold tabular-nums"
-                            >
-                              {selectedTime}
-                            </motion.span>
-                          </>
-                        )}
-                      </>
-                    ),
-                  },
-                ].map(({ icon: Icon, label, value }, i) => (
-                  <motion.div key={label} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.1 + i * 0.08 }} className="flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0">
-                      <Icon className="w-4 h-4 text-primary" />
-                    </div>
-                    <div>
-                      <p className="text-[11px] uppercase tracking-widest text-muted-foreground">{label}</p>
-                      <p className="text-sm font-semibold text-foreground first-letter:uppercase">{value}</p>
-                    </div>
-                  </motion.div>
-                ))}
-                <motion.div initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.26 }} className="flex items-start gap-4">
-                  <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0">
-                    <Scissors className="w-4 h-4 text-primary" />
-                  </div>
-                  <div>
-                    <p className="text-[11px] uppercase tracking-widest text-muted-foreground mb-1">Prestations</p>
-                    {liveSelected.map(s => (
-                      <p key={s.id} className="text-sm text-foreground">{s.name} <span className="text-primary font-semibold">{s.price}€</span></p>
-                    ))}
-                  </div>
-                </motion.div>
-                {/* Produits ajoutés : remis par le barber pendant le RDV */}
-                <AnimatePresence initial={false}>
-                  {addonLines.length > 0 && (
-                    <motion.div
-                      key="addon-products"
-                      initial={{ opacity: 0, y: reduceMotion ? 0 : 6 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: reduceMotion ? 0 : 6 }}
-                      transition={{ duration: 0.2 }}
-                      className="flex items-start gap-4"
-                    >
-                      <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0">
-                        <ShoppingBag className="w-4 h-4 text-primary" />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-[11px] uppercase tracking-widest text-muted-foreground mb-1">Produits</p>
-                        {addonLines.map(it => (
-                          <p key={it.product_id} className="text-sm text-foreground break-words">
-                            {it.name} ×{it.quantity} <span className="text-primary font-semibold whitespace-nowrap">{formatPrice(it.price * it.quantity)}</span>
-                          </p>
-                        ))}
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
+              {/* Réponse perdue, mais le rendez-vous est bien enregistré : « Confirmer » le rend tel quel */}
+              {uncertainMatch && ownSameBooking && !success && (
+                <div role="status" className="p-3 rounded-2xl border border-primary/30 bg-primary/10 text-xs text-foreground/90 leading-relaxed break-words">
+                  <span className="font-semibold">Votre rendez-vous est bien enregistré.</span>{' '}
+                  Touchez « Confirmer » pour terminer, ou retrouvez-le dans{' '}
+                  <Link to="/appointments" className="font-semibold text-primary underline underline-offset-2 whitespace-nowrap">Mes rendez-vous</Link>.
+                </div>
+              )}
+
+              {/* Autre rendez-vous que celui-ci ne remplacera pas : choix explicite avant « Confirmer » */}
+              {!success && existingConflicts.length > 0 && (
+                <div role="status" className="p-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 text-xs text-amber-200 leading-relaxed break-words">
+                  {existingConflicts.map(({ apt, locked, label }) => (
+                    <p key={apt.id} className="mb-2">
+                      Vous avez déjà rendez-vous le <span className="font-semibold text-amber-100">{label}</span>
+                      {apt.employee_name ? <> avec <span className="font-semibold text-amber-100">{apt.employee_name}</span></> : null}.
+                      {' '}Ce nouveau rendez-vous s'ajoutera : <span className="font-semibold text-amber-100">celui-ci restera prévu</span>.
+                      {locked ? (
+                        <>
+                          {' '}Il est dans moins de {cancelHours} h : il ne peut plus être déplacé ni annulé en ligne. Pour le déplacer,{' '}
+                          <a href={SALON_PHONE_HREF} className="font-semibold text-amber-100 underline whitespace-nowrap">appelez le salon au {SALON_PHONE}</a>.
+                        </>
+                      ) : (
+                        <>
+                          {' '}
+                          <button type="button" onClick={() => moveInstead(apt)} className="font-semibold text-primary underline underline-offset-2">
+                            Déplacer plutôt celui du {label}
+                          </button>
+                        </>
+                      )}
+                    </p>
+                  ))}
+                  <label className="flex items-start gap-2 cursor-pointer text-amber-100">
+                    <input type="checkbox" checked={extraAck} onChange={(e) => setExtraAck(e.target.checked)}
+                      className="mt-0.5 h-4 w-4 shrink-0 accent-[hsl(var(--primary))]" />
+                    <span>C'est un rendez-vous en plus (pour moi ou un proche) : je garde {existingConflicts.length > 1 ? 'les autres' : 'l\'autre'}.</span>
+                  </label>
+                </div>
+              )}
+
+              {lateBooking && !rescheduleTooLate && (
+                <div role="status" className="p-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 text-xs text-amber-200 leading-relaxed">
+                  Ce rendez-vous commence dans moins de {cancelHours} h : il ne pourra plus être annulé ni déplacé en ligne.
+                  En cas d'empêchement, appelez le salon au{' '}
+                  <a href={SALON_PHONE_HREF} className="font-semibold text-amber-100 underline whitespace-nowrap">{SALON_PHONE}</a>.
+                </div>
+              )}
+              <ConfirmSummary
+                services={liveSelected}
+                totalDuration={totalDuration}
+                totalPrice={totalPrice}
+                employee={liveEmployee || selectedEmployee}
+                anyBarber={anyBarber}
+                dateLabel={selectedDayLabel}
+                time={selectedTime}
+                endTime={endTime}
+                onEditServices={() => goToStep(0)}
+                onEditSlot={() => goToStep(1)}
+              />
 
               {/* Produits de la boutique à ajouter (pas pour un déplacement : ceux de l'ancien RDV suivent).
-                  Déjà proposés avant le créneau quand la réservation vient d'une photo : le
-                  récapitulatif ci-dessus les reprend */}
-              {addonsEnabled && !galleryFocus && (
-                <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="empty:hidden">
-                  <ProductAddon services={selectedServices} selection={addonSelection} onChange={setAddonSelection} />
-                </motion.div>
+                  Repliés : le client les ouvre s'il le souhaite. Déjà proposés avant le créneau quand la
+                  réservation vient d'une photo : le total ci-dessous les reprend */}
+              {showAddons && (
+                <div className="rounded-2xl border border-border bg-card overflow-hidden">
+                  <button type="button" onClick={() => { hapticFeedback(); setAddonsOpen(v => !v); }} aria-expanded={addonsOpen || addonLines.length > 0}
+                    className="w-full min-h-[52px] px-3.5 flex items-center gap-3 text-left">
+                    <ShoppingBag className="w-[18px] h-[18px] text-muted-foreground shrink-0" aria-hidden="true" />
+                    <span className="flex-1 text-sm font-medium text-foreground">
+                      {addonLines.length > 0
+                        ? `${addonLines.reduce((n, it) => n + it.quantity, 0)} produit${addonLines.reduce((n, it) => n + it.quantity, 0) > 1 ? 's' : ''} ajouté${addonLines.reduce((n, it) => n + it.quantity, 0) > 1 ? 's' : ''} · ${formatPrice(addonSum)}`
+                        : 'Ajouter un produit de la boutique'}
+                    </span>
+                    <ChevronDown className={`w-4 h-4 text-primary shrink-0 transition-transform duration-300 ${addonsOpen || addonLines.length > 0 ? 'rotate-180' : ''}`} aria-hidden="true" />
+                  </button>
+                  <AnimatePresence initial={false}>
+                    {(addonsOpen || addonLines.length > 0) && (
+                      <motion.div key="addons" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: reduceMotion ? 0 : 0.25 }} className="px-3.5 pb-3.5 empty:hidden">
+                        <ProductAddon services={selectedServices} selection={addonSelection} onChange={setAddonSelection} />
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              )}
+
+              {/* Note pour le barber, repliée tant qu'elle est vide */}
+              <div className="rounded-2xl border border-border bg-card overflow-hidden">
+                <button type="button" onClick={() => { hapticFeedback(); setNoteOpen(v => !v); }} aria-expanded={noteOpen || !!notes}
+                  className="w-full min-h-[52px] px-3.5 flex items-center gap-3 text-left">
+                  <MessageSquare className="w-[18px] h-[18px] text-muted-foreground shrink-0" aria-hidden="true" />
+                  <span className="flex-1 text-sm font-medium text-foreground">{barberLabel ? `Ajouter une note pour ${barberLabel}` : 'Ajouter une note'}</span>
+                  <ChevronDown className={`w-4 h-4 text-primary shrink-0 transition-transform duration-300 ${noteOpen || notes ? 'rotate-180' : ''}`} aria-hidden="true" />
+                </button>
+                {(noteOpen || !!notes) && (
+                  <div className="px-3.5 pb-3.5">
+                    <Textarea
+                      placeholder="Une précision pour votre barber (facultatif)"
+                      aria-label="Note pour le barber"
+                      value={notes}
+                      onChange={(e) => setNotes(e.target.value.slice(0, NOTES_MAX))}
+                      maxLength={NOTES_MAX}
+                      className="bg-background/40 border-border resize-none rounded-xl placeholder:text-muted-foreground/60"
+                      rows={3}
+                    />
+                    <p className="mt-1 text-right text-[10px] text-muted-foreground">{notes.length}/{NOTES_MAX}</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Délai pour déplacer ou annuler soi-même (heure de Paris) */}
+              {cancelDeadline && (
+                <p className="flex items-start gap-2 text-xs leading-relaxed text-muted-foreground">
+                  <Info className="w-4 h-4 shrink-0 mt-px" aria-hidden="true" />
+                  <span>Déplaçable ou annulable en ligne jusqu'au <span className="font-semibold text-foreground/80">{cancelDeadline}</span> ; ensuite, seul le salon pourra le faire.</span>
+                </p>
               )}
 
               {/* Total */}
-              <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.32 }} className="backdrop-blur-xl bg-primary/10 border border-primary/20 rounded-2xl p-4">
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-xs text-muted-foreground">Durée totale</span>
-                  <span className="text-xs font-medium text-foreground">{totalDuration} min</span>
-                </div>
+              <div className="rounded-2xl border border-primary/25 bg-primary/10 p-4">
                 {addonLines.length > 0 && (
                   <>
                     <div className="flex justify-between items-center mb-1">
                       <span className="text-xs text-muted-foreground">Prestations</span>
                       <span className="text-xs font-medium text-foreground tabular-nums">{formatPrice(totalPrice)}</span>
                     </div>
-                    <div className="flex justify-between items-center mb-1">
+                    <div className="flex justify-between items-center mb-2">
                       <span className="text-xs text-muted-foreground">Produits</span>
                       <span className="text-xs font-medium text-foreground tabular-nums">{formatPrice(addonSum)}</span>
                     </div>
                   </>
                 )}
-                <div className="flex justify-between items-center pt-2 border-t border-primary/20">
-                  <span className="text-sm font-semibold text-foreground">Total</span>
-                  <span className="text-xl font-bold text-primary tabular-nums">{addonLines.length > 0 ? formatPrice(grandTotal) : `${totalPrice}€`}</span>
+                <div className={`flex justify-between items-center ${addonLines.length > 0 ? 'pt-2 border-t border-primary/20' : ''}`}>
+                  <div>
+                    <p className="text-[15px] font-semibold text-foreground">Total</p>
+                    <p className="text-[11px] text-muted-foreground">À régler au salon · {formatDuration(totalDuration)}</p>
+                  </div>
+                  <span className="font-fut text-[32px] font-bold leading-none text-primary tabular-nums">{formatPrice(grandTotal)}</span>
                 </div>
-                <p className="mt-1 text-right text-[10px] text-muted-foreground/70">À régler au salon</p>
-              </motion.div>
-
-              <div>
-                <Textarea
-                  placeholder="Ajouter une note (optionnel)..."
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value.slice(0, NOTES_MAX))}
-                  maxLength={NOTES_MAX}
-                  className="backdrop-blur-xl bg-white/5 border-white/10 resize-none rounded-2xl placeholder:text-muted-foreground/40"
-                  rows={3}
-                />
-                <p className="mt-1 text-right text-[10px] text-muted-foreground">{notes.length}/{NOTES_MAX}</p>
               </div>
             </motion.div>
           )}
         </AnimatePresence>
-        </div>
-
-        {/* Récapitulatif qui grandit à chaque choix : prix qui compte */}
-        <AnimatePresence>
-          {hasRecap && step !== 3 && (
-            <motion.div
-              layout
-              initial={{ opacity: 0, y: 14 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 14 }}
-              transition={springy}
-              className="mt-6 p-3.5 rounded-2xl backdrop-blur-xl bg-white/5 border border-white/10 flex items-center gap-3"
-            >
-              <div className="flex-1 min-w-0">
-                <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Votre réservation</p>
-                <div className="flex items-center gap-1.5 flex-wrap mt-1.5 text-xs">
-                  <AnimatePresence mode="popLayout">
-                    {selectedServices.length > 0 && (
-                      <Chip key="services" icon={Scissors}>{selectedServices.length} prestation{selectedServices.length > 1 ? 's' : ''}</Chip>
-                    )}
-                    {/* Produits ajoutés avant le créneau (réservation depuis une photo de la galerie) */}
-                    {addonLines.length > 0 && (
-                      <Chip key="products" icon={ShoppingBag}>{addonLines.reduce((n, it) => n + it.quantity, 0)} produit{addonLines.reduce((n, it) => n + it.quantity, 0) > 1 ? 's' : ''}</Chip>
-                    )}
-                    {selectedEmployee && <Chip key="barber" icon={User}>{selectedEmployee.name}</Chip>}
-                    {!selectedEmployee && anyBarber && <Chip key="any-barber" icon={Users}>Premier dispo</Chip>}
-                    {selectedDate && <Chip key="date" icon={Calendar}>{upperFirst(format(selectedDate, 'EEE d MMM', { locale: fr }))}</Chip>}
-                  </AnimatePresence>
-                </div>
-              </div>
-              <div className="text-right shrink-0">
-                <AnimatedNumber value={totalPrice + addonSum} suffix="€" className="block text-lg font-bold text-primary tabular-nums leading-tight" />
-                <p className="text-[10px] text-muted-foreground"><AnimatedNumber value={totalDuration} suffix=" min" /></p>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Réponse perdue, mais le rendez-vous est bien enregistré : « Confirmer » le rend tel quel */}
-        {step === 3 && uncertainMatch && ownSameBooking && !success && (
-          <div role="status" className="mt-6 p-3 rounded-2xl border border-primary/30 bg-primary/10 text-xs text-foreground/90 leading-relaxed break-words">
-            <span className="font-semibold">Votre rendez-vous est bien enregistré.</span>{' '}
-            Touchez « Confirmer » pour terminer, ou retrouvez-le dans{' '}
-            <Link to="/appointments" className="font-semibold text-primary underline underline-offset-2 whitespace-nowrap">Mes rendez-vous</Link>.
-          </div>
-        )}
-
-        {/* Autre rendez-vous que celui-ci ne remplacera pas : choix explicite avant « Confirmer » */}
-        {step === 3 && !success && existingConflicts.length > 0 && (
-          <div role="status" className="mt-6 p-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 text-xs text-amber-200 leading-relaxed break-words">
-            {existingConflicts.map(({ apt, locked, label }) => (
-              <p key={apt.id} className="mb-2">
-                Vous avez déjà rendez-vous le <span className="font-semibold text-amber-100">{label}</span>
-                {apt.employee_name ? <> avec <span className="font-semibold text-amber-100">{apt.employee_name}</span></> : null}.
-                {' '}Ce nouveau rendez-vous s'ajoutera : <span className="font-semibold text-amber-100">celui-ci restera prévu</span>.
-                {locked ? (
-                  <>
-                    {' '}Il est dans moins de {cancelHours} h : il ne peut plus être déplacé ni annulé en ligne. Pour le déplacer,{' '}
-                    <a href={SALON_PHONE_HREF} className="font-semibold text-amber-100 underline whitespace-nowrap">appelez le salon au {SALON_PHONE}</a>.
-                  </>
-                ) : (
-                  <>
-                    {' '}
-                    <button type="button" onClick={() => moveInstead(apt)} className="font-semibold text-primary underline underline-offset-2">
-                      Déplacer plutôt celui du {label}
-                    </button>
-                  </>
-                )}
-              </p>
-            ))}
-            <label className="flex items-start gap-2 cursor-pointer text-amber-100">
-              <input type="checkbox" checked={extraAck} onChange={(e) => setExtraAck(e.target.checked)}
-                className="mt-0.5 h-4 w-4 shrink-0 accent-[hsl(var(--primary))]" />
-              <span>C'est un rendez-vous en plus (pour moi ou un proche) : je garde {existingConflicts.length > 1 ? 'les autres' : 'l\'autre'}.</span>
-            </label>
-          </div>
-        )}
-
-        {step === 3 && lateBooking && !rescheduleTooLate && (
-          <div role="status" className="mt-6 p-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 text-xs text-amber-200 leading-relaxed">
-            Ce rendez-vous commence dans moins de {cancelHours} h : il ne pourra plus être annulé ni déplacé en ligne.
-            En cas d'empêchement, appelez le salon au{' '}
-            <a href={SALON_PHONE_HREF} className="font-semibold text-amber-100 underline whitespace-nowrap">{SALON_PHONE}</a>.
-          </div>
-        )}
-
-        {/* Navigation */}
-        <div className="flex gap-3 mt-6 pb-6">
-          {step > 0 && (
-            <motion.button whileTap={{ scale: 0.96 }} onClick={() => goToStep((step === 2 && skipBarberStep) ? 0 : step - 1)}
-              className="flex items-center gap-2 px-5 h-12 rounded-2xl backdrop-blur-xl bg-white/5 border border-white/10 text-sm font-medium text-foreground hover:bg-white/10 transition-all">
-              <ChevronLeft className="w-4 h-4" /> Retour
-            </motion.button>
-          )}
-          {step < 3 ? (
-            <motion.button whileTap={canNext() ? { scale: 0.97 } : undefined} onClick={() => goToStep((step === 0 && skipBarberStep) ? 2 : step + 1)} disabled={!canNext()}
-              className={`flex-1 flex items-center justify-center gap-2 h-12 rounded-2xl text-sm font-semibold transition-all duration-300 ${
-                canNext()
-                  ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/25 hover:bg-primary/90'
-                  : 'bg-white/5 border border-white/10 text-muted-foreground cursor-not-allowed'
-              }`}>
-              {step === 0 && galleryFocus && skipBarberStep && selectedEmployee
-                ? `Choisir mon créneau avec ${selectedEmployee.name}`
-                : 'Suivant'} <ChevronRight className="w-4 h-4" />
-            </motion.button>
-          ) : (
-            <span className={`flex-1 rounded-2xl ${canConfirm ? 'pulse-cta' : ''}`}>
-              <motion.button whileTap={canConfirm ? { scale: 0.97 } : undefined} onClick={() => createAppointment.mutate()} disabled={createAppointment.isPending || !canConfirm}
-                className="w-full flex items-center justify-center gap-2 h-12 rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/25 text-sm font-semibold hover:bg-primary/90 transition-all disabled:opacity-60 disabled:cursor-not-allowed">
-                {createAppointment.isPending ? 'Confirmation...' : reschedulePending ? 'Vérification du rendez-vous…' : 'Confirmer le rendez-vous'}
-                <Check className="w-4 h-4" />
-              </motion.button>
-            </span>
-          )}
         </div>
       </div>
+
+      {/* Barre fixée en bas : ce qui est choisi et le bouton de l'étape */}
+      <AnimatePresence>
+        {!success && step === 0 && selectedServices.length > 0 && (
+          galleryFocus ? (
+            <BookingBar
+              key="bar-gallery"
+              actionLabel={selectedEmployee ? `Choisir mon créneau avec ${selectedEmployee.name}` : 'Choisir mon créneau'}
+              onAction={() => goToStep(1)}
+              disabled={!canNext()}
+            />
+          ) : (
+            <BookingBar
+              key="bar-services"
+              title={servicesTitle}
+              subtitle={durationPrice}
+              actionLabel="Continuer"
+              onAction={() => goToStep(1)}
+              disabled={!canNext()}
+            />
+          )
+        )}
+        {!success && step === 1 && (
+          <BookingBar
+            key="bar-slot"
+            title={selectedTime && selectedDate ? `${upperFirst(format(selectedDate, 'EEE d MMM', { locale: fr }))} · ${selectedTime}` : 'Choisissez une heure'}
+            subtitle={selectedTime && selectedEmployee ? `avec ${selectedEmployee.name} · ${durationPrice}` : durationPrice}
+            actionLabel="Continuer"
+            onAction={() => goToStep(2)}
+            disabled={!canNext()}
+          />
+        )}
+        {!success && step === 2 && (
+          <BookingBar
+            key="bar-confirm"
+            actionLabel={createAppointment.isPending ? 'Confirmation…' : reschedulePending ? 'Vérification du rendez-vous…' : 'Confirmer le rendez-vous'}
+            onAction={() => createAppointment.mutate()}
+            disabled={createAppointment.isPending || !canConfirm}
+            pulse={canConfirm && !createAppointment.isPending}
+            icon={Check}
+          />
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {success && (

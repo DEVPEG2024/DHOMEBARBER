@@ -2,55 +2,71 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '@/api/apiClient';
 import { useQuery } from '@tanstack/react-query';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
-import { Search, X, SearchX, Scissors, Sparkles, Flame, Plus, Gift } from 'lucide-react';
+import { Search, X, SearchX, Scissors, Sparkles, Plus, Gift } from 'lucide-react';
 import { hapticFeedback } from '@/lib/capacitor';
-import ServiceItemCard, { KindIcon } from './ServiceItemCard';
-import CategoryChips from './CategoryChips';
-import FormulasBlock from './FormulasBlock';
-import FavoriteServicesBlock from './FavoriteServicesBlock';
 import { useFavorites } from '@/lib/favorites';
-import { useAuth } from '@/lib/AuthContext';
+import { usePopularServiceIds } from '@/lib/popularServices';
 import LoadError from '@/components/shared/LoadError';
+import { KindIcon } from './KindIcon';
+import CategoryChips from './CategoryChips';
+import ServiceRow from './ServiceRow';
+import PopularServicesBlock from './PopularServicesBlock';
+import ServiceSheet from './ServiceSheet';
 import {
   EASE,
-  OTHER_GROUP_ID,
+  RUBRICS,
+  RUBRIC_BY_KEY,
   categoryKind,
   serviceKind,
-  isFormula,
-  isPlainCut,
+  serviceRubric,
+  normalizeText,
   isPlainBeard,
+  isAdultCut,
+  pickBeardAddon,
+  cheapestService,
   findFormulaSwap,
+  complementsFor,
   isNewService,
   matchesSearch,
-  computePopularIds,
-  fallbackPopularIds,
   formatDuration,
   formatPrice,
 } from './serviceUtils';
 
-/** Marge sous la barre de chips collante pour qu'un en-tête de catégorie ciblé reste visible. */
+/** Marge sous la barre de chips collante pour qu'un en-tête de rubrique ciblé reste visible. */
 const HEADING_SCROLL_MARGIN = 'calc(env(safe-area-inset-top, 0px) + 68px)';
 /** Pendant un défilement programmé (tap sur une chip), le suivi du défilement se tait. */
 const SCROLL_LOCK_MS = 900;
 const MAX_SUGGESTIONS = 3;
-
-const cheapest = (list) => [...list].sort((a, b) => (Number(a.price) || 0) - (Number(b.price) || 0))[0] || null;
+/** Cartes du bloc « Les plus demandées » (grille 2 × 2) ; masqué en dessous de 2. */
+const POPULAR_SHOWN = 4;
+const FAVORITES_GROUP_ID = 'favoris';
 
 /**
- * Sélecteur de prestations partagé (étape 1 de la réservation) : mêmes cartes, chips et formules
- * que la page Prestations, plus une rangée de **suggestions** qui suit la sélection :
- * - rien de sélectionné → les prestations les plus demandées, en un tap ;
- * - une coupe sans barbe → « Ajoutez la barbe » (la moins chère), et inversement ;
+ * Catalogue des prestations, partagé par la page Prestations et l'étape 1 de la réservation :
+ * recherche, « Les plus demandées » (classement du serveur, `usePopularServiceIds`), chips de
+ * rubriques collantes avec suivi du défilement, « Mes favoris », puis une liste groupée par rubrique
+ * (catégories du salon si elles existent, sinon rubriques automatiques `serviceRubric`) en lignes
+ * compactes. Un tap sur une ligne ouvre la fiche de la prestation (`ServiceSheet`).
+ *
+ * Boutons : sélection vide → `pickLabel` (« Réserver », « Choisir ») → `onPick([prestation])` ;
+ * dès que le client compose plusieurs prestations → bascule « Ajouter » / « Ajouté ✓ » (`onToggle`).
+ * La fiche garde toujours son action principale (`onPick` avec les compléments cochés) et ajoute à
+ * la sélection en un seul rendu (`onSwap([], […])`). Aucune barre fixe ici : l'appelant la gère.
+ *
+ * Rangée de suggestions, seulement quand la sélection n'est pas vide :
+ * - une coupe sans barbe → « Ajoutez la barbe », et inversement ;
  * - coupe ou barbe sans soin → « Un soin en plus ? » ;
  * - coupe + barbe choisies séparément alors qu'une formule les réunit moins cher → « Passez à la
  *   formule », qui remplace les deux par la formule (économie affichée).
- * Tout est calculé côté client depuis le catalogue : rien à configurer.
  *
  * @param {object} props
  * @param {Array} props.services            Prestations actives (déjà chargées par l'appelant)
  * @param {string[]|Set<string>} props.selectedIds
  * @param {(service: object) => void} props.onToggle
- * @param {(remove: object[], add: object[]) => void} [props.onSwap]  Remplacement (formule) ; sans lui, on bascule une à une
+ * @param {(remove: object[], add: object[]) => void} [props.onSwap]  Retire et ajoute en un seul rendu ; sans lui, une à une
+ * @param {(services: object[]) => void} [props.onPick]  Prendre exactement ces prestations et continuer ;
+ *   sans lui, les boutons basculent la sélection (`onToggle`)
+ * @param {string} [props.pickLabel]        Libellé de l'action principale (défaut « Réserver »)
  * @param {boolean} [props.loading]
  * @param {Error|null} [props.error]  Échec du chargement des prestations (sans données) : écran d'erreur
  * @param {() => void} [props.onRetry]  « Réessayer » de l'écran d'erreur
@@ -58,21 +74,24 @@ const cheapest = (list) => [...list].sort((a, b) => (Number(a.price) || 0) - (Nu
  * @param {boolean} [props.suggestionsOnly]  Seulement la rangée de suggestions (réservation depuis
  *   une photo de la galerie : la prestation est déjà choisie, on propose ses compléments)
  */
-export default function ServicePicker({ services = [], selectedIds, onToggle, onSwap, loading = false, error = null, onRetry, retrying = false, suggestionsOnly = false }) {
+export default function ServicePicker({
+  services = [], selectedIds, onToggle, onSwap, onPick, pickLabel = 'Réserver',
+  loading = false, error = null, onRetry, retrying = false, suggestionsOnly = false,
+}) {
   const favorites = useFavorites();
-  const { user } = useAuth();
-  // Seul le staff reçoit les `services` des RDV terminés : pour un client (ou un visiteur), la
-  // projection « créneaux » ne les contient pas, la requête ne servirait à rien.
-  const isStaff = user?.role === 'admin' || user?.role === 'barber';
   const toggleFavorite = useCallback((service) => favorites.toggle('services', service.id, service.name), [favorites]);
   const reduceMotion = useReducedMotion();
+  const popularIds = usePopularServiceIds();
   const [query, setQuery] = useState('');
-  const [activeCat, setActiveCat] = useState('all');
+  const [activeCat, setActiveCat] = useState(null);
+  const [sheetService, setSheetService] = useState(null);
   const headingRefs = useRef({});
   const barRef = useRef(null);
   const lockUntilRef = useRef(0);
   const nowMs = useMemo(() => Date.now(), []);
 
+  // Catégories du salon : aucune en base aujourd'hui. Si le salon en crée, elles priment ; les
+  // prestations sans catégorie gardent leur rubrique automatique.
   const { data: categories = [] } = useQuery({
     queryKey: ['serviceCategories'],
     staleTime: 5 * 60 * 1000,
@@ -85,145 +104,162 @@ export default function ServicePicker({ services = [], selectedIds, onToggle, on
     },
   });
 
-  // Prestations les plus réservées (voir Services.jsx : repli silencieux sur sort_order).
-  // Staff seulement ; client → directement l'ordre `sort_order`.
-  const { data: completedApts, isPending: popularPending } = useQuery({
-    queryKey: ['popularServices'],
-    enabled: services.length > 0 && isStaff,
-    retry: false,
-    staleTime: 5 * 60 * 1000,
-    queryFn: async () => {
-      try {
-        const rows = await api.entities.Appointment.filter({ status: 'completed' }, '-date', 200);
-        return Array.isArray(rows) ? rows : [];
-      } catch {
-        return [];
-      }
-    },
-  });
-
-  const popularIds = useMemo(() => {
-    if (services.length === 0) return new Set();
-    if (!isStaff) return new Set(fallbackPopularIds(services));
-    if (popularPending) return new Set();
-    const computed = computePopularIds(completedApts, services);
-    return new Set(computed || fallbackPopularIds(services));
-  }, [completedApts, popularPending, services, isStaff]);
-
+  const byId = useMemo(() => new Map(services.map(s => [String(s.id), s])), [services]);
   const newIds = useMemo(
     () => new Set(services.filter(s => isNewService(s, nowMs)).map(s => String(s.id))),
     [services, nowMs],
   );
-
   const selectedSet = useMemo(
     () => new Set((selectedIds instanceof Set ? [...selectedIds] : (selectedIds || [])).map(String)),
     [selectedIds],
   );
+  const selectedServices = useMemo(() => services.filter(s => selectedSet.has(String(s.id))), [services, selectedSet]);
+  const hasSelection = selectedSet.size > 0;
+  const mode = hasSelection || !onPick ? 'toggle' : 'pick';
 
   const categoryById = useMemo(() => new Map(categories.map(c => [String(c.id), c])), [categories]);
-  const kindOf = useCallback(
-    (s) => serviceKind(s, s?.category_id != null ? categoryById.get(String(s.category_id))?.name || '' : ''),
+  const categoryOf = useCallback(
+    (s) => (s?.category_id != null ? categoryById.get(String(s.category_id)) || null : null),
     [categoryById],
   );
+  const kindOf = useCallback((s) => serviceKind(s, categoryOf(s)?.name || ''), [categoryOf]);
+  // Icône d'une prestation (fiche) : celle de sa catégorie, sinon celle de sa rubrique automatique
+  const iconKindOf = useCallback(
+    (s) => (categoryOf(s) ? kindOf(s) : RUBRIC_BY_KEY[serviceRubric(s)]?.kind || 'cut'),
+    [categoryOf, kindOf],
+  );
 
+  // « Les plus demandées » : les premières prestations actives du classement du serveur
+  const popularServices = useMemo(
+    () => popularIds.map(id => byId.get(id)).filter(Boolean).slice(0, POPULAR_SHOWN),
+    [popularIds, byId],
+  );
+  const rankOf = useMemo(() => new Map(popularServices.map((s, i) => [String(s.id), i + 1])), [popularServices]);
+
+  const favoriteServices = useMemo(
+    () => [...favorites.services].map(id => byId.get(String(id))).filter(Boolean),
+    [favorites.services, byId],
+  );
+
+  // Groupes : favoris (hors recherche), catégories du salon (dans leur ordre), puis rubriques
+  // automatiques ; une rubrique qui porte le nom d'une catégorie la rejoint. Groupes vides retirés.
   const groups = useMemo(() => {
     const byCat = new Map();
-    const other = [];
+    const byRubric = new Map();
     for (const s of services) {
       if (!matchesSearch(s, query)) continue;
-      const cat = s.category_id != null ? categoryById.get(String(s.category_id)) : null;
-      if (cat) {
-        const key = String(cat.id);
-        if (!byCat.has(key)) byCat.set(key, []);
-        byCat.get(key).push(s);
-      } else {
-        other.push(s);
-      }
+      const cat = categoryOf(s);
+      const key = cat ? String(cat.id) : serviceRubric(s);
+      const target = cat ? byCat : byRubric;
+      if (!target.has(key)) target.set(key, []);
+      target.get(key).push(s);
     }
-    const out = categories
-      .filter(c => byCat.has(String(c.id)))
-      .map(c => ({ id: String(c.id), name: c.name, kind: categoryKind(c.name), services: byCat.get(String(c.id)) }));
-    if (other.length > 0) out.push({ id: OTHER_GROUP_ID, name: categories.length > 0 ? 'Autres prestations' : 'Prestations', kind: 'cut', services: other });
+    const out = [];
+    if (!query && favoriteServices.length > 0) {
+      out.push({ id: FAVORITES_GROUP_ID, name: 'Mes favoris', kind: 'favorite', services: favoriteServices });
+    }
+    const byLabel = new Map();
+    for (const c of categories) {
+      const list = byCat.get(String(c.id));
+      if (!list) continue;
+      const group = { id: `cat-${c.id}`, name: c.name, kind: categoryKind(c.name), services: [...list] };
+      byLabel.set(normalizeText(c.name), group);
+      out.push(group);
+    }
+    for (const r of RUBRICS) {
+      const list = byRubric.get(r.key);
+      if (!list) continue;
+      const same = byLabel.get(normalizeText(r.label));
+      if (same) { same.services.push(...list); continue; }
+      out.push({ id: `rub-${r.key}`, name: r.label, kind: r.kind, note: r.note, services: list });
+    }
     return out;
-  }, [services, categories, categoryById, query]);
+  }, [services, categories, categoryOf, query, favoriteServices]);
 
-  const visibleCount = groups.reduce((n, g) => n + g.services.length, 0);
-  const chips = useMemo(
-    () => [{ id: 'all', label: 'Tout', count: visibleCount }, ...groups.map(g => ({ id: g.id, label: g.name, count: g.services.length }))],
-    [groups, visibleCount],
-  );
+  const resultCount = groups.reduce((n, g) => n + (g.id === FAVORITES_GROUP_ID ? 0 : g.services.length), 0);
+  const chips = useMemo(() => groups.map(g => ({ id: g.id, label: g.name, count: g.services.length })), [groups]);
   const showChips = groups.length > 1 && !suggestionsOnly;
+  const activeId = groups.some(g => g.id === activeCat) ? activeCat : groups[0]?.id;
 
-  const formulas = useMemo(() => (query ? [] : services.filter(isFormula)), [services, query]);
-
-  // ─── Suggestions ───
-  const selectedServices = useMemo(() => services.filter(s => selectedSet.has(String(s.id))), [services, selectedSet]);
+  // ─── Suggestions (sélection non vide seulement) ───
   const suggestions = useMemo(() => {
-    if (query) return [];
+    if (query || selectedServices.length === 0) return [];
     const out = [];
     const notSelected = services.filter(s => !selectedSet.has(String(s.id)));
     const kinds = new Set(selectedServices.map(kindOf));
-
-    if (selectedServices.length === 0) {
-      for (const s of services) {
-        if (popularIds.has(String(s.id)) && out.length < MAX_SUGGESTIONS) {
-          out.push({ key: `pop-${s.id}`, label: s.name, sub: `${formatPrice(s.price)} · ${formatDuration(s.duration)}`, icon: 'flame', add: [s], remove: [] });
-        }
-      }
-      return out;
-    }
 
     // Formule « coupe + barbe » qui réunit une coupe et une barbe choisies séparément, moins cher
     const swap = findFormulaSwap(selectedServices, notSelected);
     if (swap) {
       const { formula, remove, saving } = swap;
-      out.push({ key: `formula-${formula.id}`, label: `Passez à « ${formula.name} »`, sub: `${formatPrice(formula.price)} · vous économisez ${formatPrice(saving)}`, icon: 'gift', add: [formula], remove, accent: true });
+      out.push({ key: `formula-${formula.id}`, label: `Passez à « ${String(formula.name).trim()} »`, sub: `${formatPrice(formula.price)} · vous économisez ${formatPrice(saving)}`, icon: 'gift', add: [formula], remove, accent: true });
     }
     // Coupe / barbe d'après le nom, pas d'après l'icône : « Barbe à la tondeuse » a l'icône tondeuse
     // mais reste une barbe, et une prestation sans mot-clé (« Epilation nez ») retombe sur l'icône
     // coupe sans en être une. La coupe proposée est une coupe adulte (pas « moins de 6 ans »).
-    const isAdultCut = (s) => isPlainCut(s) && kindOf(s) !== 'kids';
-    const hasCut = selectedServices.some(isAdultCut);
+    const adultCut = (s) => isAdultCut(s, kindOf);
+    const hasCut = selectedServices.some(adultCut);
     const hasBeard = selectedServices.some(isPlainBeard);
     if (hasCut && !hasBeard && !kinds.has('formula')) {
-      const s = cheapest(notSelected.filter(isPlainBeard));
-      if (s) out.push({ key: `beard-${s.id}`, label: 'Ajoutez la barbe', sub: `${s.name} · +${formatPrice(s.price)} · +${formatDuration(s.duration)}`, icon: 'plus', add: [s], remove: [] });
+      const s = pickBeardAddon(notSelected);
+      if (s) out.push({ key: `beard-${s.id}`, label: 'Ajoutez la barbe', sub: `${String(s.name).trim()} · +${formatPrice(s.price)} · +${formatDuration(s.duration)}`, icon: 'plus', add: [s], remove: [] });
     }
     if (hasBeard && !hasCut && !kinds.has('formula')) {
-      const s = cheapest(notSelected.filter(isAdultCut));
-      if (s) out.push({ key: `cut-${s.id}`, label: 'Ajoutez la coupe', sub: `${s.name} · +${formatPrice(s.price)} · +${formatDuration(s.duration)}`, icon: 'plus', add: [s], remove: [] });
+      const s = cheapestService(notSelected.filter(adultCut));
+      if (s) out.push({ key: `cut-${s.id}`, label: 'Ajoutez la coupe', sub: `${String(s.name).trim()} · +${formatPrice(s.price)} · +${formatDuration(s.duration)}`, icon: 'plus', add: [s], remove: [] });
     }
     if ((hasCut || hasBeard || kinds.has('formula')) && !kinds.has('care')) {
-      const s = cheapest(notSelected.filter(x => kindOf(x) === 'care'));
-      if (s) out.push({ key: `care-${s.id}`, label: 'Un soin en plus ?', sub: `${s.name} · +${formatPrice(s.price)} · +${formatDuration(s.duration)}`, icon: 'sparkles', add: [s], remove: [] });
+      const s = cheapestService(notSelected.filter(x => kindOf(x) === 'care'));
+      if (s) out.push({ key: `care-${s.id}`, label: 'Un soin en plus ?', sub: `${String(s.name).trim()} · +${formatPrice(s.price)} · +${formatDuration(s.duration)}`, icon: 'sparkles', add: [s], remove: [] });
     }
     return out.slice(0, MAX_SUGGESTIONS);
-  }, [query, services, selectedServices, selectedSet, kindOf, popularIds]);
+  }, [query, services, selectedServices, selectedSet, kindOf]);
 
+  // ─── Actions ───
   const applySuggestion = (sug) => {
     hapticFeedback();
     if (onSwap) {
       onSwap(sug.remove, sug.add);
       return;
     }
-    sug.remove.forEach(s => onToggle(s));
-    sug.add.forEach(s => onToggle(s));
+    sug.remove.forEach(s => onToggle?.(s));
+    sug.add.forEach(s => onToggle?.(s));
   };
+
+  /** Ajoute plusieurs prestations en un seul rendu (fiche : prestation + compléments cochés). */
+  const addMany = useCallback((list) => {
+    const fresh = list.filter(s => s && !selectedSet.has(String(s.id)));
+    if (fresh.length === 0) return;
+    if (onSwap) onSwap([], fresh);
+    else fresh.forEach(s => onToggle?.(s));
+  }, [onSwap, onToggle, selectedSet]);
+
+  const rowAction = useCallback((service) => {
+    if (mode === 'pick') {
+      hapticFeedback();
+      onPick?.([service]);
+      return;
+    }
+    onToggle?.(service);
+  }, [mode, onPick, onToggle]);
+
+  const openSheet = useCallback((service) => { hapticFeedback(); setSheetService(service); }, []);
+  const closeSheet = useCallback(() => setSheetService(null), []);
+
+  const sheetComplements = useMemo(
+    () => (sheetService ? complementsFor(sheetService, services, { selected: selectedServices, kindOf }) : []),
+    [sheetService, services, selectedServices, kindOf],
+  );
 
   const selectChip = (id) => {
     hapticFeedback();
     setActiveCat(id);
     lockUntilRef.current = Date.now() + SCROLL_LOCK_MS;
-    const behavior = reduceMotion ? 'auto' : 'smooth';
-    if (id === 'all') {
-      const first = groups[0] && headingRefs.current[groups[0].id];
-      if (first) first.scrollIntoView({ behavior, block: 'start' });
-      return;
-    }
-    headingRefs.current[id]?.scrollIntoView({ behavior, block: 'start' });
+    headingRefs.current[id]?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
   };
 
-  // Suivi du défilement (voir Services.jsx)
+  // Suivi du défilement : la chip active suit la rubrique sous la barre (dernier en-tête passé
+  // au-dessus du seuil) ; en bas de page, c'est la dernière rubrique ; tout en haut, la première.
   useEffect(() => {
     if (!showChips) return undefined;
     let raf = 0;
@@ -232,13 +268,16 @@ export default function ServicePicker({ services = [], selectedIds, onToggle, on
       if (Date.now() < lockUntilRef.current) return;
       const barBottom = barRef.current?.getBoundingClientRect().bottom ?? 60;
       const threshold = barBottom + 12;
-      let current = 'all';
+      let current = groups[0]?.id ?? null;
       for (const g of groups) {
         const el = headingRefs.current[g.id];
         if (!el) continue;
         if (el.getBoundingClientRect().top <= threshold) current = g.id;
         else break;
       }
+      const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4;
+      const lastHeading = groups.length > 0 ? headingRefs.current[groups[groups.length - 1].id] : null;
+      if (atBottom && lastHeading && lastHeading.getBoundingClientRect().top < window.innerHeight) current = groups[groups.length - 1].id;
       setActiveCat(prev => (prev === current ? prev : current));
     };
     const onScroll = () => { if (!raf) raf = requestAnimationFrame(update); };
@@ -251,7 +290,6 @@ export default function ServicePicker({ services = [], selectedIds, onToggle, on
   const loadFailed = !!error && !loading && services.length === 0;
 
   const SugIcon = ({ icon }) => {
-    if (icon === 'flame') return <Flame className="w-3.5 h-3.5 text-amber-400" aria-hidden="true" />;
     if (icon === 'gift') return <Gift className="w-3.5 h-3.5" aria-hidden="true" />;
     if (icon === 'sparkles') return <Sparkles className="w-3.5 h-3.5 text-emerald-400" aria-hidden="true" />;
     return <Plus className="w-3.5 h-3.5 text-primary" aria-hidden="true" />;
@@ -262,7 +300,6 @@ export default function ServicePicker({ services = [], selectedIds, onToggle, on
       {suggestions.length > 0 && (
         <motion.div
           key="suggestions"
-          layout
           initial={reduceMotion ? false : { opacity: 0, y: -6 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -6 }}
@@ -271,7 +308,7 @@ export default function ServicePicker({ services = [], selectedIds, onToggle, on
         >
           <p className="text-[11px] uppercase tracking-[0.2em] text-primary font-semibold mb-2 flex items-center gap-1.5">
             <Sparkles className="w-3 h-3" aria-hidden="true" />
-            {selectedServices.length === 0 ? 'Les plus demandées' : suggestionsOnly ? 'Pour compléter' : 'Suggestions pour vous'}
+            {suggestionsOnly ? 'Pour compléter' : 'Suggestions pour vous'}
           </p>
           <div className="flex gap-2 overflow-x-auto scrollbar-hide -mx-4 px-4 pb-1">
             <AnimatePresence initial={false}>
@@ -279,7 +316,6 @@ export default function ServicePicker({ services = [], selectedIds, onToggle, on
                 <motion.button
                   key={sug.key}
                   type="button"
-                  layout
                   initial={reduceMotion ? false : { opacity: 0, scale: 0.92 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.92 }}
@@ -308,6 +344,8 @@ export default function ServicePicker({ services = [], selectedIds, onToggle, on
 
   if (suggestionsOnly) return suggestionsBlock;
 
+  const showPopular = !query && !loading && !loadFailed && popularServices.length >= 2;
+
   return (
     <div>
       {/* Recherche */}
@@ -322,7 +360,7 @@ export default function ServicePicker({ services = [], selectedIds, onToggle, on
           spellCheck={false}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Rechercher une prestation…"
+          placeholder="Coupe, barbe, couleur…"
           aria-label="Rechercher une prestation"
           className="w-full h-12 rounded-2xl bg-card border border-border pl-11 pr-12 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-colors"
         />
@@ -337,88 +375,87 @@ export default function ServicePicker({ services = [], selectedIds, onToggle, on
       {/* Suggestions : suivent la sélection */}
       {suggestionsBlock}
 
-      {/* Favoris du client (hors recherche et pendant le chargement) */}
-      {!query && !loading && (
-        <FavoriteServicesBlock
-          services={services}
-          favoriteIds={favorites.services}
+      {/* Les plus demandées (classement du serveur, hors recherche) */}
+      {showPopular && (
+        <PopularServicesBlock
+          services={popularServices}
           selectedIds={selectedSet}
-          popularIds={popularIds}
-          newIds={newIds}
-          onToggle={onToggle}
-          onFavorite={toggleFavorite}
+          mode={mode}
+          pickLabel={pickLabel}
+          onOpen={openSheet}
+          onAction={rowAction}
           reduceMotion={reduceMotion}
         />
       )}
 
-      {/* Formules en vitrine (hors recherche) */}
-      <FormulasBlock
-        formulas={formulas}
-        selectedIds={selectedSet}
-        popularIds={popularIds}
-        newIds={newIds}
-        onToggle={onToggle}
-        reduceMotion={reduceMotion}
-      />
-
-      {showChips && (
-        <CategoryChips items={chips} activeId={activeCat} onSelect={selectChip} reduceMotion={reduceMotion} barRef={barRef} />
+      {showChips && !loading && !loadFailed && (
+        <CategoryChips items={chips} activeId={activeId} onSelect={selectChip} reduceMotion={reduceMotion} barRef={barRef} />
       )}
 
       {query && !loading && (
         <p className="text-xs text-muted-foreground mt-4" aria-live="polite">
-          {visibleCount} résultat{visibleCount > 1 ? 's' : ''} pour « {query.trim()} »
+          {resultCount} résultat{resultCount > 1 ? 's' : ''} pour « {query.trim()} »
         </p>
       )}
 
       {loadFailed ? (
         <LoadError what="les prestations" error={error} onRetry={onRetry} retrying={retrying} className="mt-4" />
       ) : loading ? (
-        <div className="space-y-3 mt-4" aria-busy="true" aria-label="Chargement des prestations">
-          {[0, 1, 2, 3].map(i => (
-            <div key={i} className="h-[92px] rounded-2xl bg-secondary border border-border animate-pulse" />
+        <div className="mt-5 rounded-2xl border border-border bg-card/70 overflow-hidden divide-y divide-border" aria-busy="true" aria-label="Chargement des prestations">
+          {[0, 1, 2, 3, 4].map(i => (
+            <div key={i} className="h-[60px] px-3.5 flex items-center gap-3">
+              <div className="flex-1 space-y-1.5">
+                <div className="h-3.5 w-2/3 rounded bg-secondary animate-pulse" />
+                <div className="h-3 w-1/2 rounded bg-secondary/70 animate-pulse" />
+              </div>
+              <div className="h-9 w-20 rounded-full bg-secondary animate-pulse" />
+            </div>
           ))}
         </div>
       ) : (
         groups.map(group => (
-          <section key={group.id} aria-labelledby={`pick-${group.id}`} className="mt-5">
-            {showChips && (
-              <h2
-                id={`pick-${group.id}`}
-                ref={el => { headingRefs.current[group.id] = el; }}
-                style={{ scrollMarginTop: HEADING_SCROLL_MARGIN }}
-                className="flex items-center gap-2 mb-3"
-              >
-                <KindIcon kind={group.kind} size="sm" />
-                <span className="font-display text-lg font-bold text-foreground leading-tight">{group.name}</span>
-                <span className="text-[11px] font-semibold text-muted-foreground tabular-nums">{group.services.length}</span>
-              </h2>
-            )}
-            <div className="space-y-3">
-              {group.services.map((service, i) => {
+          <motion.section
+            key={group.id}
+            aria-labelledby={`pick-${group.id}`}
+            className="mt-5"
+            initial={reduceMotion ? false : { opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.35, ease: EASE }}
+          >
+            <h2
+              id={`pick-${group.id}`}
+              ref={el => { headingRefs.current[group.id] = el; }}
+              style={{ scrollMarginTop: HEADING_SCROLL_MARGIN }}
+              className="flex items-center gap-2 mb-2.5"
+            >
+              <KindIcon kind={group.kind} size="sm" />
+              <span className="font-display text-lg font-bold text-foreground leading-tight">{group.name}</span>
+              <span className="text-xs font-semibold text-muted-foreground tabular-nums">{group.services.length}</span>
+            </h2>
+            {group.note && <p className="text-xs text-muted-foreground -mt-1 mb-2.5">{group.note}</p>}
+            <ul className="rounded-2xl border border-border bg-card/70 overflow-hidden divide-y divide-border">
+              {group.services.map(service => {
                 const id = String(service.id);
                 return (
-                  <ServiceItemCard
-                    key={id}
+                  <ServiceRow
+                    key={`${group.id}-${id}`}
                     service={service}
-                    kind={serviceKind(service, group.id === OTHER_GROUP_ID ? '' : group.name)}
                     selected={selectedSet.has(id)}
-                    popular={popularIds.has(id)}
                     isNew={newIds.has(id)}
-                    onToggle={onToggle}
-                    favorite={favorites.services.has(id)}
-                    onFavorite={toggleFavorite}
+                    mode={mode}
+                    pickLabel={pickLabel}
+                    onOpen={openSheet}
+                    onAction={rowAction}
                     reduceMotion={reduceMotion}
-                    index={i}
                   />
                 );
               })}
-            </div>
-          </section>
+            </ul>
+          </motion.section>
         ))
       )}
 
-      {!loading && !loadFailed && groups.length === 0 && (
+      {!loading && !loadFailed && resultCount === 0 && (
         <div className="text-center py-12">
           <div className="w-16 h-16 rounded-2xl bg-card border border-border flex items-center justify-center mx-auto mb-4">
             {query ? <SearchX className="w-6 h-6 text-muted-foreground/40" aria-hidden="true" /> : <Scissors className="w-6 h-6 text-muted-foreground/30" aria-hidden="true" />}
@@ -436,6 +473,31 @@ export default function ServicePicker({ services = [], selectedIds, onToggle, on
           )}
         </div>
       )}
+
+      {/* Fiche d'une prestation (portail dans body) */}
+      <AnimatePresence>
+        {sheetService && (
+          <ServiceSheet
+            key={String(sheetService.id)}
+            service={sheetService}
+            kind={iconKindOf(sheetService)}
+            rank={rankOf.get(String(sheetService.id)) || null}
+            isNew={newIds.has(String(sheetService.id))}
+            complements={sheetComplements}
+            pickLabel={pickLabel}
+            canPick={!!onPick}
+            hasSelection={hasSelection}
+            selected={selectedSet.has(String(sheetService.id))}
+            favorite={favorites.services.has(String(sheetService.id))}
+            onFavorite={toggleFavorite}
+            onPick={(list) => { setSheetService(null); onPick?.(list); }}
+            onAdd={(list) => { addMany(list); setSheetService(null); }}
+            onRemove={(s) => { onToggle?.(s); setSheetService(null); }}
+            onClose={closeSheet}
+            reduceMotion={reduceMotion}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

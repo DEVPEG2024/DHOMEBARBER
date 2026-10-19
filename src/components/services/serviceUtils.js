@@ -1,24 +1,16 @@
 /**
- * Helpers de la page Prestations : icône par nature de prestation, formules, nouveautés,
- * prestations populaires, recherche, formats de durée et de prix.
+ * Helpers du catalogue (page Prestations et choix des prestations de la réservation) : icône par
+ * nature de prestation, rubriques automatiques, formules, compléments, nouveautés, recherche,
+ * formats de durée et de prix.
  * Aucun appel réseau ici : la page fournit les données, ces fonctions sont pures.
  */
-import { Scissors, Palette, Sparkles, Baby, Zap, Gift } from 'lucide-react';
+import { Scissors, Palette, Sparkles, Baby, Zap, Gift, Repeat, Heart } from 'lucide-react';
 
 /** Courbe « signature » de l'app (sortie très douce). */
 export const EASE = [0.16, 1, 0.3, 1];
 
 /** Une prestation est « Nouveau » pendant ce nombre de jours après sa création. */
 export const NEW_DAYS = 30;
-
-/** Nombre de badges « Populaire ». */
-export const POPULAR_COUNT = 3;
-
-/** En dessous de ce nombre de rendez-vous exploitables, on ne se fie pas au comptage (repli `sort_order`). */
-export const POPULAR_MIN_SAMPLE = 5;
-
-/** Identifiant du groupe des prestations sans catégorie (ou de catégorie inactive). */
-export const OTHER_GROUP_ID = '__other__';
 
 /** Minuscules sans accents, pour la recherche et les mots-clés. */
 export function normalizeText(value) {
@@ -41,6 +33,9 @@ export const KINDS = {
   clipper: { Icon: Zap, label: 'Tondeuse', tone: 'text-orange-400 bg-orange-500/12' },
   beard: { emoji: '🧔', label: 'Barbe', tone: 'text-primary bg-primary/12' },
   cut: { Icon: Scissors, label: 'Coupe', tone: 'text-primary bg-primary/12' },
+  // Rubriques seulement (en-têtes, fiche) : jamais déduites d'un nom par `serviceKind`
+  pack: { Icon: Repeat, label: 'Abonnement', tone: 'text-violet-400 bg-violet-500/12' },
+  favorite: { Icon: Heart, label: 'Favori', tone: 'text-rose-500 bg-rose-500/12', iconClass: 'fill-current' },
 };
 
 const KIND_PATTERNS = [
@@ -198,39 +193,122 @@ export function matchesSearch(service, query) {
   return words.every(w => haystack.includes(w));
 }
 
+// ─── Rubriques automatiques ───────────────────────────────────────────────
+
 /**
- * Ids des prestations les plus réservées, d'après les rendez-vous terminés (`services[].service_id`).
- * Renvoie `null` si l'échantillon est trop mince (moins de `POPULAR_MIN_SAMPLE` rendez-vous portant
- * des prestations) : c'est le cas d'un client, à qui le serveur ne renvoie que les créneaux des autres.
+ * Rubriques du catalogue, dans l'ordre d'affichage. Le salon n'a aucune catégorie en base : sans
+ * elles, les 32 prestations tombaient dans une seule liste. `kind` = icône de l'en-tête (`KINDS`),
+ * `note` = sous-titre facultatif sous l'en-tête.
  */
-export function computePopularIds(appointments, services, count = POPULAR_COUNT) {
-  if (!Array.isArray(appointments) || !Array.isArray(services)) return null;
-  const known = new Set(services.map(s => String(s.id)));
-  const counts = new Map();
-  let sample = 0;
-  for (const apt of appointments) {
-    const list = Array.isArray(apt?.services) ? apt.services : null;
-    if (!list || list.length === 0) continue;
-    sample += 1;
-    for (const item of list) {
-      const id = item?.service_id != null ? String(item.service_id) : null;
-      if (!id || !known.has(id)) continue;
-      counts.set(id, (counts.get(id) || 0) + 1);
-    }
-  }
-  if (sample < POPULAR_MIN_SAMPLE || counts.size === 0) return null;
-  const order = new Map(services.map((s, i) => [String(s.id), Number(s.sort_order ?? i)]));
-  return [...counts.entries()]
-    .sort((a, b) => b[1] - a[1] || (order.get(a[0]) ?? 0) - (order.get(b[0]) ?? 0))
-    .slice(0, count)
-    .map(([id]) => id);
+export const RUBRICS = [
+  { key: 'cut', label: 'Coupes', kind: 'cut' },
+  { key: 'kids', label: 'Enfants', kind: 'kids' },
+  { key: 'combo', label: 'Coupe + barbe', kind: 'formula' },
+  { key: 'beard', label: 'Barbe et rasage', kind: 'beard' },
+  { key: 'head', label: 'Tête rasée', kind: 'clipper' },
+  { key: 'color', label: 'Couleur et mèches', kind: 'color' },
+  { key: 'care', label: 'Soins et épilation', kind: 'care' },
+  { key: 'pack', label: 'Abonnements', kind: 'pack', note: 'Formules mensuelles : demandez les détails au salon.' },
+  { key: 'other', label: 'Autres prestations', kind: 'cut' },
+];
+
+export const RUBRIC_BY_KEY = Object.fromEntries(RUBRICS.map(r => [r.key, r]));
+
+// Mots-clés des rubriques (texte déjà normalisé). Plus stricts que `KIND_PATTERNS` (icônes) :
+// « petit » n'y fait pas un enfant (« Petit contour de barbe » reste une barbe).
+const RUBRIC_PACK = /\babonnements?\b/;
+const RUBRIC_KIDS = /\b(enfants?|kids?|junior|ados?|bebes?)\b|moins de \d+ ans|(^|\s)-\s?\d+ ans|a partir de \d+ ans/;
+const RUBRIC_HEAD = /\b(tete|crane)\b|boule a zero/;
+const RUBRIC_SHAVE = /\b(rasage|rase|rasee|tondeuse)\b|boule a zero/;
+const RUBRIC_BEARD = /\b(barbes?|moustaches?|boucs?|rasage)\b/;
+const RUBRIC_COLOR = /(couleur|coloration|\bcolo\b|meche|decolo|balayage|blond|patine|teint)/;
+const RUBRIC_CARE = /(soin|epil|\bcire\b|masque|gommage|visage|\bspa\b|massage|vapeur|hydrat)/;
+const RUBRIC_CUT = /\b(coupes?|ciseaux?|coiffure|coiffage|shampo\w*|brushing|degrade|fade|permanente|defris\w*|lissage|tondeuse)\b/;
+
+/**
+ * Rubrique automatique d'une prestation, déduite de son nom (`RUBRICS`). L'ordre des tests compte :
+ * les abonnements (« 4 coupes + barbe premium ») avant tout, les enfants avant les coupes, les
+ * formules coupe + barbe avant la barbe, la tête rasée avant la barbe (« Rasage Tête + Sculpture
+ * barbe »), la barbe avant la couleur (« Teinture Barbe ») et avant les soins (« Rituel barbe…
+ * serviette chaude »), un soin qui nomme une coupe reste une coupe.
+ * @returns {'cut'|'kids'|'combo'|'beard'|'head'|'color'|'care'|'pack'|'other'}
+ */
+export function serviceRubric(service) {
+  const t = normalizeText(service?.name);
+  if (!t) return 'other';
+  if (MULTI_CUT_PACK.test(t) || RUBRIC_PACK.test(t)) return 'pack';
+  if (RUBRIC_KIDS.test(t)) return 'kids';
+  if (isCutBeardCombo(t) || (KIND_PATTERNS[0][1].test(t) && CUT_WORD.test(t) && BEARD_WORD.test(t))) return 'combo';
+  if (RUBRIC_HEAD.test(t) && RUBRIC_SHAVE.test(t)) return 'head';
+  if (RUBRIC_BEARD.test(t) && !CUT_WORD.test(t)) return 'beard';
+  if (RUBRIC_COLOR.test(t)) return 'color';
+  if (RUBRIC_CARE.test(t) && !CUT_WORD.test(t)) return 'care';
+  if (RUBRIC_CUT.test(t)) return 'cut';
+  return 'other';
 }
 
-/** Repli : les premières prestations par `sort_order`. */
-export function fallbackPopularIds(services, count = POPULAR_COUNT) {
-  if (!Array.isArray(services)) return [];
-  return [...services]
-    .sort((a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0))
-    .slice(0, count)
-    .map(s => String(s.id));
+// ─── Compléments ──────────────────────────────────────────────────────────
+
+const defaultKindOf = (s) => serviceKind(s, '');
+
+/** La moins chère d'une liste (à prix égal, la première : ordre du catalogue). */
+export function cheapestService(list) {
+  let best = null;
+  for (const s of list || []) {
+    if (!best || (Number(s?.price) || 0) < (Number(best.price) || 0)) best = s;
+  }
+  return best;
+}
+
+/** Coupe adulte seule (pas « moins de 6 ans ») : celle qu'on propose avec une barbe, et inversement. */
+export function isAdultCut(service, kindOf = defaultKindOf) {
+  return isPlainCut(service) && kindOf(service) !== 'kids';
+}
+
+/**
+ * Barbe proposée en complément d'une coupe : la moins chère des barbes seules, de préférence parmi
+ * celles dont le nom dit « barbe » (« Contour de barbe » plutôt que « Taille Moustache / Bouc »).
+ */
+export function pickBeardAddon(candidates) {
+  const beards = (candidates || []).filter(isPlainBeard);
+  const named = beards.filter(s => /\bbarbe\b/.test(normalizeText(s.name)));
+  return cheapestService(named.length > 0 ? named : beards);
+}
+
+/**
+ * « Souvent ajouté avec » (fiche d'une prestation) : 0 à `max` compléments, même logique que les
+ * suggestions de la réservation. Coupe → la barbe la moins chère + le soin le moins cher ; barbe ou
+ * formule coupe + barbe → le soin ; rien pour un abonnement, une couleur, un enfant ou un soin.
+ * Jamais une prestation déjà choisie, ni une barbe (un soin) quand la sélection en a déjà une.
+ * @param {object} service                 prestation de la fiche
+ * @param {Array} catalog                  prestations actives
+ * @param {{ selected?: Array, kindOf?: Function, max?: number }} [options]
+ */
+export function complementsFor(service, catalog, { selected = [], kindOf = defaultKindOf, max = 2 } = {}) {
+  if (!service) return [];
+  const rubric = serviceRubric(service);
+  if (rubric === 'pack' || rubric === 'color') return [];
+  const chosen = new Set([service, ...selected].map(s => String(s.id)));
+  const pool = (catalog || []).filter(s => !chosen.has(String(s.id)));
+  const others = selected.filter(s => String(s.id) !== String(service.id));
+  const hasBeard = others.some(s => isPlainBeard(s) || isCutBeardCombo(s?.name));
+  const hasCare = others.some(s => kindOf(s) === 'care');
+
+  const cut = isAdultCut(service, kindOf);
+  const out = [];
+  if (cut && !hasBeard) {
+    const beard = pickBeardAddon(pool);
+    if (beard) out.push(beard);
+  }
+  if ((cut || isPlainBeard(service) || isCutBeardCombo(service.name)) && kindOf(service) !== 'care' && !hasCare) {
+    const care = cheapestService(pool.filter(s => kindOf(s) === 'care'));
+    if (care) out.push(care);
+  }
+  return out.slice(0, max);
+}
+
+/** Première ligne de la description, pour la ligne compacte (« 30 min · Soin et massage… »). */
+export function descriptionLead(service) {
+  const text = typeof service?.description === 'string' ? service.description.trim() : '';
+  return text ? text.split(/\n+/)[0].trim() : '';
 }
