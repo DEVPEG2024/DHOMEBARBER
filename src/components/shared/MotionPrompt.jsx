@@ -12,8 +12,10 @@ import { useAuth } from '@/lib/AuthContext';
  * `NotificationPrompt` : à la première ouverture d'un profil barber, elle explique l'effet et
  * « Activer » déclenche la demande d'iOS (le tap sur le bouton est le geste exigé par Safari).
  *
- * - Seulement sur iOS (seul système qui demande une autorisation) et tant que rien n'est décidé ;
- *   Android et ordinateurs ont l'effet d'emblée, sans fenêtre.
+ * - Seulement dans Safari / l'app web installée sur iPhone (seul cas où iOS affiche une demande) et
+ *   tant que rien n'est décidé. Dans l'app iPhone, la WebView accorde sans rien afficher : la
+ *   demande part en silence au premier toucher, à chaque lancement (`startMotionPermission` de
+ *   lib/motion.js). Android et ordinateurs ont l'effet d'emblée, sans fenêtre.
  * - Seulement là où l'effet existe : `/barber/:id` (carte du barber), et pour un client `/profile`
  *   et `/gang-card` (sa carte Gang, en tête du profil).
  * - « Plus tard » et croix : réaffichée au plus 3 fois, 7 jours d'écart.

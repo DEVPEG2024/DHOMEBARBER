@@ -6,16 +6,30 @@
  * - iOS 13+ (Safari et WKWebView de l'app) : `DeviceOrientationEvent.requestPermission()`
  *   doit être appelé pendant un vrai geste utilisateur, et pour Safari un appui (pointerdown)
  *   n'en est pas un : seuls le relâchement (touchend / pointerup), le clic et une touche comptent.
- *   La demande part du bouton « Activer » de la fenêtre `MotionPrompt` (profil d'un barber,
- *   12 oct. 2026) ; avant, elle partait sans explication au premier geste n'importe où dans
- *   l'app. Le résultat est mémorisé (`localStorage`) pour que les cartes écoutent dès
- *   l'ouverture les fois suivantes. Un refus est mémorisé aussi : iOS ne réaffiche pas la
- *   boîte de dialogue, l'appel renvoie « denied » sans rien montrer.
+ *   WebKit ne garde la décision qu'EN MÉMOIRE : à chaque relance de l'app (ou de Safari), aucun
+ *   événement n'arrive tant que la demande n'a pas été refaite pendant un geste. D'où
+ *   `startMotionPermission`, appelé au démarrage (19 oct. 2026 : jusque-là, l'effet 3D ne
+ *   marchait que pendant la session où « Activer » avait été touché) :
+ *   · app iPhone (Capacitor) : la WebView accorde d'office, sans boîte de dialogue
+ *     (`WebViewDelegationHandler` → `.grant`) ; la demande part donc en silence au premier
+ *     toucher, à chaque lancement, et la fenêtre `MotionPrompt` n'a rien à expliquer ;
+ *   · Safari / app web installée : la première fois, la fenêtre `MotionPrompt` explique et
+ *     « Activer » demande ; une autorisation déjà donnée est redemandée au premier toucher sur
+ *     une page de carte (Safari ne remontre sa boîte que s'il a été relancé entre-temps).
+ *   Le résultat est mémorisé (`localStorage`) pour que les cartes écoutent dès l'ouverture. Un
+ *   refus est mémorisé aussi : la boîte n'est plus réaffichée.
  *
  * Les composants s'abonnent avec `onMotionPermission` et lisent `motionPermissionState()`.
  */
+import { Capacitor } from '@capacitor/core';
 
 const STORAGE_KEY = 'dhb-motion-permission';
+// Pages où une carte s'incline (carte d'un barber, carte Gang du client)
+const CARD_PAGES = /^\/(barber\/|profile$|gang-card)/;
+
+const inNativeShell = () => {
+  try { return Capacitor.isNativePlatform(); } catch { return false; }
+};
 
 /** 'unknown' | 'granted' | 'denied' | 'unsupported' */
 let state = 'unknown';
@@ -84,25 +98,52 @@ export function requestMotionPermission() {
   return inFlight;
 }
 
-/** Vrai quand une autorisation explicite est nécessaire (iOS) et pas encore décidée. */
+/**
+ * Vrai quand une autorisation explicite est à demander (iOS, Safari) et pas encore décidée.
+ * Faux dans l'app iPhone : la WebView accorde sans rien afficher, `startMotionPermission` s'en charge.
+ */
 export function motionPermissionPending() {
-  return needsPermission() && initMotionState() === 'unknown';
+  return needsPermission() && !inNativeShell() && initMotionState() === 'unknown';
 }
 
 const GESTURE_EVENTS = ['touchend', 'pointerup', 'click', 'keydown'];
 
 /**
- * Arme la demande d'autorisation sur le premier geste utilisateur, n'importe où dans l'app.
- * Sans effet hors iOS. Se désarme dès qu'une réponse ferme (accordé / refusé) est obtenue.
+ * Arme la demande d'autorisation sur le premier geste utilisateur (seulement quand `when()` est
+ * vrai, partout sinon). Sans effet hors iOS. Se désarme dès qu'une réponse ferme (accordé /
+ * refusé) est obtenue ; un appel rejeté (hors geste) laisse le prochain geste réessayer.
  */
-export function armMotionPermissionOnFirstGesture() {
+export function armMotionPermissionOnFirstGesture({ when } = {}) {
   initMotionState();
   if (!needsPermission()) return;
   const handler = () => {
+    if (when && !when()) return;
     requestMotionPermission().then((result) => {
       if (result === 'granted' || result === 'denied') disarm();
     });
   };
   const disarm = () => GESTURE_EVENTS.forEach((ev) => window.removeEventListener(ev, handler, true));
   GESTURE_EVENTS.forEach((ev) => window.addEventListener(ev, handler, true));
+}
+
+let started = false;
+/**
+ * Au démarrage de l'app (main.jsx) : rétablit l'accès au gyroscope que WebKit a oublié depuis la
+ * dernière ouverture. App iPhone : au premier toucher, sans boîte de dialogue. Safari : seulement
+ * si l'autorisation avait déjà été donnée, au premier toucher sur une page de carte. Ailleurs, rien.
+ */
+export function startMotionPermission() {
+  if (started) return;
+  started = true;
+  initMotionState();
+  if (!needsPermission()) return;
+  // App iPhone : jamais de refus possible (la WebView accorde toujours), même un « denied » resté
+  // d'une ancienne version est redemandé
+  if (inNativeShell()) {
+    armMotionPermissionOnFirstGesture();
+    return;
+  }
+  if (state === 'granted') {
+    armMotionPermissionOnFirstGesture({ when: () => CARD_PAGES.test(window.location.pathname) });
+  }
 }

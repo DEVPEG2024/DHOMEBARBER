@@ -5,6 +5,7 @@ import '@/index.css'
 import { initCapacitor, isNative } from '@/lib/capacitor'
 import { initNativePush, addNotification, getBadgeCount, syncServiceWorkerNotifications } from '@/lib/pushNotifications'
 import { reloadOnceForStaleChunk } from '@/lib/chunkReload'
+import { startMotionPermission } from '@/lib/motion'
 
 // Après un déploiement, un onglet resté ouvert demande d'anciens fichiers de page qui n'existent
 // plus : Vite émet `vite:preloadError`, on recharge une fois pour prendre la nouvelle version
@@ -26,8 +27,10 @@ function updateBadge() {
   }).catch(() => {});
 }
 
-// Gyroscope des cartes FUT : sur iOS l'autorisation est demandée par la fenêtre
-// MotionPrompt (profil d'un barber), plus au premier geste n'importe où ; ailleurs, actif d'emblée
+// Gyroscope des cartes FUT : iOS oublie l'autorisation à chaque lancement. App iPhone : redemandée
+// en silence au premier toucher ; Safari : fenêtre MotionPrompt la première fois, puis redemandée
+// au premier toucher sur une carte ; ailleurs, actif d'emblée (voir lib/motion.js)
+startMotionPermission();
 
 // Initialize Capacitor on native platforms
 if (isNative) {

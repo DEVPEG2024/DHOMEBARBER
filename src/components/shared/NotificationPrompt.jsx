@@ -5,7 +5,7 @@ import { Bell, CalendarCheck, Zap, Sparkles, X, Settings as SettingsIcon, Calend
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/AuthContext';
 import { isNative, platform, hapticFeedback } from '@/lib/capacitor';
-import { getPushPermission, subscribeToPush } from '@/lib/pushNotifications';
+import { getPushPermission, subscribeToPush, isSubscribed, syncPushSubscription } from '@/lib/pushNotifications';
 import { friendlyError } from '@/components/shared/LoadError';
 import { useAndroidBack } from '@/lib/useAndroidBack';
 
@@ -19,7 +19,9 @@ import { useAndroidBack } from '@/lib/useAndroidBack';
  * - autorisation jamais demandée → réaffichée au plus 3 fois, 7 jours d'écart ;
  * - autorisation refusée sur le téléphone → variante « Ouvrir les réglages » (iOS) ou marche à
  *   suivre (Android, web), au plus 2 fois, 30 jours d'écart ;
- * - désactivée volontairement dans Paramètres de l'app (`optout`) ou déjà accordée → jamais.
+ * - désactivée volontairement dans Paramètres de l'app (`optout`) → jamais ;
+ * - accordée : jamais, sauf sur téléphone si l'appareil n'est toujours pas enregistré pour ce compte
+ *   après la synchro du lancement (`unregistered`, au plus 3 fois, 3 jours d'écart).
  * Sur le web, seulement dans l'app installée (écran d'accueil) : dans un onglet, pas de fenêtre.
  */
 const STORE_KEY = 'dhb-notif-prompt';
@@ -27,7 +29,27 @@ const DAY = 24 * 60 * 60 * 1000;
 const RULES = {
   prompt: { max: 3, gap: 7 * DAY },
   denied: { max: 2, gap: 30 * DAY },
+  // Téléphone : autorisation accordée mais appareil jamais enregistré pour ce compte (jeton jamais
+  // arrivé au serveur). La fenêtre propose de finir l'activation, sans nouvelle demande du système
+  unregistered: { max: 3, gap: 3 * DAY },
 };
+// iPhone : jusqu'à la 1.0.6 (build 13, 19 oct. 2026) l'activation n'aboutissait jamais (méthodes push
+// absentes d'AppDelegate.swift). Ceux qui avaient répondu « Plus tard » à une activation qui ne
+// marchait pas repartent une fois de zéro
+const IOS_FIX_KEY = 'dhb-notif-prompt-ios-fix';
+function resetAfterIosFix() {
+  if (!isNative || platform !== 'ios') return;
+  try {
+    if (localStorage.getItem(IOS_FIX_KEY)) return;
+    const state = readState();
+    delete state.prompt;
+    writeState(state);
+    localStorage.setItem(IOS_FIX_KEY, '1');
+  } catch { /* stockage indisponible */ }
+}
+// Synchro du lancement (AuthContext) : le jeton arrive par un événement, on lui laisse ce temps
+const REGISTRATION_WAIT = 6000;
+const REGISTRATION_POLL = 1500;
 const SHOW_DELAY = 2500;
 // Pas pendant un parcours : réservation, connexion, page de paramètres (interrupteur déjà là),
 // ni sur le profil d'un barber, où s'ouvre la fenêtre du gyroscope (MotionPrompt)
@@ -92,8 +114,23 @@ export default function NotificationPrompt() {
     if (!isNative && !isStandaloneWeb()) return undefined;
     let cancelled = false;
     let timer;
+    // Appareil enregistré pour ce compte d'ici `REGISTRATION_WAIT` (synchro du lancement) ?
+    const registered = async () => {
+      for (let waited = 0; ; waited += REGISTRATION_POLL) {
+        if (cancelled) return true;
+        if (await isSubscribed().catch(() => false)) return true;
+        if (waited >= REGISTRATION_WAIT) return false;
+        await new Promise((r) => setTimeout(r, REGISTRATION_POLL));
+      }
+    };
     const attempt = async () => {
-      const status = await getPushPermission();
+      resetAfterIosFix();
+      let status = await getPushPermission();
+      if (status === 'granted' && isNative) {
+        await syncPushSubscription(user.id).catch(() => {});
+        if (await registered()) return;
+        status = 'unregistered';
+      }
       const rule = RULES[status];
       if (cancelled || !rule) return;
       const state = readState();
@@ -103,7 +140,7 @@ export default function NotificationPrompt() {
       if (gangOverlayOpen()) { timer = setTimeout(attempt, RETRY_DELAY); return; }
       writeState({ ...state, [status]: { count: entry.count + 1, last: Date.now() } });
       setFailed(null);
-      setMode(status);
+      setMode(status === 'unregistered' ? 'prompt' : status);
     };
     timer = setTimeout(attempt, SHOW_DELAY);
     return () => { cancelled = true; clearTimeout(timer); };
