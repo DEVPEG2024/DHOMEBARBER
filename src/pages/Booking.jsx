@@ -1669,7 +1669,9 @@ export default function Booking() {
 
               {/* Heures du jour choisi */}
               {selectedDate && (
-                <section aria-labelledby="day-slots-title">
+                // Hauteur minimale : avec peu d'heures la page était trop courte pour remonter la bande
+                // de jours en haut, et elle sautait à une hauteur différente à chaque jour touché
+                <section aria-labelledby="day-slots-title" className="min-h-[60vh]">
                   <div className="flex items-baseline justify-between gap-2 mb-3">
                     <h2 id="day-slots-title" className="text-[15px] font-semibold text-foreground">{selectedDayLabel}</h2>
                     {slotsReady && slotOptions.length > 0 && (
