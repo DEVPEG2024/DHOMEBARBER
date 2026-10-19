@@ -27,7 +27,8 @@ function dayAriaLabel(day) {
 export default function WeekCalendar({ days = [], selectedKey, label, canPrev, canNext, onPrev, onNext, onSelect }) {
   const reduceMotion = useReducedMotion();
   return (
-    <section aria-labelledby="week-calendar-title">
+    // `id` + marge : cible du défilement quand un jour est touché (Booking.jsx, `chooseDay`)
+    <section id="week-calendar" aria-labelledby="week-calendar-title" className="scroll-mt-3">
       <div className="flex items-center justify-between gap-2 mb-2.5">
         <h2 id="week-calendar-title" className="text-[15px] font-semibold text-foreground first-letter:uppercase">{label}</h2>
         <div className="flex gap-1.5">

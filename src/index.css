@@ -429,6 +429,9 @@ body.keyboard-open .login-logo {
   position: absolute;
   inset: -12%;
   z-index: -1;
+  /* Le halo déborde et grandit : sans cela il captait le doigt sur ce qui l'entoure (lien
+     « Réserver ma première visite » sous la carte du Profil, inactif jusqu'au 19 oct. 2026) */
+  pointer-events: none;
   border-radius: 9999px;
   background: radial-gradient(circle, hsl(var(--primary) / 0.35), transparent 65%);
   will-change: transform, opacity;

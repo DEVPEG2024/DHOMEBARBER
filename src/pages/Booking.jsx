@@ -1075,6 +1075,12 @@ export default function Booking() {
   /** Jour du calendrier : ses heures s'affichent dessous (l'heure choisie sur un autre jour est retirée). */
   const chooseDay = (day) => {
     hapticFeedback();
+    // Les heures s'affichent sous le calendrier : sur un téléphone elles tombaient sous la barre du
+    // bas et le tap semblait sans effet. Le calendrier remonte en haut de l'écran, heures dessous.
+    requestAnimationFrame(() => {
+      const el = document.getElementById('week-calendar');
+      if (el && el.getBoundingClientRect().top > 24) el.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+    });
     if (selectedDateStr === day.key) return;
     setSelectedDate(day.date);
     setSelectedTime(null);
@@ -1854,6 +1860,15 @@ export default function Booking() {
         </AnimatePresence>
         </div>
       </div>
+
+      {/* Fond plein sous la barre et la barre du bas : le contenu ne transparaît plus entre les deux */}
+      {!success && (step > 0 || selectedServices.length > 0) && (
+        <div
+          aria-hidden="true"
+          className="booking-bar fixed inset-x-0 bottom-0 z-30 pointer-events-none h-[calc(12rem+env(safe-area-inset-bottom,0px))]"
+          style={{ background: 'linear-gradient(to top, hsl(var(--background)) 72%, hsl(var(--background) / 0))' }}
+        />
+      )}
 
       {/* Barre fixée en bas : ce qui est choisi et le bouton de l'étape */}
       <AnimatePresence>

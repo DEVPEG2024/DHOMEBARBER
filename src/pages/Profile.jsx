@@ -217,7 +217,7 @@ export default function Profile() {
                   fidèle ne doit pas lire « Réserver ma première visite » */}
               {!gangPending && (
                 <Link to={gangCard ? '/gang-card' : '/booking'}
-                  className="mt-4 inline-flex items-center gap-1.5 text-xs font-semibold text-primary">
+                  className="relative z-10 mt-4 inline-flex items-center gap-1.5 min-h-[44px] px-3 text-xs font-semibold text-primary">
                   {gangCard ? 'Voir ma carte, mes écussons et la collection' : 'Réserver ma première visite'}
                   <ChevronRight className="w-3.5 h-3.5" />
                 </Link>
