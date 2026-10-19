@@ -30,7 +30,7 @@ import BookingSteps from '@/components/booking/BookingSteps';
 import BookingBar from '@/components/booking/BookingBar';
 import BarberStrip from '@/components/booking/BarberStrip';
 import NextSlots from '@/components/booking/NextSlots';
-import WeekCalendar from '@/components/booking/WeekCalendar';
+import DayStrip from '@/components/booking/DayStrip';
 import SlotGroups from '@/components/booking/SlotGroups';
 import ConfirmSummary from '@/components/booking/ConfirmSummary';
 import { track } from '@/lib/analytics';
@@ -571,10 +571,26 @@ export default function Booking() {
   // Horizon de réservation : jours d'aujourd'hui (compris) à `horizonKey` (exclu)
   const horizonKey = useMemo(() => format(addMonths(dateFromKey(todayKey), BOOKING_MONTHS_AHEAD), 'yyyy-MM-dd'), [todayKey]);
   const firstWeekKey = useMemo(() => weekKeyOf(dateFromKey(todayKey)), [todayKey]);
-  const lastWeekKey = useMemo(() => weekKeyOf(addDays(dateFromKey(horizonKey), -1)), [horizonKey]);
-  // Semaine affichée par le calendrier de l'écran Créneau (suit le jour choisi, flèches sinon)
-  const [visibleWeekKey, setVisibleWeekKey] = useState(null);
-  const shownWeekKey = visibleWeekKey && visibleWeekKey >= firstWeekKey && visibleWeekKey <= lastWeekKey ? visibleWeekKey : firstWeekKey;
+  // Tous les jours de l'horizon, pour la bande de jours de l'écran Créneau
+  const horizonDays = useMemo(() => {
+    const out = [];
+    for (let date = dateFromKey(todayKey); format(date, 'yyyy-MM-dd') < horizonKey; date = addDays(date, 1)) {
+      out.push({ date, key: format(date, 'yyyy-MM-dd') });
+    }
+    return out;
+  }, [todayKey, horizonKey]);
+  // Jours à l'écran dans la bande (signalés par `DayStrip` au défilement) : leurs semaines, et la
+  // suivante d'avance, sont chargées pour afficher les places au fil du glissé
+  const [visibleRange, setVisibleRange] = useState(null);
+  const onVisibleRange = React.useCallback((range) => setVisibleRange(range), []);
+  const visibleWeekKeys = useMemo(() => {
+    if (!visibleRange) return [];
+    const keys = [];
+    const last = weekKeyOf(dateFromKey(visibleRange.lastKey));
+    for (let k = weekKeyOf(dateFromKey(visibleRange.firstKey)); k <= last; k = format(addDays(dateFromKey(k), 7), 'yyyy-MM-dd')) keys.push(k);
+    keys.push(format(addDays(dateFromKey(last), 7), 'yyyy-MM-dd'));
+    return keys.filter(k => k < horizonKey);
+  }, [visibleRange, horizonKey]);
 
   const selectedDateStr = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : null;
   const selectedWeekKey = selectedDate ? weekKeyOf(selectedDate) : null;
@@ -597,9 +613,9 @@ export default function Booking() {
   const weekKeys = useMemo(() => {
     const keys = [];
     for (let i = 0; i < PRELOAD_WEEKS; i += 1) keys.push(format(addDays(dateFromKey(firstWeekKey), 7 * i), 'yyyy-MM-dd'));
-    for (const k of [shownWeekKey, selectedWeekKey]) if (k && !keys.includes(k)) keys.push(k);
+    for (const k of [...visibleWeekKeys, selectedWeekKey]) if (k && !keys.includes(k)) keys.push(k);
     return keys;
-  }, [firstWeekKey, shownWeekKey, selectedWeekKey]);
+  }, [firstWeekKey, visibleWeekKeys, selectedWeekKey]);
   const weekQueries = useQueries({
     queries: weekKeys.map(weekKey => ({
       queryKey: ['appointments-day', 'week', weekKey],
@@ -821,7 +837,6 @@ export default function Booking() {
     const inRange = presetDateKey >= todayKey && presetDateKey < horizonKey;
     if (!selectedDate && inRange) {
       setSelectedDate(dateFromKey(presetDateKey));
-      setVisibleWeekKey(weekKeyOf(dateFromKey(presetDateKey)));
     } else {
       presetApplied.current.time = true;
       if (presetTime && !selectedDate) setPresetMiss('gone');
@@ -860,24 +875,17 @@ export default function Booking() {
     return optionsForDay(selectedDate, selectedDateStr);
   }, [scopeEmployee, scopeReady, selectedDate, selectedDateStr, slotsReady, blockingByDate, privatesByDate, timeOffs, totalDuration, shortestDuration, employees, nowTick]);
 
-  // Places de chaque jour de la semaine affichée (calendrier de l'écran Créneau) : jours passés et
-  // hors horizon inactifs ; semaine pas encore chargée → attente ; lecture en échec → inconnu
-  const shownWeekState = weekState(shownWeekKey);
-  const calendarDays = useMemo(() => weekDays(shownWeekKey).map(({ date, key }) => {
-    if (key < todayKey) return { date, key, status: 'past' };
-    if (key >= horizonKey) return { date, key, status: 'beyond' };
-    if (shownWeekState === 'failed') return { date, key, status: 'unknown' };
-    if (!scopeReady || shownWeekState !== 'ready') return { date, key, status: 'loading' };
+  // Places de chaque jour de l'horizon (bande de jours de l'écran Créneau), calculées pour les
+  // semaines chargées ; les autres attendent (chargées au fil du défilement) ; lecture en échec → inconnu
+  const weekStates = weekKeys.map(weekState);
+  const stripDays = useMemo(() => horizonDays.map(({ date, key }) => {
+    const i = weekKeys.indexOf(weekKeyOf(date));
+    const stateOfWeek = i >= 0 ? weekStates[i] : 'loading';
+    if (stateOfWeek === 'failed') return { date, key, status: 'unknown' };
+    if (!scopeReady || stateOfWeek !== 'ready') return { date, key, status: 'loading' };
     const { options, reason } = optionsForDay(date, key);
     return options.length > 0 ? { date, key, status: 'open', count: options.length } : { date, key, status: 'empty', reason };
-  }), [shownWeekKey, shownWeekState, todayKey, horizonKey, scopeEmployee, scopeReady, blockingByDate, privatesByDate, timeOffs, totalDuration, shortestDuration, employees, nowTick]);
-  const calendarLabel = useMemo(() => {
-    const days = weekDays(shownWeekKey);
-    const first = days[0].date;
-    const last = days[6].date;
-    if (first.getMonth() === last.getMonth()) return format(first, 'LLLL yyyy', { locale: fr });
-    return `${format(first, 'LLL', { locale: fr })} – ${format(last, 'LLL yyyy', { locale: fr })}`;
-  }, [shownWeekKey]);
+  }), [horizonDays, weekKeys.join(','), weekStates.join(','), scopeEmployee, scopeReady, blockingByDate, privatesByDate, timeOffs, totalDuration, shortestDuration, employees, nowTick]);
 
   // Prochaines disponibilités : premiers créneaux des deux premières semaines (deux par jour au
   // plus). `null` tant qu'elles ne sont pas chargées ; une semaine en échec est simplement sautée.
@@ -990,7 +998,6 @@ export default function Booking() {
   useEffect(() => {
     if (step !== 1 || selectedDate || !nextItems || nextItems.length === 0) return;
     setSelectedDate(nextItems[0].date);
-    setVisibleWeekKey(weekKeyOf(nextItems[0].date));
   }, [step, selectedDate, nextItems]);
 
   const reduceMotion = useReducedMotion();
@@ -1075,10 +1082,10 @@ export default function Booking() {
   /** Jour du calendrier : ses heures s'affichent dessous (l'heure choisie sur un autre jour est retirée). */
   const chooseDay = (day) => {
     hapticFeedback();
-    // Les heures s'affichent sous le calendrier : sur un téléphone elles tombaient sous la barre du
-    // bas et le tap semblait sans effet. Le calendrier remonte en haut de l'écran, heures dessous.
+    // Les heures s'affichent sous la bande de jours : sur un téléphone elles tombaient sous la barre
+    // du bas et le tap semblait sans effet. La bande remonte en haut de l'écran, heures dessous.
     requestAnimationFrame(() => {
-      const el = document.getElementById('week-calendar');
+      const el = document.getElementById('day-strip');
       if (el && el.getBoundingClientRect().top > 24) el.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
     });
     if (selectedDateStr === day.key) return;
@@ -1099,18 +1106,9 @@ export default function Booking() {
   const chooseNext = (item) => {
     hapticFeedback();
     setSelectedDate(item.date);
-    setVisibleWeekKey(weekKeyOf(item.date));
     setPresetMiss(null);
     if (anyBarber && item.employee) setSelectedEmployee(item.employee);
     setSelectedTime(item.time);
-  };
-
-  /** Flèches du calendrier : semaine précédente / suivante, dans l'horizon de réservation. */
-  const shiftWeek = (delta) => {
-    hapticFeedback();
-    const next = format(addDays(dateFromKey(shownWeekKey), 7 * delta), 'yyyy-MM-dd');
-    if (next < firstWeekKey || next > lastWeekKey) return;
-    setVisibleWeekKey(next);
   };
 
   /**
@@ -1649,16 +1647,12 @@ export default function Booking() {
                 </div>
               )}
 
-              {/* Semaine : places de chaque jour */}
-              <WeekCalendar
-                days={calendarDays}
+              {/* Jours : bande qui défile, places de chaque jour */}
+              <DayStrip
+                days={stripDays}
                 selectedKey={selectedDateStr}
-                label={calendarLabel}
-                canPrev={shownWeekKey > firstWeekKey}
-                canNext={shownWeekKey < lastWeekKey}
-                onPrev={() => shiftWeek(-1)}
-                onNext={() => shiftWeek(1)}
                 onSelect={chooseDay}
+                onVisibleRange={onVisibleRange}
               />
 
               {/* Rien dans les deux prochaines semaines : on le dit (les flèches mènent plus loin) */}
