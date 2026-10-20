@@ -1,0 +1,49 @@
+name: Vérifications
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Un nouveau push sur la même branche annule la vérification en cours
+concurrency:
+  group: verifications-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verifications:
+    name: Relecture et parcours de bout en bout
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+
+      - name: Installer Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Installer les dépendances
+        run: npm ci
+
+      - name: Relecture du code (ESLint)
+        run: npm run lint
+
+      - name: Installer Chromium pour Playwright
+        run: npx playwright install --with-deps chromium
+
+      - name: Build et vérifications de bout en bout (API simulée, aucune requête vers la production)
+        run: npm run test:e2e
+
+      - name: Envoyer le rapport Playwright en cas d'échec
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rapport-playwright
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 14
