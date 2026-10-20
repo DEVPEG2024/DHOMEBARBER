@@ -47,6 +47,7 @@ const ACTION_LABELS = {
   push_open: 'Notification ouverte',
   privatisation_request: 'Demande de privatisation',
   last_minute_click: '« Réserver ce créneau » (Last Minute de l\'accueil)',
+  last_minute_share: '« Envoyer à un ami » (Last Minute de l\'accueil)',
 };
 export const actionLabel = (name) => ACTION_LABELS[name] || name;
 
