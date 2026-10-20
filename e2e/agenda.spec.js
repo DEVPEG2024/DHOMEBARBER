@@ -52,4 +52,47 @@ test.describe('Agenda de l\'équipe', () => {
       .some((r) => JSON.stringify(r.q) === JSON.stringify({ date: semaine }) && r.query.sort === 'start_time'))
       .toBe(true);
   });
+
+  // Last Minute (20 oct. 2026) : tous les clients sont prévenus automatiquement 3 h avant par le
+  // serveur (jobs/lastMinuteAutoPush.js) ; l'agenda ne prévient tout de suite que dans ces 3 h.
+  // Horloge figée à 10 h ; Dom est libre à 10:30 et à 16:00.
+  async function ouvrirLastMinute(page, debut) {
+    await page.goto(`/admin/agenda?view=day&date=${jour(0)}`);
+    await page.getByRole('button', { name: 'Last Minute', exact: true }).click();
+    const fenetre = page.getByRole('dialog');
+    await fenetre.locator('#lm-barber').selectOption(BARBERS.dom.id);
+    await expect(fenetre.locator('#lm-start')).toBeEnabled();
+    await fenetre.locator('#lm-start').selectOption(debut);
+    return fenetre;
+  }
+
+  test('Last Minute à plus de 3 h : créneau bloqué sans notification, annonce automatique indiquée', async ({ page, api }) => {
+    const fenetre = await ouvrirLastMinute(page, '16:00');
+    await expect(fenetre.getByRole('status').filter({ hasText: 'prévenus automatiquement' })).toContainText('aujourd\'hui à 13:00');
+    await fenetre.getByRole('button', { name: 'Bloquer le créneau', exact: true }).click();
+    await expect(page.getByText('Créneau bloqué · tous les clients seront prévenus automatiquement aujourd\'hui à 13:00')).toBeVisible();
+    expect(api.requetesVers('POST', '/entities/Appointment').at(-1).corps)
+      .toMatchObject({ status: 'last_minute', employee_id: BARBERS.dom.id, date: jour(0), start_time: '16:00' });
+    expect(api.requetesVers('POST', '/last-minute'), 'aucune notification immédiate').toHaveLength(0);
+  });
+
+  test('Last Minute à plus de 3 h, « Prévenir aussi tout de suite » : notification immédiate en plus', async ({ page, api }) => {
+    api.surcharger('POST', '/last-minute', () => ({ json: { sent: 4, failed: 0, total: 5, skippedNative: 0 } }));
+    const fenetre = await ouvrirLastMinute(page, '16:00');
+    await fenetre.getByLabel('Prévenir aussi les clients tout de suite').check();
+    await fenetre.getByRole('button', { name: 'Bloquer et prévenir les clients' }).click();
+    await expect(page.getByText('Notification envoyée à 4 appareils · Créneau bloqué')).toBeVisible();
+    expect(api.requetesVers('POST', '/last-minute')).toHaveLength(1);
+  });
+
+  test('Last Minute dans moins de 3 h : les clients sont prévenus tout de suite', async ({ page, api }) => {
+    api.surcharger('POST', '/last-minute', () => ({ json: { sent: 4, failed: 0, total: 5, skippedNative: 0 } }));
+    const fenetre = await ouvrirLastMinute(page, '10:30');
+    await expect(fenetre.getByText('Le créneau commence dans moins de 3 h : tous les clients sont prévenus tout de suite.')).toBeVisible();
+    await expect(fenetre.getByLabel('Prévenir aussi les clients tout de suite')).toHaveCount(0);
+    await fenetre.getByRole('button', { name: 'Bloquer et prévenir les clients' }).click();
+    await expect(page.getByText('Notification envoyée à 4 appareils · Créneau bloqué')).toBeVisible();
+    expect(api.requetesVers('POST', '/last-minute').at(-1).corps)
+      .toMatchObject({ employee_id: BARBERS.dom.id, date: jour(0), start_time: '10:30' });
+  });
 });

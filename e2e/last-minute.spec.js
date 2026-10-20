@@ -1,6 +1,7 @@
-// Last Minute sur l'accueil (20 oct. 2026) : les créneaux libérés par le salon depuis l'agenda, en
-// cartes orange (une grande carte, ou un carrousel à partir de deux) ; « Réserver ce créneau » ouvre
-// la réservation avec le barber, le jour et l'heure ; le créneau pris quitte aussitôt l'accueil.
+// Last Minute sur l'accueil (20 oct. 2026) : les créneaux libérés par le salon depuis l'agenda, du
+// jour seulement, en cartes orange compactes (une carte, ou un carrousel à partir de deux) ;
+// « Réserver » ouvre la réservation avec le barber, le jour et l'heure ; le créneau pris quitte
+// aussitôt l'accueil.
 import { test, expect } from './support/test.js';
 import { BARBERS, CLIENT, PRESTATIONS, rendezVous } from './support/donnees.js';
 import { jour } from './support/temps.js';
@@ -40,7 +41,17 @@ test.describe('Last Minute sur l\'accueil', () => {
     await expect(page.getByRole('region', { name: 'Créneaux Last Minute' })).toHaveCount(0);
   });
 
-  test('un créneau : grande carte, réservation pré-remplie, créneau retiré de l\'accueil', async ({ page, api }) => {
+  test('créneau de demain : rien sur l\'accueil aujourd\'hui (le jour même seulement)', async ({ page, api }) => {
+    api.tables.Appointment.push(lastMinute('lm-demain', BARBERS.romain, jour(1), '10:00', '10:30'));
+    await page.goto('/');
+    await accueilPret(page);
+    await expect.poll(() => lecturesLastMinute(api).length).toBeGreaterThan(0);
+    // L'accueil ne demande plus que le jour même
+    expect(lecturesLastMinute(api).every((r) => JSON.stringify(r.q?.date) === JSON.stringify([jour(0)]))).toBe(true);
+    await expect(boutonsReserverCreneau(page)).toHaveCount(0);
+  });
+
+  test('un créneau : carte compacte, réservation pré-remplie, créneau retiré de l\'accueil', async ({ page, api }) => {
     // Sans le RDV du client de 17 h ce jour-là (la confirmation demanderait « un rendez-vous en plus »)
     api.tables.Appointment = api.tables.Appointment.filter((r) => r.id !== 'apt-proche-romain');
     api.tables.Appointment.push(lastMinute('lm-kevin', BARBERS.kevin, jour(0), '15:30', '16:00'));
@@ -58,6 +69,9 @@ test.describe('Last Minute sur l\'accueil', () => {
     await expect(carte).toBeVisible();
     await expect(carte).toContainText('dans 5 h 30');
     await expect(carte).toContainText('15:30 – 16:00');
+    // Carte compacte (demande du propriétaire) : ~125 px de haut, plus de 270 px avant
+    const hauteur = (await carte.boundingBox()).height;
+    expect(hauteur, `hauteur de la carte : ${hauteur} px`).toBeLessThanOrEqual(140);
     // Une seule carte : pas de carrousel
     await expect(page.getByRole('region', { name: 'Créneaux Last Minute' })).toHaveCount(0);
 
@@ -107,7 +121,7 @@ test.describe('Last Minute sur l\'accueil', () => {
   test.describe('à 320 px', () => {
     test.use({ viewport: { width: 320, height: 640 } });
 
-    test('plusieurs créneaux : carrousel du plus proche au plus lointain, sans débordement', async ({ page, api }) => {
+    test('plusieurs créneaux : carrousel du jour, du plus proche au plus lointain, sans débordement', async ({ page, api }) => {
       api.tables.Appointment.push(
         lastMinute('lm-kevin', BARBERS.kevin, jour(0), '15:30', '16:00'),
         lastMinute('lm-romain', BARBERS.romain, jour(1), '10:00', '10:30'),
@@ -118,14 +132,22 @@ test.describe('Last Minute sur l\'accueil', () => {
 
       const carrousel = page.getByRole('region', { name: 'Créneaux Last Minute' });
       await expect(carrousel).toBeVisible();
-      await expect(page.getByText('3 créneaux Last Minute', { exact: true })).toBeVisible();
-      await expect(carrousel.getByRole('article')).toHaveCount(3);
+      // Le créneau de demain (Romain) n'apparaît pas : le jour même seulement
+      await expect(page.getByText('2 créneaux Last Minute', { exact: true })).toBeVisible();
+      await expect(carrousel.getByRole('article')).toHaveCount(2);
       const noms = await carrousel.getByRole('article').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')));
       expect(noms).toEqual([
         'Créneau Last Minute aujourd\'hui à 12:00 avec Dom',
         'Créneau Last Minute aujourd\'hui à 15:30 avec Kevin',
-        'Créneau Last Minute demain à 10:00 avec Romain',
       ]);
+      // Cartes compactes, et les deux boutons tiennent sur une ligne à 320 px
+      for (const carte of await carrousel.getByRole('article').all()) {
+        expect((await carte.boundingBox()).height).toBeLessThanOrEqual(140);
+        const reserver = await carte.getByRole('link', { name: /^Réserver ce créneau/ }).boundingBox();
+        const envoyer = await carte.getByRole('button', { name: /^Envoyer à un ami/ }).boundingBox();
+        expect(Math.abs(reserver.y - envoyer.y), 'boutons sur la même ligne').toBeLessThan(2);
+        expect(envoyer.height).toBeGreaterThanOrEqual(40);
+      }
       await attendreSansDebordement(page, 'l\'accueil avec le carrousel Last Minute');
     });
   });

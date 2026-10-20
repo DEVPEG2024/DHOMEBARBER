@@ -862,6 +862,19 @@ function lastMinuteBookingUrl({ employee_id, date, start_time }) {
   return `/booking?barber=${encodeURIComponent(employee_id)}&date=${date}&time=${start_time}`;
 }
 
+/**
+ * Annonce automatique d'un Last Minute (serveur, jobs/lastMinuteAutoPush.js, 20 oct. 2026) : tous
+ * les clients sont prévenus 3 h avant le début, jamais avant 08:00. Rend `{ label, dueNow }` :
+ * heure d'envoi (« 14:30 ») et vrai si elle est déjà atteinte (le créneau commence dans moins de
+ * 3 h : la notification part tout de suite, depuis l'agenda).
+ */
+const LAST_MINUTE_AUTO_LEAD = 180;
+function lastMinuteAutoAnnounce(date, start) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || '')) || !/^\d{2}:\d{2}$/.test(String(start || ''))) return null;
+  const label = minutesToTime(Math.max(timeToMinutes(start) - LAST_MINUTE_AUTO_LEAD, 8 * 60));
+  return { label, dueNow: parisInstant(date, label) <= Date.now() };
+}
+
 function LastMinuteForm({ open, employees, timeOffs, defaultEmployeeId, defaultDate, cachedDay, onCreated, onDone }) {
   const todayKey = parisDay(0).key;
   const tomorrowKey = parisDay(1).key;
@@ -878,6 +891,8 @@ function LastMinuteForm({ open, employees, timeOffs, defaultEmployeeId, defaultD
   // Réponse perdue : le push est peut-être parti, un renvoi demande une confirmation en deux taps
   const [pushUncertain, setPushUncertain] = useState(false);
   const [confirmResend, setConfirmResend] = useState(false);
+  // Créneau à plus de 3 h : prévenir aussi tout de suite (sinon seule l'annonce automatique part)
+  const [notifyNow, setNotifyNow] = useState(false);
 
   // Barbers chargés après l'ouverture : le premier est proposé
   useEffect(() => {
@@ -986,6 +1001,21 @@ function LastMinuteForm({ open, employees, timeOffs, defaultEmployeeId, defaultD
   }[plan.state];
 
   const canSend = !sending && (created ? true : plan.state === 'ok' && !!startTime && !!endTime);
+  // Annonce automatique de 3 h avant ; créneau déjà dans la fenêtre (ou ligne existante à annoncer) :
+  // la notification part tout de suite depuis l'agenda
+  const auto = !created && startTime ? lastMinuteAutoAnnounce(form.date, startTime) : null;
+  const pushNow = created ? true : (!auto || auto.dueNow || notifyNow);
+  const autoDay = form.date === todayKey ? 'aujourd\'hui' : form.date === tomorrowKey ? 'demain' : (validDate ? `le ${format(lastMinuteDayDate(form.date), 'EEEE d MMMM', { locale: fr })}` : '');
+
+  /** Créneau bloqué sans notification immédiate : le serveur l'annoncera 3 h avant. */
+  const finishWithAutoAnnounce = () => {
+    toast.success(`Créneau bloqué · tous les clients seront prévenus automatiquement ${autoDay} à ${auto.label}`, {
+      description: 'Notification envoyée par le serveur 3 h avant le créneau (jamais avant 8 h).',
+      duration: 8000,
+    });
+    setSending(false);
+    onDone();
+  };
 
   const handleSendLastMinute = async () => {
     if (!canSend) return;
@@ -1017,8 +1047,13 @@ function LastMinuteForm({ open, employees, timeOffs, defaultEmployeeId, defaultD
         // Créneau bloqué « last_minute » sur l'agenda : un client qui le réserve le reprend (serveur)
         const res = await api.entities.Appointment.create(payload);
         row = { id: res?.id ?? null, employee_id: employee.id, employee_name: employee.name || '', date: form.date, start_time: startTime, end_time: endTime };
-        setCreated(row);
         onCreated?.();
+        // Plus de 3 h avant : pas de notification maintenant, le serveur l'enverra à l'heure
+        if (!pushNow) {
+          finishWithAutoAnnounce();
+          return;
+        }
+        setCreated(row);
       } catch (e) {
         // Réponse perdue (réseau, 503 du routeur) : la ligne a pu être créée quand même. On relit la
         // journée ; si le créneau Last Minute est là, le prochain tap n'envoie que la notification
@@ -1041,6 +1076,11 @@ function LastMinuteForm({ open, employees, timeOffs, defaultEmployeeId, defaultD
             toast.warning('Le créneau a peut-être été créé : vérifiez l\'agenda avant de réessayer (il apparaîtra dans « Déjà bloqué » au retour du réseau)', { duration: 10000 });
             onCreated?.();
             setSending(false);
+            return;
+          }
+          if (found && !pushNow) {
+            onCreated?.();
+            finishWithAutoAnnounce();
             return;
           }
           if (found) {
@@ -1106,11 +1146,11 @@ function LastMinuteForm({ open, employees, timeOffs, defaultEmployeeId, defaultD
       <DialogHeader>
         <DialogTitle className="text-sm flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-orange-400 animate-pulse" />
-          Notification Last Minute
+          Créneau Last Minute
         </DialogTitle>
       </DialogHeader>
       <p className="text-xs text-muted-foreground mb-3">
-        Le créneau est bloqué dans l'agenda et une notification part vers tous les clients. Seules les heures qu'un client peut réserver sont proposées.
+        Le créneau est bloqué dans l'agenda et apparaît sur l'accueil des clients le jour même. Tous les clients sont prévenus automatiquement 3 h avant (jamais avant 8 h). Seules les heures qu'un client peut réserver sont proposées.
       </p>
       <div className="space-y-3">
         <div>
@@ -1134,7 +1174,7 @@ function LastMinuteForm({ open, employees, timeOffs, defaultEmployeeId, defaultD
 
         {pendingLM.length > 0 && !sending && (
           <div className="rounded-xl border border-orange-500/30 bg-orange-500/10 px-3 py-2.5 space-y-2">
-            <p className="text-xs font-semibold text-orange-300">Bloqués dans l'agenda — déjà annoncés aux clients ? Annoncer enverra un nouveau push à tous.</p>
+            <p className="text-xs font-semibold text-orange-300">Déjà bloqués : les clients seront prévenus automatiquement 3 h avant. « Annoncer » les prévient tout de suite (nouvelle notification à tous).</p>
             <div className="flex flex-wrap gap-2">
               {pendingLM.map((a) => {
                 const st = String(a.start_time).slice(0, 5);
@@ -1195,6 +1235,26 @@ function LastMinuteForm({ open, employees, timeOffs, defaultEmployeeId, defaultD
           </div>
         )}
 
+        {auto && plan.state === 'ok' && (
+          auto.dueNow ? (
+            <p role="status" className="rounded-xl border border-orange-500/30 bg-orange-500/10 px-3 py-2 text-xs leading-relaxed text-orange-300">
+              Le créneau commence dans moins de 3 h : tous les clients sont prévenus tout de suite.
+            </p>
+          ) : (
+            <div className="rounded-xl border border-orange-500/30 bg-orange-500/10 px-3 py-2.5 space-y-2">
+              <p role="status" className="text-xs leading-relaxed text-orange-300">
+                Tous les clients seront prévenus automatiquement <strong className="font-semibold">{autoDay} à {auto.label}</strong> (3 h avant{auto.label === '08:00' ? ', pas avant 8 h' : ''}).
+              </p>
+              <label className="flex items-center gap-2 text-xs text-foreground cursor-pointer">
+                <input type="checkbox" checked={notifyNow} disabled={sending}
+                  onChange={(e) => setNotifyNow(e.target.checked)}
+                  className="w-4 h-4 accent-orange-500" />
+                Prévenir aussi les clients tout de suite
+              </label>
+            </div>
+          )
+        )}
+
         {pushError && (pushUncertain ? (
           <div role="alert" className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-300">
             Créneau bloqué. La notification est peut-être partie (la réponse du serveur n'est pas arrivée) : vérifiez auprès d'un client avant de la renvoyer (le serveur ne bloque les doublons que pendant 15 min).
@@ -1222,8 +1282,10 @@ function LastMinuteForm({ open, employees, timeOffs, defaultEmployeeId, defaultD
             confirmResend ? 'Confirmer' : 'Vérifier l\'envoi / réessayer'
           ) : created ? (
             'Renvoyer la notification'
+          ) : pushNow ? (
+            'Bloquer et prévenir les clients'
           ) : (
-            'Envoyer la notification'
+            'Bloquer le créneau'
           )}
         </button>
         {created && !sending && (

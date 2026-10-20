@@ -6,6 +6,10 @@
  * passe `no_show` à l'heure. Un client ne lit que les colonnes de créneau (id, employee_id,
  * employee_name, date, start_time, end_time, status) et `blocks_client`, calculé par le serveur :
  * faux tant que personne n'est rattaché au créneau.
+ *
+ * **Le jour même seulement** (demande du propriétaire, 20 oct. 2026) : un créneau de demain
+ * n'apparaît sur l'accueil que demain. Tous les clients sont prévenus automatiquement 3 h avant
+ * son début, jamais avant 8 h (serveur : jobs/lastMinuteAutoPush.js).
  */
 import { useEffect, useMemo, useState } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
@@ -15,6 +19,7 @@ import { api } from '@/api/apiClient';
 import { fetchPublicBarbers } from '@/lib/publicBarbers';
 import { parisDay } from '@/lib/slots';
 import { parisInstant } from '@/lib/calendarLinks';
+import { isNative } from '@/lib/capacitor';
 
 /**
  * Clé sous le préfixe `appointments` : une réservation (Booking.jsx), une annulation ou un
@@ -41,14 +46,19 @@ const toMinutes = (t) => {
   return m ? Number(m[1]) * 60 + Number(m[2]) : null;
 };
 
+const parisDateFmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit' });
+/** Jour de Paris (AAAA-MM-JJ) de l'instant `now`. */
+export const parisDateKey = (now = Date.now()) => parisDateFmt.format(new Date(now));
+
 /**
- * Créneaux à montrer, du plus proche au plus lointain : statut `last_minute`, libre pour un client
- * (`blocks_client` pas vrai), qui commence dans plus de 10 min (heure de Paris), barber visible des clients
- * (fiche publique, pas de fiche de test). Un même barber, jour et heure n'apparaît qu'une fois.
- * Tous les créneaux sont rendus (le carrousel en garde `MAX_LAST_MINUTE_SLOTS`).
+ * Créneaux à montrer, du plus proche au plus lointain : statut `last_minute`, **du jour** (Paris),
+ * libre pour un client (`blocks_client` pas vrai), qui commence dans plus de 10 min, barber visible
+ * des clients (fiche publique, pas de fiche de test). Un même barber, jour et heure n'apparaît
+ * qu'une fois. Tous les créneaux sont rendus (le carrousel en garde `MAX_LAST_MINUTE_SLOTS`).
  * Chaque élément : `{ id, employeeId, barber, date, start, end, startsAt }`.
  */
 export function selectOpenLastMinutes(rows, barbers, now = Date.now()) {
+  const today = parisDateKey(now);
   const byId = new Map((Array.isArray(barbers) ? barbers : [])
     .filter((b) => b && !b.is_hidden)
     .map((b) => [String(b.id), b]));
@@ -59,6 +69,8 @@ export function selectOpenLastMinutes(rows, barbers, now = Date.now()) {
     const date = String(row.date || '').slice(0, 10);
     const start = hhmm(row.start_time);
     if (!DATE_RE.test(date) || !TIME_RE.test(start)) continue;
+    // Le jour même seulement (une réponse en cache de la veille ne remontre pas ses créneaux)
+    if (date !== today) continue;
     const startsAt = parisInstant(date, start);
     if (!(startsAt > now + LAST_MINUTE_MIN_LEAD_MS)) continue;
     const barber = byId.get(String(row.employee_id));
@@ -113,6 +125,63 @@ export function lastMinuteBookingUrl(slot) {
 export const barberFirstName = (barber) => String(barber?.name || '').trim().split(/\s+/)[0] || 'votre barber';
 
 /**
+ * Adresse publique du site, pour un lien envoyé à quelqu'un d'autre : dans les apps,
+ * `window.location.origin` vaut capacitor://localhost (iOS) ou https://localhost (Android).
+ */
+const PUBLIC_SITE = 'https://dhomebarber.fr';
+
+/**
+ * Message « Envoyer à un ami » d'un créneau : texte au tutoiement (un client écrit à un ami) et
+ * lien public vers la réservation pré-remplie. Un ami sans compte passe par la connexion, qui le
+ * ramène sur ce lien. `src=partage-last-minute` : provenance de sa visite dans Admin → Trafic.
+ */
+export function lastMinuteShareContent(slot, now = Date.now()) {
+  const { day } = lastMinuteLabels(slot, now);
+  const when = day === "Aujourd'hui" || day === 'Demain' ? day.toLowerCase() : `le ${day.toLowerCase()}`;
+  return {
+    title: "Last Minute · D'Home Barber",
+    text: `⚡ Place Last Minute chez D'Home Barber : ${when} à ${slot.start} avec ${barberFirstName(slot.barber)}. Réserve vite :`,
+    url: `${PUBLIC_SITE}${lastMinuteBookingUrl(slot)}&src=partage-last-minute`,
+  };
+}
+
+/**
+ * Ouvre le partage du téléphone pour un créneau. Rend `'shared'`, `'cancelled'` (partage refermé
+ * par le client), `'copied'` (lien copié faute de partage : navigateur d'ordinateur) ou `'failed'`.
+ * Apps : feuille de partage du système (`@capacitor/share` ; la WebView Android n'a pas
+ * `navigator.share`). Web : `navigator.share` appelé sans attente avant lui (il exige le geste
+ * du client), puis le presse-papier.
+ */
+export async function shareLastMinute(slot, now = Date.now()) {
+  const { title, text, url } = lastMinuteShareContent(slot, now);
+  if (isNative) {
+    try {
+      const { Share } = await import('@capacitor/share');
+      await Share.share({ title, text, url, dialogTitle: 'Envoyer à un ami' });
+      return 'shared';
+    } catch (err) {
+      if (/cancel/i.test(String(err?.message || err))) return 'cancelled';
+      // Module absent ou refus du système : les voies du web prennent le relais
+    }
+  }
+  if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+    try {
+      await navigator.share({ title, text, url });
+      return 'shared';
+    } catch (err) {
+      if (err?.name === 'AbortError') return 'cancelled';
+      // Partage refusé (geste trop ancien, appli cible en échec) : copie du lien
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(`${text} ${url}`);
+    return 'copied';
+  } catch {
+    return 'failed';
+  }
+}
+
+/**
  * Libellés d'un créneau : `day` (« Aujourd'hui », « Demain », sinon « Mer. 22 oct. »), `chip`
  * (aujourd'hui : « dans 45 min » / « dans 1 h 25 » ; plus tard : la date courte), `live`
  * (vrai pour un compte à rebours : le point « en direct » ne s'affiche que devant lui).
@@ -136,8 +205,8 @@ export function lastMinuteLabels(slot, now = Date.now()) {
 }
 
 /**
- * Créneaux Last Minute libres d'aujourd'hui et de demain : `{ slots, total, now }` (`slots` limité
- * à `MAX_LAST_MINUTE_SLOTS`). Relu chaque minute et au retour sur l'app ; l'horloge locale avance
+ * Créneaux Last Minute libres **du jour** : `{ slots, total, now }` (`slots` limité à
+ * `MAX_LAST_MINUTE_SLOTS`). Relu chaque minute et au retour sur l'app ; l'horloge locale avance
  * toutes les 30 s (compte à rebours, créneau commencé retiré).
  * Ne rejette jamais : en échec, aucune carte (la section se cache).
  */
@@ -151,14 +220,14 @@ export function useOpenLastMinutes({ enabled = true } = {}) {
     return () => { clearInterval(id); document.removeEventListener('visibilitychange', onVisible); };
   }, []);
 
-  // Jours de Paris recalculés avec l'horloge : à minuit la requête passe au nouveau jour
+  // Jour de Paris recalculé avec l'horloge : à minuit la requête passe au nouveau jour
   const today = parisDay(0).key;
-  const tomorrow = parisDay(1).key;
   const slotsQuery = useQuery({
     queryKey: [...LAST_MINUTE_QUERY_KEY, today],
-    queryFn: () => api.entities.Appointment.filter({ status: 'last_minute', date: [today, tomorrow] }, 'start_time', 50),
+    queryFn: () => api.entities.Appointment.filter({ status: 'last_minute', date: [today] }, 'start_time', 50),
     enabled,
-    // À minuit la clé change : les cartes de la veille restent le temps de relire (pas de clignotement)
+    // À minuit la clé change : la réponse de la veille sert le temps de relire, ses créneaux sont
+    // écartés par la date (selectOpenLastMinutes)
     placeholderData: keepPreviousData,
     staleTime: 15 * 1000,
     refetchInterval: 60 * 1000,
