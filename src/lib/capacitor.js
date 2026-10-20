@@ -162,13 +162,28 @@ function initKeyboardHandling() {
     Keyboard.addListener('keyboardDidShow', (info) => {
       const kb = Math.round(Number(info && info.keyboardHeight) || lastKeyboardHeight || 0);
       const resized = heightBeforeKeyboard != null && window.innerHeight < heightBeforeKeyboard - 40;
-      setKeyboardOpen(true, Math.max(keyboardOverlap(), resized ? 0 : kb));
+      // Android : fenêtre déjà plus courte que l'écran d'environ la hauteur du clavier = WebView
+      // réduite AVANT l'événement (adjustResize) ; réserver le clavier en plus le compterait deux
+      // fois (une fenêtre plein écran s'écrasait en haut de l'écran). Pas sur iOS : en mode
+      // compatibilité iPhone sur iPad, la taille d'écran déclarée n'est pas sûre, et le cas
+      // « jamais réduite » (refus Apple du 9 sept.) doit garder la hauteur du clavier
+      const shrunkBeforeEvent = platform === 'android' && !!window.screen
+        && window.screen.height - window.innerHeight >= kb - 40;
+      setKeyboardOpen(true, Math.max(keyboardOverlap(), resized || shrunkBeforeEvent ? 0 : kb));
       scheduleReveal(80);
       // Deuxième passe après la mise en page du padding (et l'animation du clavier)
       setTimeout(revealActiveField, 450);
     });
     Keyboard.addListener('keyboardWillHide', () => { heightBeforeKeyboard = null; setKeyboardOpen(false, 0); });
     Keyboard.addListener('keyboardDidHide', () => setKeyboardOpen(false, 0));
+    // WebView réduite APRÈS keyboardDidShow (simulateur iPad, iPadOS 26) : la hauteur du clavier
+    // réservée devient de trop, on ne garde que le recouvrement réel (0 si la fenêtre a rétréci)
+    window.addEventListener('resize', () => {
+      if (heightBeforeKeyboard == null || !document.body.classList.contains('keyboard-open')) return;
+      if (window.innerHeight >= heightBeforeKeyboard - 40) return;
+      setKeyboardOpen(true, keyboardOverlap());
+      scheduleReveal(80);
+    });
   } catch {}
 
   // 2. Repli visualViewport : recouvrement réel quand le navigateur le rapporte (web mobile).
