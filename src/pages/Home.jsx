@@ -16,6 +16,7 @@ import { useMusic } from '@/lib/MusicContext';
 import { BARBER_PHOTO_ASPECT, BARBER_PHOTO_BG } from '@/lib/barberPhoto';
 import { barberPhotoLayoutId } from '@/components/shared/BarberCard';
 import RebookCard from '@/components/home/RebookCard';
+import LastMinuteSection from '@/components/home/LastMinuteSection';
 import OpenStatusBadge from '@/components/home/OpenStatusBadge';
 import { snapFeatureEnabled } from '@/lib/snapLenses';
 import TextileHomeCard from '@/components/textile/TextileHomeCard';
@@ -335,12 +336,15 @@ function BarberMarquee({ employees }) {
   );
 }
 
-// `rebook` (« Comme la dernière fois ») et `salon-event` sont des sections auto-masquées : leur
-// composant rend `null` sans contenu (pas de RDV passé, pas d'événement à venir) et le conteneur
-// `.auto-section` vide est caché par le wrapper (`[&:has(>.auto-section:empty)]:hidden`).
-const DEFAULT_SECTION_ORDER = ['quick-info', 'rebook', 'barbers', 'try-on', 'news', 'services', 'shop', 'textile', 'salon-event', 'partners', 'reviews', 'gift-card', 'cta'];
+// `last-minute`, `rebook` (« Comme la dernière fois ») et `salon-event` sont des sections
+// auto-masquées : leur composant rend `null` sans contenu (aucun créneau Last Minute libre, pas de
+// RDV passé, pas d'événement à venir) et le conteneur `.auto-section` vide est caché par le wrapper
+// (`[&:has(>.auto-section:empty)]:hidden`). `last-minute` est en tête par défaut : la fusion avec un
+// ordre sauvegardé l'insère donc en haut de l'accueil tant que l'admin ne l'a pas déplacée.
+const DEFAULT_SECTION_ORDER = ['last-minute', 'quick-info', 'rebook', 'barbers', 'try-on', 'news', 'services', 'shop', 'textile', 'salon-event', 'partners', 'reviews', 'gift-card', 'cta'];
 
 const SECTION_LABELS = {
+  'last-minute': 'Last Minute',
   'quick-info': 'Infos rapides',
   'barbers': 'Le Gang',
   'news': 'News Gang',
@@ -738,6 +742,23 @@ export default function Home() {
           </div>
         );
 
+      case 'last-minute':
+        // Créneaux libérés par le salon depuis l'agenda, en carrousel de cartes orange (demande du
+        // 20 oct. 2026) ; en mode édition, un repère pour la positionner même sans créneau ouvert
+        if (editMode) {
+          return (
+            <div className="rounded-3xl p-5 text-center border border-orange-500/40 bg-orange-500/10">
+              <p className="text-xs font-semibold text-foreground">Last Minute</p>
+              <p className="text-[11px] text-muted-foreground mt-1">Créneaux publiés depuis l'agenda, en carrousel de cartes orange (cachée quand aucun n'est libre).</p>
+            </div>
+          );
+        }
+        return (
+          <div className="auto-section">
+            <LastMinuteSection />
+          </div>
+        );
+
       case 'rebook':
         // « Comme la dernière fois » : déplaçable comme les autres sections (demande du 12 sept. 2026).
         // RebookCard rend null sans RDV exploitable ; en mode édition, un repère pour la positionner.
@@ -1043,8 +1064,10 @@ export default function Home() {
           </Reorder.Group>
         ) : (
           /* Normal mode */
-          /* Chaque section se dévoile quand elle arrive à l'écran (et non toutes au chargement) */
-          <div className="space-y-8">
+          /* Chaque section se dévoile quand elle arrive à l'écran (et non toutes au chargement).
+             Écart en `gap` et non `space-y` : une section auto-masquée (display:none) ne laisse
+             aucun trou, même en tête (Last Minute sans créneau ouvert : 32 px de vide avant) */
+          <div className="flex flex-col gap-8">
             {sectionOrder.map((id) => {
               const content = renderSection(id);
               if (!content) return null;

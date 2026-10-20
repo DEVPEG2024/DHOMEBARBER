@@ -6,12 +6,13 @@ import { motion, useMotionValue, useTransform, useReducedMotion } from 'framer-m
  * - la carte au centre est à taille réelle, ses voisines légèrement réduites et atténuées ;
  * - points de position sous le carrousel (tap = aller à la carte) ;
  * - défilement automatique facultatif (`autoplay` en ms) : en pause dès que le client touche
- *   le carrousel (8 s), quand il est hors de l'écran, onglet caché ou mouvement réduit.
+ *   le carrousel (8 s), quand il est hors de l'écran, onglet caché ou mouvement réduit ;
+ * - couleur du point actif : `activeDotClass` (vert du salon par défaut, orange pour le Last Minute).
  *
  * Le carrousel déborde jusqu'aux bords de l'écran (`-mx-4 px-4`, la page a 16 px de marge) ;
  * la page n'en défile pas pour autant : la zone de défilement est le carrousel lui-même.
  */
-export default function SnapCarousel({ children, itemWidth = '78%', gap = 12, autoplay = 0, dots = true, className = '', label }) {
+export default function SnapCarousel({ children, itemWidth = '78%', gap = 12, autoplay = 0, dots = true, className = '', label, activeDotClass = 'bg-primary' }) {
   const reduce = useReducedMotion();
   const ref = useRef(null);
   const scrollX = useMotionValue(0);
@@ -28,7 +29,9 @@ export default function SnapCarousel({ children, itemWidth = '78%', gap = 12, au
     if (!el) return undefined;
     const measure = () => {
       const first = el.querySelector('[data-carousel-item]');
-      if (first) setStep(first.getBoundingClientRect().width + gap);
+      // offsetWidth et non getBoundingClientRect : la carte peut être réduite (scale) au moment de
+      // la mesure, le pas serait faux et la carte au centre ne serait plus à taille réelle
+      if (first) setStep(first.offsetWidth + gap);
     };
     measure();
     const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
@@ -99,7 +102,7 @@ export default function SnapCarousel({ children, itemWidth = '78%', gap = 12, au
               type="button"
               tabIndex={-1}
               onClick={() => { pause(); goTo(i); }}
-              className={`h-1.5 rounded-full transition-all duration-300 ${i === index ? 'w-5 bg-primary' : 'w-1.5 bg-white/20'}`}
+              className={`h-1.5 rounded-full transition-all duration-300 ${i === index ? `w-5 ${activeDotClass}` : 'w-1.5 bg-foreground/20'}`}
             />
           ))}
         </div>
@@ -113,13 +116,17 @@ function CarouselItem({ children, i, step, scrollX, width, reduce }) {
   const dist = useTransform(scrollX, (x) => Math.min(1, Math.abs(i * step - x) / step));
   const scale = useTransform(dist, [0, 1], [1, 0.92]);
   const opacity = useTransform(dist, [0, 1], [1, 0.55]);
+  // L'aimantation se calcule sur le cadre transformé de l'élément aimanté : la réduction est donc
+  // portée par un élément intérieur. Posée sur le cadre aimanté, elle faisait arrêter le carrousel
+  // 12 px trop loin (cadre de la carte suivante encore réduite, relevé le 20 oct. 2026).
   return (
-    <motion.div
-      data-carousel-item
-      className="snap-start shrink-0"
-      style={reduce ? { width } : { width, scale, opacity, transformOrigin: 'center center' }}
-    >
-      {children}
-    </motion.div>
+    <div data-carousel-item className="snap-start shrink-0" style={{ width }}>
+      <motion.div
+        className="h-full"
+        style={reduce ? undefined : { scale, opacity, transformOrigin: 'center center' }}
+      >
+        {children}
+      </motion.div>
+    </div>
   );
 }

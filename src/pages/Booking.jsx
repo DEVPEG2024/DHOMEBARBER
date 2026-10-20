@@ -5,7 +5,7 @@ import { fetchPublicBarbers } from '@/lib/publicBarbers';
 import { useAuth } from '@/lib/AuthContext';
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
-import { Calendar, CalendarPlus, Check, ChevronDown, Info, MessageSquare, Scissors, ShoppingBag } from 'lucide-react';
+import { Calendar, CalendarPlus, Check, ChevronDown, Info, MessageSquare, Scissors, ShoppingBag, Zap } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { format, addDays, addMonths } from 'date-fns';
@@ -34,6 +34,7 @@ import DayStrip from '@/components/booking/DayStrip';
 import SlotGroups from '@/components/booking/SlotGroups';
 import ConfirmSummary from '@/components/booking/ConfirmSummary';
 import { track } from '@/lib/analytics';
+import { barberFirstName, forgetBookedLastMinute } from '@/lib/lastMinute';
 
 /**
  * Étapes du parcours (refonte du 19 oct. 2026 : barber, jour et heure sur un seul écran). Les noms
@@ -571,6 +572,18 @@ export default function Booking() {
   // Horizon de réservation : jours d'aujourd'hui (compris) à `horizonKey` (exclu)
   const horizonKey = useMemo(() => format(addMonths(dateFromKey(todayKey), BOOKING_MONTHS_AHEAD), 'yyyy-MM-dd'), [todayKey]);
   const firstWeekKey = useMemo(() => weekKeyOf(dateFromKey(todayKey)), [todayKey]);
+  // Lien Last Minute (carte de l'accueil, notification) : rappelé dès l'étape Prestation, sinon le
+  // client ne retrouvait ni le barber ni l'heure du créneau avant l'écran Créneau (tests du 20 oct. 2026)
+  const lastMinuteLink = presetTime && presetDateKey && preSelectedBarber && !rescheduleId
+    && presetDateKey >= todayKey && presetDateKey < horizonKey
+    ? {
+        barber: barberFirstName(preSelectedBarber),
+        day: presetDateKey === todayKey ? "aujourd'hui"
+          : presetDateKey === tomorrowKey ? 'demain'
+          : format(dateFromKey(presetDateKey), 'EEEE d MMMM', { locale: fr }),
+        time: presetTime,
+      }
+    : null;
   // Tous les jours de l'horizon, pour la bande de jours de l'écran Créneau
   const horizonDays = useMemo(() => {
     const out = [];
@@ -1239,9 +1252,14 @@ export default function Booking() {
           from_gallery: fromGallery, reschedule: !!previous,
         });
       }
+      // Last Minute repris par cette réservation : retiré de l'accueil tout de suite (avant
+      // l'invalidation, sinon l'écriture dans le cache l'annulerait), puis la liste est relue
+      forgetBookedLastMinute(queryClient, created?.employee_id != null ? created : {
+        employee_id: sendRef.current?.employeeId, date: sendRef.current?.date, start_time: sendRef.current?.time,
+      });
       queryClient.invalidateQueries({ queryKey: ['appointments-day'] });
       queryClient.invalidateQueries({ queryKey: ['myAppointments'] });
-      queryClient.invalidateQueries({ queryKey: ['appointments'] }); // « Comme la dernière fois » / prochain RDV de l'accueil
+      queryClient.invalidateQueries({ queryKey: ['appointments'] }); // « Comme la dernière fois », Last Minute et prochain RDV de l'accueil
       // Le rendez-vous créé (id, heure de fin et prix recalculés par le serveur) alimente
       // l'« Ajouter au calendrier » de l'écran de succès
       setCreatedAppointment(created && typeof created === 'object' ? created : null);
@@ -1474,9 +1492,19 @@ export default function Booking() {
             <h1 className="font-display text-[26px] leading-tight font-bold text-foreground">
               {step === 0 && galleryFocus ? 'Votre prestation' : STEP_TITLES[step]}
             </h1>
-            {step === 0 && !galleryFocus && (
+            {/* Heure du lien encore proposée (pas « plus disponible », pas remplacée par une autre) */}
+            {step === 0 && !galleryFocus && (lastMinuteLink && presetMiss !== 'gone'
+              && (!presetApplied.current.time || selectedTime === presetTime) ? (
+              <p className="mt-2 flex items-start gap-2.5 rounded-2xl border border-orange-500/40 bg-orange-500/10 px-3.5 py-2.5 text-sm text-foreground">
+                <Zap className="w-4 h-4 mt-0.5 shrink-0 fill-current text-orange-600 dark:text-orange-400" aria-hidden="true" />
+                <span>
+                  <span className="font-semibold">Last Minute avec {lastMinuteLink.barber}, {lastMinuteLink.day} à {lastMinuteLink.time}.</span>
+                  {' '}Choisissez votre prestation : l'heure sera proposée à l'étape suivante.
+                </span>
+              </p>
+            ) : (
               <p className="text-sm text-muted-foreground mt-1">Touchez « Choisir » : vous choisirez ensuite le barber et l'heure.</p>
-            )}
+            ))}
           </motion.div>
 
           {/* Compte de l'équipe (admin qui parcourt les pages client) : réservation depuis l'agenda */}

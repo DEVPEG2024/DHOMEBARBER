@@ -29,6 +29,7 @@ src/
 │   ├── availability.js        # Écran Créneau : créneaux d'un jour (barber ou « peu importe », dayOptions), semaines (weekDays, weekKeyOf), prochaines disponibilités (pickNextOptions), libellés des jours sans place
 │   ├── popularServices.js     # « Les plus demandées » : usePopularServiceIds() lit `popular_services` des paramètres publics (classement calculé par le serveur), [] en cas d'échec
 │   ├── reschedule.js          # Déplacer un RDV : prochains créneaux libres (même barber, mêmes prestations), création puis annulation de l'ancien
+│   ├── lastMinute.js          # Last Minute de l'accueil (20 oct. 2026) : useOpenLastMinutes (créneaux libres d'aujourd'hui et de demain, clé ['appointments','last-minute', jour]), libellés, lien /booking, forgetBookedLastMinute (retrait du cache après une réservation)
 │   ├── feedbackApi.js         # Bugs et suggestions : types, statuts, endroits de l'app, contexte technique joint à l'envoi
 │   ├── adminAlerts.js         # Réglages des alertes admin (salon_settings.admin_alerts) : useAdminAlertPrefs, groupes de types
 │   ├── adminActivity.js       # Activité clients (admin) : agrégation des entités en chronologie, lu / non lu, toasts, formatActivityTime
@@ -46,13 +47,13 @@ src/
 │   ├── agenda/                # DayView, WeekView, MonthView, AgendaToolbar, AppointmentCard (+ DragGhost), AppointmentDetailModal + AppointmentEditForm, MoveDialog, BreakModal, useBreakDrag, useCardDrag, agendaUtils (période, chevauchements, horaires, slotIssues)
 │   ├── layout/                # ClientLayout, AdminLayout, BottomNav
 │   ├── shared/                # ServiceCard, EmployeeCard, BarberCard (carte style FUT), StarRating, SectionHeader, ImageCropDialog, MusicToggle
-│   ├── home/                  # RebookCard (« Comme la dernière fois »), OpenStatusBadge (Ouvert / Fermé heure de Paris)
+│   ├── home/                  # RebookCard (« Comme la dernière fois »), OpenStatusBadge (Ouvert / Fermé heure de Paris), LastMinuteSection (créneaux Last Minute en cartes orange : une grande carte ou un carrousel)
 │   ├── BackgroundMusic.jsx
 │   ├── ErrorBoundary.jsx
 │   ├── UserNotRegisteredError.jsx
 │   └── ui/                    # Composants shadcn/ui (dialog, button, etc.)
 ├── pages/
-│   ├── Home.jsx               # Page d'accueil (hero centré, logo, "Premium Barber Shop", pastille Ouvert / Fermé en direct, bouton Réserver à anneau orbital, bloc « Comme la dernière fois », carrousel barbers avec parallaxe, bloc Carte Cadeau pulsant). Ordre des sections lu depuis salon_settings.homepage_order (pas d'éditeur UI, modifier en DB)
+│   ├── Home.jsx               # Page d'accueil (hero centré, logo, "Premium Barber Shop", pastille Ouvert / Fermé en direct, bouton Réserver à anneau orbital, section Last Minute en tête par défaut, bloc « Comme la dernière fois », carrousel barbers avec parallaxe, bloc Carte Cadeau pulsant). Ordre des sections lu depuis salon_settings.homepage_order, modifiable par l'admin (« Organiser l'accueil ») ; sections dans un conteneur `flex flex-col gap-8`
 │   ├── Booking.jsx            # Réservation en 3 étapes (refonte du 19 oct. 2026, voir « Prestations et réservation ») : Prestation → Créneau (barber, semaine avec places, heures Matin / Après-midi / Soir) → Confirmation, barre fixée en bas, écran de succès pluie de lames + boutons calendrier — composants dans components/booking/
 │   ├── Services.jsx           # Prestations (refonte du 19 oct. 2026) : « Les plus demandées » (classement serveur), rubriques automatiques, lignes compactes avec « Réserver » direct → /booking?services=<id> (ouvre l'écran Créneau), fiche d'une prestation, sélection multiple + barre de résumé — même catalogue que la réservation (`ServicePicker`), composants dans components/services/
 │   ├── Shop.jsx               # Boutique produits : tap sur une carte → fiche produit complète (components/shop/ProductSheet.jsx : galerie image_url + images, description entière, stock, quantité, ajout au panier)

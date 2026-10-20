@@ -1,0 +1,132 @@
+// Last Minute sur l'accueil (20 oct. 2026) : les créneaux libérés par le salon depuis l'agenda, en
+// cartes orange (une grande carte, ou un carrousel à partir de deux) ; « Réserver ce créneau » ouvre
+// la réservation avec le barber, le jour et l'heure ; le créneau pris quitte aussitôt l'accueil.
+import { test, expect } from './support/test.js';
+import { BARBERS, CLIENT, PRESTATIONS, rendezVous } from './support/donnees.js';
+import { jour } from './support/temps.js';
+import { attendreSansDebordement } from './support/outils.js';
+
+/** Créneau Last Minute publié depuis l'agenda : ligne sans client, statut `last_minute`. */
+const lastMinute = (id, barber, date, debut, finCreneau) => rendezVous({
+  id, barber, prestations: [], date, debut, statut: 'last_minute', end_time: finCreneau, total_duration: 30,
+});
+
+/** Lectures des créneaux Last Minute faites par l'accueil. */
+const lecturesLastMinute = (api) => api.requetesVers('GET', '/entities/Appointment').filter((r) => r.q?.status === 'last_minute');
+
+const boutonsReserverCreneau = (page) => page.getByRole('link', { name: /^Réserver ce créneau/ });
+
+/** Accueil affiché, sections comprises (« Horaires » est dans la même liste que le Last Minute). */
+async function accueilPret(page) {
+  await expect(page.getByRole('link', { name: 'Réserver maintenant' })).toBeVisible();
+  await expect(page.getByText('Horaires', { exact: true })).toBeVisible();
+}
+
+test.describe('Last Minute sur l\'accueil', () => {
+  test.beforeEach(async ({ connecter }) => {
+    await connecter(CLIENT);
+  });
+
+  test('aucun créneau libre : rien sur l\'accueil', async ({ page, api }) => {
+    // Un créneau déjà pris par un client et un autre qui commence dans 5 min ne s'affichent pas
+    api.tables.Appointment.push(
+      { ...lastMinute('lm-pris', BARBERS.dom, jour(0), '15:00', '15:30'), client_email: 'jules.martin@exemple.fr', client_name: 'Jules Martin' },
+      lastMinute('lm-trop-tot', BARBERS.kevin, jour(0), '10:05', '10:30'),
+    );
+    await page.goto('/');
+    await accueilPret(page);
+    await expect.poll(() => lecturesLastMinute(api).length).toBeGreaterThan(0);
+    await expect(boutonsReserverCreneau(page)).toHaveCount(0);
+    await expect(page.getByRole('region', { name: 'Créneaux Last Minute' })).toHaveCount(0);
+  });
+
+  test('un créneau : grande carte, réservation pré-remplie, créneau retiré de l\'accueil', async ({ page, api }) => {
+    // Sans le RDV du client de 17 h ce jour-là (la confirmation demanderait « un rendez-vous en plus »)
+    api.tables.Appointment = api.tables.Appointment.filter((r) => r.id !== 'apt-proche-romain');
+    api.tables.Appointment.push(lastMinute('lm-kevin', BARBERS.kevin, jour(0), '15:30', '16:00'));
+    // Le vrai serveur reprend la ligne Last Minute (même id) au lieu d'en créer une autre
+    api.surcharger('POST', '/entities/Appointment', (req) => {
+      const lm = api.tables.Appointment.find((r) => r.id === 'lm-kevin' && r.status === 'last_minute');
+      if (!lm || req.corps?.start_time !== '15:30') return undefined;
+      Object.assign(lm, req.corps, { status: 'confirmed', internal_notes: '[last_minute]' });
+      return { status: 201, json: { ...lm, blocks_client: true } };
+    });
+
+    await page.goto('/');
+    await accueilPret(page);
+    const carte = page.getByRole('article', { name: 'Créneau Last Minute aujourd\'hui à 15:30 avec Kevin' });
+    await expect(carte).toBeVisible();
+    await expect(carte).toContainText('dans 5 h 30');
+    await expect(carte).toContainText('15:30 – 16:00');
+    // Une seule carte : pas de carrousel
+    await expect(page.getByRole('region', { name: 'Créneaux Last Minute' })).toHaveCount(0);
+
+    await carte.getByRole('link', { name: 'Réserver ce créneau, aujourd\'hui à 15:30 avec Kevin' }).click();
+    await expect(page).toHaveURL(new RegExp(`/booking\\?barber=${BARBERS.kevin.id}&date=${jour(0)}&time=15%3A30$`));
+
+    // Étape Prestation : le créneau est rappelé
+    await expect(page.getByRole('heading', { name: 'Choisissez votre prestation' })).toBeVisible();
+    await expect(page.getByText('Last Minute avec Kevin, aujourd\'hui à 15:30.')).toBeVisible();
+    await page.getByRole('button', { name: 'Choisir : Coupe', exact: true }).click();
+
+    // Écran Créneau : Kevin, aujourd'hui et 15:30 déjà choisis
+    await expect(page.getByRole('heading', { name: 'Choisissez votre créneau' })).toBeVisible();
+    // Nom du bouton : initiale (pas de photo), prénom, « Habituel » (dernière visite chez Kevin)
+    await expect(page.getByRole('group', { name: 'Choix du barber' }).getByRole('button', { name: /\bKevin\b/ }))
+      .toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByRole('group', { name: 'Après-midi' }).getByRole('button', { name: '15:30', exact: true }))
+      .toHaveAttribute('aria-pressed', 'true');
+    await page.getByRole('button', { name: 'Continuer' }).click();
+    await page.getByRole('button', { name: 'Confirmer le rendez-vous' }).click();
+    await expect(page.getByRole('heading', { name: 'Rendez-vous confirmé' })).toBeVisible();
+    expect(api.requetesVers('POST', '/entities/Appointment')[0].corps).toMatchObject({
+      employee_id: BARBERS.kevin.id, date: jour(0), start_time: '15:30', end_time: '16:00',
+      services: [{ service_id: PRESTATIONS.coupe.id, name: 'Coupe', duration: 30, price: 25 }],
+    });
+    await expect(page).toHaveURL(/\/appointments$/, { timeout: 10_000 });
+
+    // Retour à l'accueil sans recharger l'app : la liste des Last Minute répond lentement, la carte
+    // du créneau pris ne doit pas réapparaître le temps de la relire
+    let relecturesServies = 0;
+    api.surcharger('GET', '/entities/Appointment', async (req) => {
+      if (req.q?.status !== 'last_minute') return undefined;
+      await new Promise((r) => { setTimeout(r, 2500); });
+      relecturesServies += 1;
+      return undefined;
+    });
+    const lecturesAvant = lecturesLastMinute(api).length;
+    await page.locator('nav').getByRole('link', { name: 'Accueil', exact: true }).click();
+    await accueilPret(page);
+    // Contrôle immédiat (sans attente) : la relecture n'a pas encore répondu
+    expect(await boutonsReserverCreneau(page).count()).toBe(0);
+    await expect.poll(() => lecturesLastMinute(api).length).toBeGreaterThan(lecturesAvant);
+    await expect.poll(() => relecturesServies).toBeGreaterThan(0);
+    await expect(boutonsReserverCreneau(page)).toHaveCount(0);
+  });
+
+  test.describe('à 320 px', () => {
+    test.use({ viewport: { width: 320, height: 640 } });
+
+    test('plusieurs créneaux : carrousel du plus proche au plus lointain, sans débordement', async ({ page, api }) => {
+      api.tables.Appointment.push(
+        lastMinute('lm-kevin', BARBERS.kevin, jour(0), '15:30', '16:00'),
+        lastMinute('lm-romain', BARBERS.romain, jour(1), '10:00', '10:30'),
+        lastMinute('lm-dom', BARBERS.dom, jour(0), '12:00', '12:30'),
+      );
+      await page.goto('/');
+      await accueilPret(page);
+
+      const carrousel = page.getByRole('region', { name: 'Créneaux Last Minute' });
+      await expect(carrousel).toBeVisible();
+      await expect(page.getByText('3 créneaux Last Minute', { exact: true })).toBeVisible();
+      await expect(carrousel.getByRole('article')).toHaveCount(3);
+      const noms = await carrousel.getByRole('article').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')));
+      expect(noms).toEqual([
+        'Créneau Last Minute aujourd\'hui à 12:00 avec Dom',
+        'Créneau Last Minute aujourd\'hui à 15:30 avec Kevin',
+        'Créneau Last Minute demain à 10:00 avec Romain',
+      ]);
+      await attendreSansDebordement(page, 'l\'accueil avec le carrousel Last Minute');
+    });
+  });
+});
