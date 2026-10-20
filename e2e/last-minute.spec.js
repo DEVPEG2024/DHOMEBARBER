@@ -121,6 +121,17 @@ test.describe('Last Minute sur l\'accueil', () => {
   test.describe('à 320 px', () => {
     test.use({ viewport: { width: 320, height: 640 } });
 
+    test('un créneau : « Last Minute » et « dans 5 h 30 » en entier sur la carte pleine largeur', async ({ page, api }) => {
+      api.tables.Appointment.push(lastMinute('lm-kevin', BARBERS.kevin, jour(0), '15:30', '16:00'));
+      await page.goto('/');
+      await accueilPret(page);
+      const carte = page.getByRole('article', { name: 'Créneau Last Minute aujourd\'hui à 15:30 avec Kevin' });
+      await expect(carte).toContainText('dans 5 h 30');
+      const libelle = carte.getByText('Last Minute', { exact: true });
+      await expect(libelle).toBeVisible();
+      expect(await libelle.evaluate((el) => el.scrollWidth > el.clientWidth), '« Last Minute » coupé').toBe(false);
+    });
+
     test('plusieurs créneaux : carrousel du jour, du plus proche au plus lointain, sans débordement', async ({ page, api }) => {
       api.tables.Appointment.push(
         lastMinute('lm-kevin', BARBERS.kevin, jour(0), '15:30', '16:00'),
@@ -143,9 +154,15 @@ test.describe('Last Minute sur l\'accueil', () => {
       // Cartes compactes, et les deux boutons tiennent sur une ligne à 320 px
       for (const carte of await carrousel.getByRole('article').all()) {
         expect((await carte.boundingBox()).height).toBeLessThanOrEqual(140);
-        // « Last Minute » entier, même avec un long compte à rebours (Kevin : « 5 h 30 »)
-        const coupe = await carte.getByText('Last Minute', { exact: true }).evaluate((el) => el.scrollWidth > el.clientWidth);
-        expect(coupe, '« Last Minute » coupé').toBe(false);
+        // Compte à rebours toujours précédé de « dans » (sans lui, « 5 h 30 » se lit comme une durée),
+        // libellé de la carte réduit à l'éclair (l'en-tête dit « 2 créneaux Last Minute »), rien de coupé
+        await expect(carte).toContainText(/dans \d/);
+        await expect(carte.getByText('Last Minute', { exact: true })).toBeHidden();
+        // Les deux rangées de contenu (photo / heure / pastille, puis boutons) tiennent dans la carte ;
+        // le halo décoratif, en position absolue, déborde exprès sous le cadre qui le masque
+        const debordements = await carte.locator(':scope > div > div.flex').evaluateAll((rangees) => rangees
+          .map((r) => r.scrollWidth - r.clientWidth).filter((d) => d > 1));
+        expect(debordements, 'rangée de la carte qui déborde').toEqual([]);
         const reserver = await carte.getByRole('link', { name: /^Réserver ce créneau/ }).boundingBox();
         const envoyer = await carte.getByRole('button', { name: /^Envoyer à un ami/ }).boundingBox();
         expect(Math.abs(reserver.y - envoyer.y), 'boutons sur la même ligne').toBeLessThan(2);

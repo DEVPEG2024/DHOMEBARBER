@@ -32,12 +32,8 @@ function LiveDot() {
   );
 }
 
-function LastMinuteCard({ slot, now }) {
+function LastMinuteCard({ slot, now, inCarousel = false }) {
   const { day, chip, live } = lastMinuteLabels(slot, now);
-  // « dans 1 h 25 » : sous 360 px, « dans » se cache (le point « en direct » dit déjà que c'est un
-  // compte à rebours) ; sinon « Last Minute » était coupé dans le carrousel à 320 px
-  const chipLead = live && chip.startsWith('dans ') ? 'dans ' : '';
-  const chipRest = chipLead ? chip.slice(chipLead.length) : chip;
   const name = barberFirstName(slot.barber);
   const photo = slot.barber?.photo_url;
   const when = `${day.toLowerCase()} à ${slot.start}`;
@@ -78,11 +74,13 @@ function LastMinuteCard({ slot, now }) {
             )}
           </span>
           <div className="min-w-0 flex-1">
-            {/* Sous 360 px (carrousel à 320 px), lettres resserrées et pastille sans « dans » :
-                « Last Minute » tient en entier, même avec « 5 h 30 » (vérifié par e2e/last-minute.spec.js) */}
+            {/* La pastille garde toujours « dans 1 h 25 » (sans « dans », « 1 h 25 » à côté de « 15:30 »
+                se lisait comme une durée). Dans le carrousel sous 360 px, il ne reste pas la place pour
+                « Last Minute » : l'éclair seul, l'en-tête au-dessus dit « 2 créneaux Last Minute ».
+                La carte seule, en pleine largeur, garde le libellé entier (vérifié par e2e/last-minute.spec.js) */}
             <p className="flex items-center gap-1 text-[10px] font-extrabold tracking-[0.03em] min-[360px]:tracking-[0.16em] uppercase text-orange-200">
               <Zap className="lm-bolt w-3 h-3 shrink-0 fill-current" aria-hidden="true" />
-              <span className="truncate">Last Minute</span>
+              <span className={inCarousel ? 'hidden min-[360px]:inline truncate' : 'truncate'}>Last Minute</span>
             </p>
             {/* Une seule ligne : la fin du créneau se cache sous 360 px, jamais l'heure de début */}
             <p className="mt-0.5 font-fut leading-none text-white whitespace-nowrap">
@@ -96,10 +94,7 @@ function LastMinuteCard({ slot, now }) {
           <span className="shrink-0 self-start inline-flex items-center gap-1 min-[360px]:gap-1.5 px-1.5 min-[360px]:px-2 py-1 rounded-full bg-black/25 border border-white/20 text-[11px] font-semibold text-orange-100 whitespace-nowrap">
             {/* Point « en direct » devant le compte à rebours seulement, jamais devant une date */}
             {live && <LiveDot />}
-            <span>
-              {chipLead && <span className="hidden min-[360px]:inline">{chipLead}</span>}
-              {chipRest}
-            </span>
+            {chip}
           </span>
         </div>
 
@@ -158,7 +153,7 @@ export default function LastMinuteSection() {
       {/* 90 % : la carte suivante dépasse juste assez pour inviter à glisser, les deux boutons tiennent à 320 px */}
       <SnapCarousel itemWidth="90%" gap={10} autoplay={5200} label="Créneaux Last Minute" activeDotClass="bg-orange-500">
         {slots.map((slot) => (
-          <LastMinuteCard key={slot.id ?? `${slot.employeeId}-${slot.date}-${slot.start}`} slot={slot} now={now} />
+          <LastMinuteCard key={slot.id ?? `${slot.employeeId}-${slot.date}-${slot.start}`} slot={slot} now={now} inCarousel />
         ))}
       </SnapCarousel>
     </section>
