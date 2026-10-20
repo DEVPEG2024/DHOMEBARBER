@@ -95,6 +95,46 @@ test.describe('Console du navigateur', () => {
   });
 });
 
+test.describe('Gyroscope', () => {
+  // La fenêtre n'existe pas sous la réduction des animations (réglage de toute la suite) : sans
+  // cette ligne, le test passerait même avec l'ancienne détection
+  test.use({ reducedMotion: 'no-preference' });
+
+  // Chromium récent expose `DeviceOrientationEvent.requestPermission` : la fenêtre « Fais bouger la
+  // carte » ne doit s'ouvrir que sur iPhone / iPad (src/lib/motion.js, `isAppleTouchDevice`)
+  test('pas de fenêtre « Fais bouger la carte » sur Chrome, même avec requestPermission', async ({ page, connecter }) => {
+    await page.addInitScript(() => {
+      if (window.DeviceOrientationEvent && !window.DeviceOrientationEvent.requestPermission) {
+        window.DeviceOrientationEvent.requestPermission = () => Promise.resolve('granted');
+      }
+    });
+    await connecter(CLIENT);
+    await page.goto('/profile');
+    await expect(page.getByRole('heading', { level: 1, name: /Camille/ })).toBeVisible();
+    // La fenêtre s'ouvrait 1,2 s après l'arrivée (2 s de plus si une révélation Gang est ouverte) :
+    // les minuteries de la page avancent de 5 s
+    await page.clock.runFor(5000);
+    await expect(page.getByText('Fais bouger la carte')).toHaveCount(0);
+  });
+
+  test.describe('sur iPhone (Safari)', () => {
+    test.use({ userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1' });
+
+    test('la fenêtre « Fais bouger la carte » s\'ouvre toujours sur la carte du profil', async ({ page, connecter }) => {
+      await page.addInitScript(() => {
+        if (window.DeviceOrientationEvent && !window.DeviceOrientationEvent.requestPermission) {
+          window.DeviceOrientationEvent.requestPermission = () => Promise.resolve('granted');
+        }
+      });
+      await connecter(CLIENT);
+      await page.goto('/profile');
+      await expect(page.getByRole('heading', { level: 1, name: /Camille/ })).toBeVisible();
+      await page.clock.runFor(5000);
+      await expect(page.getByText('Fais bouger la carte')).toBeVisible();
+    });
+  });
+});
+
 test.describe('Hors connexion', () => {
   test('liste impossible à charger : « Pas de connexion internet » et non une liste vide', async ({ page, api, connecter }) => {
     await connecter(CLIENT);

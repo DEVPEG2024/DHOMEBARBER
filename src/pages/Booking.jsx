@@ -1001,6 +1001,9 @@ export default function Booking() {
   }, [step, selectedDate, nextItems]);
 
   const reduceMotion = useReducedMotion();
+  // Titre d'étape : pas d'animation au premier affichage, une apparition à chaque changement
+  const titleShownRef = useRef(false);
+  useEffect(() => { titleShownRef.current = true; }, []);
 
   const toggleService = (service) => {
     hapticFeedback();
@@ -1457,16 +1460,24 @@ export default function Booking() {
         <div className="mb-6">
           <BookingSteps step={step} onBack={() => goToStep(step - 1)} backDisabled={createAppointment.isPending} />
 
-          <AnimatePresence mode="wait" initial={false}>
-            <motion.div key={step} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }} className="mt-4">
-              <h1 className="font-display text-[26px] leading-tight font-bold text-foreground">
-                {step === 0 && galleryFocus ? 'Votre prestation' : STEP_TITLES[step]}
-              </h1>
-              {step === 0 && !galleryFocus && (
-                <p className="text-sm text-muted-foreground mt-1">Touchez « Choisir » : vous choisirez ensuite le barber et l'heure.</p>
-              )}
-            </motion.div>
-          </AnimatePresence>
+          {/* Le nouveau titre remplace l'ancien tout de suite, en fondu. Avec AnimatePresence
+              mode="wait", il attendait la fin de la sortie de l'ancien : des changements d'étape
+              rapprochés (refus 409 qui ramène au créneau) pouvaient laisser « Vérifiez et
+              confirmez » au-dessus de l'écran Créneau (relevé par les tests le 20 oct. 2026) */}
+          <motion.div
+            key={step}
+            initial={titleShownRef.current && !reduceMotion ? { opacity: 0, y: 6 } : false}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.18 }}
+            className="mt-4"
+          >
+            <h1 className="font-display text-[26px] leading-tight font-bold text-foreground">
+              {step === 0 && galleryFocus ? 'Votre prestation' : STEP_TITLES[step]}
+            </h1>
+            {step === 0 && !galleryFocus && (
+              <p className="text-sm text-muted-foreground mt-1">Touchez « Choisir » : vous choisirez ensuite le barber et l'heure.</p>
+            )}
+          </motion.div>
 
           {/* Compte de l'équipe (admin qui parcourt les pages client) : réservation depuis l'agenda */}
           {isStaffAccount && !success && (

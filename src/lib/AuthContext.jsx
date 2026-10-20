@@ -41,6 +41,10 @@ export const AuthProvider = ({ children }) => {
   // alors « Pas de connexion internet » avec Réessayer au lieu du formulaire.
   const [authError, setAuthError] = useState(null);
   const [isRetryingAuth, setIsRetryingAuth] = useState(false);
+  // Vrai quand la session vient d'être refermée par un 401 du serveur : RequireAuth / RequireAdmin
+  // ajoutent alors `expired=1` à leur redirection vers /login (sans stockage : marche aussi quand
+  // sessionStorage est indisponible). Remis à faux à la connexion suivante.
+  const [sessionExpired, setSessionExpired] = useState(false);
   // Déconnexion en cours : le 401 éventuel de la désinscription push (jeton déjà expiré,
   // compte supprimé) ne doit pas déclencher « session expirée »
   const loggingOutRef = useRef(false);
@@ -179,8 +183,10 @@ export const AuthProvider = ({ children }) => {
         }
         return;
       }
-      // Drapeau posé avant de vider l'état : RequireAuth redirige vers /login (sans expired=1)
-      // avant la fin de la fusion des notifications ; la page de connexion le lit pour expliquer
+      // RequireAuth redirige vers /login dès que l'état est vidé, avant la fin de la fusion des
+      // notifications : `sessionExpired` (même rendu que la fermeture) lui fait ajouter expired=1 ;
+      // le drapeau de session couvre en plus un rechargement complet de la page
+      setSessionExpired(true);
       try { sessionStorage.setItem('dhb-session-expired', '1'); } catch { /* stockage indisponible */ }
       // On attend la fusion des notifications (2 s au plus) avant de rediriger : le
       // déchargement de la page interromprait la transaction IndexedDB en cours
@@ -253,6 +259,7 @@ export const AuthProvider = ({ children }) => {
     setUser(fullUser);
     setIsAuthenticated(true);
     setAuthError(null);
+    setSessionExpired(false);
     syncPushSubscription(fullUser?.id);
     return fullUser;
   }, []);
@@ -267,6 +274,7 @@ export const AuthProvider = ({ children }) => {
     setUser(newUser);
     setIsAuthenticated(true);
     setAuthError(null);
+    setSessionExpired(false);
     setWelcomePending(true);
     syncPushSubscription(newUser?.id);
     return newUser;
@@ -342,6 +350,7 @@ export const AuthProvider = ({ children }) => {
       retryAuth,
       dismissAuthError,
       welcomePending,
+      sessionExpired,
       login,
       register,
       dismissWelcome,

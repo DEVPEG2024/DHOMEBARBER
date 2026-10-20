@@ -67,10 +67,6 @@
 - « Me prévenir » (textile) abandonne à 8 s sur iPhone pendant l'attente de 10 s de l'enregistrement natif (aucune fausse réussite, tour 7).
 - Options non faites : refus serveur d'une validation sans prestation, mention dans Clients / Notifications, classement sur `/admin/feed` (tour 3) ; « N places prises » sous la capacité, pastille « Annulé » dans `ActivityRow` / `ActivityBell`, « Rouvrir le RDV » dans l'historique des débits (tour 5) ; email de rappel « expire bientôt » du textile, phrase serveur sur le renvoi Last Minute, repli de `BarberSettings.jsx` sur les horaires du salon, confort de `Notifications.jsx` pour les clients supprimés (tour 6) ; flèches d'ordre des barbers dans Équipe, « avec <barber> » retiré des rappels d'un barber inactif, message au client retiré d'un événement (tour 7) ; modèles « Promotion » / « Fermeture » de Notifications en repères à compléter, signalement des tâches de ménage d'un barber inactif dans `Cleaning.jsx` (tour 8) ; avertissement dans `DropDialog` quand un autre drop est ouvert, jauges d'invités au-delà de 2000 invitations, détail du solde des cartes cadeau avant suppression de compte, « Rendre sur la carte » sur une carte annulée (tour 9).
 - `BackgroundMusic.jsx` : code mort à supprimer (tour 6).
-- **Relevés par les tests de bout en bout (20 oct. 2026, non corrigés)** :
-  - fenêtre du gyroscope « Fais bouger la carte » montrée sur Chrome ordinateur et Android web (`/profile`, `/barber/:id`) : Chromium récent expose `DeviceOrientationEvent.requestPermission`, que `needsPermission` (`src/lib/motion.js`) croit propre à iOS. Une tape de trop, rien de cassé ;
-  - session expirée : l'adresse `/login?…&expired=1` n'est jamais atteinte (RequireAuth redirige d'abord vers `/login?redirect=…`) ; le message s'affiche quand même par le drapeau `dhb-session-expired` (`src/lib/AuthContext.jsx`) ;
-  - une fois sur ~200 passages, machine saturée : après un 409, le titre de la réservation reste « Vérifiez et confirmez » alors que l'écran Créneau est affiché (`AnimatePresence mode="wait"` du titre, `Booking.jsx`). Non reproduit en 60 répétitions.
 - Tests de bout en bout : à étendre à la Boutique, Privatiser le salon, profil barber, tableau de bord ; le chemin animé (animations non réduites) n'est pas couvert.
 - Activité clients v1 (13 oct.) : une action dont la ligne a été supprimée disparaît du fil, un RDV saisi par le staff avec l'email d'un client apparaît comme une action client, lu / non lu propre au navigateur, ~14 requêtes / min par onglet admin. Réglé par la table d'audit `admin_activity` (v2 de `docs/backend-admin-alerts.md`, § 5), non faite.
 
@@ -94,6 +90,8 @@
 - Vidéo de démonstration à refilmer si Snap demande à voir l'effet (la lentille n'en a aucun et le sujet porte une casquette).
 
 ## Réglés depuis (pour mémoire, ne pas rouvrir)
+
+- Relevés par les tests de bout en bout le 20 oct. 2026, corrigés le même jour : fenêtre du gyroscope montrée sur Chrome ordinateur et Android web (Chromium expose `requestPermission` : `isAppleTouchDevice` dans `src/lib/motion.js`, tests dans les deux sens) ; `expired=1` jamais posé dans l'adresse à l'expiration de la session (état `sessionExpired` d'AuthContext lu par RequireAuth / RequireAdmin, test resserré) ; titre de la réservation resté sur « Vérifiez et confirmez » après un 409 sous forte charge (`AnimatePresence mode="wait"` retiré du titre, 40 répétitions du test 409 en parallèle sans échec).
 
 - Ramasse-miettes des médias (restes du 5 sept.) : `jobs/mediaCleanup.js`, dimanche 03h30 (v81), puis chaque nuit pour les comptes clients supprimés (tour 9).
 - `POST /cleaning/notify-today` en UTC : corrigé le 5 sept. 2026 (`ac.parisToday()`).

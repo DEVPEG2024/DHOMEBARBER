@@ -3,6 +3,10 @@
  *
  * - Android, ordinateurs, navigateurs sans `requestPermission` : aucune autorisation,
  *   l'état est « granted » d'emblée (sans capteur, aucun événement n'arrive, rien ne change).
+ *   Chromium récent expose lui aussi `DeviceOrientationEvent.requestPermission` (accordée sans
+ *   boîte de dialogue, événements reçus de toute façon) : seul un iPhone / iPad est traité comme
+ *   iOS (`isAppleTouchDevice`), sinon la fenêtre « Fais bouger la carte » s'ouvrait sur Chrome
+ *   ordinateur et Android (relevé par les tests de bout en bout le 20 oct. 2026).
  * - iOS 13+ (Safari et WKWebView de l'app) : `DeviceOrientationEvent.requestPermission()`
  *   doit être appelé pendant un vrai geste utilisateur, et pour Safari un appui (pointerdown)
  *   n'en est pas un : seuls le relâchement (touchend / pointerup), le clic et une touche comptent.
@@ -37,8 +41,23 @@ let initialized = false;
 let inFlight = null;
 const listeners = new Set();
 
+/** iPhone, iPad, iPod : tous leurs navigateurs sont WebKit, qui exige et oublie l'autorisation. */
+export function isAppleTouchDevice() {
+  try {
+    if (inNativeShell()) return Capacitor.getPlatform() === 'ios';
+    const ua = navigator.userAgent || '';
+    if (/iPhone|iPad|iPod/i.test(ua)) return true;
+    // iPadOS en mode « site pour ordinateur » : se présente comme un Mac, mais tactile
+    return /Macintosh/i.test(ua) && (navigator.maxTouchPoints || 0) > 1;
+  } catch {
+    return false;
+  }
+}
+
 const needsPermission = () =>
-  typeof window !== 'undefined' && typeof window.DeviceOrientationEvent?.requestPermission === 'function';
+  typeof window !== 'undefined'
+  && typeof window.DeviceOrientationEvent?.requestPermission === 'function'
+  && isAppleTouchDevice();
 
 function readStored() {
   try { return window.localStorage.getItem(STORAGE_KEY); } catch { return null; }

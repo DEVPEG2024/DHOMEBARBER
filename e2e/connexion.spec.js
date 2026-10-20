@@ -67,12 +67,11 @@ test.describe('Connexion', () => {
     await page.getByRole('link', { name: 'Profil' }).click();
 
     await expect(toast(page, 'Votre session a expiré, reconnectez-vous.')).toBeVisible();
-    // AuthContext vise `/login?redirect=…&expired=1`, mais la garde RequireAuth redirige d'abord vers
-    // `/login?redirect=…` dès que la session est vidée : le message vient alors du drapeau posé dans
-    // sessionStorage (`dhb-session-expired`). Les deux adresses sont acceptées, le message est exigé.
+    // RequireAuth ajoute `expired=1` (état `sessionExpired` d'AuthContext) : avant le 20 oct. 2026 il
+    // redirigeait sans, et le message ne tenait qu'au drapeau de sessionStorage
     await expect(page).toHaveURL((url) => url.pathname === '/login'
       && url.searchParams.get('redirect') === '/profile'
-      && [null, '1'].includes(url.searchParams.get('expired')));
+      && url.searchParams.get('expired') === '1');
     await expect(page.getByRole('heading', { name: 'Connexion' })).toBeVisible();
     expect(await page.evaluate(() => localStorage.getItem('base44_access_token'))).toBeNull();
   });

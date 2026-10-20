@@ -76,8 +76,8 @@ export default function Login() {
 
   // Session expirée en cours d'utilisation (voir AuthContext) : dire pourquoi on est ici,
   // plutôt que de renvoyer l'utilisateur sur un écran de connexion sans explication.
-  // Le drapeau de session (posé par AuthContext avant de vider l'état) couvre la redirection de
-  // RequireAuth, qui arrive sans expired=1 ; l'`id` évite un double toast quand les deux sont là.
+  // `expired=1` vient de RequireAuth / RequireAdmin (état `sessionExpired` d'AuthContext) ; le
+  // drapeau de session couvre un rechargement complet. L'`id` évite un double toast.
   useEffect(() => {
     let flagged = false;
     try {

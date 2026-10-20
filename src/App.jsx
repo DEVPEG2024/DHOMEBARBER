@@ -98,12 +98,14 @@ function safeRedirect(value) {
   return value;
 }
 
-// Adresse de /login qui ramène ici une fois connecté (requête comprise : /booking?services=…)
-const loginPathFor = (location) => `/login?redirect=${encodeURIComponent(location.pathname + location.search)}`;
+// Adresse de /login qui ramène ici une fois connecté (requête comprise : /booking?services=…) ;
+// `expired=1` quand la session vient d'être refermée par le serveur (Login dit pourquoi)
+const loginPathFor = (location, expired = false) =>
+  `/login?redirect=${encodeURIComponent(location.pathname + location.search)}${expired ? '&expired=1' : ''}`;
 
 // Route guard: requires authentication (client routes only)
 function RequireAuth() {
-  const { user, isAuthenticated, isLoadingAuth } = useAuth();
+  const { user, isAuthenticated, isLoadingAuth, sessionExpired } = useAuth();
   const location = useLocation();
 
   if (isLoadingAuth) {
@@ -115,7 +117,7 @@ function RequireAuth() {
   }
 
   if (!isAuthenticated) {
-    return <Navigate to={loginPathFor(location)} replace />;
+    return <Navigate to={loginPathFor(location, sessionExpired)} replace />;
   }
 
   // Redirect barbers to admin interface
@@ -129,7 +131,7 @@ function RequireAuth() {
 
 // Route guard: requires admin or barber role
 function RequireAdmin() {
-  const { user, isAuthenticated, isLoadingAuth } = useAuth();
+  const { user, isAuthenticated, isLoadingAuth, sessionExpired } = useAuth();
   const location = useLocation();
 
   if (isLoadingAuth) {
@@ -141,7 +143,7 @@ function RequireAdmin() {
   }
 
   if (!isAuthenticated) {
-    return <Navigate to={loginPathFor(location)} replace />;
+    return <Navigate to={loginPathFor(location, sessionExpired)} replace />;
   }
 
   if (user?.role !== 'admin' && user?.role !== 'barber') {
