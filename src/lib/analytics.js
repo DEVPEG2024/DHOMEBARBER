@@ -9,12 +9,17 @@
  * - Pages : chemin sans identifiant ni paramètre (`/barber/:id`), compté à l'arrivée ; le temps
  *   passé part par tranches (`time`) au départ de la page ou à la mise en arrière-plan.
  * - Actions clés (`track`) et publications du fil vues (`trackPostView`).
+ * - Erreurs de l'app (`reportError`, 20 oct. 2026) : écran planté (ErrorBoundary), erreur ou
+ *   promesse non gérée (`initErrorReporting`) ; message et pile nettoyés sur l'appareil (emails,
+ *   téléphones, jetons, identifiants, adresses), une fois par erreur et par session, 10 au plus ;
+ *   envoyées tout de suite. Admin → Trafic → « Erreurs de l'app ».
  * Envoi par lots toutes les 15 s et à la mise en arrière-plan (`fetch` keepalive), compte lu par
  * le serveur sur le jeton. Jamais bloquant : une mesure perdue est perdue.
- * Le client peut refuser dans Paramètres (`dhb-analytics-optout`).
+ * Le client peut refuser dans Paramètres (`dhb-analytics-optout`) : ni mesure ni erreurs.
  */
 import { API_BASE, getToken } from '@/api/apiClient';
 import { isNative, platform as capPlatform } from '@/lib/capacitor';
+import { STALE_CHUNK_ERROR } from '@/lib/chunkReload';
 
 const VISITOR_KEY = 'dhb-vid';
 const OPTOUT_KEY = 'dhb-analytics-optout';
@@ -35,6 +40,9 @@ let hiddenAt = null;
 let page = null; // { name, visibleMs, since }
 let pendingSource = null;
 let sessionStartedAt = 0;
+let reportedErrors = new Set(); // empreintes des erreurs déjà envoyées dans la session
+let errorsHooked = false;
+let errorFlushTimer = null;
 
 const safeStorage = {
   get(key) { try { return localStorage.getItem(key); } catch { return null; } },
@@ -129,6 +137,7 @@ function newSession(path) {
   pendingSource = null;
   sessionStartedAt = Date.now();
   sentPostViews = new Set();
+  reportedErrors = new Set();
   page = null;
   enterPage(path);
 }
@@ -251,6 +260,92 @@ export function trackPostView(postId) {
   const id = String(postId);
   if (sentPostViews.has(id) || !UUID_SEGMENT.test(id)) return;
   postViews.add(id);
+}
+
+// ─── Erreurs de l'app ───
+const MAX_ERRORS_PER_SESSION = 10;
+// Bruit sans intérêt : coupure réseau (hors ligne), requête abandonnée, boucle de ResizeObserver,
+// erreur d'un autre site sans détail (« Script error. »), fichier de page périmé après un
+// déploiement (rechargé tout seul, voir chunkReload.js)
+const IGNORED_ERROR = /ResizeObserver loop|^Script error\.?$|AbortError|aborted|Load failed|Failed to fetch|NetworkError|Network request failed|Pas de connexion|timeout|Délai dépassé/i;
+const EXTENSION_STACK = /(?:chrome|moz|safari(?:-web)?)-extension:\/\//i;
+
+/**
+ * Texte d'erreur sans donnée personnelle (le serveur refait le même nettoyage) : emails, jetons,
+ * identifiants, téléphones, longues suites de chiffres et paramètres retirés ; adresses de fichier
+ * réduites au nom (`index-abc.js:12:34`).
+ */
+export function scrubErrorText(text) {
+  return String(text)
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '<email>')
+    .replace(/eyJ[\w-]{5,}\.[\w-]{5,}\.[\w-]{5,}/g, '<jeton>')
+    .replace(/\b(?:Bearer|ApplePass)\s+\S+/gi, '<jeton>')
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, ':id')
+    .replace(/(?:\+33\s?|\b0)[1-9](?:[\s.-]?\d{2}){4}\b/g, '<tél>')
+    .replace(/(?:https?|capacitor|file|webpack|blob):\/\/[^\s)'"]*\/([^/\s)'"?#]+)(?:[?#][^\s)'"]*)?/gi, '$1')
+    .replace(/\?[\w%.&;+-]*=[\w%.=&;+-]*/g, '')
+    .replace(/\d{5,}/g, '<n>');
+}
+
+/** Message d'une erreur quelconque (Error, texte, objet rejeté par une promesse). */
+function errorMessageOf(error) {
+  if (error == null) return '';
+  if (typeof error === 'string') return error;
+  if (error instanceof Error || typeof error.message === 'string') {
+    const name = error.name && error.name !== 'Error' ? `${error.name}: ` : '';
+    return `${name}${error.message || ''}`;
+  }
+  try { return JSON.stringify(error).slice(0, 300); } catch { return String(error); }
+}
+
+function scheduleErrorFlush(now) {
+  if (now) {
+    if (errorFlushTimer) { clearTimeout(errorFlushTimer); errorFlushTimer = null; }
+    flush({ keepalive: true });
+    return;
+  }
+  if (errorFlushTimer) return;
+  errorFlushTimer = setTimeout(() => { errorFlushTimer = null; flush({ keepalive: true }); }, 1000);
+}
+
+/**
+ * Erreur de l'app : `reportError(err, { source: 'react' | 'window' | 'promise', now })`.
+ * Jamais bloquant, jamais deux fois la même dans une session, 10 au plus par session ; `now`
+ * envoie sans attendre (écran planté : le client va recharger). Démarre la mesure si l'app a
+ * planté avant son premier affichage. Rien si le client a refusé la mesure.
+ */
+export function reportError(error, { source = 'window', now = false } = {}) {
+  try {
+    if (typeof window === 'undefined' || isAnalyticsOptedOut()) return;
+    const raw = errorMessageOf(error).trim();
+    if (!raw || IGNORED_ERROR.test(raw) || STALE_CHUNK_ERROR.test(raw)) return;
+    const rawStack = typeof error?.stack === 'string' ? error.stack : '';
+    if (EXTENSION_STACK.test(rawStack)) return;
+    if (!started) initAnalytics();
+    if (!session) return;
+    const message = scrubErrorText(raw).replace(/\s+/g, ' ').trim().slice(0, 200);
+    const key = `${source}|${message}`;
+    if (!message || reportedErrors.has(key) || reportedErrors.size >= MAX_ERRORS_PER_SESSION) return;
+    reportedErrors.add(key);
+    const stack = rawStack.split('\n')
+      .filter((line) => line.trim() && !line.includes(raw.slice(0, 40)))
+      .slice(0, 12).map((line) => scrubErrorText(line).replace(/\s+/g, ' ').trim()).join('\n').slice(0, 800);
+    push({
+      type: 'error',
+      name: message,
+      props: { source, page: normalizePath(currentPath()), ...(stack ? { stack } : {}) },
+    });
+    scheduleErrorFlush(now);
+  } catch { /* la remontée d'une erreur ne doit jamais en créer une autre */ }
+}
+
+/** Erreurs et promesses non gérées de toute l'app (main.jsx, avant le premier affichage). */
+export function initErrorReporting() {
+  if (errorsHooked || typeof window === 'undefined') return;
+  errorsHooked = true;
+  // Erreur de chargement d'une image ou d'un script : n'arrive pas ici (pas de remontée jusqu'à window)
+  window.addEventListener('error', (event) => reportError(event.error || event.message, { source: 'window' }));
+  window.addEventListener('unhandledrejection', (event) => reportError(event.reason, { source: 'promise' }));
 }
 
 /**

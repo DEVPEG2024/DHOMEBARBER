@@ -7,6 +7,7 @@ import LoadError, { queryFailed } from '@/components/shared/LoadError';
 import BarList from '@/components/analytics/BarList';
 import HourHeatmap from '@/components/analytics/HourHeatmap';
 import TrendChart from '@/components/analytics/TrendChart';
+import { AppErrorsCard, ErrorHealthBadge } from '@/components/analytics/AppErrors';
 import {
   actionLabel, addDays, deltaOf, deviceLabel, formatDuration, formatNumber, formatPercent, pageLabel, parisDay,
   platformLabel, shortDay, sourceLabel,
@@ -98,10 +99,13 @@ export default function AdminTraffic() {
           <p className="text-xs text-muted-foreground mt-0.5">Mesure d'audience interne de l'app, aucun service extérieur</p>
         </div>
         {data && (
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs text-foreground">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" aria-hidden="true" />
-            {formatNumber(data.live?.sessions)} en ce moment
-          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs text-foreground">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" aria-hidden="true" />
+              {formatNumber(data.live?.sessions)} en ce moment
+            </span>
+            <ErrorHealthBadge errors={data.errors} />
+          </div>
         )}
       </div>
 
@@ -255,6 +259,8 @@ export default function AdminTraffic() {
               </ul>
             )}
           </Card>
+
+          <AppErrorsCard errors={data.errors} period={`${shortDay(data.period.from)} au ${shortDay(data.period.to)}`} />
 
           <p className="text-[11px] text-muted-foreground px-1 pb-2">
             {scope === 'clients' ? 'Clients seulement : visites de l\'équipe et des comptes testeurs exclues. ' : 'Tout le monde : équipe et comptes testeurs compris. '}

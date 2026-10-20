@@ -466,7 +466,7 @@ export default function Settings() {
               </div>
               <div className="text-left min-w-0">
                 <p className="text-sm font-semibold text-foreground">Mesure d'audience</p>
-                <p className="text-[11px] text-muted-foreground">Statistiques internes du salon (pages vues, temps passé), jamais partagées</p>
+                <p className="text-[11px] text-muted-foreground">Statistiques internes du salon (pages vues, temps passé) et erreurs techniques de l'app, jamais partagées</p>
               </div>
             </div>
             <div className={`w-11 h-6 rounded-full transition-colors relative shrink-0 ${analyticsOn ? 'bg-primary' : 'bg-muted'}`}>

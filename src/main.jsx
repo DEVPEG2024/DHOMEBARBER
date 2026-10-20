@@ -6,6 +6,11 @@ import { initCapacitor, isNative } from '@/lib/capacitor'
 import { initNativePush, addNotification, getBadgeCount, syncServiceWorkerNotifications } from '@/lib/pushNotifications'
 import { reloadOnceForStaleChunk } from '@/lib/chunkReload'
 import { startMotionPermission } from '@/lib/motion'
+import { initErrorReporting } from '@/lib/analytics'
+
+// Erreurs et promesses non gérées : remontées dans Admin → Trafic (« Erreurs de l'app »), dès avant
+// le premier affichage
+initErrorReporting()
 
 // Après un déploiement, un onglet resté ouvert demande d'anciens fichiers de page qui n'existent
 // plus : Vite émet `vite:preloadError`, on recharge une fois pour prendre la nouvelle version

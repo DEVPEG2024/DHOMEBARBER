@@ -1,5 +1,6 @@
 import React from 'react';
 import { isReloadPending, isStaleChunkError, reloadOnceForStaleChunk } from '@/lib/chunkReload';
+import { reportError } from '@/lib/analytics';
 
 export default class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -18,7 +19,10 @@ export default class ErrorBoundary extends React.Component {
     // depuis moins de 15 s : l'écran d'erreur reste, avec son bouton
     if (isReloadPending() || (isStaleChunkError(error) && reloadOnceForStaleChunk())) {
       this.setState({ reloading: true });
+      return;
     }
+    // Écran planté : remonté tout de suite dans Admin → Trafic (« Erreurs de l'app »)
+    reportError(error, { source: 'react', now: true });
   }
 
   render() {

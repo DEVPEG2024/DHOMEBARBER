@@ -37,3 +37,9 @@ android/
 
 # Harnais de vérification temporaire
 .verify/
+
+# Vérifications de bout en bout (Playwright) : rapports et captures des échecs
+playwright-report/
+test-results/
+blob-report/
+playwright/.cache/

@@ -5,6 +5,27 @@ import pluginReactHooks from "eslint-plugin-react-hooks";
 import pluginUnusedImports from "eslint-plugin-unused-imports";
 
 export default [
+  // Dossiers générés, jamais relus : compilations natives (hors git), build, rapports Playwright
+  {
+    ignores: ["ios/", "android/", "dist/", "playwright-report/", "test-results/", "blob-report/"],
+  },
+  // Vérifications de bout en bout : code Node (Playwright) dont une partie s'exécute dans la page
+  // (`page.evaluate`, `addInitScript`), d'où les deux jeux de globales
+  {
+    files: ["e2e/**/*.js", "playwright.config.js"],
+    ...pluginJs.configs.recommended,
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: "module",
+      globals: { ...globals.node, ...globals.browser },
+    },
+    rules: {
+      ...pluginJs.configs.recommended.rules,
+      "no-unused-vars": ["error", { varsIgnorePattern: "^_", argsIgnorePattern: "^_" }],
+      // Les fixtures Playwright sans dépendance s'écrivent `async ({}, use) => …` (motif imposé)
+      "no-empty-pattern": "off",
+    },
+  },
   {
     files: [
       "src/components/**/*.{js,mjs,cjs,jsx}",
