@@ -14,7 +14,9 @@ concurrency:
 jobs:
   verifications:
     name: Relecture et parcours de bout en bout
-    runs-on: ubuntu-latest
+    # Version fixée : ubuntu-latest bascule vers Ubuntu 26 depuis le 19 oct. 2026 ; la monter quand
+    # Playwright y installe Chromium sans erreur
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Récupérer le code
