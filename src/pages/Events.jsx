@@ -1,557 +1,141 @@
-import React, { useState, useMemo } from 'react';
-import { api } from '@/api/apiClient';
-import { fetchPublicBarbers } from '@/lib/publicBarbers';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useAuth } from '@/lib/AuthContext';
-import { motion } from 'framer-motion';
-import { PartyPopper, Calendar, Clock, Users, MessageSquare, Send, CheckCircle, Sparkles, Ban, Euro, ThumbsUp, ThumbsDown, MapPin } from 'lucide-react';
-import { toast } from 'sonner';
-import { format } from 'date-fns';
-import { fr } from 'date-fns/locale';
+/**
+ * Onglet Événements : invitations du salon (`SalonEventsSection`) et « Privatiser le salon »
+ * (refonte du 19 oct. 2026, maquettes validées par le propriétaire) :
+ * - en tête, les devis à accepter et les privatisations confirmées à venir ;
+ * - accroche avec l'équipe, occasions (un tap ouvre la demande avec l'occasion choisie),
+ *   étapes, formats, demandes en cours / passées, questions fréquentes ;
+ * - barre « Demander un devis » fixée dès que le bouton de l'accroche est sorti par le haut ;
+ * - demande de devis en plein écran (`RequestSheet`), qui garde son brouillon si on la ferme.
+ * Lien `/events?demande=<occasion>` (evjg, anniversaire, team_building, autre) ou `?demande=1` :
+ * ouvre directement la demande.
+ */
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { useReducedMotion } from 'framer-motion';
 import SalonEventsSection from '@/components/salon-events/SalonEventsSection';
-import LoadError from '@/components/shared/LoadError';
-import { formatPrice } from '@/components/services/serviceUtils';
-import { parisDay } from '@/lib/slots';
-
-// Le salon reçoit exclusivement une clientèle masculine : pas d'EVJF dans les formules.
-const EVENT_TYPES = [
-  { id: 'evjg', label: 'EVJG', emoji: '🤵', desc: 'Enterrement de vie de jeune garçon' },
-  { id: 'anniversaire', label: 'Anniversaire', emoji: '🎂', desc: 'Fête d\'anniversaire' },
-  { id: 'team_building', label: 'Team Building', emoji: '🤝', desc: 'Événement d\'entreprise' },
-  { id: 'autre', label: 'Autre', emoji: '🎉', desc: 'Événement personnalisé' },
-];
-
-const TIME_SLOTS = [
-  { id: 'morning', label: 'Matinée (9h-14h)' },
-  { id: 'afternoon', label: 'Après-midi (14h-20h)' },
-  { id: 'full_day', label: 'Journée complète (9h-20h)' },
-];
-
-/** Message lisible d'une erreur d'API : celui du serveur s'il existe, sinon le repli. */
-const serverMessage = (err, fallback) => {
-  const message = err?.data?.error || err?.message;
-  if (typeof navigator !== 'undefined' && navigator.onLine === false) return 'Pas de connexion internet, réessayez.';
-  if (/failed to fetch|load failed|networkerror/i.test(String(message || ''))) return 'Pas de connexion internet, réessayez.';
-  return message && !/^HTTP \d+$/.test(message) ? message : fallback;
-};
-
-const STATUS_CONFIG = {
-  pending: { label: 'En attente', color: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' },
-  quoted: { label: 'Devis reçu', color: 'bg-blue-500/10 text-blue-400 border-blue-500/20' },
-  accepted: { label: 'Devis accepté', color: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
-  confirmed: { label: 'Confirmé', color: 'bg-green-500/10 text-green-400 border-green-500/20' },
-  declined: { label: 'Refusé', color: 'bg-red-500/10 text-red-400 border-red-500/20' },
-  cancelled: { label: 'Annulée', color: 'bg-muted text-muted-foreground border-border' },
-};
+import PrivatisationHero from '@/components/privatisation/PrivatisationHero';
+import OccasionGrid from '@/components/privatisation/OccasionGrid';
+import { HowItWorks, FormatsRow, PrivatisationFaq } from '@/components/privatisation/PrivatisationInfo';
+import StickyRequestBar from '@/components/privatisation/StickyRequestBar';
+import RequestSheet from '@/components/privatisation/RequestSheet';
+import QuoteCard from '@/components/privatisation/QuoteCard';
+import ConfirmedTicket from '@/components/privatisation/ConfirmedTicket';
+import MyRequests from '@/components/privatisation/MyRequests';
+import LoadError, { queryFailed } from '@/components/shared/LoadError';
+import { useMyEvents, useParisClock } from '@/components/privatisation/usePrivatisation';
+import { eventTypeOf, groupRequests, requestAnchorId } from '@/components/privatisation/privatisationUtils';
 
 export default function Events() {
-  const { user } = useAuth();
-  const queryClient = useQueryClient();
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({
-    event_type: '',
-    date: '',
-    time_slot: 'full_day',
-    guest_count: '',
-    message: '',
-  });
+  const reduceMotion = useReducedMotion();
+  const clock = useParisClock();
+  const myEventsQuery = useMyEvents();
+  const groups = useMemo(() => groupRequests(myEventsQuery.data, clock), [myEventsQuery.data, clock]);
 
-  const { data: employees = [] } = useQuery({
-    queryKey: ['employees'],
-    staleTime: 5 * 60 * 1000, // catalogue : change rarement
-    queryFn: fetchPublicBarbers,
-  });
+  // Demande de devis : `openKey` change à chaque ouverture pour appliquer l'occasion choisie
+  const [sheet, setSheet] = useState({ open: false, presetType: null, openKey: 0 });
+  const openRequest = useCallback((presetType = null) => {
+    setSheet(s => ({ open: true, presetType: eventTypeOf(presetType) ? presetType : null, openKey: s.openKey + 1 }));
+  }, []);
+  const closeRequest = useCallback(() => setSheet(s => ({ ...s, open: false })), []);
 
-  const myEventsQuery = useQuery({
-    queryKey: ['myEvents', user?.email],
-    queryFn: () => api.entities.Event.filter({ client_email: user?.email }, '-created_at', 20),
-    enabled: !!user?.email,
-  });
-  const myEvents = myEventsQuery.data || [];
+  // Lien profond `?demande=…` : ouvre la demande puis retire le paramètre (un retour arrière ne la rouvre pas)
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const wanted = searchParams.get('demande');
+    if (wanted == null) return;
+    openRequest(wanted);
+    const next = new URLSearchParams(searchParams);
+    next.delete('demande');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams, openRequest]);
 
-  // Fetch all confirmed events to block taken slots
-  const { data: confirmedEvents = [] } = useQuery({
-    queryKey: ['confirmedEvents'],
-    queryFn: () => api.entities.Event.filter({ status: 'confirmed' }, '-date', 200),
-  });
-
-  // Determine which time slots are blocked for the selected date
-  const blockedSlots = useMemo(() => {
-    if (!form.date) return new Set();
-    const eventsOnDate = confirmedEvents.filter(e => String(e.date).slice(0, 10) === form.date);
-    const blocked = new Set();
-    for (const ev of eventsOnDate) {
-      if (ev.time_slot === 'full_day') {
-        blocked.add('morning');
-        blocked.add('afternoon');
-        blocked.add('full_day');
-      } else if (ev.time_slot === 'morning') {
-        blocked.add('morning');
-        blocked.add('full_day');
-      } else if (ev.time_slot === 'afternoon') {
-        blocked.add('afternoon');
-        blocked.add('full_day');
-      }
-    }
-    // If both morning and afternoon are taken, full_day is also blocked
-    if (blocked.has('morning') && blocked.has('afternoon')) {
-      blocked.add('full_day');
-    }
-    return blocked;
-  }, [form.date, confirmedEvents]);
-
-  // Réponse au devis : un seul envoi à la fois (boutons désactivés), refus confirmé par un second tap
-  const [confirmDeclineId, setConfirmDeclineId] = useState(null);
-  const answerQuote = useMutation({
-    mutationFn: ({ id, status }) => api.entities.Event.update(id, { status }),
-    onSuccess: (_data, { status }) => {
-      setConfirmDeclineId(null);
-      queryClient.invalidateQueries({ queryKey: ['myEvents'] });
-      if (status === 'accepted') {
-        queryClient.invalidateQueries({ queryKey: ['confirmedEvents'] });
-        toast.success('Devis accepté ! Rendez-vous au salon pour le paiement.');
-      } else {
-        toast.success('Devis refusé');
-      }
-    },
-    onError: (err) => {
-      setConfirmDeclineId(null);
-      toast.error(serverMessage(err, 'La réponse au devis n\'a pas pu être envoyée, réessayez.'));
-      // Le devis a pu changer entre-temps (modifié ou retiré par le salon) : on recharge
-      if (err?.status) queryClient.invalidateQueries({ queryKey: ['myEvents'] });
-    },
-  });
-
-  const createEvent = useMutation({
-    mutationFn: (data) => api.entities.Event.create(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['myEvents'] });
-      toast.success('Demande envoyée ! Nous vous recontacterons rapidement.');
-      setShowForm(false);
-      setForm({ event_type: '', date: '', time_slot: 'full_day', guest_count: '', message: '' });
-    },
-    onError: (err) => {
-      // Message du serveur (créneau invalide, date passée, doublon, quota…) ; coupure réseau en
-      // français (« Load failed » sinon). Le formulaire reste rempli : le serveur rend la même
-      // demande sans la recréer si elle était déjà arrivée.
-      toast.error(serverMessage(err, 'Erreur lors de l\'envoi'));
-      // Un créneau a pu être confirmé entre-temps : on recharge les créneaux pris
-      if (err?.status === 409 || err?.status === 400) queryClient.invalidateQueries({ queryKey: ['confirmedEvents'] });
-    },
-  });
-
-  // Créneau pris au changement de date : on bascule sur le premier créneau libre. Date complète :
-  // aucun créneau, l'envoi reste désactivé ; revenu sur une date libre, on reprend la journée
-  // complète (choix par défaut) si elle est libre.
-  React.useEffect(() => {
-    if (form.time_slot && !blockedSlots.has(form.time_slot)) return;
-    const next = !form.time_slot && !blockedSlots.has('full_day')
-      ? 'full_day'
-      : TIME_SLOTS.find(s => !blockedSlots.has(s.id))?.id || '';
-    if (next !== form.time_slot) setForm(f => ({ ...f, time_slot: next }));
-  }, [form.date, form.time_slot, blockedSlots]);
-
-  // Envoi possible seulement sur un créneau existant et libre (le serveur refuse `time_slot: ''`)
-  const slotValid = TIME_SLOTS.some(s => s.id === form.time_slot) && !blockedSlots.has(form.time_slot);
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    if (!form.event_type || !form.date) {
-      toast.error('Type d\'événement et date requis');
-      return;
-    }
-    if (!slotValid) {
-      toast.error(blockedSlots.size >= TIME_SLOTS.length
-        ? 'Tous les créneaux sont pris pour cette date, choisissez-en une autre'
-        : 'Choisissez un créneau libre');
-      return;
-    }
-    createEvent.mutate({
-      ...form,
-      guest_count: parseInt(form.guest_count) || 1,
-      client_name: user?.full_name || '',
-      client_email: user?.email || '',
-      client_phone: user?.phone || '',
-      employees: employees.map(e => ({ id: e.id, name: e.name })),
-      status: 'pending',
+  // Barre fixée : seulement quand le bouton de l'accroche est sorti de l'écran par le haut
+  const ctaRef = useRef(null);
+  const [ctaPassed, setCtaPassed] = useState(false);
+  useEffect(() => {
+    const el = ctaRef.current;
+    if (!el || typeof IntersectionObserver === 'undefined') return undefined;
+    const observer = new IntersectionObserver(([entry]) => {
+      setCtaPassed(!entry.isIntersecting && entry.boundingClientRect.top < 0);
     });
-  };
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
-  const selectedType = EVENT_TYPES.find(t => t.id === form.event_type);
+  // « Voir ma demande » après l'envoi : la liste se recharge, on attend que la carte existe (3 s au
+  // plus), puis défilement et focus sur elle ; sinon (pas d'identifiant, rechargement en échec) on
+  // va au titre « Mes demandes » ou, à défaut, en haut de la page
+  const scrollTimer = useRef(null);
+  useEffect(() => () => clearTimeout(scrollTimer.current), []);
+  const viewRequest = useCallback((id) => {
+    closeRequest();
+    clearTimeout(scrollTimer.current);
+    const behavior = reduceMotion ? 'auto' : 'smooth';
+    const reveal = (el) => {
+      el.scrollIntoView({ behavior, block: 'start' });
+      if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '-1');
+      el.focus({ preventScroll: true });
+    };
+    let tries = 0;
+    const tick = () => {
+      const el = id != null ? document.getElementById(requestAnchorId(id)) : null;
+      if (el) return reveal(el);
+      tries += 1;
+      if (id != null && tries < 20) {
+        scrollTimer.current = setTimeout(tick, 150);
+        return undefined;
+      }
+      const title = document.getElementById('my-requests-title');
+      if (title) return reveal(title);
+      window.scrollTo({ top: 0, behavior });
+      return undefined;
+    };
+    scrollTimer.current = setTimeout(tick, 250);
+  }, [closeRequest, reduceMotion]);
 
   return (
-    <div className="max-w-lg mx-auto px-5 py-6">
-      {/* Événements organisés par le salon (invitations / ouverts à tous) : absent sans événement */}
-      <SalonEventsSection />
-
-      {/* Header */}
-      <div className="text-center mb-6">
-        <div className="w-16 h-16 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center mx-auto mb-3">
-          <PartyPopper className="w-8 h-8 text-primary" />
-        </div>
-        <h1 className="font-display text-2xl font-bold">Privatiser le salon</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          EVJG, anniversaires, team building... Réservez le salon et toute l'équipe pour votre événement.
-        </p>
-      </div>
-
-      {/* Features */}
-      <div className="grid grid-cols-3 gap-2 mb-6">
-        {[
-          { icon: Users, label: 'Équipe complète', sub: `${employees.length} barbers` },
-          { icon: Clock, label: 'Demi-journée', sub: 'ou journée' },
-          { icon: Sparkles, label: 'Sur mesure', sub: 'Personnalisé' },
-        ].map(({ icon: Icon, label, sub }) => (
-          <div key={label} className="glass rounded-2xl p-3 text-center">
-            <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center mx-auto mb-2">
-              <Icon className="w-4 h-4 text-primary" />
-            </div>
-            <p className="text-xs font-semibold text-foreground">{label}</p>
-            <p className="text-[11px] text-muted-foreground mt-0.5">{sub}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* CTA */}
-      {!showForm && (
-        <motion.button
-          whileTap={{ scale: 0.97 }}
-          onClick={() => setShowForm(true)}
-          className="w-full flex items-center justify-center gap-2 h-13 py-3.5 rounded-2xl bg-primary text-primary-foreground font-semibold text-sm shadow-lg shadow-primary/25 hover:bg-primary/90 transition-all mb-6"
-        >
-          <Send className="w-4 h-4" />
-          Demander une privatisation
-        </motion.button>
-      )}
-
-      {/* Form */}
-      {showForm && (
-        <motion.form
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          onSubmit={handleSubmit}
-          className="bg-card border border-border rounded-2xl p-5 mb-6 space-y-4"
-        >
-          <h2 className="text-sm font-semibold flex items-center gap-2">
-            <PartyPopper className="w-4 h-4 text-primary" />
-            Votre événement
-          </h2>
-
-          {/* Event type */}
-          <div>
-            <label className="text-xs text-muted-foreground mb-2 block">Type d'événement *</label>
-            <div className="grid grid-cols-3 gap-2">
-              {EVENT_TYPES.map(type => (
-                <button
-                  key={type.id}
-                  type="button"
-                  onClick={() => setForm(f => ({ ...f, event_type: type.id }))}
-                  className={`p-3 rounded-xl border text-center transition-all ${
-                    form.event_type === type.id
-                      ? 'border-primary bg-primary/10 ring-1 ring-primary/30'
-                      : 'border-border hover:border-primary/30'
-                  }`}
-                >
-                  <span className="text-xl block mb-1">{type.emoji}</span>
-                  <span className="text-[11px] font-semibold">{type.label}</span>
-                </button>
-              ))}
-            </div>
-            {selectedType && (
-              <p className="text-[11px] text-muted-foreground mt-1.5">{selectedType.desc}</p>
-            )}
-          </div>
-
-          {/* Date */}
-          <div>
-            <label className="text-xs text-muted-foreground mb-1 block">
-              <Calendar className="w-3 h-3 inline mr-1" />
-              Date souhaitée *
-            </label>
-            <input type="date" value={form.date}
-              onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
-              min={format(new Date(), 'yyyy-MM-dd')}
-              className="w-full bg-secondary border border-border rounded-xl px-4 py-3 text-sm" />
-          </div>
-
-          {/* Time slot */}
-          <div>
-            <label className="text-xs text-muted-foreground mb-2 block">
-              <Clock className="w-3 h-3 inline mr-1" />
-              Créneau
-            </label>
-            <div className="space-y-2">
-              {TIME_SLOTS.map(slot => {
-                const isBlocked = blockedSlots.has(slot.id);
-                return (
-                  <button
-                    key={slot.id}
-                    type="button"
-                    disabled={isBlocked}
-                    onClick={() => !isBlocked && setForm(f => ({ ...f, time_slot: slot.id }))}
-                    className={`w-full text-left px-4 py-3 rounded-xl border text-sm transition-all ${
-                      isBlocked
-                        ? 'border-border bg-muted/50 text-muted-foreground/50 cursor-not-allowed line-through'
-                        : form.time_slot === slot.id
-                          ? 'border-primary bg-primary/10 font-semibold'
-                          : 'border-border hover:border-primary/30'
-                    }`}
-                  >
-                    <span className="flex items-center justify-between">
-                      {slot.label}
-                      {isBlocked && (
-                        <span className="flex items-center gap-1 text-[11px] text-red-400 font-medium no-underline">
-                          <Ban className="w-3 h-3" />
-                          Réservé
-                        </span>
-                      )}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-            {blockedSlots.size > 0 && blockedSlots.size < 3 && (
-              <p className="text-[11px] text-muted-foreground mt-1.5">
-                Certains créneaux sont déjà réservés pour cette date.
-              </p>
-            )}
-            {blockedSlots.size >= 3 && (
-              <p className="text-[11px] text-red-400 mt-1.5">
-                Tous les créneaux sont pris pour cette date. Veuillez choisir une autre date.
-              </p>
-            )}
-          </div>
-
-          {/* Guest count */}
-          <div>
-            <label className="text-xs text-muted-foreground mb-1 block">
-              <Users className="w-3 h-3 inline mr-1" />
-              Nombre de personnes
-            </label>
-            <input type="number" min="1" max="30" placeholder="Ex: 8"
-              value={form.guest_count}
-              onChange={e => setForm(f => ({ ...f, guest_count: e.target.value }))}
-              className="w-full bg-secondary border border-border rounded-xl px-4 py-3 text-sm" />
-          </div>
-
-          {/* Message */}
-          <div>
-            <label className="text-xs text-muted-foreground mb-1 block">
-              <MessageSquare className="w-3 h-3 inline mr-1" />
-              Message / demandes spéciales
-            </label>
-            <textarea rows={3} placeholder="Décrivez votre événement, vos envies..."
-              value={form.message}
-              onChange={e => setForm(f => ({ ...f, message: e.target.value }))}
-              className="w-full bg-secondary border border-border rounded-xl px-4 py-3 text-sm resize-none" />
-          </div>
-
-          {/* Submit */}
-          <div className="flex gap-2">
-            <button type="button" onClick={() => setShowForm(false)}
-              className="flex-1 py-3 rounded-xl border border-border text-sm text-muted-foreground hover:bg-secondary transition-all">
-              Annuler
-            </button>
-            <button type="submit" disabled={createEvent.isPending || !slotValid}
-              className="flex-1 py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2">
-              {createEvent.isPending ? (
-                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              ) : (
-                <>
-                  <Send className="w-3.5 h-3.5" />
-                  Envoyer
-                </>
-              )}
-            </button>
-          </div>
-        </motion.form>
-      )}
-
-      {/* My events : squelette au premier chargement, erreur à la place de la liste */}
-      {myEventsQuery.isLoading && (
-        <div className="space-y-3" aria-busy="true" aria-label="Chargement de vos demandes">
-          <div className="h-4 w-32 rounded bg-secondary animate-pulse" />
-          {[0, 1].map(i => (
-            <div key={i} className="h-24 rounded-xl bg-card border border-border animate-pulse" />
-          ))}
-        </div>
-      )}
-      {((myEventsQuery.isError && !myEventsQuery.data) || (myEventsQuery.isPending && myEventsQuery.fetchStatus === 'paused')) && (
+    <div className="max-w-lg mx-auto px-4 pt-6 pb-28">
+      {/* Demandes impossibles à charger : dit en haut de page (un client qui arrive par la
+          notification « devis prêt » ne doit pas croire qu'il n'a rien) */}
+      {queryFailed(myEventsQuery) && (
         <LoadError
-          what="vos demandes"
+          what="vos demandes de privatisation"
           error={myEventsQuery.error}
           onRetry={myEventsQuery.refetch}
           retrying={myEventsQuery.isFetching}
           compact
+          className="mb-8"
         />
       )}
-      {myEvents.length > 0 && (
-        <div>
-          <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
-            <CheckCircle className="w-4 h-4 text-primary" />
-            Mes demandes
-          </h2>
-          <div className="space-y-3">
-            {myEvents.map((event, i) => {
-              const type = EVENT_TYPES.find(t => t.id === event.event_type);
-              const status = STATUS_CONFIG[event.status] || STATUS_CONFIG.pending;
-              const slot = TIME_SLOTS.find(s => s.id === event.time_slot);
-              const isQuoted = event.status === 'quoted';
-              // Devis d'une date passée (jour de Paris) : plus d'acceptation en ligne, le refus reste
-              const quotePast = isQuoted && !!event.date && String(event.date).slice(0, 10) < parisDay().key;
-              return (
-                <motion.div key={event.id}
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i * 0.05 }}
-                  className={`bg-card border rounded-xl p-4 ${isQuoted ? 'border-blue-500/30 ring-1 ring-blue-500/20' : 'border-border'}`}
-                >
-                  <div className="flex items-start justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-lg">{type?.emoji || '🎉'}</span>
-                      <div>
-                        <p className="text-sm font-semibold">{type?.label || event.event_type}</p>
-                        <p className="text-[11px] text-muted-foreground">
-                          {event.date && format(new Date(event.date + 'T12:00:00'), 'd MMMM yyyy', { locale: fr })}
-                          {slot && ` · ${slot.label}`}
-                        </p>
-                      </div>
-                    </div>
-                    <span className={`shrink-0 whitespace-nowrap text-[11px] font-semibold px-2.5 py-1 rounded-full border ${status.color}`}>
-                      {status.label}
-                    </span>
-                  </div>
-                  {event.status === 'cancelled' && event.cancellation_reason && (
-                    <p className="text-xs text-muted-foreground mb-1 break-words">Motif : {event.cancellation_reason}</p>
-                  )}
-                  {event.guest_count > 0 && (
-                    <p className="text-xs text-muted-foreground">{event.guest_count} personne(s)</p>
-                  )}
 
-                  {/* Devis reçu - affichage prominent */}
-                  {event.price && (
-                    <div className={`mt-3 p-3 rounded-xl border ${isQuoted ? 'bg-blue-500/10 border-blue-500/20' : 'bg-primary/5 border-primary/10'}`}>
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Euro className={`w-4 h-4 ${isQuoted ? 'text-blue-400' : 'text-primary'}`} />
-                          <span className="text-xs text-muted-foreground">Devis</span>
-                        </div>
-                        <span className={`text-lg font-black ${isQuoted ? 'text-blue-400' : 'text-primary'}`}>{formatPrice(event.price)}</span>
-                      </div>
-                      {event.admin_notes && (
-                        <p className="text-xs text-muted-foreground mt-2 italic">"{event.admin_notes}"</p>
-                      )}
-                      {isQuoted && (
-                        <p className="text-[10px] text-muted-foreground mt-2 flex items-center gap-1">
-                          <MapPin className="w-3 h-3" />
-                          Paiement au salon lors de l'événement
-                        </p>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Admin notes sans devis */}
-                  {!event.price && event.admin_notes && (
-                    <div className="mt-2 p-2 rounded-lg bg-primary/5 border border-primary/10">
-                      <p className="text-xs text-muted-foreground">{event.admin_notes}</p>
-                    </div>
-                  )}
-
-                  {/* Devis sans prix (en cours de modification par le salon) : rien à accepter */}
-                  {isQuoted && !(Number(event.price) > 0) && (
-                    <p className="mt-3 text-xs text-muted-foreground text-center">Devis en cours de mise à jour par le salon</p>
-                  )}
-
-                  {/* Boutons accepter/refuser le devis (refus en deux taps) */}
-                  {isQuoted && Number(event.price) > 0 && (() => {
-                    const sending = answerQuote.isPending && String(answerQuote.variables?.id) === String(event.id);
-                    const confirming = String(confirmDeclineId) === String(event.id);
-                    if (confirming) {
-                      return (
-                        <div className="mt-3 p-3 rounded-xl bg-red-500/5 border border-red-500/20">
-                          <p className="text-xs text-foreground text-center mb-2">Refuser ce devis ? Le salon sera prévenu.</p>
-                          <div className="grid grid-cols-2 gap-2">
-                            <button
-                              type="button"
-                              onClick={() => setConfirmDeclineId(null)}
-                              disabled={answerQuote.isPending}
-                              className="py-3 rounded-xl bg-white/5 border border-white/10 text-sm font-medium text-muted-foreground hover:bg-white/10 transition-all disabled:opacity-50"
-                            >
-                              Non, garder
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => answerQuote.mutate({ id: event.id, status: 'declined' })}
-                              disabled={answerQuote.isPending}
-                              className="flex items-center justify-center gap-2 py-3 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 transition-all disabled:opacity-50"
-                            >
-                              {sending
-                                ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                : <><ThumbsDown className="w-4 h-4" />Oui, refuser</>}
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    }
-                    return (
-                      <div className="grid grid-cols-2 gap-2 mt-3">
-                        {quotePast ? (
-                          <a
-                            href="tel:0666083605"
-                            className="flex items-center justify-center text-center px-2 py-3 rounded-xl bg-white/5 border border-white/10 text-xs font-medium text-foreground"
-                          >
-                            Date passée : contactez le salon
-                          </a>
-                        ) : (
-                        <motion.button
-                          type="button"
-                          whileTap={answerQuote.isPending ? undefined : { scale: 0.97 }}
-                          onClick={() => answerQuote.mutate({ id: event.id, status: 'accepted' })}
-                          disabled={answerQuote.isPending}
-                          className="flex items-center justify-center gap-2 py-3 rounded-xl bg-green-600 text-white text-sm font-semibold hover:bg-green-700 transition-all disabled:opacity-50"
-                        >
-                          {sending
-                            ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                            : <><ThumbsUp className="w-4 h-4" />Accepter</>}
-                        </motion.button>
-                        )}
-                        <motion.button
-                          type="button"
-                          whileTap={answerQuote.isPending ? undefined : { scale: 0.97 }}
-                          onClick={() => setConfirmDeclineId(event.id)}
-                          disabled={answerQuote.isPending}
-                          className="flex items-center justify-center gap-2 py-3 rounded-xl bg-white/5 border border-white/10 text-sm font-medium text-muted-foreground hover:bg-white/10 transition-all disabled:opacity-50"
-                        >
-                          <ThumbsDown className="w-4 h-4" />
-                          Refuser
-                        </motion.button>
-                      </div>
-                    );
-                  })()}
-
-                  {/* Devis accepté - en attente paiement */}
-                  {event.status === 'accepted' && (
-                    <div className="mt-3 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-center">
-                      <p className="text-xs font-semibold text-emerald-400">Devis accepté</p>
-                      <p className="text-[10px] text-muted-foreground mt-1">Rendez-vous au salon pour régler le paiement</p>
-                    </div>
-                  )}
-
-                  {/* Confirmé */}
-                  {event.status === 'confirmed' && (
-                    <div className="mt-3 p-3 rounded-xl bg-green-500/10 border border-green-500/20 text-center">
-                      <p className="text-xs font-semibold text-green-400 flex items-center justify-center gap-1.5">
-                        <CheckCircle className="w-3.5 h-3.5" />
-                        Événement confirmé
-                      </p>
-                    </div>
-                  )}
-                </motion.div>
-              );
-            })}
-          </div>
+      {groups.spotlight.length > 0 && (
+        <div className="space-y-8 mb-8">
+          {groups.spotlight.map(({ event, view }) => (view.kind === 'confirmed'
+            ? <ConfirmedTicket key={event.id} event={event} view={view} clock={clock} />
+            : <QuoteCard key={event.id} event={event} view={view} />))}
         </div>
       )}
+
+      {/* Événements organisés par le salon (invitations / ouverts à tous) : absent sans événement */}
+      <SalonEventsSection />
+
+      <div className="space-y-10">
+        <PrivatisationHero onRequest={() => openRequest()} ctaRef={ctaRef} />
+        <OccasionGrid onPick={openRequest} />
+        <HowItWorks />
+        <FormatsRow />
+        <MyRequests query={myEventsQuery} groups={groups} showError={false} />
+        <PrivatisationFaq />
+      </div>
+
+      <StickyRequestBar visible={ctaPassed && !sheet.open} onRequest={() => openRequest()} />
+      <RequestSheet
+        open={sheet.open}
+        presetType={sheet.presetType}
+        openKey={sheet.openKey}
+        onClose={closeRequest}
+        onViewRequest={viewRequest}
+      />
     </div>
   );
 }

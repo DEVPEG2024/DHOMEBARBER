@@ -45,6 +45,7 @@ const ACTION_LABELS = {
   gallery_open: 'Photo de réalisation ouverte',
   gallery_book: '« Réserver » depuis une photo',
   push_open: 'Notification ouverte',
+  privatisation_request: 'Demande de privatisation',
 };
 export const actionLabel = (name) => ACTION_LABELS[name] || name;
 

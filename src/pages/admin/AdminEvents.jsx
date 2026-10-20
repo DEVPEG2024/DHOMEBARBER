@@ -293,7 +293,8 @@ export default function AdminEvents() {
                 <div className="p-2.5 rounded-lg bg-secondary/50 mb-3">
                   <p className="text-xs text-muted-foreground flex items-start gap-1.5">
                     <MessageSquare className="w-3 h-3 shrink-0 mt-0.5" />
-                    {event.message}
+                    {/* Message sur plusieurs lignes (idées en un tap de la demande du client) */}
+                    <span className="min-w-0 whitespace-pre-line break-words">{event.message}</span>
                   </p>
                 </div>
               )}

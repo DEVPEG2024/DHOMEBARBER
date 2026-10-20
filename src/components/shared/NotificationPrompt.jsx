@@ -58,10 +58,13 @@ const BLOCKED_PATHS = ['/booking', '/login', '/settings', '/barber/', '/gang-car
 // Une fenêtre de la carte Gang est ouverte (révélation de niveau, story, écussons) : on réessaie
 const RETRY_DELAY = 2000;
 
-/** Révélation de niveau / story (`data-gang-overlay`) ou écussons (`data-gang-badge-overlay`) affichés */
+/**
+ * Révélation de niveau / story (`data-gang-overlay`), écussons (`data-gang-badge-overlay`) ou
+ * fenêtre plein écran de l'app (`data-app-overlay`, ex. demande de privatisation) affichés
+ */
 function gangOverlayOpen() {
   try {
-    return !!document.querySelector('[data-gang-overlay], [data-gang-badge-overlay]');
+    return !!document.querySelector('[data-gang-overlay], [data-gang-badge-overlay], [data-app-overlay]');
   } catch {
     return false;
   }
