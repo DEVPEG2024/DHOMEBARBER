@@ -143,6 +143,9 @@ test.describe('Last Minute sur l\'accueil', () => {
       // Cartes compactes, et les deux boutons tiennent sur une ligne à 320 px
       for (const carte of await carrousel.getByRole('article').all()) {
         expect((await carte.boundingBox()).height).toBeLessThanOrEqual(140);
+        // « Last Minute » entier, même avec un long compte à rebours (Kevin : « 5 h 30 »)
+        const coupe = await carte.getByText('Last Minute', { exact: true }).evaluate((el) => el.scrollWidth > el.clientWidth);
+        expect(coupe, '« Last Minute » coupé').toBe(false);
         const reserver = await carte.getByRole('link', { name: /^Réserver ce créneau/ }).boundingBox();
         const envoyer = await carte.getByRole('button', { name: /^Envoyer à un ami/ }).boundingBox();
         expect(Math.abs(reserver.y - envoyer.y), 'boutons sur la même ligne').toBeLessThan(2);

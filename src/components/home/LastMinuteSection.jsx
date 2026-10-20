@@ -34,6 +34,10 @@ function LiveDot() {
 
 function LastMinuteCard({ slot, now }) {
   const { day, chip, live } = lastMinuteLabels(slot, now);
+  // « dans 1 h 25 » : sous 360 px, « dans » se cache (le point « en direct » dit déjà que c'est un
+  // compte à rebours) ; sinon « Last Minute » était coupé dans le carrousel à 320 px
+  const chipLead = live && chip.startsWith('dans ') ? 'dans ' : '';
+  const chipRest = chipLead ? chip.slice(chipLead.length) : chip;
   const name = barberFirstName(slot.barber);
   const photo = slot.barber?.photo_url;
   const when = `${day.toLowerCase()} à ${slot.start}`;
@@ -74,7 +78,8 @@ function LastMinuteCard({ slot, now }) {
             )}
           </span>
           <div className="min-w-0 flex-1">
-            {/* Sous 360 px (carrousel à 320 px), lettres resserrées : « Last Minute » tient en entier */}
+            {/* Sous 360 px (carrousel à 320 px), lettres resserrées et pastille sans « dans » :
+                « Last Minute » tient en entier, même avec « 5 h 30 » (vérifié par e2e/last-minute.spec.js) */}
             <p className="flex items-center gap-1 text-[10px] font-extrabold tracking-[0.03em] min-[360px]:tracking-[0.16em] uppercase text-orange-200">
               <Zap className="lm-bolt w-3 h-3 shrink-0 fill-current" aria-hidden="true" />
               <span className="truncate">Last Minute</span>
@@ -91,7 +96,10 @@ function LastMinuteCard({ slot, now }) {
           <span className="shrink-0 self-start inline-flex items-center gap-1 min-[360px]:gap-1.5 px-1.5 min-[360px]:px-2 py-1 rounded-full bg-black/25 border border-white/20 text-[11px] font-semibold text-orange-100 whitespace-nowrap">
             {/* Point « en direct » devant le compte à rebours seulement, jamais devant une date */}
             {live && <LiveDot />}
-            {chip}
+            <span>
+              {chipLead && <span className="hidden min-[360px]:inline">{chipLead}</span>}
+              {chipRest}
+            </span>
           </span>
         </div>
 
