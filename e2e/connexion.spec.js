@@ -61,6 +61,10 @@ test.describe('Connexion', () => {
     await connecter(CLIENT);
     await page.goto('/');
     await expect(page.getByRole('link', { name: 'Réserver maintenant' })).toBeVisible();
+    // Chargements de l'accueil partis (la carte Gang du client arrive en dernier) : révoquée plus
+    // tôt, une requête encore en route recevait le 401 avant le tap sur « Profil », la page partait
+    // seule vers la connexion et le tap ne trouvait plus le lien (vérification GitHub, 21 oct. 2026)
+    await expect.poll(() => api.requetesVers('GET', '/gang-card/me').length).toBeGreaterThan(0);
 
     // Le jeton n'est plus accepté par le serveur : la prochaine requête répond 401
     api.revoquerSessions();
