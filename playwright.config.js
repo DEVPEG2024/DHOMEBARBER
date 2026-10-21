@@ -4,7 +4,10 @@
 import { defineConfig, devices } from '@playwright/test';
 
 const CI = !!process.env.CI;
-const PORT = 4173;
+// Plusieurs séries en parallèle sur le même poste (agents) : chacune son build et son port,
+// `E2E_DIST=.verify/dist-a E2E_PORT=4174 npx playwright test --output .verify/results-a`
+const PORT = Number(process.env.E2E_PORT) || 4173;
+const DIST = process.env.E2E_DIST || '';
 const BASE_URL = `http://localhost:${PORT}`;
 
 export default defineConfig({
@@ -42,7 +45,7 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: `npx vite preview --port ${PORT} --strictPort`,
+    command: `npx vite preview --port ${PORT} --strictPort${DIST ? ` --outDir ${DIST}` : ''}`,
     url: BASE_URL,
     reuseExistingServer: !CI,
     timeout: 60_000,

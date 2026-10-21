@@ -1,12 +1,15 @@
 /**
  * Récapitulatif de la confirmation : une seule carte, une ligne par choix (prestations, barber,
  * date et heure) avec « Modifier » qui ramène à la bonne étape sans rien perdre du reste.
+ * Réservation depuis un look (`look` = { photoUrl, title }) : la ligne des prestations montre la
+ * photo du look et son titre ; son « Modifier » ramène au look (décidé par l'appelant).
  */
 import React from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { Calendar, Scissors } from 'lucide-react';
 import { BARBER_PHOTO_ASPECT, BARBER_PHOTO_BG } from '@/lib/barberPhoto';
 import { formatDuration, formatPrice } from '@/components/services/serviceUtils';
+import { LookPhoto } from '@/components/booking/LookHeader';
 
 function Row({ icon, label, children, onEdit, editLabel, last = false, index = 0 }) {
   const reduceMotion = useReducedMotion();
@@ -40,17 +43,29 @@ const IconTile = ({ Icon }) => (
 
 export default function ConfirmSummary({
   services = [], totalDuration, totalPrice, employee, anyBarber = false, dateLabel, time, endTime,
-  onEditServices, onEditSlot, canEditServices = true,
+  onEditServices, onEditSlot, canEditServices = true, look = null,
 }) {
+  const names = services.map(s => s.name).filter(Boolean).join(' + ');
   return (
     <div className="rounded-[18px] border border-border bg-card overflow-hidden">
-      <Row index={0} icon={<IconTile Icon={Scissors} />} label={services.length > 1 ? 'Prestations' : 'Prestation'}
-        onEdit={canEditServices ? onEditServices : null} editLabel="Modifier les prestations">
-        {services.map(s => (
-          <p key={s.id} className="text-sm font-semibold text-foreground break-words">{s.name}</p>
-        ))}
-        <p className="text-xs text-muted-foreground mt-0.5">{formatDuration(totalDuration)} · {formatPrice(totalPrice)}</p>
-      </Row>
+      {look ? (
+        <Row index={0} icon={<LookPhoto url={look.photoUrl} className="w-10 rounded-[9px]" />} label="Votre look"
+          onEdit={canEditServices ? onEditServices : null} editLabel="Modifier le look">
+          <p className="text-sm font-semibold text-foreground break-words">{look.title || names}</p>
+          {look.title && look.title !== names && (
+            <p className="text-xs text-foreground/80 mt-0.5 break-words">{names}</p>
+          )}
+          <p className="text-xs text-muted-foreground mt-0.5">{formatDuration(totalDuration)} · {formatPrice(totalPrice)}</p>
+        </Row>
+      ) : (
+        <Row index={0} icon={<IconTile Icon={Scissors} />} label={services.length > 1 ? 'Prestations' : 'Prestation'}
+          onEdit={canEditServices ? onEditServices : null} editLabel="Modifier les prestations">
+          {services.map(s => (
+            <p key={s.id} className="text-sm font-semibold text-foreground break-words">{s.name}</p>
+          ))}
+          <p className="text-xs text-muted-foreground mt-0.5">{formatDuration(totalDuration)} · {formatPrice(totalPrice)}</p>
+        </Row>
+      )}
       <Row
         index={1}
         icon={(

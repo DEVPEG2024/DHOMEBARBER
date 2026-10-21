@@ -1,7 +1,8 @@
 /**
  * « Avec qui ? » (écran Créneau) : « Peu importe » puis chaque barber, photo au format portrait des
  * barbers (jamais de vignette ronde ou carrée). Choisir un barber met les heures à jour sur le même
- * écran. Le barber de la dernière visite porte « Habituel ».
+ * écran. Le barber de la dernière visite porte « Habituel » ; celui du look choisi sur son profil
+ * (réservation depuis une photo des réalisations) porte « Ce look », qui prime.
  */
 import React from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
@@ -24,7 +25,9 @@ function SelectedBadge() {
   );
 }
 
-export default function BarberStrip({ employees = [], anyBarber, selectedId, usualId = null, loading = false, onAny, onSelect }) {
+export default function BarberStrip({
+  employees = [], anyBarber, selectedId, usualId = null, lookId = null, loading = false, onAny, onSelect,
+}) {
   const reduceMotion = useReducedMotion();
   const tap = reduceMotion ? undefined : { scale: 0.95 };
 
@@ -45,7 +48,8 @@ export default function BarberStrip({ employees = [], anyBarber, selectedId, usu
 
       {employees.map((emp) => {
         const selected = !anyBarber && String(selectedId) === String(emp.id);
-        const usual = usualId != null && String(usualId) === String(emp.id);
+        const ofLook = lookId != null && String(lookId) === String(emp.id);
+        const usual = !ofLook && usualId != null && String(usualId) === String(emp.id);
         return (
           <motion.button key={emp.id} type="button" whileTap={tap} onClick={() => onSelect(emp)} aria-pressed={selected} className={TILE}>
             <span
@@ -62,6 +66,7 @@ export default function BarberStrip({ employees = [], anyBarber, selectedId, usu
               {selected && <SelectedBadge />}
             </span>
             <span className={`text-xs leading-tight truncate max-w-full ${selected ? 'font-bold text-primary' : 'font-semibold text-foreground'}`}>{emp.name}</span>
+            {ofLook && <span className="-mt-1 text-[10px] leading-tight text-primary">Ce look</span>}
             {usual && <span className="-mt-1 text-[10px] leading-tight text-muted-foreground">Habituel</span>}
           </motion.button>
         );

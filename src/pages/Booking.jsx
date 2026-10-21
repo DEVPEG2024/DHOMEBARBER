@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { api } from '@/api/apiClient';
 import { fetchPublicBarbers } from '@/lib/publicBarbers';
 import { useAuth } from '@/lib/AuthContext';
@@ -7,6 +7,10 @@ import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/rea
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { Calendar, CalendarPlus, Check, ChevronDown, Info, MessageSquare, Scissors, ShoppingBag, Zap } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { toast } from 'sonner';
 import { format, addDays, addMonths } from 'date-fns';
 import { fr } from 'date-fns/locale';
@@ -25,7 +29,8 @@ import { addonItems, addonTotal, suggestAddonProducts } from '@/lib/appointmentP
 import { formatPrice } from '@/components/shop/productUtils';
 import { formatDuration } from '@/components/services/serviceUtils';
 import ProductAddon, { addonMaxQuantity, addonProductsQuery } from '@/components/booking/ProductAddon';
-import GalleryQuickStep from '@/components/booking/GalleryQuickStep';
+import LookHeader from '@/components/booking/LookHeader';
+import { findLook, lookLinkFor, lookServices, lookTitle, lookTotals } from '@/lib/barberGallery';
 import BookingSteps from '@/components/booking/BookingSteps';
 import BookingBar from '@/components/booking/BookingBar';
 import BarberStrip from '@/components/booking/BarberStrip';
@@ -390,6 +395,7 @@ function lastVisitBarber(appointments, employees) {
 
 export default function Booking() {
   const navigate = useNavigate();
+  const location = useLocation();
   const queryClient = useQueryClient();
   const { user, isAuthenticated, isLoadingAuth } = useAuth();
   const [step, setStep] = useState(0);
@@ -408,8 +414,9 @@ export default function Booking() {
   const [anyBarber, setAnyBarber] = useState(false);
   // Produits de la boutique ajoutés au rendez-vous : `{ [productId]: quantité }`
   const [addonSelection, setAddonSelection] = useState({});
-  // Arrivée depuis une photo de la galerie : « Changer de prestation » rouvre le catalogue complet
-  const [fullPicker, setFullPicker] = useState(false);
+  // Look quitté : le client a refait sa sélection dans le catalogue (lien dont une prestation est
+  // retirée) ; la vignette du look laisse alors la place à la carte des prestations
+  const [lookDropped, setLookDropped] = useState(false);
   // Dernier envoi dont la réponse s'est perdue (réseau coupé à la confirmation) : le rendez-vous a
   // peut-être été créé. Tant que la sélection est la même, l'heure reste choisie et « Confirmer »
   // reste affiché : le nouvel essai rend le RDV existant (doublon reconnu par le serveur).
@@ -420,8 +427,11 @@ export default function Booking() {
   const urlParams = new URLSearchParams(window.location.search);
   const preSelectedIds = (urlParams.get('services') || '').split(',').map(s => s.trim()).filter(Boolean);
   const preSelectedBarberId = urlParams.get('barber') || null;
-  // Lien « Réserver cette prestation » d'une photo des réalisations (BarberGallery)
+  // Lien d'une photo des réalisations (BarberGallery) : `from=gallery`, et depuis les looks (21 oct.
+  // 2026) `look=<clé de la photo>` (`lookKeyOf`), avec les prestations du look ajustées par le
+  // client. Les liens des apps publiées avant les looks (une prestation, sans `look`) restent valables.
   const fromGallery = urlParams.get('from') === 'gallery';
+  const lookKey = urlParams.get('look') || null;
   // « Déplacer » depuis Mes rendez-vous : l'ancien RDV n'est annulé qu'une fois le nouveau confirmé
   const rescheduleId = urlParams.get('reschedule') || null;
   // Lien d'une notification Last Minute (`/booking?barber=…&date=AAAA-MM-JJ&time=HH:MM`) : avec un
@@ -514,17 +524,6 @@ export default function Booking() {
     return selectedServices.map(s => list.find(x => String(x.id) === String(s.id)) || s);
   }, [selectedServices, servicesData]);
 
-  // Depuis une photo de la galerie : écran court (prestation choisie, compléments, produits) puis
-  // les créneaux du barber. Prestation de la photo retirée du catalogue, déplacement ou
-  // « Changer de prestation » : le sélecteur complet, comme avant.
-  const preSelectedKey = preSelectedIds.join(',');
-  const galleryAvailable = useMemo(
-    () => fromGallery && (servicesData || EMPTY_LIST).some(s => preSelectedKey.split(',').includes(String(s.id))),
-    [fromGallery, servicesData, preSelectedKey],
-  );
-  const galleryFocus = fromGallery && !fullPicker && !rescheduleId && preSelectedIds.length > 0
-    && ((servicesPending && !servicesPaused) || galleryAvailable);
-
   const employeesQuery = useQuery({
     queryKey: ['employees'],
     staleTime: 5 * 60 * 1000, // catalogue : change rarement
@@ -549,6 +548,30 @@ export default function Booking() {
     [employees, preSelectedBarberId],
   );
   const missingBarber = !!preSelectedBarberId && !employeesPending && !preSelectedBarber;
+
+  // Look choisi sur le profil du barber du lien : sa photo, retrouvée dans la galerie de ce barber
+  // (barbers publics, clé ['employees']). Photo retirée entre-temps, barber introuvable ou
+  // déplacement : la carte habituelle des prestations, rien ne casse.
+  const lookItem = useMemo(
+    () => (lookKey && preSelectedBarber && !rescheduleId ? findLook(preSelectedBarber, lookKey) : null),
+    [lookKey, preSelectedBarber, rescheduleId],
+  );
+  const lookActive = !!lookItem && !lookDropped;
+  // Barbers encore en chargement : place de la vignette réservée (pas de carte qui saute)
+  const lookPending = !!lookKey && !!preSelectedBarberId && !rescheduleId && !lookDropped
+    && employeesPending && !employeesPaused;
+  // Titre : la légende du barber, sinon les prestations réellement retenues (le client a pu en
+  // décocher ou ajouter un complément dans la visionneuse : jamais « Coupe + Barbe » pour « Coupe + Soin »)
+  const lookName = useMemo(() => {
+    if (!lookItem) return '';
+    return String(lookItem.caption || '').trim() || lookTitle({}, liveSelected);
+  }, [lookItem, liveSelected]);
+  // Sélection différente du look d'origine : la vignette liste aussi les prestations retenues
+  const lookAdjusted = useMemo(() => {
+    if (!lookItem) return false;
+    const original = new Set(lookServices(lookItem, servicesData).map(s => String(s.id)));
+    return liveSelected.length !== original.size || liveSelected.some(s => !original.has(String(s.id)));
+  }, [lookItem, servicesData, liveSelected]);
 
   const timeOffsQuery = useQuery({
     queryKey: ['timeOffs'],
@@ -719,28 +742,32 @@ export default function Booking() {
     }
   };
 
+  // Prestations du lien, dans l'ordre du lien (celui du look, de l'ancien rendez-vous) : c'est
+  // l'ordre envoyé au serveur. Prestation retirée du catalogue : bandeau « vérifiez ».
   React.useEffect(() => {
     if (preSelectedIds.length > 0 && services.length > 0 && selectedServices.length === 0) {
-      const preSelected = services.filter(s => preSelectedIds.includes(String(s.id)));
+      const preSelected = [...new Set(preSelectedIds)]
+        .map(id => services.find(s => String(s.id) === id))
+        .filter(Boolean);
       if (preSelected.length > 0) setSelectedServices(preSelected);
       if (preSelected.length < new Set(preSelectedIds).size) setRetiredNotice(true);
     }
   }, [services]);
 
   // Lien avec des prestations (« Réserver » de la page Prestations, « Comme la dernière fois »,
-  // relance, « Déplacer ») : toutes retrouvées dans le catalogue → directement l'écran Créneau.
-  // Une prestation retirée : on reste sur le choix des prestations (bandeau « vérifiez »).
-  // La réservation depuis une photo de la galerie garde son écran court.
+  // relance, « Déplacer », look d'une photo des réalisations) : toutes retrouvées dans le catalogue
+  // → directement l'écran Créneau. Une prestation retirée : on reste sur le choix des prestations
+  // (bandeau « vérifiez »).
   const autoAdvanced = useRef(false);
   useEffect(() => {
-    if (autoAdvanced.current || step !== 0 || fromGallery || preSelectedIds.length === 0 || !servicesData) return;
+    if (autoAdvanced.current || step !== 0 || preSelectedIds.length === 0 || !servicesData) return;
     autoAdvanced.current = true;
     const found = servicesData.filter(s => preSelectedIds.includes(String(s.id)));
     if (found.length > 0 && found.length === new Set(preSelectedIds).size) {
       setDirection(1);
       setStep(1);
     }
-  }, [servicesData, galleryFocus, step]);
+  }, [servicesData, step]);
 
   // Barber présélectionné à l'arrivée (une fois) : celui du lien s'il est réservable, sinon celui de
   // la dernière visite du client, sinon « Peu importe ». Attend la session, les barbers et, pour un
@@ -1014,6 +1041,7 @@ export default function Booking() {
     hapticFeedback();
     const same = (s) => String(s.id) === String(service.id);
     setRetiredNotice(false);
+    setLookDropped(true);
     setSelectedServices(prev =>
       prev.some(same)
         ? prev.filter(s => !same(s))
@@ -1026,6 +1054,7 @@ export default function Booking() {
   const swapServices = (remove, add) => {
     const removeIds = new Set(remove.map(s => String(s.id)));
     setRetiredNotice(false);
+    setLookDropped(true);
     setSelectedServices(prev => {
       const kept = prev.filter(s => !removeIds.has(String(s.id)));
       const known = new Set(kept.map(s => String(s.id)));
@@ -1066,7 +1095,41 @@ export default function Booking() {
     const seen = new Set();
     setSelectedServices(list.filter(s => s && !seen.has(String(s.id)) && seen.add(String(s.id))));
     setRetiredNotice(false);
+    setLookDropped(true);
     goToStep(1);
+  };
+
+  /**
+   * « Modifier » du look (vignette de l'écran Créneau, ligne du look de la confirmation) et retour
+   * depuis l'écran Créneau : on revient au look sur le profil du barber. Arrivé du profil (état
+   * `fromLook` posé par la visionneuse, qui a déjà mis son adresse sur ce look) : simple retour
+   * arrière. Sinon (lien partagé, page rechargée ailleurs) : le profil, visionneuse ouverte sur ce
+   * look avec la sélection en cours (`lookLinkFor`).
+   */
+  const editLook = () => {
+    hapticFeedback();
+    if (location.state?.fromLook) {
+      navigate(-1);
+      return;
+    }
+    navigate(lookLinkFor(preSelectedBarberId, lookItem?.key || lookKey, selectedServices));
+  };
+  // « Modifier le look » à la confirmation : revenir au look quitte la réservation. Une note tapée
+  // ou des produits ajoutés seraient perdus sans prévenir : on demande d'abord.
+  const [leaveLookAsk, setLeaveLookAsk] = useState(false);
+  const lookLosses = [notes.trim() && 'votre note', addonLines.length > 0 && 'les produits ajoutés'].filter(Boolean);
+  const editLookFromConfirm = () => {
+    if (lookLosses.length > 0) {
+      hapticFeedback();
+      setLeaveLookAsk(true);
+      return;
+    }
+    editLook();
+  };
+  /** Étape précédente ; depuis l'écran Créneau d'un look, retour au look (pas au catalogue). */
+  const goBack = () => {
+    if (step === 1 && lookActive) editLook();
+    else goToStep(step - 1);
   };
 
   /** Écran Créneau, barber précis (quitte « peu importe ») : l'heure est gardée si ce barber l'a encore. */
@@ -1398,7 +1461,7 @@ export default function Booking() {
   // Bouton retour d'Android : étape précédente (même règle que « Retour ») au lieu de quitter la
   // page et de perdre la sélection ; sur l'écran de succès, « Mes rendez-vous » tout de suite (sans
   // retour arrière suivi d'une redirection surprise). Sans effet sur le web et iOS.
-  useAndroidBack(step > 0 && !success && !createAppointment.isPending, () => goToStep(step - 1));
+  useAndroidBack(step > 0 && !success && !createAppointment.isPending, goBack);
   // Pendant l'envoi : le retour est ignoré (il quittait la page en pleine confirmation)
   useAndroidBack(createAppointment.isPending, () => {});
   useAndroidBack(success, () => {
@@ -1455,8 +1518,10 @@ export default function Booking() {
   const selectedDayLabel = selectedDate ? upperFirst(format(selectedDate, 'EEEE d MMMM', { locale: fr })) : '';
   const [addonsOpen, setAddonsOpen] = useState(false);
   const [noteOpen, setNoteOpen] = useState(false);
-  const showAddons = addonsEnabled && !galleryFocus && addonProducts.length > 0;
+  const showAddons = addonsEnabled && addonProducts.length > 0;
   const barberLabel = (liveEmployee || selectedEmployee)?.name;
+  // Vignette du look : prestations, durée et prix de la sélection réelle (catalogue à jour)
+  const lookLive = lookTotals(liveSelected);
 
   return (
     <div className="min-h-screen relative overflow-x-clip">
@@ -1469,7 +1534,7 @@ export default function Booking() {
       <div className="relative max-w-lg mx-auto px-4 pt-5 pb-48">
         {/* En-tête : retour, progression en trois étapes, titre */}
         <div className="mb-6">
-          <BookingSteps step={step} onBack={() => goToStep(step - 1)} backDisabled={createAppointment.isPending} />
+          <BookingSteps step={step} onBack={goBack} backDisabled={createAppointment.isPending} />
 
           {/* Le nouveau titre remplace l'ancien tout de suite, en fondu. Avec AnimatePresence
               mode="wait", il attendait la fin de la sortie de l'ancien : des changements d'étape
@@ -1483,10 +1548,10 @@ export default function Booking() {
             className="mt-4"
           >
             <h1 className="font-display text-[26px] leading-tight font-bold text-foreground">
-              {step === 0 && galleryFocus ? 'Votre prestation' : STEP_TITLES[step]}
+              {STEP_TITLES[step]}
             </h1>
             {/* Heure du lien encore proposée (pas « plus disponible », pas remplacée par une autre) */}
-            {step === 0 && !galleryFocus && (lastMinuteLink && presetMiss !== 'gone'
+            {step === 0 && (lastMinuteLink && presetMiss !== 'gone'
               && (!presetApplied.current.time || selectedTime === presetTime) ? (
               <p className="mt-2 flex items-start gap-2.5 rounded-2xl border border-orange-500/40 bg-orange-500/10 px-3.5 py-2.5 text-sm text-foreground">
                 <Zap className="w-4 h-4 mt-0.5 shrink-0 fill-current text-orange-600 dark:text-orange-400" aria-hidden="true" />
@@ -1575,25 +1640,8 @@ export default function Booking() {
 
         <div className="relative">
         <AnimatePresence mode="popLayout" custom={direction} initial={false}>
-          {/* Étape 1 : prestations (écran court depuis une photo de la galerie) */}
-          {step === 0 && galleryFocus && (
-            <motion.div key="gallery-quick" custom={direction} variants={stepVariants} initial="enter" animate="center" exit="exit" transition={stepTransition}>
-              <GalleryQuickStep
-                catalog={services}
-                selected={liveSelected}
-                photoServiceIds={preSelectedIds}
-                loading={servicesPending || selectedServices.length === 0}
-                barber={selectedEmployee || preSelectedBarber}
-                onToggle={toggleService}
-                onSwap={swapServices}
-                onChangeServices={() => { hapticFeedback(); setFullPicker(true); }}
-                addonsEnabled={addonsEnabled}
-                addonSelection={addonSelection}
-                onAddonChange={setAddonSelection}
-              />
-            </motion.div>
-          )}
-          {step === 0 && !galleryFocus && (
+          {/* Étape 1 : prestations */}
+          {step === 0 && (
             <motion.div key="services" custom={direction} variants={stepVariants} initial="enter" animate="center" exit="exit" transition={stepTransition}>
               {/* Même catalogue que la page Prestations : « Choisir » mène au créneau, la sélection
                   multiple passe par « Ajouter » et la barre du bas */}
@@ -1616,22 +1664,35 @@ export default function Booking() {
           {step === 1 && (
             <motion.div key="datetime" custom={direction} variants={stepVariants} initial="enter" animate="center" exit="exit" transition={stepTransition}
               className="space-y-6">
-              {/* Prestations choisies */}
-              <div className="flex items-center gap-3 p-3 rounded-2xl border border-border bg-card">
-                <span className="w-10 h-10 shrink-0 rounded-xl bg-primary/12 text-primary flex items-center justify-center" aria-hidden="true">
-                  <Scissors className="w-[18px] h-[18px]" />
-                </span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-foreground line-clamp-2 break-words">
-                    {liveSelected.length > 1 ? liveSelected.map(s => s.name).join(' + ') : liveSelected[0]?.name}
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-0.5">{durationPrice}</p>
+              {/* Look choisi sur le profil du barber (photo, titre, total), sinon les prestations choisies */}
+              {lookActive || lookPending ? (
+                <LookHeader
+                  loading={!lookActive}
+                  photoUrl={lookItem?.url}
+                  title={lookName}
+                  names={lookAdjusted && lookItem?.caption ? liveSelected.map(s => s.name).filter(Boolean).join(' + ') : ''}
+                  count={lookLive.count}
+                  duration={lookLive.duration}
+                  price={lookLive.price}
+                  onEdit={editLook}
+                />
+              ) : (
+                <div className="flex items-center gap-3 p-3 rounded-2xl border border-border bg-card">
+                  <span className="w-10 h-10 shrink-0 rounded-xl bg-primary/12 text-primary flex items-center justify-center" aria-hidden="true">
+                    <Scissors className="w-[18px] h-[18px]" />
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-foreground line-clamp-2 break-words">
+                      {liveSelected.length > 1 ? liveSelected.map(s => s.name).join(' + ') : liveSelected[0]?.name}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5">{durationPrice}</p>
+                  </div>
+                  <button type="button" onClick={() => goToStep(0)}
+                    className="shrink-0 min-h-[44px] px-2 text-[13px] font-semibold text-primary hover:text-primary/80">
+                    Modifier
+                  </button>
                 </div>
-                <button type="button" onClick={() => goToStep(0)}
-                  className="shrink-0 min-h-[44px] px-2 text-[13px] font-semibold text-primary hover:text-primary/80">
-                  Modifier
-                </button>
-              </div>
+              )}
 
               {/* Avec qui ? */}
               <section aria-labelledby="barber-strip-title">
@@ -1647,6 +1708,7 @@ export default function Booking() {
                   anyBarber={anyBarber}
                   selectedId={selectedEmployee?.id}
                   usualId={usualBarber?.id}
+                  lookId={lookActive ? preSelectedBarber?.id : null}
                   loading={employeesPending && !employeesPaused}
                   onAny={chooseAnyBarber}
                   onSelect={chooseBarber}
@@ -1721,13 +1783,21 @@ export default function Booking() {
                   ) : slotsFailedQuery ? (
                     <LoadError what="les créneaux" error={slotsFailedQuery.error} onRetry={retrySlots} retrying={slotsRetrying} compact />
                   ) : slotOptions.length > 0 ? (
-                    <SlotGroups
-                      options={slotOptions}
-                      selectedTime={selectedTime}
-                      selectedEmployeeId={selectedEmployee?.id}
-                      showBarber={anyBarber}
-                      onSelect={chooseSlot}
-                    />
+                    <>
+                      <SlotGroups
+                        options={slotOptions}
+                        selectedTime={selectedTime}
+                        selectedEmployeeId={selectedEmployee?.id}
+                        showBarber={anyBarber}
+                        onSelect={chooseSlot}
+                      />
+                      {/* Look de plusieurs prestations : les heures tiennent compte de sa durée totale */}
+                      {lookActive && liveSelected.length > 1 && (
+                        <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+                          Seuls les créneaux assez longs pour tout le look ({formatDuration(totalDuration)}) sont proposés.
+                        </p>
+                      )}
+                    </>
                   ) : emptyMessage && (
                     <div className="rounded-2xl border border-border bg-card p-6 text-center">
                       <p className="text-sm text-muted-foreground">{emptyMessage.title}</p>
@@ -1799,13 +1869,13 @@ export default function Booking() {
                 dateLabel={selectedDayLabel}
                 time={selectedTime}
                 endTime={endTime}
-                onEditServices={() => goToStep(0)}
+                onEditServices={lookActive ? editLookFromConfirm : () => goToStep(0)}
                 onEditSlot={() => goToStep(1)}
+                look={lookActive ? { photoUrl: lookItem.url, title: lookName } : null}
               />
 
               {/* Produits de la boutique à ajouter (pas pour un déplacement : ceux de l'ancien RDV suivent).
-                  Repliés : le client les ouvre s'il le souhaite. Déjà proposés avant le créneau quand la
-                  réservation vient d'une photo : le total ci-dessous les reprend */}
+                  Repliés : le client les ouvre s'il le souhaite. Réservation depuis un look comprise */}
               {showAddons && (
                 <div className="rounded-2xl border border-border bg-card overflow-hidden">
                   <button type="button" onClick={() => { hapticFeedback(); setAddonsOpen(v => !v); }} aria-expanded={addonsOpen || addonLines.length > 0}
@@ -1901,23 +1971,14 @@ export default function Booking() {
       {/* Barre fixée en bas : ce qui est choisi et le bouton de l'étape */}
       <AnimatePresence>
         {!success && step === 0 && selectedServices.length > 0 && (
-          galleryFocus ? (
-            <BookingBar
-              key="bar-gallery"
-              actionLabel={selectedEmployee ? `Choisir mon créneau avec ${selectedEmployee.name}` : 'Choisir mon créneau'}
-              onAction={() => goToStep(1)}
-              disabled={!canNext()}
-            />
-          ) : (
-            <BookingBar
-              key="bar-services"
-              title={servicesTitle}
-              subtitle={durationPrice}
-              actionLabel="Continuer"
-              onAction={() => goToStep(1)}
-              disabled={!canNext()}
-            />
-          )
+          <BookingBar
+            key="bar-services"
+            title={servicesTitle}
+            subtitle={durationPrice}
+            actionLabel="Continuer"
+            onAction={() => goToStep(1)}
+            disabled={!canNext()}
+          />
         )}
         {!success && step === 1 && (
           <BookingBar
@@ -1951,6 +2012,23 @@ export default function Booking() {
           />
         )}
       </AnimatePresence>
+
+      {/* « Modifier le look » avec une note ou des produits saisis : rester, ou revenir au look */}
+      <AlertDialog open={leaveLookAsk} onOpenChange={setLeaveLookAsk}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Revenir au look ?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Vous pourrez changer les prestations du look, puis choisir de nouveau votre créneau.
+              Ne seront pas gardés : {lookLosses.join(' et ')}.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Rester ici</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { setLeaveLookAsk(false); editLook(); }}>Revenir au look</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

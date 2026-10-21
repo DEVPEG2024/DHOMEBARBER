@@ -54,6 +54,28 @@ export const PRESTATIONS = {
   couleur: { id: 'srv-couleur', name: 'Coloration', price: 45, duration: 60, sort_order: 8 },
 };
 
+/** Photo des réalisations (`/api/media/<uuid>`, servie par le faux serveur : image de couleur). */
+export const media = (n) => `https://dhomebarber-api-3aabb8313cb6.herokuapp.com/api/media/aaaaaaaa-0000-4000-8000-${String(n).padStart(12, '0')}`;
+
+/**
+ * Réalisations des barbers (looks, 21 oct. 2026). Kevin : un look de trois prestations, un look
+ * d'une prestation rangé à l'ancienne (`service_id` seul, comme l'enregistraient les apps d'avant
+ * les looks), un look enfant et une photo sans prestation. Romain : un look barbe. Dom : aucune.
+ */
+export const LOOKS = {
+  kevinComplet: { url: media(1), caption: 'Dégradé, barbe et couleur', service_ids: ['srv-couleur', 'srv-coupe', 'srv-barbe'], service_id: 'srv-couleur' },
+  kevinDegrade: { url: media(2), caption: 'Dégradé à blanc', service_id: 'srv-coupe' },
+  kevinEnfant: { url: media(3), caption: 'Étoile pour les petits', service_ids: ['srv-enfant'], service_id: 'srv-enfant' },
+  kevinSansPrestation: { url: media(4), caption: '' },
+  romainBarbe: { url: media(5), caption: 'Barbe sculptée', service_ids: ['srv-barbe', 'srv-contours'], service_id: 'srv-barbe' },
+};
+/** Clé de lien d'une photo (`lookKeyOf` de src/lib/barberGallery.js : l'uuid du média). */
+export const cleLook = (look) => look.url.split('/').pop();
+const GALERIES = {
+  'emp-kevin': [LOOKS.kevinComplet, LOOKS.kevinDegrade, LOOKS.kevinEnfant, LOOKS.kevinSansPrestation],
+  'emp-romain': [LOOKS.romainBarbe],
+};
+
 /** Ligne de prestation telle que le serveur la range dans un rendez-vous. */
 const ligne = (p) => ({ service_id: p.id, name: p.name, duration: p.duration, price: p.price });
 
@@ -141,7 +163,7 @@ export function creerDonnees() {
     permissions: [],
     skills: {},
     experience_level: 80,
-    gallery: [],
+    gallery: structuredClone(GALERIES[b.id] || []),
     is_active: true,
     is_hidden: false,
     created_at: ANCIEN,

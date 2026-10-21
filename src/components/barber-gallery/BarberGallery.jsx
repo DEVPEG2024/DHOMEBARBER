@@ -1,205 +1,248 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { useNavigate } from 'react-router-dom';
+import React, { useCallback, useEffect, useId, useMemo, useState } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { CalendarPlus, ChevronLeft, ChevronRight, Images, X } from 'lucide-react';
 import { api } from '@/api/apiClient';
 import { hapticFeedback } from '@/lib/capacitor';
-import { GALLERY_PREVIEW, activeServicesQuery, bookingLinkFor, galleryOf } from '@/lib/barberGallery';
-import { formatDuration, formatPrice } from '@/components/services/serviceUtils';
-import { useAndroidBack } from '@/lib/useAndroidBack';
 import { track } from '@/lib/analytics';
+import { barberFirstName } from '@/lib/lastMinute';
+import {
+  GALLERY_PREVIEW, LOOK_FILTERS, activeServicesQuery, bookingLinkFor, galleryOf, lookFilterKeys,
+  lookLinkFor, lookServices, lookTitle, lookTotals,
+} from '@/lib/barberGallery';
+import LoadError, { queryFailed } from '@/components/shared/LoadError';
+import { FeaturedLook, LookTile } from './LookCard';
+import LookViewer from './LookViewer';
+import { idsOf, sameIds } from './lookSelection';
 
-const SWIPE_OFFSET = 60;
-const SWIPE_VELOCITY = 450;
-
-/**
- * Visionneuse plein écran : croix, flèches, glissé gauche / droite, Échap et ← / → au clavier.
- * Rendue dans `body` ; les événements de pointeur sont arrêtés à sa racine, sinon (portail React)
- * ils remonteraient au bloc glissable du profil et feraient changer de barber. Les touches sont
- * écoutées en capture pour la même raison (BarberProfile écoute ← / → sur window).
- */
-function Lightbox({ items, index, onIndex, onClose, barberName, serviceOf, onBook }) {
-  const reduce = useReducedMotion();
-  const [dir, setDir] = useState(0);
-  const count = items.length;
-  const item = items[index];
-
-  const go = useCallback((step) => {
-    if (count < 2) return;
-    setDir(step);
-    hapticFeedback();
-    onIndex((index + step + count) % count);
-  }, [count, index, onIndex]);
-
-  useEffect(() => {
-    const onKey = (e) => {
-      if (e.key === 'Escape') onClose();
-      else if (e.key === 'ArrowRight') go(1);
-      else if (e.key === 'ArrowLeft') go(-1);
-      else return;
-      e.stopPropagation();
-      e.preventDefault();
-    };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [go, onClose]);
-
-  useEffect(() => {
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = prev; };
-  }, []);
-
-  if (!item) return null;
-  const service = serviceOf(item);
-
-  return createPortal(
-    <motion.div
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[70] bg-black/95 flex flex-col"
-      onPointerDown={(e) => e.stopPropagation()}
-      role="dialog" aria-modal="true" aria-label="Réalisations"
+/** Puce de filtre (« Tous 4 », « Coupes 2 »…). */
+function FilterChip({ label, count, active, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`h-9 px-3.5 rounded-full text-[13px] font-semibold border transition-colors ${active
+        ? 'bg-primary border-primary text-primary-foreground'
+        : 'bg-card border-border text-foreground/80 hover:text-foreground'}`}
     >
-      <div className="flex items-center justify-between px-4 pt-[max(env(safe-area-inset-top),16px)] pb-3 text-white">
-        <span className="text-xs tabular-nums text-white/60">{index + 1} / {count}</span>
-        <button type="button" onClick={onClose} aria-label="Fermer"
-          className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center">
-          <X className="w-5 h-5" />
-        </button>
-      </div>
-
-      <div className="relative flex-1 min-h-0 flex items-center justify-center overflow-hidden">
-        <AnimatePresence initial={false} custom={dir} mode="popLayout">
-          <motion.img
-            key={item.url}
-            src={item.url}
-            alt={item.caption || `Réalisation ${index + 1}`}
-            custom={dir}
-            initial={reduce ? { opacity: 0 } : { opacity: 0, x: dir >= 0 ? 80 : -80 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={reduce ? { opacity: 0 } : { opacity: 0, x: dir >= 0 ? -80 : 80 }}
-            transition={{ type: 'spring', stiffness: 320, damping: 32 }}
-            drag={count > 1 ? 'x' : false}
-            dragConstraints={{ left: 0, right: 0 }}
-            dragElastic={0.4}
-            onDragEnd={(_e, { offset, velocity }) => {
-              if (offset.x < -SWIPE_OFFSET || velocity.x < -SWIPE_VELOCITY) go(1);
-              else if (offset.x > SWIPE_OFFSET || velocity.x > SWIPE_VELOCITY) go(-1);
-            }}
-            draggable={false}
-            className="max-w-full max-h-full object-contain select-none touch-pan-y"
-          />
-        </AnimatePresence>
-        {count > 1 && (
-          <>
-            <button type="button" onClick={() => go(-1)} aria-label="Photo précédente"
-              className="absolute left-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/50 text-white flex items-center justify-center">
-              <ChevronLeft className="w-5 h-5" />
-            </button>
-            <button type="button" onClick={() => go(1)} aria-label="Photo suivante"
-              className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/50 text-white flex items-center justify-center">
-              <ChevronRight className="w-5 h-5" />
-            </button>
-          </>
-        )}
-      </div>
-
-      {/* Réserver depuis la photo : la prestation qu'elle montre (si le barber l'a indiquée et
-          qu'elle est encore au catalogue), sinon ce barber seul */}
-      <div className="px-5 pt-3 pb-[max(env(safe-area-inset-bottom),20px)] text-center space-y-2.5">
-        {item.caption && <p className="text-sm text-white/90">{item.caption}</p>}
-        {service && (
-          <p className="text-xs text-white/60">
-            {service.name} · {formatPrice(service.price)}{service.duration ? ` · ${formatDuration(service.duration)}` : ''}
-          </p>
-        )}
-        <button
-          type="button"
-          onClick={() => onBook(service)}
-          data-testid="gallery-book"
-          className="w-full max-w-sm mx-auto flex items-center justify-center gap-2 py-3 rounded-2xl bg-primary text-primary-foreground text-sm font-semibold active:scale-[0.98] transition-transform"
-        >
-          <CalendarPlus className="w-4 h-4" />
-          {service ? 'Réserver cette prestation' : `Réserver avec ${barberName || 'ce barber'}`}
-        </button>
-      </div>
-    </motion.div>,
-    document.body,
+      {label} <span className={`tabular-nums ${active ? 'opacity-85' : 'text-muted-foreground'}`}>{count}</span>
+    </button>
   );
 }
 
 /**
- * Réalisations d'un barber sur son profil public : grille de vignettes carrées (les 9 premières,
- * puis « Voir les N photos »), tap = visionneuse avec « Réserver cette prestation » (prix sur la
- * vignette d'une photo liée à une prestation). Rien n'est affiché sans photo.
+ * « Les looks de <prénom> » sur le profil public d'un barber (21 oct. 2026). Chaque photo des
+ * réalisations porte un look de 1 à 5 prestations (`employees.gallery`, src/lib/barberGallery.js) :
+ * filtres (Coupes, Barbe…) dès que deux sont présents, look vedette en grande carte (« Réserver ce
+ * look » va droit aux créneaux), puis grille de vignettes 4:5. Un tap ouvre la visionneuse
+ * (LookViewer) où le client ajuste le look avant de choisir son créneau. Rien sans photo.
+ *
+ * Adresse (contrat partagé avec la réservation) : la visionneuse ouverte = `/barber/<id>?look=<clé>`
+ * (remplacée, pas empilée) ; `&services=a,b` y rouvre la sélection du client. Avant de partir
+ * réserver, l'adresse du profil est remplacée par celle du look et de la sélection : le retour
+ * depuis la réservation rouvre la visionneuse telle que le client l'a laissée. Une clé inconnue de
+ * ce barber est retirée de l'adresse ; pendant un changement de barber (glissé), la section qui
+ * s'en va ne réagit plus à l'adresse du suivant.
+ *
+ * Catalogue en échec ou hors connexion : photos et légendes restent, sans aucun prix, avec un
+ * LoadError compact.
  */
 export default function BarberGallery({ employee, delay = 0 }) {
   const navigate = useNavigate();
-  const items = galleryOf(employee);
-  const [open, setOpen] = useState(null); // index affiché, null = fermé
+  const { id: routeId } = useParams();
+  const [params] = useSearchParams();
+  const reduce = useReducedMotion();
+  const headingId = useId();
+  const [filter, setFilter] = useState('all');
   const [expanded, setExpanded] = useState(false);
-  // Catalogue (même clé que la réservation) : la prestation d'une photo n'est proposée que si elle
-  // est encore active ; sinon, réservation avec ce barber seul
-  const servicesQuery = useQuery({ ...activeServicesQuery(api), enabled: items.some((it) => it.service_id) });
-  const services = Array.isArray(servicesQuery.data) ? servicesQuery.data : [];
-  const serviceOf = (item) => (item?.service_id ? services.find((s) => String(s.id) === String(item.service_id)) || null : null);
-  const book = (service) => {
+
+  const items = useMemo(() => galleryOf(employee), [employee]);
+  const anyService = items.some((it) => it.service_ids.length > 0);
+  // Catalogue actif (même clé que la réservation) : prix et durées toujours recalculés
+  const servicesQuery = useQuery({ ...activeServicesQuery(api), enabled: anyService });
+  const catalog = Array.isArray(servicesQuery.data) ? servicesQuery.data : null;
+  const catalogFailed = anyService && !catalog && queryFailed(servicesQuery);
+  const catalogPending = anyService && !catalog && !catalogFailed;
+
+  const employeeId = employee?.id != null ? String(employee.id) : '';
+  const firstName = barberFirstName(employee);
+
+  const looks = useMemo(() => items.map((item) => {
+    const services = catalog ? lookServices(item, catalog) : null;
+    return {
+      item,
+      services,
+      totals: services ? lookTotals(services) : null,
+      filters: services ? lookFilterKeys(services) : [],
+      title: lookTitle(item, services || []),
+      // Look réservable (au moins une prestation) ; catalogue pas encore lu : d'après la photo
+      hasLook: services ? services.length > 0 : item.service_ids.length > 0,
+    };
+  }), [items, catalog]);
+
+  // Filtres présents (au moins deux différents pour afficher les puces)
+  const filters = useMemo(() => LOOK_FILTERS
+    .map((f) => ({ ...f, count: looks.filter((l) => l.filters.includes(f.key)).length }))
+    .filter((f) => f.count > 0), [looks]);
+  const showFilters = filters.length >= 2;
+  const activeFilter = showFilters && filters.some((f) => f.key === filter) ? filter : 'all';
+  const filtered = activeFilter === 'all' ? looks : looks.filter((l) => l.filters.includes(activeFilter));
+
+  // Visionneuse : ouverte par l'adresse, seulement sur le profil de CE barber
+  const mine = !!employeeId && String(routeId) === employeeId;
+  const lookKey = mine ? params.get('look') : null;
+  const servicesParam = mine ? params.get('services') : null;
+  const current = lookKey ? looks.find((l) => l.item.key === lookKey) || null : null;
+  // Barres de progression et suivant / précédent : les looks du filtre affiché (sinon tous)
+  const viewerLooks = current && filtered.includes(current) ? filtered : looks;
+  const viewerIndex = current ? viewerLooks.indexOf(current) : -1;
+
+  const profilePath = lookLinkFor(employeeId);
+
+  // Clé inconnue de ce barber (photo retirée, lien d'un autre barber) : rien ne s'ouvre
+  useEffect(() => {
+    if (mine && lookKey && !current) navigate(profilePath, { replace: true });
+  }, [mine, lookKey, current, navigate, profilePath]);
+
+  const openLook = (look) => {
     hapticFeedback();
-    track('gallery_book', { barber_id: String(employee?.id || ''), with_service: !!service });
-    setOpen(null);
-    navigate(bookingLinkFor(employee, service));
+    track('gallery_open', { barber_id: employeeId });
+    navigate(lookLinkFor(employeeId, look.item.key), { replace: true });
   };
-  // Bouton retour d'Android : ferme la visionneuse au lieu de quitter le profil
-  useAndroidBack(open != null, () => setOpen(null));
+
+  const closeViewer = useCallback(() => {
+    navigate(profilePath, { replace: true });
+  }, [navigate, profilePath]);
+
+  const showIndex = useCallback((i) => {
+    const target = viewerLooks[i];
+    if (target) navigate(lookLinkFor(employeeId, target.item.key), { replace: true });
+  }, [viewerLooks, navigate, employeeId]);
+
+  /**
+   * Départ vers la réservation : l'adresse du profil devient celle du look et de la sélection
+   * (le retour y rouvre la visionneuse), puis les créneaux de ce barber avec ces prestations.
+   */
+  const book = useCallback((look, selection, from) => {
+    hapticFeedback();
+    const ids = idsOf(selection);
+    track('gallery_book', {
+      barber_id: employeeId,
+      with_service: ids.length > 0,
+      services: ids.length,
+      adjusted: !sameIds(ids, idsOf(look.services)),
+      from,
+    });
+    navigate(lookLinkFor(employeeId, look.item.key, ids), { replace: true });
+    navigate(bookingLinkFor(employee, ids, look.item), { state: { fromLook: true } });
+  }, [employee, employeeId, navigate]);
+
+  const bookFromViewer = useCallback((look, selection) => book(look, selection, 'viewer'), [book]);
+
   if (items.length === 0) return null;
 
-  const shown = expanded ? items : items.slice(0, GALLERY_PREVIEW);
-  const hidden = items.length - shown.length;
+  const featured = filtered.find((l) => l.hasLook) || null;
+  const rest = filtered.filter((l) => l !== featured);
+  const previewRest = Math.max(0, GALLERY_PREVIEW - (featured ? 1 : 0));
+  const shownRest = expanded ? rest : rest.slice(0, previewRest);
+  const hiddenCount = rest.length - shownRest.length;
+  const pendingFor = (look) => catalogPending && look.item.service_ids.length > 0;
+
+  const chooseFilter = (key) => {
+    if (key === activeFilter) return;
+    hapticFeedback();
+    setFilter(key);
+    setExpanded(false);
+  };
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 12 }}
+    <motion.section
+      aria-labelledby={headingId}
+      initial={reduce ? false : { opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay, duration: 0.4 }}
-      className="rounded-2xl border border-white/[0.08] bg-white/[0.03] backdrop-blur-xl shadow-[0_8px_32px_rgba(0,0,0,0.12)] p-5 mb-5"
+      className="mb-6"
     >
-      <h3 className="text-[10px] uppercase tracking-[0.2em] text-primary/60 font-semibold mb-3 flex items-center gap-2">
-        <Images className="w-3.5 h-3.5" />
-        Réalisations
-        <span className="text-muted-foreground/50 normal-case tracking-normal font-normal">· {items.length}</span>
-      </h3>
-      <div className="grid grid-cols-3 gap-1.5">
-        {shown.map((item, i) => (
-          <button
-            key={item.url}
-            type="button"
-            onClick={() => { hapticFeedback(); setOpen(i); track('gallery_open', { barber_id: String(employee?.id || '') }); }}
-            className="relative aspect-square rounded-lg overflow-hidden bg-white/5 active:scale-[0.97] transition-transform"
-            aria-label={item.caption || `Réalisation ${i + 1}`}
-          >
-            <img src={item.url} alt="" loading="lazy" decoding="async" draggable={false} className="w-full h-full object-cover" />
-            {serviceOf(item) && (
-              <span className="absolute bottom-1 left-1 rounded-md bg-black/65 px-1.5 py-0.5 text-[10px] font-semibold text-white">
-                {formatPrice(serviceOf(item).price)}
-              </span>
-            )}
-          </button>
-        ))}
+      <div className="mb-3.5">
+        <h2 id={headingId} aria-label={`Les looks de ${firstName}`} className="flex flex-col gap-0.5">
+          <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">Les looks de</span>
+          <span className="font-fut text-4xl font-extrabold leading-none text-foreground">{firstName}</span>
+        </h2>
+        <p className="mt-1 text-xs text-muted-foreground">
+          {items.length} look{items.length > 1 ? 's' : ''} · touchez une photo pour l&apos;ajuster
+        </p>
       </div>
-      {hidden > 0 && (
-        <button type="button" onClick={() => setExpanded(true)}
-          className="w-full mt-3 py-2.5 rounded-xl border border-white/10 bg-white/[0.04] text-xs font-semibold text-foreground/80">
-          Voir les {items.length} photos
+
+      {showFilters && (
+        <div role="group" aria-label="Filtrer les looks" className="flex flex-wrap gap-2 mb-3.5">
+          <FilterChip label="Tous" count={looks.length} active={activeFilter === 'all'} onClick={() => chooseFilter('all')} />
+          {filters.map((f) => (
+            <FilterChip key={f.key} label={f.label} count={f.count} active={activeFilter === f.key} onClick={() => chooseFilter(f.key)} />
+          ))}
+        </div>
+      )}
+
+      {catalogFailed && (
+        <LoadError compact className="mb-3.5" what="les prix des looks" error={servicesQuery.error}
+          onRetry={servicesQuery.refetch} retrying={servicesQuery.isFetching} />
+      )}
+
+      <motion.div
+        key={activeFilter}
+        initial={reduce ? false : { opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ type: 'spring', stiffness: 320, damping: 32 }}
+        className="flex flex-col gap-2.5"
+      >
+        {featured && (
+          <FeaturedLook
+            look={featured}
+            firstName={firstName}
+            pending={pendingFor(featured)}
+            onOpen={() => openLook(featured)}
+            onBook={() => book(featured, featured.services || [], 'featured')}
+          />
+        )}
+        {shownRest.length > 0 && (
+          <ul aria-label={featured ? 'Autres looks' : 'Looks'} className="grid grid-cols-2 gap-2.5">
+            {shownRest.map((look) => (
+              <li key={look.item.key}>
+                <LookTile look={look} firstName={firstName} pending={pendingFor(look)} onOpen={() => openLook(look)} />
+              </li>
+            ))}
+          </ul>
+        )}
+      </motion.div>
+
+      {hiddenCount > 0 && (
+        <button type="button" onClick={() => { hapticFeedback(); setExpanded(true); }}
+          className="w-full mt-3 h-11 rounded-2xl border border-border bg-card text-sm font-semibold text-foreground/85">
+          Voir les {filtered.length} looks
         </button>
       )}
+
       <AnimatePresence>
-        {open !== null && (
-          <Lightbox items={items} index={open} onIndex={setOpen} onClose={() => setOpen(null)}
-            barberName={employee?.name} serviceOf={serviceOf} onBook={book} />
+        {current && viewerIndex >= 0 && (
+          <LookViewer
+            looks={viewerLooks}
+            index={viewerIndex}
+            firstName={firstName}
+            photoUrl={employee?.photo_url || null}
+            catalog={catalog}
+            catalogQuery={{
+              failed: catalogFailed,
+              error: servicesQuery.error,
+              refetch: servicesQuery.refetch,
+              isFetching: servicesQuery.isFetching,
+            }}
+            servicesParam={servicesParam}
+            onIndex={showIndex}
+            onClose={closeViewer}
+            onBook={bookFromViewer}
+          />
         )}
       </AnimatePresence>
-    </motion.div>
+    </motion.section>
   );
 }

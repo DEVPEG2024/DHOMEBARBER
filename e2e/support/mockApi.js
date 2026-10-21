@@ -171,6 +171,12 @@ export class FauxServeur {
     }
     const cors = ENTETES_CORS(requete.headers().origin || new URL(origineApp).origin);
     if (requete.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
+    // Images stockées en base (`GET /api/media/<id>`) : une image de couleur, la même pour un même id
+    const mediaId = /^\/api\/media\/([^/]+)$/.exec(url.pathname)?.[1];
+    if (mediaId && requete.method() === 'GET') {
+      this.requetes.push({ methode: 'GET', chemin: url.pathname, query: {}, q: null, corps: null });
+      return route.fulfill({ status: 200, headers: cors, contentType: 'image/svg+xml', body: imageDeMedia(mediaId) });
+    }
 
     const req = this.decoder(requete, url);
     let reponse;
@@ -252,6 +258,14 @@ export class FauxServeur {
         if (e?.type === 'error') this.erreursApp.push(`${e.name} (${e.props?.source || '?'}, ${e.props?.page || '?'})`);
       }
       return { json: { ok: true } };
+    }
+
+    // Envoi d'une image (`UploadFile`) : rangée « en base », URL `/api/media/<uuid>` comme le vrai serveur
+    if (methode === 'POST' && chemin === '/integration-endpoints/Core/UploadFile') {
+      if (!req.compte) return nonAuthentifie();
+      this.compteurId += 1;
+      const id = `bbbbbbbb-0000-4000-8000-${String(this.compteurId).padStart(12, '0')}`;
+      return { json: { file_url: `${API_ORIGINE}/api/media/${id}` } };
     }
 
     // Carte Gang du client (révélation de niveau, profil)
@@ -378,6 +392,17 @@ function cheminCorrespond(motif, chemin) {
 
 const nonAuthentifie = () => ({ status: 401, json: { error: 'Non authentifié' } });
 const jetonInvalide = () => ({ status: 401, json: { error: 'Token invalide ou expiré' } });
+
+/** Image d'un média simulé : portrait 4:5 d'une teinte tirée de l'id (lisible sur les captures). */
+function imageDeMedia(id) {
+  let h = 0;
+  for (const c of id) h = (h * 31 + c.charCodeAt(0)) % 360;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1000" viewBox="0 0 800 1000">`
+    + `<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="hsl(${h},45%,42%)"/>`
+    + `<stop offset="1" stop-color="hsl(${(h + 40) % 360},50%,18%)"/></linearGradient></defs>`
+    + `<rect width="800" height="1000" fill="url(#g)"/><circle cx="400" cy="380" r="170" fill="hsla(${h},30%,85%,0.35)"/>`
+    + `<rect x="230" y="560" width="340" height="320" rx="150" fill="hsla(${h},30%,85%,0.25)"/></svg>`;
+}
 
 function typeDeContenu(chemin) {
   if (/\.css(\?|$)/.test(chemin) || chemin.includes('/css')) return 'text/css';

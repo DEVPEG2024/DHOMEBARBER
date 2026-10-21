@@ -28,6 +28,7 @@
 - **Déclarer la remontée des erreurs avant iOS build 16 / Android code 17** (premier build qui l'embarque) : App Store « Confidentialité de l'app » → Diagnostics → Données de plantage ; Play « Sécurité des données » → Infos et performances → Journaux de plantage. Source : 20 oct. 2026, `docs/fonctions/admin-pilotage.md`.
 - **Galerie des réalisations** : ne la mentionner dans les fiches des stores qu'une fois remplie (refus Google du 10 sept. 2026 pour une promesse absente). Source : `docs/fonctions/barbers.md`.
 - **Last Minute sur l'accueil** (20 oct. 2026) : en ligne sur dhomebarber.fr, dans les apps seulement avec le build 16 / code 17. Source : `docs/fonctions/interface-accueil-animations.md`.
+- **Looks de la galerie** (21 oct. 2026) : en ligne sur dhomebarber.fr ; les apps publiées gardent l'ancien parcours (une prestation par photo, écran « Votre prestation ») jusqu'au build 16 / code 17. Le serveur garde le look entier quand une ancienne app enregistre la galerie. Source : `docs/fonctions/barbers.md`.
 - **Plugin natif Snap** (SDK iOS / Android via un plugin Capacitor) : non fait, seulement si les performances de la WebView ne suffisent pas. Source : `docs/fonctions/snap-essayage.md`.
 
 ## Contrôles jamais faits sur un vrai appareil ou dans un navigateur
@@ -72,7 +73,8 @@
 - `BackgroundMusic.jsx` : code mort à supprimer (tour 6).
 - Last Minute de l'accueil (20 oct. 2026) : la carte arrive après le reste de l'accueil (décalage CLS 0,09 mesuré avec une réponse à 1,5 s ; lancer la lecture plus tôt le réduirait) ; sur iOS Safari, sans ancrage du défilement, une carte qui apparaît en tête pendant que le client a défilé plus bas peut décaler la page. Source : `docs/fonctions/interface-accueil-animations.md`.
 - Carte Gang, niveau choisi par l'admin (21 oct. 2026) : impossible pour un client sans visite terminée (409 `no_card`, pas de carte). Un habitué d'avant l'app reçoit d'abord sa carte par « Ajouter un client » dans l'agenda (prestation déjà terminée), puis l'admin choisit son niveau. Aucune notification au client quand sa carte monte (révélation à la prochaine ouverture de l'app seulement). Source : `docs/fonctions/carte-gang.md`.
-- Tests de bout en bout : à étendre à la Boutique, Privatiser le salon, profil barber, tableau de bord ; le chemin animé (animations non réduites) n'est pas couvert.
+- Code mort : l'option `suggestionsOnly` de `ServicePicker.jsx` n'a plus d'appelant depuis la suppression de `GalleryQuickStep.jsx` (looks, 21 oct. 2026). À retirer.
+- Tests de bout en bout : à étendre à la Boutique, Privatiser le salon, tableau de bord (profil barber : looks couverts depuis le 21 oct. 2026) ; le chemin animé (animations non réduites) n'est pas couvert.
 - Activité clients v1 (13 oct.) : une action dont la ligne a été supprimée disparaît du fil, un RDV saisi par le staff avec l'email d'un client apparaît comme une action client, lu / non lu propre au navigateur, ~14 requêtes / min par onglet admin. Réglé par la table d'audit `admin_activity` (v2 de `docs/backend-admin-alerts.md`, § 5), non faite.
 
 ## Dépendances

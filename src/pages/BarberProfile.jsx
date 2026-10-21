@@ -224,7 +224,8 @@ function BarberProfileContent({ employee, skillCategories, catsQuery = null }) {
       {/* Vidéo de présentation, si renseignée */}
       <MediaBlock videoUrl={videoUrl} photoUrl={photoUrl} />
 
-      {/* Réalisations (employees.gallery), rien sans photo */}
+      {/* « Les looks de <prénom> » (employees.gallery) : rien sans photo. La visionneuse s'ouvre par
+          l'adresse (`?look=<clé>&services=…`) ; seule la section de CE barber y réagit (glissé). */}
       <BarberGallery employee={employee} delay={0.1} />
 
       {/* About section - Glass card */}

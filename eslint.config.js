@@ -7,7 +7,7 @@ import pluginUnusedImports from "eslint-plugin-unused-imports";
 export default [
   // Dossiers générés, jamais relus : compilations natives (hors git), build, rapports Playwright
   {
-    ignores: ["ios/", "android/", "dist/", "playwright-report/", "test-results/", "blob-report/"],
+    ignores: ["ios/", "android/", "dist/", ".verify/", "playwright-report/", "test-results/", "blob-report/"],
   },
   // Vérifications de bout en bout : code Node (Playwright) dont une partie s'exécute dans la page
   // (`page.evaluate`, `addInitScript`), d'où les deux jeux de globales
