@@ -4,8 +4,19 @@ import { parisInstant } from '@/lib/calendarLinks';
 export const startsAt = (apt) => parisInstant(apt.date, apt.start_time || '00:00');
 export const endsAt = (apt) => parisInstant(apt.date, apt.end_time || apt.start_time || '23:59');
 
-/** Une visite = rendez-vous honoré (confirmé ou terminé) dont l'heure de fin est passée. */
+/** Statuts d'un rendez-vous honoré (voir `isVisit`). */
 export const VISIT_STATUSES = ['confirmed', 'completed'];
+
+/**
+ * Une visite, même règle que la carte Gang (lib/gangCard.js du serveur, 21 oct. 2026) : rendez-vous
+ * terminé (prestation validée par le barber) dès le jour même, sans attendre l'heure de fin prévue,
+ * jamais un jour à venir ; rendez-vous confirmé une fois son heure de fin passée (heure de Paris).
+ */
+export function isVisit(apt, now = Date.now()) {
+  if (!apt?.date) return false;
+  if (apt.status === 'completed') return String(apt.date).slice(0, 10) <= parisDayKey(new Date(now));
+  return apt.status === 'confirmed' && endsAt(apt) <= now;
+}
 
 /** Commandes encore en cours (ni retirées, ni annulées). */
 export const OPEN_ORDER_STATUSES = ['pending', 'confirmed', 'ready'];

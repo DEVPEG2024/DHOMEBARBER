@@ -277,7 +277,7 @@ Chaque ligne est un invariant : la casser réintroduit un bug déjà corrigé ou
 
 ### Carte Gang
 
-- Visite = RDV `confirmed` / `completed` terminé (Paris), **une par jour** ; déplacement ≠ annulation ; absence = `no_show`.
+- Visite = RDV `completed` (validé par le barber) **dès le jour même**, ou `confirmed` dont l'heure de fin (Paris) est passée ; jamais un jour à venir ; **une par jour** ; déplacement ≠ annulation ; absence = `no_show`. Même règle dans `pastVisits` (serveur) et `isVisit` (`profileUtils.js` : Profil, Clients).
 - Seuils dans `lib/gangCard.js` **et** `TIER_MIN` de `GangCardPage.jsx` : changer des deux côtés. **Aucun avantage lié aux niveaux** ; carte publique réduite (`publicCard`) ; numéro figé (`users.gang_serial`).
 - Niveau choisi par l'admin (`users.gang_min_tier`, fiche client des Cartes Gang, 21 oct. 2026) = un **minimum**, la carte continue de monter avec les visites ; `computeCard` le lit sur le compte : **toute requête qui charge un compte pour une carte sélectionne la colonne** ; sans visite, pas de carte (409 `no_card`).
 - Effets en grand seulement, arrivée spectaculaire une fois par ouverture, **aucun bandeau écrit sur la carte**, photo fondue en ovale. Détail : `docs/fonctions/carte-gang.md`.

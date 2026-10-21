@@ -22,7 +22,7 @@ import AnimatedCounter from '@/components/motion/AnimatedCounter';
 import NextVisitCard from '@/components/profile/NextVisitCard';
 import ShortcutGrid from '@/components/profile/ShortcutGrid';
 import FavoritesCarousel from '@/components/profile/FavoritesCarousel';
-import { OPEN_ORDER_STATUSES, VISIT_STATUSES, endsAt, firstName } from '@/components/profile/profileUtils';
+import { OPEN_ORDER_STATUSES, isVisit, endsAt, firstName } from '@/components/profile/profileUtils';
 
 // Taille de la carte en tête du profil : la largeur de l'écran moins les marges, 0,9 au plus
 function useProfileCardSize() {
@@ -142,7 +142,7 @@ export default function Profile() {
 
   const now = Date.now();
   const dated = (Array.isArray(appointments) ? appointments : []).filter(a => a?.date);
-  const visits = dated.filter(a => VISIT_STATUSES.includes(a.status) && endsAt(a) <= now);
+  const visits = dated.filter(a => isVisit(a, now));
   // Une visite par jour, comme la carte Gang (une famille qui réserve 3 RDV le même jour = 1 visite)
   const visitDays = new Set(visits.map(a => String(a.date).slice(0, 10))).size;
   const upcomingCount = dated.filter(a => a.status === 'confirmed' && endsAt(a) > now).length;

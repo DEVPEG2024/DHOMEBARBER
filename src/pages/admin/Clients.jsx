@@ -11,6 +11,7 @@ import { toast } from 'sonner';
 import LoadError, { friendlyError } from '@/components/shared/LoadError';
 import { useAuth } from '@/lib/AuthContext';
 import { parisInstant } from '@/lib/calendarLinks';
+import { isVisit } from '@/components/profile/profileUtils';
 import { invalidateAppointmentQueries, isClientPlaceholder } from '@/components/agenda/agendaUtils';
 import { normalizeSearch } from '@/components/admin-activity/activityUi';
 
@@ -51,10 +52,11 @@ const parisTodayStr = () => new Intl.DateTimeFormat('en-CA', {
 /** Fiche « Ajouter » / « Importer » : RDV annulé, sans prestation ni prix, posé pour faire exister le contact. */
 const isPlaceholderAppointment = isClientPlaceholder;
 
-/** Vraie visite : RDV confirmé ou terminé dont l'heure de fin (Paris) est passée (ni annulé, ni absent, ni à venir). */
-const isPastVisit = (apt, now = Date.now()) =>
-  !!apt.date && (apt.status === 'completed' || apt.status === 'confirmed')
-  && parisInstant(apt.date, apt.end_time || apt.start_time || '00:00') <= now;
+/**
+ * Vraie visite, même règle que le Profil et la carte Gang (`isVisit`) : prestation validée dès le
+ * jour même, RDV confirmé une fois son heure de fin (Paris) passée ; ni annulé, ni absent, ni à venir.
+ */
+const isPastVisit = isVisit;
 
 // Import : lots de 8 créations, au moins 2,5 s entre deux lots (~190 requêtes / min, moins de la
 // moitié du quota de 400 / min / IP que partage tout le Wi-Fi du salon)
@@ -146,8 +148,8 @@ function buildClients(registeredUsers, appointments, employees) {
     // Mettre à jour le nom/téléphone depuis le RDV si manquant
     if (!c.name || c.name === c.email) c.name = apt.client_name || c.name;
     if (!c.phone) c.phone = apt.client_phone || '';
-    // Visites : même règle que le Profil et la carte Gang (RDV confirmé ou terminé dont l'heure de
-    // fin est passée, une par jour). Dépensé : encaissé seulement, hors pourboire, produit vendu
+    // Visites : même règle que le Profil et la carte Gang (prestation validée dès le jour même, RDV
+    // confirmé une fois son heure de fin passée, une par jour). Dépensé : encaissé seulement, hors pourboire, produit vendu
     // compris, sans la part réglée par carte cadeau (comme le tableau de bord)
     if (isPastVisit(apt, now)) c.visitDays.add(String(apt.date).slice(0, 10));
     if (apt.status === 'completed' || apt.payment_method) {
