@@ -6,6 +6,8 @@
 
 ## À faire dès que possible (actions datées)
 
+- **Ajouter au calendrier dans les apps** (21 oct. 2026) : « Calendrier Apple » (iPhone) et « Autre agenda » (Android) n'arrivent qu'avec le build iOS 16 / code Android 17. L'essayer sur un vrai iPhone et un vrai Android avec ce build : tap → Safari → fiche « Ajouter » ; Android → fichier téléchargé puis ouvert par l'agenda. Seul Safari a été vérifié (simulateur iPhone), pas le tap dans l'app native. Source : `docs/fonctions/reservation-rendez-vous.md`.
+
 - **Carte cadeau de démonstration `DHB-LTWB-WDEZ`** (10 €, id `c8a29982-e057-4e52-b9e0-0cd8afacf251`, compte `reviewer@dhomebarber.fr`) : elle compte dans le CA des cartes cadeau. La supprimer définitivement après la revue d'iOS 1.0.7 (build 15) et d'Android 1.0.15 (Admin → Cartes cadeau), sans supprimer le compte. Puis nettoyer avis, publications, RDV des comptes de démonstration (règle de nettoyage). Source : 19–20 oct. 2026, `docs/historique/stores.md`.
 - **Activité clients** : retirer la seconde requête des annulations sans auteur (`cancelled_by` absent) vers le **27 oct. 2026** ; elle ne sert qu'aux annulations antérieures au tour 5. Source : tour 5 du 18 oct. 2026, `docs/historique/2026-10-18-verification-tours-5-a-7.md`.
 - **Compte barber « Sacha »** (fiche barber supprimée) : il a perdu l'accès au tour 3, mais le compte et son abonnement push restent. À supprimer par l'admin dans Comptes barbers (écriture en production, jamais par une session d'audit). Source : tour 3 du 18 oct. 2026.

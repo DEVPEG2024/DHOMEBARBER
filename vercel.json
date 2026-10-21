@@ -2,6 +2,7 @@
   "rewrites": [
     { "source": "/lm/:id/carte.jpg", "destination": "https://dhomebarber-api-3aabb8313cb6.herokuapp.com/api/share/last-minute/:id/carte.jpg" },
     { "source": "/lm/:id", "destination": "https://dhomebarber-api-3aabb8313cb6.herokuapp.com/api/share/last-minute/:id" },
+    { "source": "/agenda/rdv/:id/:sig", "destination": "https://dhomebarber-api-3aabb8313cb6.herokuapp.com/api/calendar/rdv/:id/:sig" },
     { "source": "/((?!assets/).*)", "destination": "/index.html" }
   ],
   "headers": [

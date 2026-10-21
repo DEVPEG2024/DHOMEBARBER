@@ -12,10 +12,10 @@ import { format, addDays, addMonths } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import ServicePicker from '@/components/services/ServicePicker';
 import LoadError, { isNetworkError } from '@/components/shared/LoadError';
-import { hapticFeedback, isNative } from '@/lib/capacitor';
+import { hapticFeedback } from '@/lib/capacitor';
 import { blocksClient, checkOldCancelled, appointmentDuration } from '@/lib/reschedule';
 import { useAndroidBack } from '@/lib/useAndroidBack';
-import { appointmentEvent, openCalendar, parisInstant } from '@/lib/calendarLinks';
+import { appointmentEvent, calendarTargets, openCalendar, parisInstant } from '@/lib/calendarLinks';
 import { SALON_PHONE, SALON_PHONE_HREF, useCancelFeatures } from '@/lib/cancellation';
 import { analyzeDay, parisDay } from '@/lib/slots';
 import {
@@ -66,15 +66,6 @@ const upperFirst = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 /** Pluie de lames : nombre et instant de l'éclatement (s). */
 const BLADE_COUNT = 30;
 const BURST_AT = 0.35;
-/**
- * Cibles « Ajouter au calendrier » de l'écran de succès. Le fichier .ics ne s'ouvre pas dans
- * l'app native (rien ne se passe sur iPhone) : seulement sur le web, en attendant l'écriture du
- * fichier par @capacitor/filesystem + @capacitor/share.
- */
-const CALENDAR_TARGETS = [
-  { kind: 'google', label: 'Google Agenda' },
-  ...(isNative ? [] : [{ kind: 'ics', label: 'Apple / Outlook' }]),
-];
 /** Note de réservation : même limite que CREATE_RULES.appointments côté serveur. */
 const NOTES_MAX = 1000;
 /** Refus 400 du serveur qui portent sur le créneau lui-même (assertSlotAvailable) : passé, horaires, fermeture, congé. */
@@ -293,7 +284,8 @@ export function SuccessOverlay({ barberName, detail, calendarEvent = null, durat
             {detail}
           </motion.p>
         )}
-        {/* Ajout au calendrier : Google Agenda ou fichier .ics (Apple Calendar / Outlook) */}
+        {/* Ajout au calendrier : Google Agenda ou fichier .ics (Apple Calendar / Outlook ; dans les
+            apps, le lien signé du serveur ouvert par Safari) */}
         {calendarEvent && (
           <motion.div
             initial={{ opacity: 0, y: reduceMotion ? 0 : 8 }}
@@ -301,7 +293,7 @@ export function SuccessOverlay({ barberName, detail, calendarEvent = null, durat
             transition={{ delay: 1.15, duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
             className="mt-3 flex items-center justify-center gap-2"
           >
-            {CALENDAR_TARGETS.map(({ kind, label }) => (
+            {calendarTargets(calendarEvent).map(({ kind, label }) => (
               <motion.button
                 key={kind}
                 type="button"
@@ -1443,6 +1435,7 @@ export default function Booking() {
       end_time: created.end_time,
       total_duration: created.total_duration ?? totalDuration,
       total_price: created.total_price ?? totalPrice,
+      calendar_url: created.calendar_url,
     });
   }, [success, createdAppointment, selectedEmployee, selectedDate, selectedTime, liveSelected, totalDuration, totalPrice]);
 

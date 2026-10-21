@@ -12,9 +12,9 @@ import { toast } from 'sonner';
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
-import { hapticFeedback, isNative } from '@/lib/capacitor';
+import { hapticFeedback } from '@/lib/capacitor';
 import LoadError, { isNetworkError, queryFailed } from '@/components/shared/LoadError';
-import { appointmentEvent, openCalendar, parisInstant } from '@/lib/calendarLinks';
+import { appointmentEvent, calendarTargets, openCalendar, parisInstant } from '@/lib/calendarLinks';
 import {
   SALON_PHONE, SALON_PHONE_HREF, CANCEL_REASON_MAX, APPOINTMENT_CANCEL_REASONS,
   useCancelFeatures, friendlyCancelError, cancelledByLabel, cleanReason,
@@ -54,12 +54,6 @@ const ordersLabel = (orders) => orders.map(orderItemsLabel).filter(Boolean).join
 /** Plusieurs produits différents (accord du texte : « Les produits ajoutés … seront annulés »). */
 const manyProducts = (orders) => orders
   .reduce((n, o) => n + (Array.isArray(o?.items) ? o.items.length : 0), 0) > 1;
-
-/** Cibles « Ajouter au calendrier » : le .ics ne s'ouvre pas dans l'app native, seulement sur le web. */
-const CALENDAR_TARGETS = [
-  { kind: 'google', label: 'Google Agenda' },
-  ...(isNative ? [] : [{ kind: 'ics', label: 'Apple / Outlook' }]),
-];
 
 /** Statuts qui rangent un rendez-vous dans l'historique, quelle que soit sa date. */
 const CLOSED_STATUSES = ['cancelled', 'completed', 'no_show'];
@@ -445,10 +439,10 @@ export default function Appointments() {
     navigate(rescheduleHref(apt));
   };
 
-  /** Ouvre Google Agenda ou télécharge le .ics d'un rendez-vous (UID stable : réimporter met à jour au lieu de dupliquer). */
-  const addToCalendar = (kind, apt) => {
+  /** Ouvre Google Agenda ou le .ics d'un rendez-vous (UID stable : réimporter met à jour au lieu de dupliquer). */
+  const addToCalendar = (kind, event) => {
     hapticFeedback();
-    openCalendar(kind, appointmentEvent(apt));
+    openCalendar(kind, event);
     setCalendarOpenId(null);
   };
 
@@ -575,6 +569,8 @@ export default function Appointments() {
                 const cancelledReason = cancelledLabel ? cleanReason(apt.cancellation_reason) : '';
                 // À venir (fin du RDV pas encore passée) et ni annulé ni terminé : proposer l'ajout au calendrier
                 const canAddToCalendar = !CLOSED_STATUSES.includes(apt.status) && endsAt(apt) > now;
+                const calendarEvent = canAddToCalendar ? appointmentEvent(apt) : null;
+                const targets = calendarEvent ? calendarTargets(calendarEvent) : [];
                 const calendarOpen = calendarOpenId === apt.id;
                 // Produits ajoutés à ce RDV à venir, encore à remettre
                 const linkedOrders = canAddToCalendar ? (ordersByAppointment.get(String(apt.id)) || NO_ORDERS) : NO_ORDERS;
@@ -738,14 +734,14 @@ export default function Appointments() {
                                 animate={{ opacity: 1, y: 0 }}
                                 exit={{ opacity: 0, y: reduceMotion ? 0 : -4 }}
                                 transition={{ duration: 0.18, ease: 'easeOut' }}
-                                className={`mt-3 grid ${CALENDAR_TARGETS.length > 1 ? 'grid-cols-2' : 'grid-cols-1'} gap-2`}
+                                className={`mt-3 grid ${targets.length > 1 ? 'grid-cols-2' : 'grid-cols-1'} gap-2`}
                               >
-                                {CALENDAR_TARGETS.map(({ kind, label }) => (
+                                {targets.map(({ kind, label }) => (
                                   <motion.button
                                     key={kind}
                                     type="button"
                                     whileTap={{ scale: 0.96 }}
-                                    onClick={() => addToCalendar(kind, apt)}
+                                    onClick={() => addToCalendar(kind, calendarEvent)}
                                     className="flex items-center justify-center gap-1.5 h-9 rounded-xl bg-white/5 border border-white/10 text-[11px] font-semibold text-foreground hover:bg-white/10 transition-colors"
                                   >
                                     <CalendarPlus className="w-3.5 h-3.5 text-primary" />

@@ -5,6 +5,11 @@
  *   dates en heure locale de Paris (sans « Z ») et paramètre `ctz=Europe/Paris`.
  * - Apple Calendar / Outlook : fichier iCalendar (.ics) généré côté client,
  *   `DTSTART;TZID=Europe/Paris` + bloc VTIMEZONE, fins de ligne CRLF, texte échappé.
+ * - Rendez-vous d'un client : le serveur fournit en plus `calendar_url`, le lien signé de son .ics
+ *   (`https://dhomebarber.fr/agenda/rdv/<id>/<signature>`, lib/calendarIcs.js du serveur). C'est la
+ *   seule voie qui marche dans les apps : sur iPhone, Safari l'ouvre et montre la fiche du RDV avec
+ *   « Ajouter » ; sur Android, le navigateur télécharge le fichier (Samsung Agenda, Outlook…). Sans
+ *   ce champ (serveur pas encore à jour, privatisation, événement), l'app ne propose que Google.
  *
  * Convention : `start` / `end` sont des `Date` dont les composantes *locales*
  * (`getHours`…) sont l'heure murale du salon (Paris). On ne convertit jamais de
@@ -12,7 +17,8 @@
  * l'appareil du client n'est pas réglé sur Paris (`toLocalDate` construit la Date
  * à partir des chaînes `YYYY-MM-DD` / `HH:mm` renvoyées par l'API).
  */
-import { isNative, openExternalUrl } from '@/lib/capacitor';
+import { isNative, platform, openExternalUrl } from '@/lib/capacitor';
+import { isAppleTouchDevice } from '@/lib/motion';
 
 export const SALON_LOCATION = "D'Home Barber, 3 Rue du Bois Arquet, 74140 Douvaine";
 export const ICS_FILENAME = 'rendez-vous-dhomebarber.ics';
@@ -188,13 +194,20 @@ export function buildAppointmentEvent({ barberName, services = [], date, startTi
   };
 }
 
+/** Lien .ics signé du serveur, seulement s'il pointe vers le salon (jamais une autre adresse ni un autre schéma). */
+const ICS_URL_RE = /^https:\/\/dhomebarber\.fr\/agenda\/rdv\/[0-9a-f-]+\/[0-9a-f]+$/;
+function safeIcsUrl(url) {
+  return typeof url === 'string' && ICS_URL_RE.test(url) ? url : null;
+}
+
 /**
  * Événement d'un rendez-vous tel que renvoyé par l'API (`date`, `start_time`, `end_time`,
- * `employee_name`, `services`…), avec son UID stable. Même événement depuis l'écran de succès de
- * la réservation et depuis Mes rendez-vous : l'ajouter deux fois ne crée pas de doublon.
+ * `employee_name`, `services`, `calendar_url`…), avec son UID stable (le même que le .ics du
+ * serveur). Même événement depuis l'écran de succès de la réservation et depuis Mes rendez-vous :
+ * l'ajouter deux fois ne crée pas de doublon.
  */
 export function appointmentEvent(apt) {
-  return buildAppointmentEvent({
+  const event = buildAppointmentEvent({
     barberName: apt.employee_name,
     services: apt.services,
     date: apt.date,
@@ -204,6 +217,20 @@ export function appointmentEvent(apt) {
     totalPrice: apt.total_price,
     uid: apt.id != null ? appointmentUid(apt.id) : undefined,
   });
+  return { ...event, icsUrl: safeIcsUrl(apt.calendar_url) };
+}
+
+/**
+ * Boutons « Ajouter au calendrier » d'un événement. Sur le web : Google et le fichier .ics. Dans
+ * les apps, le fichier seulement si le serveur a fourni son lien (`icsUrl`) : en premier sur
+ * iPhone (Calendrier Apple), en second sur Android (Samsung Agenda, Outlook…).
+ */
+export function calendarTargets(event) {
+  const google = { kind: 'google', label: 'Google Agenda' };
+  if (!isNative) return [google, { kind: 'ics', label: 'Apple / Outlook' }];
+  if (!event?.icsUrl) return [google];
+  if (platform === 'ios') return [{ kind: 'ics', label: 'Calendrier Apple' }, google];
+  return [google, { kind: 'ics', label: 'Autre agenda' }];
 }
 
 /**
@@ -317,6 +344,27 @@ export async function openCalendar(kind, event) {
     if (isNative) await openExternalUrl(url);
     else window.open(url, '_blank', 'noopener');
     return;
+  }
+
+  // Lien signé du serveur, ouvert sans attendre (geste de l'utilisateur gardé)
+  if (event.icsUrl) {
+    if (isNative && platform === 'ios') {
+      // Capacitor confie une nouvelle fenêtre à iOS (UIApplication.open) : Safari lui-même, qui
+      // montre la fiche du RDV avec « Ajouter ». Le lien n'a pas d'extension .ics : avec elle,
+      // iOS l'aurait donné à Calendrier comme abonnement.
+      window.open(event.icsUrl, '_blank');
+      return;
+    }
+    if (isNative) {
+      await openExternalUrl(event.icsUrl);
+      return;
+    }
+    // Safari d'iPhone / iPad : la fiche « Ajouter » s'ouvre par-dessus la page ; un Blob, lui,
+    // finit dans les téléchargements
+    if (isAppleTouchDevice()) {
+      window.location.assign(event.icsUrl);
+      return;
+    }
   }
 
   const ics = buildIcs(event);
