@@ -596,16 +596,22 @@ function QRScannerModal({ onClose, onScanned }) {
         const ctx = canvas?.getContext('2d', { willReadFrequently: true });
 
         const scan = () => {
-          if (cancelled || !video || video.readyState < 2 || !ctx) {
+          // Fenêtre fermée pendant video.play() : la boucle ne démarre pas
+          if (cancelled) return;
+          const w = video.videoWidth;
+          const h = video.videoHeight;
+          // Safari annonce parfois une vidéo prête avec une image encore vide (0 × 0) :
+          // getImageData lèverait IndexSizeError et la boucle s'arrêterait (scanner figé)
+          if (video.readyState < 2 || !ctx || !w || !h) {
             rafId = requestAnimationFrame(scan);
             return;
           }
 
-          canvas.width = video.videoWidth;
-          canvas.height = video.videoHeight;
+          if (canvas.width !== w) canvas.width = w;
+          if (canvas.height !== h) canvas.height = h;
           ctx.drawImage(video, 0, 0);
 
-          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const imageData = ctx.getImageData(0, 0, w, h);
           const qr = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' });
 
           if (qr && qr.data) {

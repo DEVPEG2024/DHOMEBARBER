@@ -273,18 +273,20 @@ const EXTENSION_STACK = /(?:chrome|moz|safari(?:-web)?)-extension:\/\//i;
 /**
  * Texte d'erreur sans donnée personnelle (le serveur refait le même nettoyage) : emails, jetons,
  * identifiants, téléphones, longues suites de chiffres et paramètres retirés ; adresses de fichier
- * réduites au nom (`index-abc.js:12:34`).
+ * réduites au nom (`index-abc.js:12:34`). Copie identique dans `dhomebarber-api/lib/analytics.js`
+ * (`test-app-errors.js` compare) : une ligne de pile Safari / Firefox (`scan@Booking-abc.js:21:45678`)
+ * n'est ni un email ni un long numéro, même nettoyée deux fois.
  */
 export function scrubErrorText(text) {
   return String(text)
-    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '<email>')
+    .replace(/[A-Z0-9._%+-]+@(?![\w.-]*\.(?:m?js|html?)\b)[A-Z0-9.-]+\.[A-Z]{2,}/gi, '<email>')
     .replace(/eyJ[\w-]{5,}\.[\w-]{5,}\.[\w-]{5,}/g, '<jeton>')
     .replace(/\b(?:Bearer|ApplePass)\s+\S+/gi, '<jeton>')
     .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, ':id')
     .replace(/(?:\+33\s?|\b0)[1-9](?:[\s.-]?\d{2}){4}\b/g, '<tél>')
     .replace(/(?:https?|capacitor|file|webpack|blob):\/\/[^\s)'"]*\/([^/\s)'"?#]+)(?:[?#][^\s)'"]*)?/gi, '$1')
     .replace(/\?[\w%.&;+-]*=[\w%.=&;+-]*/g, '')
-    .replace(/\d{5,}/g, '<n>');
+    .replace(/(\.m?js:\d+:)?\d{5,}/g, (m, position) => (position ? m : '<n>'));
 }
 
 /** Message d'une erreur quelconque (Error, texte, objet rejeté par une promesse). */
