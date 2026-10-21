@@ -130,18 +130,26 @@ export const barberFirstName = (barber) => String(barber?.name || '').trim().spl
  */
 const PUBLIC_SITE = 'https://dhomebarber.fr';
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * Message « Envoyer à un ami » d'un créneau : texte au tutoiement (un client écrit à un ami) et
- * lien public vers la réservation pré-remplie. Un ami sans compte passe par la connexion, qui le
- * ramène sur ce lien. `src=partage-last-minute` : provenance de sa visite dans Admin → Trafic.
+ * lien public. Lien `https://dhomebarber.fr/lm/<id>` (21 oct. 2026) : la page d'aperçu du serveur
+ * (routes/share.js, relayée par vercel.json) donne aux messageries une belle carte (image du
+ * créneau, titre, description) puis renvoie vers la réservation pré-remplie avec
+ * `src=partage-last-minute` (provenance dans Admin → Trafic). Identifiant illisible : lien direct
+ * vers la réservation, comme avant. Un ami sans compte passe par la connexion, qui le ramène ici.
  */
 export function lastMinuteShareContent(slot, now = Date.now()) {
   const { day } = lastMinuteLabels(slot, now);
   const when = day === "Aujourd'hui" || day === 'Demain' ? day.toLowerCase() : `le ${day.toLowerCase()}`;
+  const id = String(slot.id ?? '');
   return {
     title: "Last Minute · D'Home Barber",
     text: `⚡ Place Last Minute chez D'Home Barber : ${when} à ${slot.start} avec ${barberFirstName(slot.barber)}. Réserve vite :`,
-    url: `${PUBLIC_SITE}${lastMinuteBookingUrl(slot)}&src=partage-last-minute`,
+    url: UUID_RE.test(id)
+      ? `${PUBLIC_SITE}/lm/${id.toLowerCase()}`
+      : `${PUBLIC_SITE}${lastMinuteBookingUrl(slot)}&src=partage-last-minute`,
   };
 }
 

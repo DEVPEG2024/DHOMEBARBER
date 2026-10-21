@@ -12,17 +12,37 @@ const lastMinute = (id, barber, date, debut, finCreneau) => rendezVous({
 });
 
 const TEXTE = '⚡ Place Last Minute chez D\'Home Barber : aujourd\'hui à 15:30 avec Kevin. Réserve vite :';
-const LIEN = `https://dhomebarber.fr/booking?barber=${BARBERS.kevin.id}&date=${jour(0)}&time=15%3A30&src=partage-last-minute`;
+// Identifiant au format de la base (UUID) : le lien est celui de la page d'aperçu (21 oct. 2026),
+// qui affiche une belle carte dans la messagerie puis renvoie vers la réservation pré-remplie
+const ID_CRENEAU = '7a3c9e2b-4d1f-4b8a-9c6e-1f2d3e4a5b6c';
+const LIEN = `https://dhomebarber.fr/lm/${ID_CRENEAU}`;
+const LIEN_DIRECT = `https://dhomebarber.fr/booking?barber=${BARBERS.kevin.id}&date=${jour(0)}&time=15%3A30&src=partage-last-minute`;
 
 const boutonPartage = (page) => page.getByRole('button', { name: /^Envoyer à un ami : aujourd'hui à 15:30 avec Kevin$/ });
 
 test.describe('Last Minute : « Envoyer à un ami »', () => {
   test.beforeEach(async ({ connecter, api }) => {
     await connecter(CLIENT);
-    api.tables.Appointment.push(lastMinute('lm-kevin', BARBERS.kevin, jour(0), '15:30', '16:00'));
+    api.tables.Appointment.push(lastMinute(ID_CRENEAU, BARBERS.kevin, jour(0), '15:30', '16:00'));
   });
 
-  test('partage du téléphone : texte et lien public de la réservation pré-remplie', async ({ page }) => {
+  test('identifiant illisible : lien direct vers la réservation pré-remplie (repli)', async ({ page, api }) => {
+    api.tables.Appointment = api.tables.Appointment.filter((r) => r.id !== ID_CRENEAU);
+    api.tables.Appointment.push(lastMinute('lm-kevin', BARBERS.kevin, jour(0), '15:30', '16:00'));
+    await page.addInitScript(() => {
+      window.__partages = [];
+      Object.defineProperty(Navigator.prototype, 'share', {
+        configurable: true,
+        value: async function share(data) { window.__partages.push(data); },
+      });
+    });
+    await page.goto('/');
+    await boutonPartage(page).click();
+    await expect.poll(() => page.evaluate(() => window.__partages.length)).toBe(1);
+    expect((await page.evaluate(() => window.__partages[0])).url).toBe(LIEN_DIRECT);
+  });
+
+  test('partage du téléphone : texte et lien de la page d\'aperçu du créneau', async ({ page }) => {
     // Faux partage du téléphone : garde ce que l'app lui confie
     await page.addInitScript(() => {
       window.__partages = [];
