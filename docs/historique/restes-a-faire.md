@@ -43,7 +43,6 @@
 
 ## Serveur, données, sécurité
 
-- **Vérification de l'email à l'inscription** : non faite (chantier à part, changement de comportement à décider avec le propriétaire) ; l'email de bienvenue part toujours. Le risque principal (historique d'un compte supprimé) est fermé. Tours 6 et 8.
 - **Google Wallet** : en attente de l'accès en publication de l'émetteur ; poser `GOOGLE_WALLET_ISSUER_ID` + `GOOGLE_WALLET_SERVICE_ACCOUNT` seulement après. Avant la production, remplacer les logos simplifiés par les **badges officiels** Apple / Google (commentaire « PRODUCTION » dans `WalletButtons.jsx`). `validTimeInterval` de l'objet Google inchangé (tour 5).
 - **Achats hors RDV payés par carte cadeau** (commandes, précommandes, privatisations) : pas de colonne `gift_card_amount` ni de rattachement, seul un avertissement est en place (tour 7).
 - **Contrôle du prix envoyé** réservé aux commandes de la Boutique avec `client_ref` (sinon `test-orders.js`, qui envoie exprès un faux prix, est à réécrire) ; garde-fou serveur des doubles commandes au-delà de 60 s non ajouté (bloquerait une seconde commande voulue). Tours 6 et 7.
@@ -85,8 +84,7 @@
 
 ## À décider avec le salon ou le propriétaire
 
-- Push à l'acheteur après un débit de carte cadeau : coupé (`GIFT_CARD_DEBIT_NOTIFY_OWNER=true` pour l'allumer).
-- Export comptable des cartes cadeau : part carte retirée (choix fait au tour 7), **à confirmer avec le comptable du salon**.
+- Export comptable des cartes cadeau : part carte retirée (choix fait au tour 7), **format à voir plus tard** (propriétaire, 21 oct. 2026), à confirmer aussi avec le comptable du salon.
 - Fenêtre « Publier aussi sur Google » proposée après tout avis (Google interdit la sollicitation sélective) : à confirmer avec le salon (tour 6).
 - Assouplir le délai de 24 h (déplacer dans les 24 h vers un créneau plus tard le même jour) : proposé, non fait, refusé sans accord du propriétaire (18 oct.).
 
@@ -97,6 +95,8 @@
 - Vidéo de démonstration à refilmer si Snap demande à voir l'effet (la lentille n'en a aucun et le sujet porte une casquette).
 
 ## Réglés depuis (pour mémoire, ne pas rouvrir)
+
+- Décisions du propriétaire du 21 oct. 2026 : **pas de vérification de l'email à l'inscription** (l'email de bienvenue part toujours ; le risque de l'historique d'un compte supprimé était déjà fermé, tours 6 et 8) ; **push à l'acheteur après chaque débit de carte cadeau : oui** (`GIFT_CARD_DEBIT_NOTIFY_OWNER=true` sur Heroku ; la valeur l'était déjà depuis le 17 oct., v116, alors que la doc la disait coupée : un débit de 20 € le 19 oct. a donc pu être notifié).
 
 - Relevés par les tests de bout en bout le 20 oct. 2026, corrigés le même jour : fenêtre du gyroscope montrée sur Chrome ordinateur et Android web (Chromium expose `requestPermission` : `isAppleTouchDevice` dans `src/lib/motion.js`, tests dans les deux sens) ; `expired=1` jamais posé dans l'adresse à l'expiration de la session (état `sessionExpired` d'AuthContext lu par RequireAuth / RequireAdmin, test resserré) ; titre de la réservation resté sur « Vérifiez et confirmez » après un 409 sous forte charge (`AnimatePresence mode="wait"` retiré du titre, 40 répétitions du test 409 en parallèle sans échec).
 

@@ -74,7 +74,7 @@ Incidents notables : 6 images perdues par le ramasse-miettes (25 sept., `notific
 - **Base** : addon `postgresql-deep-70510` (essential-0, 1 Go au plus, ni rollback ni fork). Sauvegarde quotidienne à **03h00 Paris** (avant le ramasse-miettes de 03h30). Pour récupérer des données : `heroku pg:backups:download` puis extraire les lignes voulues ; **jamais `pg:backups:restore`** (il écrase tout ce qui a changé depuis).
 - La session Heroku CLI expire : relancer `heroku login` si une commande répond `Invalid credentials` (tenter la commande d'abord).
 - **Variables Heroku obligatoires** : `NODE_ENV=production` (sans elle CORS accepte `localhost` et un `JWT_SECRET` de repli), `DATABASE_URL`, `JWT_SECRET` (le serveur refuse de démarrer sans), `API_PUBLIC_URL` (base des URL d'images), `FRONTEND_URL`, `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_EMAIL`, `SMTP_HOST` (défaut smtp.hostinger.com) / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS`.
-- **Variables facultatives** (chacune allume une fonction, sans elle la fonction répond 503 `not_configured` ou reste cachée) : `FAL_KEY` (+ `HAIR_ULTRA_EDIT_MODEL`) AI ULTRA ; `ANTHROPIC_API_KEY` (+ `AI_WRITER_MODEL`, défaut `claude-opus-5`) assistant IA des notifications, posée ; `SNAP_CAMERA_KIT_API_TOKEN` + `SNAP_LENS_GROUP_ID` (la saisie de l'admin dans `snap_config` prime) ; `APNS_KEY_P8` + `APNS_KEY_ID` + `APNS_TEAM_ID` + `APNS_BUNDLE_ID` (posées, pas d'`APNS_ENV` = production) ; `FCM_SERVICE_ACCOUNT` (posée) ; `APPLE_PASS_TYPE_ID` + `APPLE_TEAM_ID` + `APPLE_PASS_CERT_PEM` + `APPLE_PASS_KEY_PEM` + `APPLE_WWDR_PEM` (posées) ; `GOOGLE_WALLET_ISSUER_ID` + `GOOGLE_WALLET_SERVICE_ACCOUNT` (**pas encore posées** : attendre l'accès en publication de Google) ; `GIFT_CARD_DEBIT_NOTIFY_OWNER` (coupé, à décider avec le salon). Texte complet : `docs/fonctions/architecture-deploiement.md`.
+- **Variables facultatives** (chacune allume une fonction, sans elle la fonction répond 503 `not_configured` ou reste cachée) : `FAL_KEY` (+ `HAIR_ULTRA_EDIT_MODEL`) AI ULTRA ; `ANTHROPIC_API_KEY` (+ `AI_WRITER_MODEL`, défaut `claude-opus-5`) assistant IA des notifications, posée ; `SNAP_CAMERA_KIT_API_TOKEN` + `SNAP_LENS_GROUP_ID` (la saisie de l'admin dans `snap_config` prime) ; `APNS_KEY_P8` + `APNS_KEY_ID` + `APNS_TEAM_ID` + `APNS_BUNDLE_ID` (posées, pas d'`APNS_ENV` = production) ; `FCM_SERVICE_ACCOUNT` (posée) ; `APPLE_PASS_TYPE_ID` + `APPLE_TEAM_ID` + `APPLE_PASS_CERT_PEM` + `APPLE_PASS_KEY_PEM` + `APPLE_WWDR_PEM` (posées) ; `GOOGLE_WALLET_ISSUER_ID` + `GOOGLE_WALLET_SERVICE_ACCOUNT` (**pas encore posées** : attendre l'accès en publication de Google) ; `GIFT_CARD_DEBIT_NOTIFY_OWNER=true` (posée : push à l'acheteur après chaque débit de carte cadeau, décision du 21 oct. 2026 ; la valeur était déjà `true` depuis le 17 oct., v116). Texte complet : `docs/fonctions/architecture-deploiement.md`.
 
 ### Commandes utiles
 
@@ -379,7 +379,9 @@ Chaque ligne est un invariant : la casser réintroduit un bug déjà corrigé ou
 - Fenêtres fermées par la croix ; pas de bouton flottant sur l'accueil ; parallaxe sans hachures ni bords nets ; raccourcis du Profil en style B (une seule couleur).
 - Réservation : pas d'écran de chargement à la confirmation, succès en pluie de lames de rasoir, jours en bande qui défile (pas de flèches de semaine).
 - Pass Apple Wallet : haut vide, bande = grand logo du salon seul.
-- Push à l'acheteur après un débit de carte cadeau : coupé tant que le salon n'a pas décidé.
+- Push à l'acheteur après chaque débit de carte cadeau : **oui** (21 oct. 2026).
+- Pas de vérification de l'email à l'inscription (21 oct. 2026).
+- Export comptable des cartes cadeau : format à voir plus tard (21 oct. 2026).
 
 ## Restes à faire (les plus importants)
 
@@ -391,8 +393,7 @@ Liste complète, dédoublonnée et datée : `docs/historique/restes-a-faire.md`.
 4. Dom et Romain sans notifications sur leur téléphone, Kevin sur le web seulement : leur faire activer l'app.
 5. Compte barber « Sacha » (fiche supprimée) à supprimer dans Comptes barbers.
 6. Google Wallet : variables à poser à l'accès en publication ; badges officiels avant la production.
-7. Vérification de l'email à l'inscription : non faite, à décider avec le propriétaire.
-8. Achats hors RDV payés par carte cadeau sans `gift_card_amount` ; export comptable à confirmer avec le comptable.
-9. Dépendances : `node-forge` sans correctif ; `quill` / `react-router` en majeures non montées.
-10. Échéances : certificat Apple Wallet avant le 16 nov. 2027 ; crédit Anthropic sans rechargement automatique.
-11. Avant le build 16 / code 17 : déclarer la remontée des erreurs aux stores (voir « État au 20 oct. 2026 »).
+7. Achats hors RDV payés par carte cadeau sans `gift_card_amount` ; export comptable : format à voir plus tard avec le propriétaire.
+8. Dépendances : `node-forge` sans correctif ; `quill` / `react-router` en majeures non montées.
+9. Échéances : certificat Apple Wallet avant le 16 nov. 2027 ; crédit Anthropic sans rechargement automatique.
+10. Avant le build 16 / code 17 : déclarer la remontée des erreurs aux stores (voir « État au 21 oct. 2026 »).
