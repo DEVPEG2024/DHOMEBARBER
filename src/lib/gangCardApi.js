@@ -77,6 +77,14 @@ export const removeGangClientFromLeaderboard = (id) =>
 export const allowGangClientInLeaderboard = (id) =>
   apiRequest('PUT', apiUrl(`/gang-card/admin/client/${encodeURIComponent(id)}/leaderboard`), { allow: true });
 
+/**
+ * L'admin choisit le niveau de la carte d'un client (`tier` : clé de GANG_TIER_ORDER, ou null pour
+ * revenir au niveau des visites). C'est un minimum : la carte continue de monter avec les visites.
+ * → `{ ok, min_tier, tier, tier_label, tier_auto }`. 409 `no_card` pour un client sans visite.
+ */
+export const setGangClientTier = (id, tier) =>
+  apiRequest('PUT', apiUrl(`/gang-card/admin/client/${encodeURIComponent(id)}/tier`), { tier: tier || null });
+
 export function useGangAdminOverview({ enabled = true } = {}) {
   return useQuery({
     queryKey: GANG_ADMIN_OVERVIEW_QUERY_KEY,
@@ -89,7 +97,9 @@ export function useGangAdminOverview({ enabled = true } = {}) {
 /**
  * Admin : toutes les cartes des clients (même calcul et même cache de 60 s que la vue d'ensemble)
  * → { generated_at, cards: [{ user_id, email, full_name, phone, nudged_at, upcoming,
+ *      min_tier (niveau choisi par l'admin ou null), tier_auto (niveau des visites seules),
  *      badges_unlocked: [clé], card: { tier, edition, name, photo_url, score, stats, visits, … } }] }
+ * (min_tier / tier_auto absents sur un serveur d'avant le 21 oct. 2026)
  */
 export const GANG_ADMIN_CARDS_QUERY_KEY = ['gangAdminCards'];
 export const fetchGangAdminCards = () => apiRequest('GET', apiUrl('/gang-card/admin/cards'));
@@ -98,8 +108,10 @@ export function useGangAdminCards({ enabled = true } = {}) {
 }
 
 /**
- * Admin : fiche d'un client → { account, card, tiers: [{ key, label, min, reached_on }],
+ * Admin : fiche d'un client → { account, card, tier_auto, tiers: [{ key, label, min, reached_on }],
  *   badges: [{ …écusson, unlocked_on }], visits, missed, upcoming, absences, client_cancels }
+ * `account.min_tier` : niveau choisi par l'admin, ou null. Absent sur un serveur d'avant le 21 oct.
+ * 2026 : la fiche ne propose alors pas de choisir le niveau.
  */
 export const gangAdminClientKey = (id) => ['gangAdminClient', String(id)];
 export const fetchGangAdminClient = (id) => apiRequest('GET', apiUrl(`/gang-card/admin/client/${encodeURIComponent(id)}`));

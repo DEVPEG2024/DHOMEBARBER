@@ -53,6 +53,8 @@ function tierReached(key, card) {
   if (!card) return false;
   if (key === card.tier) return true;
   if (key === 'icone') return false;
+  // Niveau choisi par le salon (plus haut que les visites) : les niveaux en dessous sont acquis
+  if (card.tier !== 'icone' && GANG_TIER_ORDER.indexOf(key) < GANG_TIER_ORDER.indexOf(card.tier)) return true;
   return Number(card.visits) >= (TIER_MIN[key] ?? Infinity);
 }
 

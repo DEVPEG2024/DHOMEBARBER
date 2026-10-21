@@ -29,6 +29,8 @@ const fold = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toL
 const tierRank = (t) => GANG_TIER_ORDER.indexOf(t);
 const isFading = (e) => (e.card?.visits || 0) >= FADING_MIN_VISITS && (e.card?.days_since_last || 0) >= FADING_DAYS && !e.upcoming;
 const nameOf = (e) => e.full_name || e.card?.name || e.email || '';
+// Carte montée par le salon au-dessus de ses visites (niveau choisi dans la fiche du client)
+const isChosen = (e) => !!e.min_tier && !!e.tier_auto && !!e.card?.tier && e.card.tier !== e.tier_auto;
 
 function lastVisitLabel(days) {
   const d = Number(days);
@@ -60,13 +62,14 @@ function Tile({ entry, onOpen }) {
   const fresh = Number(c.stats?.FRA);
   const fading = isFading(entry);
   const badges = (entry.badges_unlocked || []).map((k) => GANG_BADGE_INFO[k]?.emoji).filter(Boolean);
+  const chosen = isChosen(entry);
   return (
     <li className="min-w-0">
       <button
         type="button"
         onClick={() => onOpen(entry)}
         className="group w-full h-full flex flex-col items-center gap-2 rounded-2xl border border-transparent p-2 pt-3 text-center transition-colors hover:border-border hover:bg-card focus-visible:border-primary focus-visible:outline-none"
-        aria-label={`${nameOf(entry)} : ${c.tier_label || ''}, ${c.visits || 0} visites. Ouvrir la fiche`}
+        aria-label={`${nameOf(entry)} : ${c.tier_label || ''}${chosen ? ' (niveau choisi par le salon)' : ''}, ${c.visits || 0} visites. Ouvrir la fiche`}
       >
         <span className="pointer-events-none transition-transform group-hover:-translate-y-0.5">
           <GangCard card={c} size={MINI} flippable={false} interactive={false} />
@@ -78,6 +81,11 @@ function Tile({ entry, onOpen }) {
             {lastVisitLabel(c.days_since_last) ? ` · ${lastVisitLabel(c.days_since_last)}` : ''}
           </span>
           <span className="mt-1 flex items-center justify-center gap-1 min-h-[18px]">
+            {chosen && (
+              <span className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-300" title="Niveau choisi par le salon">
+                Choisi
+              </span>
+            )}
             {fading && (
               <span className="rounded-full bg-sky-500/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-sky-300">
                 {Number.isFinite(fresh) ? `FRA ${fresh}` : 'À relancer'}

@@ -2,11 +2,12 @@
  * Admin « Cartes Gang » : fiche d'un client, ouverte depuis la collection
  * (`GET /gang-card/admin/client/:id`). Sa carte en grand (retournable), ses chiffres, son parcours
  * de niveaux daté, ses écussons avec la date de déblocage, ses visites, absences et annulations,
- * ses prochains rendez-vous ; appeler ou relancer. Fenêtre fermée par la croix seulement.
+ * ses prochains rendez-vous ; appeler ou relancer ; choisir le niveau de sa carte (un minimum, la
+ * carte continue de monter avec les visites). Fenêtre fermée par la croix seulement.
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Phone, BellRing, Loader2, Check, Mail, CalendarClock, UserX, XCircle } from 'lucide-react';
+import { Phone, BellRing, Loader2, Check, Mail, CalendarClock, UserX, XCircle, Crown } from 'lucide-react';
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import GangCard from '@/components/gang/GangCard';
@@ -15,10 +16,11 @@ import { GANG_STAT_KEYS, GANG_STAT_LABELS, gangStatValue, isGangStatLow, GANG_LO
 import {
   useGangAdminClient, nudgeGangClient, gangAdminClientKey, GANG_ADMIN_CARDS_QUERY_KEY, GANG_ADMIN_OVERVIEW_QUERY_KEY,
   removeGangClientFromLeaderboard, allowGangClientInLeaderboard, GANG_LEADERBOARD_QUERY_KEY,
+  setGangClientTier, GANG_TIER_ORDER,
 } from '@/lib/gangCardApi';
 import { hapticFeedback } from '@/lib/capacitor';
 import LoadError, { queryFailed } from '@/components/shared/LoadError';
-import { TierPill, clientLabel, plural, daysSince } from './gangAdminUi';
+import { TierPill, clientLabel, plural, daysSince, tierPalette } from './gangAdminUi';
 
 const FADING_MIN_VISITS = 3;
 const FADING_DAYS = 35;
@@ -191,6 +193,119 @@ function NudgeButton({ account, card, upcoming, onDone }) {
   );
 }
 
+const tierRank = (key) => GANG_TIER_ORDER.indexOf(key);
+
+/**
+ * Niveau de la carte choisi par l'admin (`PUT /gang-card/admin/client/:id/tier`). C'est un minimum :
+ * les niveaux déjà atteints par les visites ne se choisissent pas, et la carte continue de monter
+ * avec les visites. Un tap prépare le changement, « Confirmer » l'enregistre.
+ */
+function TierChoice({ account, card, tierAuto, tiers, onDone }) {
+  const queryClient = useQueryClient();
+  const [pending, setPending] = useState(null); // clé du niveau ou 'auto', en attente de confirmation
+  const [sending, setSending] = useState(false);
+  const auto = GANG_TIER_ORDER.includes(tierAuto) ? tierAuto : card.tier;
+  const current = account.min_tier || 'auto';
+  // Le choix ne sert que s'il est au-dessus des visites ; sinon la carte suit déjà les visites
+  const active = account.min_tier && tierRank(account.min_tier) > tierRank(auto);
+  const labelOf = (key) => tiers.find((t) => t.key === key)?.label || tierPalette(key).label || key;
+  const firstName = String(account.full_name || '').trim().split(/\s+/)[0] || 'ce client';
+
+  const pick = (key) => {
+    if (sending) return;
+    hapticFeedback();
+    setPending(key === current ? null : key);
+  };
+  const confirm = async () => {
+    if (sending || !pending || !account?.id) return;
+    setSending(true);
+    try {
+      const res = await setGangClientTier(account.id, pending === 'auto' ? null : pending);
+      toast.success(res?.min_tier
+        ? `Carte passée en ${res.tier_label || labelOf(res.min_tier)}`
+        : `La carte suit de nouveau les visites : ${res?.tier_label || labelOf(auto)}`);
+      setPending(null);
+      queryClient.invalidateQueries({ queryKey: GANG_LEADERBOARD_QUERY_KEY });
+      queryClient.invalidateQueries({ queryKey: ['gangSummaries'] });
+      onDone?.();
+    } catch (err) {
+      toast.error(err?.data?.error || (!err?.status ? 'Pas de connexion : rien n’a changé.' : 'Impossible de changer le niveau de la carte.'));
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const chip = (selected) => `inline-flex items-center gap-1.5 h-9 rounded-full border px-3 text-xs font-semibold transition-colors disabled:cursor-not-allowed ${
+    selected ? 'border-primary bg-primary text-primary-foreground' : 'border-border text-foreground hover:bg-secondary disabled:text-muted-foreground disabled:opacity-50 disabled:hover:bg-transparent'
+  }`;
+  const ring = (key) => (pending === key ? 'ring-2 ring-amber-400 ring-offset-2 ring-offset-background' : '');
+
+  let help;
+  if (active) help = `Niveau choisi par le salon. Ses visites seules lui donnent ${labelOf(auto)} ; la carte continue de monter avec elles.`;
+  else if (account.min_tier) help = `Ses visites ont dépassé le niveau choisi (${labelOf(account.min_tier)}) : la carte suit les visites.`;
+  else help = 'Un habitué venu avant l’app ? Choisissez un niveau plus haut : c’est un minimum, la carte continue ensuite de monter avec les visites.';
+
+  const raising = pending && pending !== 'auto' && tierRank(pending) > tierRank(card.tier);
+  const target = pending === 'auto' ? labelOf(auto) : pending ? labelOf(pending) : '';
+
+  return (
+    <Section title="Niveau de la carte" aside={active ? 'Choisi par le salon' : 'Selon les visites'}>
+      <div role="radiogroup" aria-label="Niveau de la carte" className="flex flex-wrap gap-1.5">
+        <button
+          type="button" role="radio" aria-checked={current === 'auto'}
+          onClick={() => pick('auto')} disabled={sending || current === 'auto'}
+          className={`${chip(current === 'auto')} ${ring('auto')} disabled:opacity-100`}
+        >
+          Selon les visites · {labelOf(auto)}
+        </button>
+        {GANG_TIER_ORDER.map((key) => {
+          const reached = tierRank(key) <= tierRank(auto);
+          const selected = current === key;
+          const p = tierPalette(key);
+          return (
+            <button
+              key={key} type="button" role="radio" aria-checked={selected}
+              onClick={() => pick(key)} disabled={sending || reached || selected}
+              title={reached ? 'Déjà atteint par ses visites' : undefined}
+              className={`${chip(selected)} ${ring(key)} ${selected ? 'disabled:opacity-100' : ''}`}
+            >
+              <i className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: p.gem }} aria-hidden="true" />
+              {p.short || labelOf(key)}
+            </button>
+          );
+        })}
+      </div>
+      {pending ? (
+        <div className="mt-2.5 rounded-xl border border-amber-400/40 bg-amber-400/5 px-3 py-2.5" role="group" aria-label="Confirmer le niveau">
+          <p className="text-sm font-semibold text-foreground">
+            {pending === 'auto' ? `Revenir au niveau de ses visites (${target}) ?` : `Passer la carte de ${firstName} en ${target} ?`}
+          </p>
+          <p className="text-[11px] text-muted-foreground mt-0.5">
+            {raising
+              ? `Révélation « Tu passes ${target} » à sa prochaine ouverture de l’app.`
+              : pending === 'auto' && !active
+                ? `La carte reste ${target} : elle suit déjà ses visites.`
+                : `Sa carte redescend en ${target}.`}
+          </p>
+          <div className="mt-2 flex gap-2">
+            <button type="button" onClick={confirm} disabled={sending}
+              className="h-10 px-3.5 inline-flex items-center gap-1.5 rounded-xl bg-primary text-primary-foreground text-xs font-semibold disabled:opacity-70">
+              {sending ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <Crown className="w-3.5 h-3.5" aria-hidden="true" />}
+              {sending ? 'Enregistrement…' : 'Confirmer'}
+            </button>
+            <button type="button" onClick={() => setPending(null)} disabled={sending}
+              className="h-10 px-3.5 rounded-xl border border-border text-xs font-semibold text-foreground disabled:opacity-60">
+              Annuler
+            </button>
+          </div>
+        </div>
+      ) : (
+        <p className="text-[11px] text-muted-foreground mt-2 leading-snug">{help}</p>
+      )}
+    </Section>
+  );
+}
+
 function SheetBody({ data, cardSize, onNudged }) {
   const { account, card, tiers = [], badges = [], visits = [], missed = [], upcoming = [] } = data;
   const [allVisits, setAllVisits] = useState(false);
@@ -252,6 +367,11 @@ function SheetBody({ data, cardSize, onNudged }) {
         </div>
       </div>
 
+      {/* Niveau choisi par l'admin (serveur du 21 oct. 2026 et après : `account.min_tier` présent) */}
+      {card && 'min_tier' in account && (
+        <TierChoice account={account} card={card} tierAuto={data.tier_auto} tiers={tiers} onDone={onNudged} />
+      )}
+
       {/* Stats détaillées */}
       {card && (
         <Section title="Stats">
@@ -280,15 +400,17 @@ function SheetBody({ data, cardSize, onNudged }) {
       <Section title="Parcours" aside={nextTier ? `${nextTier.label} dans ${nextTier.visits_needed} ${plural(nextTier.visits_needed, 'visite', 'visites')}` : 'Niveau maximum'}>
         <ol className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {tiers.map((t) => {
-            const reached = !!t.reached_on;
             const current = card?.tier === t.key;
+            // Niveau posé par le salon au-dessus des visites : pas de date, mais bien atteint
+            const bySalon = current && !t.reached_on && !!account.min_tier;
+            const reached = !!t.reached_on || bySalon;
             return (
               <li
                 key={t.key}
                 className={`shrink-0 min-w-[104px] rounded-xl border px-3 py-2 ${current ? 'border-primary bg-primary/5' : 'border-border'} ${reached ? '' : 'opacity-55'}`}
               >
                 <TierPill tier={t.key} label={t.label} />
-                <p className="text-[11px] font-semibold text-foreground mt-1.5">{reached ? dayLabel(t.reached_on) : 'Pas encore'}</p>
+                <p className="text-[11px] font-semibold text-foreground mt-1.5">{bySalon ? 'Choisi par le salon' : reached ? dayLabel(t.reached_on) : 'Pas encore'}</p>
                 <p className="text-[10px] text-muted-foreground">{t.key === 'icone' ? '3 ans et 18 visites' : `${t.min} ${plural(t.min, 'visite', 'visites')}`}</p>
               </li>
             );
@@ -387,6 +509,8 @@ export default function GangClientSheet({ entry, onClose }) {
   const failed = queryFailed(clientQuery);
   const cardSize = useSheetCardSize();
   const title = clientLabel(entry || {});
+  // Carte de la fiche dès qu'elle est chargée (à jour après un changement de niveau), sinon celle de la collection
+  const headCard = data?.card || entry?.card;
 
   const onNudged = () => {
     queryClient.invalidateQueries({ queryKey: gangAdminClientKey(id) });
@@ -400,10 +524,10 @@ export default function GangClientSheet({ entry, onClose }) {
         <DialogHeader className="text-left pr-8 min-w-0">
           <DialogTitle className="flex items-center gap-2 min-w-0">
             <span className="truncate">{title}</span>
-            {entry?.card?.tier && <TierPill tier={entry.card.tier} label={entry.card.tier_label} />}
+            {headCard?.tier && <TierPill tier={headCard.tier} label={headCard.tier_label} />}
           </DialogTitle>
           <DialogDescription className="truncate">
-            {entry?.card?.serial ? `Carte n° ${String(entry.card.serial).padStart(4, '0')} · ` : ''}
+            {headCard?.serial ? `Carte n° ${String(headCard.serial).padStart(4, '0')} · ` : ''}
             {entry?.email || ''}
           </DialogDescription>
         </DialogHeader>
