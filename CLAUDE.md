@@ -118,14 +118,14 @@ curl -s -o /dev/null -w "%{http_code}\n" https://dhomebarber-api-3aabb8313cb6.he
 
 ## Apps natives et stores
 
-### État au 20 oct. 2026
+### État au 21 oct. 2026
 
-- **En ligne** : iOS **1.0.6 (build 13)** depuis le 19 oct. (disponible dans l'UE, France comprise, depuis la validation DSA du 12 oct.) ; Android **1.0.14 (code 15)** depuis le 20 oct. vers 4 h (sans le correctif du clavier de la demande de privatisation).
-- **En examen** : iOS **1.0.7 build 15** (même version que le build 14 retiré ; reviewSubmission `86876013-3f80-492a-9e48-bbd669566238`, publication automatique `AFTER_APPROVAL`) ; Android **1.0.15 (code 16)** (piste production = « 16 (1.0.15) » seule).
+- **En ligne** : iOS **1.0.7 (build 15)** et Android **1.0.15 (code 16)**, toutes deux constatées en ligne le 21 oct. 2026 à 12:44 (disponibles dans l'UE, France comprise, depuis la validation DSA du 12 oct.).
+- **En examen** : rien. Sur le web seulement, en attente du prochain build : Last Minute sur l'accueil et son partage, niveau choisi des cartes Gang, prestation validée comptée tout de suite (Profil, Clients), looks de la galerie, « Ajouter au calendrier » (Calendrier Apple), remontée des erreurs de l'app.
 - **Prochains numéros : iOS build 16, Android versionCode 17.**
 - **Avant d'envoyer le build 16 / code 17** : il est le premier à remonter les erreurs de l'app ; déclarer d'abord **Diagnostics → Données de plantage** dans « Confidentialité de l'app » (App Store, liées, fonctionnement de l'app) et **Infos et performances → Journaux de plantage** dans « Sécurité des données » (Play, liés, facultatifs). Détail : `docs/fonctions/admin-pilotage.md`.
-- **Après la revue** : supprimer définitivement la carte cadeau de démonstration `DHB-LTWB-WDEZ` (10 €, id `c8a29982-e057-4e52-b9e0-0cd8afacf251`, compte `reviewer@dhomebarber.fr` ; elle compte dans le CA) dans Admin → Cartes cadeau, sans supprimer le compte ; puis nettoyer avis, publications, RDV de démonstration (règle de nettoyage plus bas).
-- **Surveillance** : LaunchAgent `~/store-watch` (toutes les 3 h, se décharge seul, messages tirés de `IOS_VERSION` / `ANDROID_VERSION`) sur iOS 1.0.7 / Android 1.0.15. Rien ne tourne quand le Mac dort.
+- **Revue terminée (21 oct.), à faire maintenant** : supprimer définitivement la carte cadeau de démonstration `DHB-LTWB-WDEZ` (10 €, id `c8a29982-e057-4e52-b9e0-0cd8afacf251`, compte `reviewer@dhomebarber.fr` ; elle compte dans le CA) dans Admin → Cartes cadeau, sans supprimer le compte ; puis nettoyer avis, publications, RDV de démonstration (règle de nettoyage plus bas).
+- **Surveillance** : LaunchAgent `~/store-watch` (toutes les 3 h, se décharge seul, messages tirés de `IOS_VERSION` / `ANDROID_VERSION`) : terminée le 21 oct. (iOS 1.0.7 / Android 1.0.15 en ligne), à relancer au prochain envoi. Rien ne tourne quand le Mac dort.
 - **Snap** : revue approuvée ; reste *Push to Production* dans le portail puis le jeton de production dans Admin → Filtres Snap → Camera Kit (sans déploiement). Les filtres restent éteints tant que la lentille n'a pas d'effet.
 - Apps gratuites : contrat « applications payantes », compte bancaire et questionnaire fiscal américain inutiles.
 
@@ -385,7 +385,7 @@ Chaque ligne est un invariant : la casser réintroduit un bug déjà corrigé ou
 
 Liste complète, dédoublonnée et datée : `docs/historique/restes-a-faire.md`.
 
-1. Après la revue d'iOS 1.0.7 / Android 1.0.15 : supprimer la carte `DHB-LTWB-WDEZ`, nettoyer les contenus de démonstration.
+1. Revue d'iOS 1.0.7 / Android 1.0.15 terminée (en ligne le 21 oct.) : supprimer la carte `DHB-LTWB-WDEZ`, nettoyer les contenus de démonstration.
 2. Snap : *Push to Production* et jeton de production ; la lentille « DHB Couleur » est vide, à refaire.
 3. Activité clients : retirer la seconde requête des annulations sans auteur vers le 27 oct. 2026.
 4. Dom et Romain sans notifications sur leur téléphone, Kevin sur le web seulement : leur faire activer l'app.
