@@ -212,13 +212,8 @@ export function lastMinuteLabels(slot, now = Date.now()) {
   return { day, chip, live: slot.date === today };
 }
 
-/**
- * Créneaux Last Minute libres **du jour** : `{ slots, total, now }` (`slots` limité à
- * `MAX_LAST_MINUTE_SLOTS`). Relu chaque minute et au retour sur l'app ; l'horloge locale avance
- * toutes les 30 s (compte à rebours, créneau commencé retiré).
- * Ne rejette jamais : en échec, aucune carte (la section se cache).
- */
-export function useOpenLastMinutes({ enabled = true } = {}) {
+/** Horloge locale des cartes Last Minute : avance toutes les 30 s et au retour sur l'app. */
+export function useLastMinuteClock() {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const tick = () => setNow(Date.now());
@@ -227,6 +222,33 @@ export function useOpenLastMinutes({ enabled = true } = {}) {
     document.addEventListener('visibilitychange', onVisible);
     return () => { clearInterval(id); document.removeEventListener('visibilitychange', onVisible); };
   }, []);
+  return now;
+}
+
+/**
+ * Publication Last Minute du fil (`kind = 'last_minute'`, posée par le serveur, 22 oct. 2026) :
+ * son créneau au format des cartes de l'accueil, ou null s'il est commencé, d'un autre jour, ou si
+ * son barber n'est plus visible (mêmes règles que `selectOpenLastMinutes`). Le serveur retire la
+ * publication quand le créneau n'est plus libre ; ceci couvre l'intervalle entre deux passages.
+ */
+export function lastMinuteSlotOfPost(post, barbers, now = Date.now()) {
+  const meta = post && post.kind === 'last_minute' && post.meta && typeof post.meta === 'object' ? post.meta : null;
+  if (!meta) return null;
+  const row = {
+    id: post.appointment_id, status: 'last_minute', employee_id: meta.employee_id,
+    date: meta.date, start_time: meta.start_time, end_time: meta.end_time,
+  };
+  return selectOpenLastMinutes([row], barbers, now)[0] || null;
+}
+
+/**
+ * Créneaux Last Minute libres **du jour** : `{ slots, total, now }` (`slots` limité à
+ * `MAX_LAST_MINUTE_SLOTS`). Relu chaque minute et au retour sur l'app ; l'horloge locale avance
+ * toutes les 30 s (compte à rebours, créneau commencé retiré).
+ * Ne rejette jamais : en échec, aucune carte (la section se cache).
+ */
+export function useOpenLastMinutes({ enabled = true } = {}) {
+  const now = useLastMinuteClock();
 
   // Jour de Paris recalculé avec l'horloge : à minuit la requête passe au nouveau jour
   const today = parisDay(0).key;

@@ -32,7 +32,11 @@ function LiveDot() {
   );
 }
 
-function LastMinuteCard({ slot, now, inCarousel = false }) {
+/**
+ * Carte d'un créneau Last Minute. `from` : écran qui la montre, pour la mesure d'audience
+ * (`home`, ou `feed` pour une publication du fil, 22 oct. 2026).
+ */
+export function LastMinuteCard({ slot, now, inCarousel = false, from = 'home' }) {
   const { day, chip, live } = lastMinuteLabels(slot, now);
   const name = barberFirstName(slot.barber);
   const photo = slot.barber?.photo_url;
@@ -40,7 +44,7 @@ function LastMinuteCard({ slot, now, inCarousel = false }) {
 
   const onBook = () => {
     hapticFeedback();
-    track('last_minute_click', { from: 'home', day: day === "Aujourd'hui" ? 'today' : 'later' });
+    track('last_minute_click', { from, day: day === "Aujourd'hui" ? 'today' : 'later' });
   };
 
   // Partage : aucune attente avant shareLastMinute (navigator.share exige le geste du client)
@@ -49,7 +53,7 @@ function LastMinuteCard({ slot, now, inCarousel = false }) {
     const how = await shareLastMinute(slot, now); // 'shared' | 'cancelled' | 'copied' | 'failed'
     if (how === 'copied') toast.success('Lien copié : collez-le dans un message à votre ami.');
     else if (how === 'failed') toast.error('Partage impossible sur cet appareil.');
-    if (how === 'shared' || how === 'copied') track('last_minute_share', { from: 'home', method: how });
+    if (how === 'shared' || how === 'copied') track('last_minute_share', { from, method: how });
   };
 
   return (

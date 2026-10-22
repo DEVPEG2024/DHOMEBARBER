@@ -16,6 +16,8 @@ import { hapticFeedback } from '@/lib/capacitor';
 import { useAndroidBack } from '@/lib/useAndroidBack';
 import LoadError, { isNetworkError } from '@/components/shared/LoadError';
 import GangLeaderboard from '@/components/gang/GangLeaderboard';
+import { LastMinuteCard } from '@/components/home/LastMinuteSection';
+import { lastMinuteSlotOfPost, useLastMinuteClock } from '@/lib/lastMinute';
 import { GANG_LEADERBOARD_QUERY_KEY } from '@/lib/gangCardApi';
 import { contentFilterError } from '@/lib/contentFilter';
 
@@ -260,7 +262,7 @@ function usePostSeen(ref, postId) {
 function PostCard({
   post, currentUser, onLike, onDelete, likes, comments, onComment, onDeleteComment, getAuthorPhoto, onOpenMenu,
   likesFailed = false, commentsFailed = false, onRetryLikes, onRetryComments, likesRetrying = false, commentsRetrying = false,
-  viewCount = null,
+  viewCount = null, lastMinuteSlot = null, now = Date.now(),
 }) {
   const cardRef = useRef(null);
   usePostSeen(cardRef, post.id);
@@ -464,8 +466,13 @@ function PostCard({
         ) : null}
       </div>
 
-      {/* Content */}
-      {post.content && (
+      {/* Publication Last Minute du salon (posée par le serveur) : la carte de l'accueil, avec
+          Réserver et Envoyer à un ami, à la place du texte (gardé pour les apps plus anciennes) */}
+      {lastMinuteSlot ? (
+        <div className="px-4 pb-3">
+          <LastMinuteCard slot={lastMinuteSlot} now={now} from="feed" />
+        </div>
+      ) : post.content && (
         <p className="px-4 pb-3 text-sm text-foreground leading-relaxed whitespace-pre-wrap break-words">{post.content}</p>
       )}
 
@@ -795,7 +802,12 @@ export default function Feed() {
   const isBlocked = (row) =>
     (!!row.author_key && blockedKeys.has(row.author_key)) ||
     (!!row.author_email && blockedEmails.has(String(row.author_email).toLowerCase()));
-  const visiblePosts = posts.filter(p => !isBlocked(p));
+  // Publications Last Minute : seulement tant que le créneau est à venir (le serveur les retire
+  // aussi, au plus tard 5 min après) ; leur créneau au format de la carte de l'accueil
+  const lastMinuteNow = useLastMinuteClock();
+  const lastMinuteSlots = new Map(posts.filter(p => p.kind === 'last_minute')
+    .map(p => [String(p.id), lastMinuteSlotOfPost(p, employees, lastMinuteNow)]));
+  const visiblePosts = posts.filter(p => !isBlocked(p) && (p.kind !== 'last_minute' || lastMinuteSlots.get(String(p.id))));
 
   // Admin : nombre de clients qui ont vu chaque publication (mesure d'audience)
   const viewIds = user?.role === 'admin' ? visiblePosts.map(p => String(p.id)).slice(0, 200) : [];
@@ -1315,13 +1327,17 @@ export default function Feed() {
                 <Flag className="w-4 h-4 text-amber-400" />
                 Signaler {menuTarget.type === 'comment' ? 'ce commentaire' : 'cette publication'}
               </button>
-              <button
-                onClick={() => { setMenuTarget(null); setBlockTarget({ key: menuTarget.authorKey, email: menuTarget.authorEmail, name: menuTarget.authorName }); }}
-                className="flex items-center gap-3 w-full px-4 py-3.5 mt-2 rounded-xl bg-secondary/60 hover:bg-secondary text-sm font-semibold text-red-400 transition-colors"
-              >
-                <Ban className="w-4 h-4" />
-                Bloquer {menuTarget.authorName || 'cet utilisateur'}
-              </button>
+              {/* Publication du salon sans auteur (Last Minute posé par le serveur) : rien à bloquer,
+                  le signalement reste possible */}
+              {(menuTarget.authorKey || menuTarget.authorEmail) && (
+                <button
+                  onClick={() => { setMenuTarget(null); setBlockTarget({ key: menuTarget.authorKey, email: menuTarget.authorEmail, name: menuTarget.authorName }); }}
+                  className="flex items-center gap-3 w-full px-4 py-3.5 mt-2 rounded-xl bg-secondary/60 hover:bg-secondary text-sm font-semibold text-red-400 transition-colors"
+                >
+                  <Ban className="w-4 h-4" />
+                  Bloquer {menuTarget.authorName || 'cet utilisateur'}
+                </button>
+              )}
               <button onClick={() => setMenuTarget(null)} className="w-full px-4 py-3 mt-3 text-sm font-medium text-muted-foreground">
                 Annuler
               </button>
@@ -1483,6 +1499,8 @@ export default function Feed() {
                   likesRetrying={likesFetching}
                   commentsRetrying={commentsFetching}
                   viewCount={postViewCounts ? (postViewCounts[String(post.id)]?.clients ?? 0) : null}
+                  lastMinuteSlot={lastMinuteSlots.get(String(post.id)) || null}
+                  now={lastMinuteNow}
                 />
               </GlassCard>
             ))}

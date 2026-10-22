@@ -46,8 +46,8 @@ const ACTION_LABELS = {
   gallery_book: '« Réserver » depuis une photo',
   push_open: 'Notification ouverte',
   privatisation_request: 'Demande de privatisation',
-  last_minute_click: '« Réserver ce créneau » (Last Minute de l\'accueil)',
-  last_minute_share: '« Envoyer à un ami » (Last Minute de l\'accueil)',
+  last_minute_click: '« Réserver ce créneau » (Last Minute de l\'accueil ou du fil)',
+  last_minute_share: '« Envoyer à un ami » (Last Minute de l\'accueil ou du fil)',
 };
 export const actionLabel = (name) => ACTION_LABELS[name] || name;
 
