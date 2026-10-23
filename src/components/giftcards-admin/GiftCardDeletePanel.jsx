@@ -9,7 +9,7 @@ import {
   formatEuro, formatDay, giftCardBalance,
 } from '@/lib/giftCardDebit';
 
-const PAYMENT_LABELS = { cb: 'CB', especes: 'espèces' };
+const PAYMENT_LABELS = { cb: 'CB', especes: 'espèces', mixte: 'CB + espèces' };
 
 /** Ce que la suppression change pour un RDV payé (en partie) par la carte. */
 function appointmentEffect(apt) {

@@ -240,13 +240,14 @@ export async function fetchRecentAppointmentsToCash(days = 7, today = parisToday
   });
 }
 
-// RDV des derniers jours déjà encaissés en CB / espèces (le client sort sa carte après coup, tour 7)
+// RDV des derniers jours déjà encaissés en CB / espèces, ou les deux (le client sort sa carte après
+// coup, tour 7)
 export const giftCardRecentPaidKey = (day) => ['giftCardTodayAppointments', 'paid', day];
 export async function fetchRecentPaidAppointments(days = 7, today = parisToday()) {
   const [y, m, d] = today.split('-').map(Number);
   const keys = Array.from({ length: days }, (_, i) => new Date(Date.UTC(y, m - 1, d - i)).toISOString().slice(0, 10));
   const rows = await api.entities.Appointment.filter({ date: keys, status: 'completed' }, '-date', 300);
-  return (Array.isArray(rows) ? rows : []).filter((a) => ['cb', 'especes'].includes(a.payment_method)
+  return (Array.isArray(rows) ? rows : []).filter((a) => ['cb', 'especes', 'mixte'].includes(a.payment_method)
     && appointmentDue(a) > 0);
 }
 
@@ -567,7 +568,7 @@ export async function reopenAppointmentAfterUndo(appointmentId, card, amount, qu
   return 'reopened';
 }
 
-const PAYMENT_LABEL = { cb: 'en CB', especes: 'en espèces', carte_cadeau: 'par une autre carte cadeau' };
+const PAYMENT_LABEL = { cb: 'en CB', especes: 'en espèces', mixte: 'en CB + espèces', carte_cadeau: 'par une autre carte cadeau' };
 
 /**
  * Annule un débit et remet tout d'aplomb : solde (serveur), RDV clôturé par ce débit rouvert,

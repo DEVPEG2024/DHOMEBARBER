@@ -164,7 +164,7 @@ function AttachPanel({ card, tx, onClose, onDone }) {
                   <li key={a.id} className={`rounded-lg border px-2.5 py-2 text-[11px] ${isOwner(a) ? 'border-primary/40 bg-primary/10' : 'border-white/10 bg-white/5'}`}>
                     <span className="block font-semibold text-foreground break-words">{a.client_name || 'Client'}{isOwner(a) ? ' · titulaire de la carte' : ''}</span>
                     <span className="block text-muted-foreground break-words">
-                      {formatDay(a.date)} · {String(a.start_time || '').slice(0, 5)}{a.employee_name ? ` · ${a.employee_name}` : ''} · encaissé {a.payment_method === 'cb' ? 'CB' : 'espèces'} {formatEuro(appointmentPrice(a))}
+                      {formatDay(a.date)} · {String(a.start_time || '').slice(0, 5)}{a.employee_name ? ` · ${a.employee_name}` : ''} · encaissé {a.payment_method === 'cb' ? 'CB' : a.payment_method === 'mixte' ? 'CB + espèces' : 'espèces'} {formatEuro(appointmentPrice(a))}
                     </span>
                     {confirmPaidId !== a.id ? (
                       <button type="button" onClick={() => setConfirmPaidId(a.id)} disabled={!!sendingId}
@@ -174,7 +174,7 @@ function AttachPanel({ card, tx, onClose, onDone }) {
                     ) : (
                       <div className="mt-1 space-y-1">
                         <p className="text-amber-300 break-words">
-                          {formatEuro(tx.amount)} seront comptés « carte cadeau » et retirés du {a.payment_method === 'cb' ? 'CB' : 'espèces'} de ce RDV au tableau de bord. Rendez cette somme au client si elle avait été encaissée.
+                          {formatEuro(tx.amount)} seront comptés « carte cadeau » et retirés du {a.payment_method === 'especes' ? 'espèces' : 'CB'} de ce RDV au tableau de bord. Rendez cette somme au client si elle avait été encaissée.
                         </p>
                         <div className="flex gap-2">
                           <button type="button" onClick={() => attach(a, { correctPaid: true })} disabled={!!sendingId}

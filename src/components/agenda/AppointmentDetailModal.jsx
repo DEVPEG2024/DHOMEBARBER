@@ -1,7 +1,7 @@
 import React, { useReducer } from 'react';
 import { Link } from 'react-router-dom';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Clock, User, Phone, Mail, Scissors, CreditCard, FileText, Calendar, Banknote, CheckCircle, Heart, ShoppingBag, ChevronDown, Check, BadgeCheck, X, AlertTriangle, Trash2, UserX, Gift, Pencil, RotateCcw, Undo2 } from 'lucide-react';
+import { Clock, User, Phone, Mail, Scissors, CreditCard, FileText, Calendar, Banknote, CheckCircle, Heart, ShoppingBag, ChevronDown, Check, BadgeCheck, X, AlertTriangle, Trash2, UserX, Gift, Pencil, RotateCcw, Undo2, Coins } from 'lucide-react';
 import { getServiceColor } from '@/utils/serviceColors';
 import { api } from '@/api/apiClient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -16,6 +16,8 @@ import { orderItemsLabel } from '@/lib/appointmentProducts';
 import { formatPrice, isShopProduct, stockInfo } from '@/components/shop/productUtils';
 import { useGangSummaries } from '@/lib/gangCardApi';
 import { gangPalette } from '@/components/gang/gangTheme';
+import { paymentSplitOf, SPLIT_PAYMENT } from '@/lib/revenue';
+import { usePaymentFeatures } from '@/lib/paymentFeatures';
 
 /** Pastille « Or · 12 visites » du client (carte Gang) ; rien sans données ou en cas d'erreur. */
 function GangClientBadge({ email }) {
@@ -68,6 +70,8 @@ const initialState = (apt) => ({
   tip: apt.tip ? String(apt.tip) : '',
   tipMethod: apt.tip_method || '',
   paymentMethod: apt.payment_method || '',
+  // « CB + Espèces » : part payée en espèces (le reste en CB)
+  cashAmount: apt.cash_amount ? String(apt.cash_amount) : '',
   // Produit vendu au fauteuil déjà enregistré (product_id) : gardé tel quel à la correction, sinon
   // la validation l'enlèverait et rendrait l'unité au stock
   selectedProductId: apt.product_id ? String(apt.product_id) : '',
@@ -105,6 +109,9 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const [state, dispatch] = useReducer(reducer, appointment, initialState);
+  // « CB + Espèces » proposé quand le serveur l'accepte (ou pour corriger un RDV déjà encaissé ainsi)
+  const { splitPayment } = usePaymentFeatures();
+  const canSplit = splitPayment || appointment.payment_method === SPLIT_PAYMENT;
   // Produits réservés avec le RDV (commandes ouvertes). Jamais recopiés dans product_sold / product_price :
   // ils sont encaissés via leur commande, sinon le tableau de bord les compterait deux fois.
   const [deliveredIds, setDeliveredIds] = React.useState(() => new Set());
@@ -263,11 +270,24 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
   // Last minute non pris (« Absent » posé par l'agenda ou « Personne n'a pris le créneau ») : pas
   // d'encaissement à 0 € sans client ni prestation ; « Un client l'a pris » d'abord (tour 7)
   const unclaimedLastMinute = isClosedOut && wasLastMinuteRow(appointment);
+  // « CB + Espèces » : part en espèces saisie, le reste en CB. À répartir : prestations + produit,
+  // hors part déjà payée par carte cadeau et hors pourboire (il a son propre moyen de paiement).
+  // Le serveur refait le contrôle : une part > 0 et plus petite que le montant à répartir.
+  const isSplit = state.paymentMethod === SPLIT_PAYMENT;
+  const splitBase = Math.max(0, Math.round((serviceTotal + prodValue - giftPaid) * 100) / 100);
+  const cashParsed = parseAmount(state.cashAmount);
+  const cashInvalid = isSplit && Number.isNaN(cashParsed);
+  const cashValue = Number.isNaN(cashParsed) ? 0 : cashParsed;
+  const cardPart = Math.round((splitBase - cashValue) * 100) / 100;
+  const cashTooHigh = isSplit && cashValue > 0 && cardPart <= 0;
+  const splitValid = !isSplit || (cashValue > 0 && cardPart > 0);
+  // Récapitulatif d'un RDV encaissé « CB + Espèces » (part espèces ramenée à l'encaissé)
+  const lockedSplit = locked && appointment.payment_method === SPLIT_PAYMENT ? paymentSplitOf(appointment) : null;
   // Last minute pris par un client de passage, pas encore enregistré : il n'apparaît dans Cartes
   // cadeau qu'une fois confirmé avec un nom et une prestation (tour 7)
   const lmNeedsSave = isLastMinute && !isCompleted && !appointment.client_email && !assignedClient
     && (appointment.status === 'last_minute' || !appointment.services?.length);
-  const canValidate = !locked && !tipInvalid && state.paymentMethod && (tipValue === 0 || state.tipMethod) && !giftCardNeedsDebit && !giftShortOnCorrection && !needsService && !giftExcessBlocks && !unclaimedLastMinute;
+  const canValidate = !locked && !tipInvalid && state.paymentMethod && (tipValue === 0 || state.tipMethod) && !giftCardNeedsDebit && !giftShortOnCorrection && !needsService && !giftExcessBlocks && !unclaimedLastMinute && splitValid;
   // 14 : RDV d'un client encore à venir : on l'annule (le client peut être prévenu), on ne le supprime pas
   const upcomingClient = !!appointment.client_email && ['confirmed', 'pending'].includes(appointment.status)
     && parisInstant(String(appointment.date || '').slice(0, 10), String(appointment.start_time || '00:00').slice(0, 5)) > Date.now();
@@ -444,11 +464,13 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
   };
 
   const handleValidate = async () => {
-    if (giftCardNeedsDebit || giftShortOnCorrection || tipInvalid || needsService || giftExcessBlocks || unclaimedLastMinute) return;
+    if (giftCardNeedsDebit || giftShortOnCorrection || tipInvalid || needsService || giftExcessBlocks || unclaimedLastMinute || !splitValid) return;
     dispatch({ type: 'SAVING', value: true });
     try {
       const updateData = {
         payment_method: state.paymentMethod,
+        // Autre moyen de paiement : le serveur efface lui-même la part en espèces
+        ...(isSplit ? { cash_amount: cashValue } : {}),
         payment_status: 'paid',
         status: 'completed',
         tip: tipValue,
@@ -861,7 +883,13 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
                 </div>
               </>
             )}
-            {isAdmin && ['cb', 'especes'].includes(appointment.payment_method) && (
+            {lockedSplit && (
+              <div className="flex items-center justify-between gap-2 text-xs text-foreground">
+                <span>Payé en espèces {formatPrice(lockedSplit.especes)}</span>
+                <span className="shrink-0">CB {formatPrice(lockedSplit.cb)}</span>
+              </div>
+            )}
+            {isAdmin && ['cb', 'especes', SPLIT_PAYMENT].includes(appointment.payment_method) && (
               <p className="text-[11px] text-muted-foreground break-words">
                 Le client paie finalement par carte cadeau ?{' '}
                 <Link to="/admin/gift-cards" className="font-semibold text-primary underline underline-offset-2">Cartes cadeau</Link>
@@ -871,8 +899,8 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
             <div className="flex items-center justify-between text-[10px] text-muted-foreground">
               <span>{appointment.total_duration} min</span>
               <span className="flex items-center gap-1">
-                {appointment.payment_method === 'cb' ? <CreditCard className="w-3 h-3" /> : appointment.payment_method === 'carte_cadeau' ? <Gift className="w-3 h-3" /> : <Banknote className="w-3 h-3" />}
-                {appointment.payment_method === 'cb' ? 'CB' : appointment.payment_method === 'carte_cadeau' ? 'Carte cadeau' : 'Espèces'}
+                {appointment.payment_method === 'cb' ? <CreditCard className="w-3 h-3" /> : appointment.payment_method === 'carte_cadeau' ? <Gift className="w-3 h-3" /> : appointment.payment_method === SPLIT_PAYMENT ? <Coins className="w-3 h-3" /> : <Banknote className="w-3 h-3" />}
+                {appointment.payment_method === 'cb' ? 'CB' : appointment.payment_method === 'carte_cadeau' ? 'Carte cadeau' : appointment.payment_method === SPLIT_PAYMENT ? 'CB + Espèces' : 'Espèces'}
               </span>
             </div>
           </div>
@@ -1036,10 +1064,11 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
             {/* Payment method selector */}
             <div>
               <p className="text-xs text-muted-foreground mb-2">Mode de paiement</p>
-              <div className="grid grid-cols-3 gap-2">
+              <div className={`grid ${canSplit ? 'grid-cols-2' : 'grid-cols-3'} gap-2`}>
                 {[
                   { value: 'cb', label: 'CB', icon: CreditCard },
                   { value: 'especes', label: 'Espèces', icon: Banknote },
+                  ...(canSplit ? [{ value: SPLIT_PAYMENT, label: 'CB + Espèces', icon: Coins }] : []),
                   { value: 'carte_cadeau', label: 'Carte cadeau', icon: Gift },
                 ].map(pm => (
                   <button
@@ -1057,6 +1086,57 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
                   </button>
                 ))}
               </div>
+              {isSplit && (
+                <div className="mt-2 space-y-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <label htmlFor="cash-part" className="flex items-center gap-1.5 text-xs text-foreground shrink-0">
+                      <Banknote className="w-3.5 h-3.5" />
+                      Espèces
+                    </label>
+                    <div className="relative flex-1 min-w-0">
+                      <input
+                        id="cash-part"
+                        aria-label="Part payée en espèces"
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="0"
+                        value={state.cashAmount}
+                        onChange={(e) => dispatch({ type: 'SET', field: 'cashAmount', value: e.target.value.replace(/[^0-9.,]/g, '') })}
+                        aria-invalid={cashInvalid || cashTooHigh}
+                        className={`w-full bg-white/5 border rounded-xl px-3 py-2 pr-7 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-primary/40 ${cashInvalid || cashTooHigh ? 'border-red-500/60' : 'border-white/10'}`}
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">€</span>
+                    </div>
+                    {splitBase > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => dispatch({ type: 'SET', field: 'cashAmount', value: String(Math.round(splitBase * 50) / 100).replace('.', ',') })}
+                        className="shrink-0 px-3 py-2 rounded-xl text-xs font-medium bg-white/5 border border-white/10 text-muted-foreground hover:bg-white/10"
+                      >
+                        Moitié
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex items-center justify-between gap-2 text-xs">
+                    <span className="flex items-center gap-1.5 text-muted-foreground">
+                      <CreditCard className="w-3.5 h-3.5" />
+                      CB
+                    </span>
+                    <span className="font-semibold text-foreground">{cashValue > 0 && cardPart > 0 ? formatPrice(cardPart) : '–'}</span>
+                  </div>
+                  {cashInvalid ? (
+                    <p className="text-[11px] text-red-400">Montant invalide (ex. 15 ou 12,50)</p>
+                  ) : splitBase <= 0 ? (
+                    <p className="text-[11px] text-red-400">Rien à encaisser hors carte cadeau.</p>
+                  ) : cashTooHigh ? (
+                    <p className="text-[11px] text-red-400 break-words">La part en espèces doit rester sous {formatPrice(splitBase)} : sinon choisissez « Espèces ».</p>
+                  ) : (
+                    <p className="text-[11px] text-muted-foreground break-words">
+                      À répartir : {formatPrice(splitBase)} (prestations{prodValue > 0 ? ' et produit' : ''}{giftPaid > 0 ? ', hors carte cadeau' : ''}). Le pourboire garde son propre moyen de paiement.
+                    </p>
+                  )}
+                </div>
+              )}
               {giftCardNeedsDebit && (
                 <div role="status" className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs leading-relaxed text-amber-200 break-words min-w-0">
                   {productUnsaved ? (

@@ -263,6 +263,7 @@ export function creerDonnees() {
         orderCancel: true,
         appointmentCancelReason: true,
         orderCancelStatuses: ['pending', 'confirmed'],
+        splitPayment: true,
         appleWallet: false,
         googleWallet: false,
       },

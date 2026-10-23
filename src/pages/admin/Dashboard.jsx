@@ -27,11 +27,11 @@ import { isRescheduledCancel, cancellationActor } from '@/lib/cancellation';
 const APPOINTMENTS_LIMIT = 2000;
 
 // CA d'un RDV (hors pourboire), part payée par carte cadeau, arrondi : partagés avec Statistiques
-import { revenueOf, round2, giftPartOf } from '@/lib/revenue';
+import { revenueOf, round2, giftPartOf, paymentSplitOf } from '@/lib/revenue';
 
 // ─── Calculs purs : bloc lu tel quel par dhomebarber-api/test/test-t7-3-dashboard.js ───
 // <calculs-purs>
-const PAYMENT_LABELS = { cb: 'CB', especes: 'Espèces', carte_cadeau: 'Carte cadeau' };
+const PAYMENT_LABELS = { cb: 'CB', especes: 'Espèces', mixte: 'CB + Espèces', carte_cadeau: 'Carte cadeau' };
 
 // Last Minute publié : encore libre, pris par un client (repère « [last_minute] » dans la note
 // interne) ou que personne n'a pris. Un Last Minute déplacé par le client reste compté une fois :
@@ -304,20 +304,17 @@ export default function AdminDashboard() {
 
   // Prestations CB vs Espèces vs Carte cadeau (sans pourboire). La part payée par carte cadeau
   // (débit au comptoir, même partiel) n'est jamais comptée en CB / espèces : seul le reste l'est.
-  // Un RDV « Carte cadeau » dont la carte n'a couvert qu'une partie : le reste en « non renseigné ».
-  const sumBy = (list, method) => round2(list
-    .filter(a => (method === null ? (!a.payment_method || a.payment_method === 'carte_cadeau') : a.payment_method === method))
-    .reduce((s, a) => s + outsideGift(a), 0));
+  // « CB + Espèces » : chaque part dans sa case (paymentSplitOf). Un RDV « Carte cadeau » dont la
+  // carte n'a couvert qu'une partie : le reste en « non renseigné » (`autre`).
+  const sumBy = (list, key) => round2(list.reduce((s, a) => s + paymentSplitOf(a)[key], 0));
   const todayCB = sumBy(paidToday, 'cb');
   const todayCash = sumBy(paidToday, 'especes');
   const todayGift = round2(paidToday.reduce((s, a) => s + giftPartOf(a), 0));
-  const todayNoMethod = sumBy(paidToday, null);
 
   // Month CB vs Espèces vs Carte cadeau (sans pourboire)
   const monthCB = sumBy(monthPaid, 'cb');
   const monthCash = sumBy(monthPaid, 'especes');
   const monthGift = round2(monthPaid.reduce((s, a) => s + giftPartOf(a), 0));
-  const monthNoMethod = sumBy(monthPaid, null);
 
   // Pourboires CB vs Espèces
   const todayTipsCB = round2(paidToday.filter(a => a.tip_method === 'cb').reduce((s, a) => s + (a.tip || 0), 0));
@@ -355,11 +352,11 @@ export default function AdminDashboard() {
       const d = subDays(new Date(), i);
       const dateStr = format(d, 'yyyy-MM-dd');
       const dayPaid = realAppts.filter(a => a.date === dateStr && isPaid(a));
-      const outside = (a) => getTotal(a) - giftPartOf(a);
-      const dayCB = round2(dayPaid.filter(a => a.payment_method === 'cb').reduce((sum, a) => sum + outside(a), 0));
-      const dayCash = round2(dayPaid.filter(a => a.payment_method === 'especes').reduce((sum, a) => sum + outside(a), 0));
+      const daySum = (key) => round2(dayPaid.reduce((sum, a) => sum + paymentSplitOf(a)[key], 0));
+      const dayCB = daySum('cb');
+      const dayCash = daySum('especes');
       const dayGift = round2(dayPaid.reduce((sum, a) => sum + giftPartOf(a), 0));
-      const dayOther = round2(dayPaid.filter(a => !a.payment_method || a.payment_method === 'carte_cadeau').reduce((sum, a) => sum + outside(a), 0));
+      const dayOther = daySum('autre');
       data.push({
         day: format(d, 'EEE', { locale: fr }),
         cb: dayCB,
