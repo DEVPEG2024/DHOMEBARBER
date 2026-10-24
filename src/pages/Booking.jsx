@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useNavigationType } from 'react-router-dom';
 import { api } from '@/api/apiClient';
 import { fetchPublicBarbers } from '@/lib/publicBarbers';
 import { useAuth } from '@/lib/AuthContext';
@@ -474,8 +474,15 @@ function BookingFlow() {
   // client. Les liens des apps publiées avant les looks (une prestation, sans `look`) restent valables.
   const fromGallery = urlParams.get('from') === 'gallery';
   const lookKey = urlParams.get('look') || null;
-  // « Déplacer » depuis Mes rendez-vous : l'ancien RDV n'est annulé qu'une fois le nouveau confirmé
-  const rescheduleId = urlParams.get('reschedule') || null;
+  // « Déplacer » depuis Mes rendez-vous : l'ancien RDV n'est annulé qu'une fois le nouveau confirmé.
+  // Gardé toute la réservation, même si l'adresse le perd sans que le client l'ait choisi : « Réserver »
+  // de la barre du bas touché en pleine réservation (juste sous « Confirmer ») mène à /booking sans
+  // paramètre, la page restait sur la confirmation et le déplacement devenait un nouveau RDV, l'ancien
+  // restant prévu (audit du 24 oct. 2026). Seuls « Ne pas déplacer » et « Réserver un rendez-vous en
+  // plus » le retirent (`dropReschedule`).
+  const urlRescheduleId = urlParams.get('reschedule') || null;
+  const [rescheduleId, setRescheduleId] = useState(urlRescheduleId);
+  if (urlRescheduleId && urlRescheduleId !== rescheduleId) setRescheduleId(urlRescheduleId);
   // Lien d'une notification Last Minute (`/booking?barber=…&date=AAAA-MM-JJ&time=HH:MM`) : avec un
   // barber actif, la date puis l'heure annoncées sont déjà choisies quand le client arrive à l'étape
   // Date & Heure (l'heure seulement si elle est encore libre pour ses prestations). Appliqué une fois.
@@ -556,10 +563,12 @@ function BookingFlow() {
 
   /** « Ne pas déplacer » : on garde le parcours, sans le paramètre `reschedule`. */
   const dropReschedule = () => {
+    setRescheduleId(null);
     const params = new URLSearchParams(window.location.search);
     params.delete('reschedule');
     const query = params.toString();
-    navigate(query ? `/booking?${query}` : '/booking', { replace: true });
+    // État gardé : l'entrée d'historique du retour d'étape (bookingStepMarker) reste valable
+    navigate(query ? `/booking?${query}` : '/booking', { replace: true, state: location.state });
   };
 
   const servicesQuery = useQuery({
@@ -578,6 +587,20 @@ function BookingFlow() {
     const list = servicesData || EMPTY_LIST;
     return selectedServices.map(s => list.find(x => String(x.id) === String(s.id)) || s);
   }, [selectedServices, servicesData]);
+  // Prestation retirée du catalogue pendant la réservation (catalogue relu, notamment après le refus
+  // « Prestation inconnue ou indisponible ») : elle quitte la sélection, bandeau « vérifiez » et
+  // retour au choix des prestations. Avant, « Confirmer » renvoyait le même refus en boucle et le
+  // catalogue en cache la proposait encore (audit du 24 oct. 2026).
+  useEffect(() => {
+    if (!servicesData || selectedServices.length === 0 || success) return;
+    const ids = new Set(servicesData.map(s => String(s.id)));
+    const kept = selectedServices.filter(s => ids.has(String(s.id)));
+    if (kept.length === selectedServices.length) return;
+    setSelectedServices(kept);
+    setRetiredNotice(true);
+    setLookDropped(true);
+    if (step > 0) { setDirection(-1); setStep(0); }
+  }, [servicesData]);
 
   // « Pour qui ? » : une prestation Enfants ou un rendez-vous suivant le demandent explicitement
   // (« Moi » n'est pas choisi d'office) ; sinon « Moi » par défaut, comme avant. Sans le drapeau du
@@ -970,20 +993,42 @@ function BookingFlow() {
   const scopeEmployee = anyBarber ? null : liveEmployee;
   // Barber connu (ou « peu importe » avec la liste des barbers) : les places peuvent se calculer
   const scopeReady = anyBarber ? !employeesPending : !!liveEmployee;
-  const optionsForDay = (date, key) => dayOptions({
-    date,
-    employee: scopeEmployee,
-    employees,
-    rows: blockingByDate.get(key) || EMPTY_LIST,
-    timeOffs,
-    totalDuration,
-    shortestDuration,
-    privateEvents: privatesByDate.get(key) || EMPTY_LIST,
-  });
+  // Déplacement sans rien changer (même barber, même jour, même heure, mêmes prestations) : l'heure
+  // actuelle n'est pas proposée. L'ancien RDV ne bloque pas les créneaux (il sera annulé), elle
+  // paraissait donc libre ; la « déplacer » là ne servait à rien (et faisait disparaître le RDV avec
+  // le serveur d'avant le 24 oct. 2026). Avec d'autres prestations (ajouter la barbe), elle reste
+  // proposée : c'est la façon de compléter son rendez-vous. Même règle que `findRescheduleSlots`.
+  const currentSlot = oldApt && sameServicesAsOld && oldApt.employee_id != null
+    ? { date: String(oldApt.date).slice(0, 10), time: String(oldApt.start_time || '').slice(0, 5), employeeId: String(oldApt.employee_id) }
+    : null;
+  const optionsForDay = (date, key) => {
+    const rows = blockingByDate.get(key) || EMPTY_LIST;
+    const dayPrivates = privatesByDate.get(key) || EMPTY_LIST;
+    const result = dayOptions({
+      date, employee: scopeEmployee, employees, rows, timeOffs, totalDuration, shortestDuration, privateEvents: dayPrivates,
+    });
+    if (!currentSlot || key !== currentSlot.date) return result;
+    const options = [];
+    for (const option of result.options) {
+      if (option.time !== currentSlot.time || String(option.employee?.id) !== currentSlot.employeeId) {
+        options.push(option);
+        continue;
+      }
+      // « Peu importe » : un autre barber libre à cette heure-là la garde, sinon elle disparaît
+      if (scopeEmployee) continue;
+      const other = [...employees]
+        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+        .find(emp => String(emp.id) !== currentSlot.employeeId
+          && analyzeDay(emp, date, rows.filter(r => String(r.employee_id) === String(emp.id)), timeOffs, totalDuration, shortestDuration, dayPrivates).slots.includes(option.time));
+      if (other) options.push({ time: option.time, employee: other });
+    }
+    return { options, reason: options.length > 0 ? null : (result.reason || 'full') };
+  };
+  const currentSlotKey = currentSlot ? `${currentSlot.date}|${currentSlot.time}|${currentSlot.employeeId}` : '';
   const { options: slotOptions, reason: emptyReason } = useMemo(() => {
     if (!selectedDate || !slotsReady || !scopeReady) return { options: [], reason: null };
     return optionsForDay(selectedDate, selectedDateStr);
-  }, [scopeEmployee, scopeReady, selectedDate, selectedDateStr, slotsReady, blockingByDate, privatesByDate, timeOffs, totalDuration, shortestDuration, employees, nowTick]);
+  }, [scopeEmployee, scopeReady, selectedDate, selectedDateStr, slotsReady, blockingByDate, privatesByDate, timeOffs, totalDuration, shortestDuration, employees, nowTick, currentSlotKey]);
 
   // Places de chaque jour de l'horizon (bande de jours de l'écran Créneau), calculées pour les
   // semaines chargées ; les autres attendent (chargées au fil du défilement) ; lecture en échec → inconnu
@@ -995,7 +1040,7 @@ function BookingFlow() {
     if (!scopeReady || stateOfWeek !== 'ready') return { date, key, status: 'loading' };
     const { options, reason } = optionsForDay(date, key);
     return options.length > 0 ? { date, key, status: 'open', count: options.length } : { date, key, status: 'empty', reason };
-  }), [horizonDays, weekKeys.join(','), weekStates.join(','), scopeEmployee, scopeReady, blockingByDate, privatesByDate, timeOffs, totalDuration, shortestDuration, employees, nowTick]);
+  }), [horizonDays, weekKeys.join(','), weekStates.join(','), scopeEmployee, scopeReady, blockingByDate, privatesByDate, timeOffs, totalDuration, shortestDuration, employees, nowTick, currentSlotKey]);
 
   // Prochaines disponibilités : premiers créneaux des deux premières semaines (deux par jour au
   // plus). `null` tant qu'elles ne sont pas chargées ; une semaine en échec est simplement sautée.
@@ -1011,7 +1056,7 @@ function BookingFlow() {
       }
     });
     return pickNextOptions(days, { limit: 6, perDay: 2 });
-  }, [preloadStates.join(','), weekKeys.join(','), todayKey, horizonKey, scopeEmployee, scopeReady, blockingByDate, privatesByDate, timeOffs, totalDuration, shortestDuration, employees, nowTick]);
+  }, [preloadStates.join(','), weekKeys.join(','), todayKey, horizonKey, scopeEmployee, scopeReady, blockingByDate, privatesByDate, timeOffs, totalDuration, shortestDuration, employees, nowTick, currentSlotKey]);
 
   // L'heure choisie est-elle encore réservable ? (prestation ajoutée après coup, créneau pris entre-
   // temps) null = on ne sait pas encore (chargement) : on ne tranche pas.
@@ -1072,7 +1117,7 @@ function BookingFlow() {
   const moveInstead = (apt) => {
     const params = new URLSearchParams(window.location.search);
     params.set('reschedule', String(apt.id));
-    navigate(`/booking?${params.toString()}`, { replace: true });
+    navigate(`/booking?${params.toString()}`, { replace: true, state: location.state });
   };
 
   // RDV qui commence dans moins de `cancelHours` heures : il ne pourra plus être annulé ni déplacé
@@ -1160,13 +1205,63 @@ function BookingFlow() {
     });
   };
 
+  /**
+   * Retour du navigateur (bouton ou geste retour sur le site, retour d'Android dans Chrome) : une
+   * étape en arrière, comme « Étape précédente ». Avant (audit du 24 oct. 2026), il quittait la
+   * réservation depuis la confirmation et toute la sélection était perdue.
+   * Une seule entrée d'historique (`bookingStepMarker`) est posée au premier passage à l'étape
+   * suivante ; chaque retour la retire, la page recule d'une étape et la repose s'il reste une étape
+   * avant celle d'arrivée (`backBaseRef` : écran Créneau quand le lien y mène directement). Revenir à
+   * l'étape d'arrivée par « Étape précédente » retire l'entrée, pour que le retour suivant quitte la page.
+   */
+  const backMarkerId = useRef(`booking-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
+  const backBaseRef = useRef(null);
+  // Entrée posée par cette page et pas encore retirée (une entrée posée ou retirée à l'instant n'est
+  // pas encore dans `location` : les deux repères couvrent ce rendu intermédiaire)
+  const hasBackMarker = location.state?.bookingStepMarker === backMarkerId.current;
+  const backPushPendingRef = useRef(false);
+  const backDroppedKeyRef = useRef(null);
+  if (hasBackMarker) backPushPendingRef.current = false;
+  const backMarkerActive = (hasBackMarker && backDroppedKeyRef.current !== location.key) || backPushPendingRef.current;
+  const backConsumingRef = useRef(false);
+  const navigationType = useNavigationType();
+  const backMarkerLiveRef = useRef(false);
+  backMarkerLiveRef.current = backMarkerActive;
+  const pushBackMarker = () => {
+    backPushPendingRef.current = true;
+    navigate(`${location.pathname}${location.search}`, { state: { ...(location.state || {}), bookingStepMarker: backMarkerId.current } });
+  };
+
   const goToStep = (next) => {
-    setDirection(next > step ? 1 : -1);
+    const forward = next > step;
+    setDirection(forward ? 1 : -1);
     setStep(next);
     hapticFeedback();
     // Chaque étape s'ouvre en haut de page (le catalogue a pu être défilé loin)
     requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'auto' }));
+    if (forward) {
+      if (backBaseRef.current === null) backBaseRef.current = step;
+      if (!backMarkerActive) pushBackMarker();
+    } else if (backMarkerActive && hasBackMarker && backBaseRef.current !== null && next <= backBaseRef.current) {
+      // Revenu à l'étape d'arrivée : l'entrée d'historique est retirée (sans effet sur l'étape)
+      backDroppedKeyRef.current = location.key;
+      backConsumingRef.current = true;
+      navigate(-1);
+    }
   };
+
+  useEffect(() => {
+    if (navigationType !== 'POP' || hasBackMarker) return;
+    if (backConsumingRef.current) { backConsumingRef.current = false; return; }
+    const base = backBaseRef.current;
+    if (base === null || step <= base || success || createAppointment.isPending) return;
+    // Retour du navigateur : étape précédente, et l'entrée reposée s'il en reste une avant l'arrivée
+    const next = step - 1;
+    setDirection(-1);
+    setStep(next);
+    requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'auto' }));
+    if (next > base) pushBackMarker();
+  }, [location.key]);
 
   // Mesure d'audience : étapes atteintes (parcours de réservation d'Admin → Trafic)
   useEffect(() => {
@@ -1207,7 +1302,8 @@ function BookingFlow() {
   const editLook = () => {
     hapticFeedback();
     if (location.state?.fromLook) {
-      navigate(-1);
+      // Entrée du retour d'étape posée par-dessus celle du look : un cran de plus
+      navigate(hasBackMarker ? -2 : -1);
       return;
     }
     navigate(lookLinkFor(preSelectedBarberId, lookItem?.key || lookKey, selectedServices));
@@ -1318,12 +1414,19 @@ function BookingFlow() {
   };
 
   const createAppointment = useMutation({
+    // Hors connexion, le mode par défaut (« online ») mettait l'envoi en pause : « Confirmation… »
+    // tournait sans fin, « Étape précédente » restait grisé, aucun message (relevé le 24 oct. 2026).
+    // L'envoi part toujours ; sans réseau, il est refusé tout de suite ci-dessous.
+    networkMode: 'always',
     mutationFn: async () => {
       if (!isAuthenticated || !user) {
         // Redirect to login, will come back to booking
         // Toute la requête est gardée (`reschedule`, barber, prestations) : sans elle, un
         // déplacement repris après la connexion devenait un nouveau RDV et l'ancien restait prévu
-        navigate(`/login?redirect=${encodeURIComponent(`/booking${window.location.search}`)}`);
+        const back = new URLSearchParams(window.location.search);
+        if (rescheduleId) back.set('reschedule', String(rescheduleId));
+        const query = back.toString();
+        navigate(`/login?redirect=${encodeURIComponent(query ? `/booking?${query}` : '/booking')}`);
         throw new Error('Non connecté');
       }
       if (user.role === 'admin' || user.role === 'barber') throw new Error('Les comptes de l\'équipe réservent depuis l\'agenda.');
@@ -1337,6 +1440,11 @@ function BookingFlow() {
       // par le serveur entre-temps (il n'est plus trouvé) ; on renvoie quand même `reschedule_of`,
       // le serveur rend le RDV existant. Le délai ne se revérifie pas sur un envoi déjà passé.
       sendRef.current = null;
+      // Appareil hors connexion : rien ne part. Ce n'est pas une « réponse perdue » (le rendez-vous
+      // n'a pas pu être créé) ; l'heure reste choisie, le client renvoie une fois reconnecté
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        throw Object.assign(new Error('Pas de connexion internet : le rendez-vous n\'a pas été envoyé. Touchez de nouveau « Confirmer » une fois connecté.'), { offline: true });
+      }
       const fromUncertain = !oldApt && uncertainMatch && uncertainSend?.previous ? uncertainSend.previous : null;
       const previous = oldApt || fromUncertain;
       if (previous && !fromUncertain && withinCancelDelay(previous, Date.now())) {
@@ -1451,11 +1559,31 @@ function BookingFlow() {
       setSuccess(true);
       hapticFeedback();
       clearTimeout(successTimer.current);
-      successTimer.current = setTimeout(() => navigate('/appointments'), canChain && !previous ? SUCCESS_DURATION_CHAIN : SUCCESS_DURATION);
+      // L'entrée du retour d'étape est remplacée : un retour depuis Mes rendez-vous rouvre la réservation, pas une page morte
+      successTimer.current = setTimeout(() => navigate('/appointments', { replace: backMarkerLiveRef.current }), canChain && !previous ? SUCCESS_DURATION_CHAIN : SUCCESS_DURATION);
       // Déplacement : le nouveau RDV est confirmé, on annule l'ancien (jamais avant)
       if (previous) cancelPreviousAppointment(previous);
     },
     onError: (err) => {
+      // Mesure d'audience des refus à la confirmation (Admin → Trafic) : statut HTTP (0 sans réseau)
+      // et code du serveur seulement, jamais le message, l'email ni un identifiant. Pas pour le
+      // renvoi vers la connexion ni pour un compte de l'équipe (aucun envoi)
+      const networkFailure = !!err?.offline || isNetworkError(err) || !!err?.timeout;
+      if (err?.message !== 'Non connecté' && !isStaffRole) {
+        const code = err?.data?.code ? String(err.data.code).slice(0, 40)
+          : err?.offline ? 'offline' : networkFailure ? 'network' : err?.tooLate ? 'too_late' : null;
+        track('booking_error', {
+          status: networkFailure ? 0 : (Number.isFinite(Number(err?.status)) ? Number(err.status) : 0),
+          ...(code ? { code } : {}),
+          reschedule: !!rescheduleId,
+        });
+      }
+      // Hors connexion avant l'envoi : rien n'est parti, on reste sur la confirmation, heure gardée
+      // (un éventuel envoi précédent dont la réponse s'est perdue reste en mémoire)
+      if (err?.offline) {
+        toast.error(err.message, { duration: 8000 });
+        return;
+      }
       // Réseau coupé pendant l'envoi : le rendez-vous a peut-être été créé (réponse perdue). Le
       // serveur reconnaît le même envoi (même compte, barber, jour, heure et prestations, quel
       // que soit le délai) et ne le crée pas deux fois : on reste sur la confirmation, l'heure gardée.
@@ -1529,8 +1657,10 @@ function BookingFlow() {
         if (anyBarber) setSelectedEmployee(null);
         goToStep(1);
       } else if (err?.status === 400) {
-        // Autres refus (plafond de rendez-vous, prestation, note) : on reste sur la confirmation
+        // Autres refus (plafond de rendez-vous, prestation, note) : on reste sur la confirmation.
+        // Catalogue relu : une prestation retirée entre-temps quitte la sélection (effet plus haut)
         queryClient.invalidateQueries({ queryKey: ['appointments-day'] });
+        queryClient.invalidateQueries({ queryKey: ['services'] });
       }
     },
   });
@@ -1900,14 +2030,17 @@ function BookingFlow() {
                 onVisibleRange={onVisibleRange}
               />
 
-              {/* Rien dans les deux prochaines semaines : on le dit (les flèches mènent plus loin) */}
+              {/* Rien dans les deux prochaines semaines : on le dit (la bande de jours mène plus loin ;
+                  il n'y a plus de flèches de semaine depuis le 19 oct. 2026) */}
               {!selectedDate && nextItems && nextItems.length === 0 && (
                 <div className="rounded-2xl border border-border bg-card p-6 text-center">
                   <p className="text-sm text-muted-foreground">
                     {anyBarber ? 'Aucune place dans les deux prochaines semaines.' : `${barberLabel || 'Ce barber'} n'a plus de place dans les deux prochaines semaines.`}
                   </p>
                   <p className="mt-2 text-xs text-muted-foreground/80">
-                    {anyBarber ? 'Regardez les semaines suivantes avec les flèches.' : 'Choisissez « Peu importe », un autre barber, ou les semaines suivantes.'}
+                    {anyBarber
+                      ? 'Faites glisser les jours ci-dessus pour voir les semaines suivantes.'
+                      : 'Choisissez « Peu importe », un autre barber, ou faites glisser les jours ci-dessus pour voir les semaines suivantes.'}
                   </p>
                 </div>
               )}

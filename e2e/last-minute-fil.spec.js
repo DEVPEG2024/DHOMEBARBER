@@ -3,8 +3,17 @@
 // l'accueil (Réserver, Envoyer à un ami) à la place du texte, et plus rien une fois le créneau
 // commencé. Horloge figée : mardi 10:00 à Paris.
 import { test, expect } from './support/test.js';
-import { BARBERS, CLIENT } from './support/donnees.js';
+import { BARBERS, CLIENT, rendezVous } from './support/donnees.js';
 import { jour } from './support/temps.js';
+
+/**
+ * Ligne Last Minute libre d'une publication (le serveur ne publie que des créneaux qui existent ;
+ * le fil recoupe ses cartes avec la liste à jour des créneaux libres, comme l'accueil).
+ */
+const creneauDe = (pub) => rendezVous({
+  id: pub.appointment_id, barber: BARBERS.kevin, prestations: [], date: pub.meta.date,
+  debut: pub.meta.start_time, statut: 'last_minute', end_time: pub.meta.end_time,
+});
 
 const publication = (id, start, end, over = {}) => ({
   id,
@@ -29,9 +38,12 @@ test.describe('Last Minute dans le fil', () => {
   });
 
   test('créneau à venir : la carte Last Minute (Réserver) à la place du texte ; créneau commencé : rien', async ({ page, api }) => {
+    const p1500 = publication('p-1500', '15:00', '15:40');
+    const p0900 = publication('p-0900', '09:00', '09:40'); // commencé à 09:00 (il est 10:00)
+    api.tables.Appointment.push(creneauDe(p1500), creneauDe(p0900));
     api.tables.Post.push(
-      publication('p-1500', '15:00', '15:40'),
-      publication('p-0900', '09:00', '09:40'), // commencé à 09:00 (il est 10:00)
+      p1500,
+      p0900,
       { id: 'p-normal', author_name: 'Yanis K.', author_role: 'user', content: 'Merci Kevin pour la coupe !', created_at: new Date(Date.now() - 3600000).toISOString() },
     );
     await page.goto('/feed');

@@ -30,6 +30,7 @@ import {
   fetchAppointmentsForDates, agendaQueryKey, invalidateAppointmentQueries,
   isBreak, isLastMinuteSlot, slotIssues, aptDuration, isUnclaimedLastMinute,
   isCancelledLike, minutesToTime, agendaErrorMessage, appointmentEndParis, isClientPlaceholder, shortDayLabel,
+  removeCoveredLastMinutes,
 } from '@/components/agenda/agendaUtils';
 
 const VIEWS = ['day', 'week', 'month'];
@@ -115,6 +116,7 @@ export default function Agenda() {
   // Fenêtre Last Minute : `key` remonte le formulaire à chaque ouverture (valeurs par défaut fraîches)
   const [lastMinute, setLastMinute] = useState({ open: false, key: 0 });
   const [walkInOpen, setWalkInOpen] = useState(false);
+  const [walkInSlot, setWalkInSlot] = useState(null); // { date, employee_id, start_time } d'un clic sur la grille
 
   // ─── Données : uniquement les jours affichés ───
   const dates = useMemo(() => {
@@ -189,9 +191,14 @@ export default function Agenda() {
       .filter((a) => !isClientPlaceholder(a)),
     [inRange, employeeFilter],
   );
-  const cancelledCount = forBarber.filter((a) => a.status === 'cancelled').length;
+  // Masqués par défaut (chip « Annulés ») : les annulés, et les Last Minute que personne n'a pris
+  // (passés en « absent » à l'heure). Depuis les Last Minute automatiques (22 oct. 2026), chaque
+  // demi-heure restée libre en laisse un : la journée se couvrait de cartes « Last Minute » barrées
+  // qui passaient pour des clients absents et repoussaient les vrais RDV dans « +N autres » (Mois).
+  const hiddenByDefault = (a) => a.status === 'cancelled' || isUnclaimedLastMinute(a);
+  const cancelledCount = forBarber.filter(hiddenByDefault).length;
   const visible = useMemo(
-    () => (showCancelled ? forBarber : forBarber.filter((a) => a.status !== 'cancelled')),
+    () => (showCancelled ? forBarber : forBarber.filter((a) => !hiddenByDefault(a))),
     [forBarber, showCancelled],
   );
 
@@ -250,11 +257,30 @@ export default function Agenda() {
     notes: 'Pause',
   });
 
+  // Last Minute libres du barber que la pause recouvre (plus réservables : retirés après la création)
+  const coveredByBreak = (employeeId, date, start_time, end_time) => slotIssues({
+    selfId: null, date, startTime: start_time, duration: timeToMinutes(end_time) - timeToMinutes(start_time),
+    employee: employees.find((e) => String(e.id) === String(employeeId)), employeeId, dayApts: inRange,
+  }).lastMinutes;
+
+  const addBreak = (start_time, end_time, employeeId, breakDate) => {
+    const covered = coveredByBreak(employeeId, breakDate, start_time, end_time);
+    createBreak.mutate(buildBreakPayload(start_time, end_time, employeeId, breakDate), {
+      onSuccess: (created) => {
+        removeCoveredLastMinutes(queryClient, covered);
+        // Tracé par erreur (un glissé de souris suffit) : la pause bloque les clients, « Annuler » la retire
+        toast.success(`Pause ajoutée : ${start_time} – ${end_time}`, {
+          action: created?.id ? { label: 'Annuler', onClick: () => deleteBreak.mutate(created.id) } : undefined,
+        });
+      },
+    });
+  };
+
   const handleCreateBreak = ({ start_time, end_time, employee_id, date }) => {
     const breakDate = date || dateKey;
     const target = employee_id || (employeeFilter !== 'all' ? employeeFilter : null);
     if (target) {
-      createBreak.mutate(buildBreakPayload(start_time, end_time, target, breakDate), { onSuccess: () => toast.success('Pause ajoutée') });
+      addBreak(start_time, end_time, target, breakDate);
       return;
     }
     setPendingBreak({ start_time, end_time, date: breakDate });
@@ -262,10 +288,7 @@ export default function Agenda() {
 
   const handlePendingBreakSelectEmployee = (empId) => {
     if (!pendingBreak) return;
-    createBreak.mutate(
-      buildBreakPayload(pendingBreak.start_time, pendingBreak.end_time, empId, pendingBreak.date),
-      { onSuccess: () => toast.success('Pause ajoutée') },
-    );
+    addBreak(pendingBreak.start_time, pendingBreak.end_time, empId, pendingBreak.date);
     setPendingBreak(null);
   };
 
@@ -303,7 +326,11 @@ export default function Agenda() {
     ));
     let created = 0;
     results.forEach((r, i) => {
-      if (r.status === 'fulfilled') { created++; return; }
+      if (r.status === 'fulfilled') {
+        created++;
+        removeCoveredLastMinutes(queryClient, coveredByBreak(targets[i].id, date, start_time, end_time));
+        return;
+      }
       const name = targets[i].name;
       skipped.push(r.reason?.status === 409 ? `${name} : déjà un créneau à ${start_time}` : `${name} : ${agendaErrorMessage(r.reason, 'erreur')}`);
     });
@@ -393,12 +420,19 @@ export default function Agenda() {
 
   // ─── Client venu sans rendez-vous (ou rendez-vous pris par téléphone) ───
   // Jour proposé : aujourd'hui s'il est affiché (vue Semaine / Mois), sinon le jour courant de l'agenda.
-  // Barber proposé : celui affiché, sinon le barber connecté.
-  const todayKey = toDateStr(new Date());
-  const walkInDate = view !== 'day' && dateSet.has(todayKey) ? todayKey : dateKey;
-  const walkInEmployeeId = employeeFilter !== 'all'
-    ? String(employeeFilter)
-    : (user?.employee_id && employees.some((e) => String(e.id) === String(user.employee_id)) ? String(user.employee_id) : '');
+  // Barber proposé : celui affiché, sinon le barber connecté. Clic sur une case vide de la grille
+  // (`walkInSlot`) : ce jour, cette heure et le barber de la colonne.
+  const walkInDate = walkInSlot?.date || (view !== 'day' && dateSet.has(parisTodayKey) ? parisTodayKey : dateKey);
+  const walkInEmployeeId = walkInSlot?.employee_id != null && walkInSlot.employee_id !== ''
+    ? String(walkInSlot.employee_id)
+    : employeeFilter !== 'all'
+      ? String(employeeFilter)
+      : (user?.employee_id && employees.some((e) => String(e.id) === String(user.employee_id)) ? String(user.employee_id) : '');
+  const openWalkIn = (slot = null) => {
+    if (walkInOpen) return;
+    setWalkInSlot(slot);
+    setWalkInOpen(true);
+  };
 
   const handleWalkInCreated = (apt, { done }) => {
     setWalkInOpen(false);
@@ -425,10 +459,12 @@ export default function Agenda() {
   };
 
   // ─── Pause ou créneau sans client : enregistré tout de suite, « Annuler » dans la notification ───
-  // `guard` : drapeaux du premier enregistrement seulement (jamais renvoyés par « Annuler »)
-  const quickSave = (apt, fields, message, guard = {}) => {
+  // `guard` : drapeaux du premier enregistrement seulement (jamais renvoyés par « Annuler »).
+  // `covered` : Last Minute libres que la pause recouvre désormais, retirés après l'enregistrement
+  const quickSave = (apt, fields, message, guard = {}, covered = []) => {
     const before = Object.fromEntries(Object.keys(fields).map((k) => [k, apt[k] ?? null]));
     saveMove(queryClient, apt, fields, false, guard)
+      .then(() => { if (isBreak(apt)) removeCoveredLastMinutes(queryClient, covered); })
       .then(() => toast.success(message, {
         action: {
           label: 'Annuler',
@@ -439,12 +475,13 @@ export default function Agenda() {
       .catch((e) => toast.error(agendaErrorMessage(e, 'Modification impossible')));
   };
 
-  // Même heure de départ qu'un autre créneau du même barber : refusé par la base, on prévient avant
-  const clashFor = (apt, date, startTime, duration, employeeId) => slotIssues({
+  // Même heure de départ qu'un autre créneau du même barber : refusé par la base, on prévient avant.
+  // Un Last Minute libre ne gêne qu'un autre Last Minute ; une pause posée dessus le retire.
+  const issuesFor = (apt, date, startTime, duration, employeeId) => slotIssues({
     selfId: apt.id, date, startTime, duration,
     employee: employees.find((e) => String(e.id) === String(employeeId)),
-    employeeId, dayApts: inRange, timeOffs: [],
-  }).clash;
+    employeeId, dayApts: inRange, timeOffs: [], keepLastMinutes: isLastMinuteSlot(apt),
+  });
 
   // ─── Carte glissée dans la grille ───
   // Pause ou créneau last minute sans client : déplacé tout de suite. Rendez-vous d'un client :
@@ -456,7 +493,7 @@ export default function Agenda() {
       return;
     }
     const fields = buildMoveFields(apt, target, employees);
-    const clash = clashFor(apt, fields.date, fields.start_time, aptDuration(apt), target.employee_id);
+    const { clash, lastMinutes } = issuesFor(apt, fields.date, fields.start_time, aptDuration(apt), target.employee_id);
     if (clash) {
       toast.error(clash);
       return;
@@ -464,7 +501,7 @@ export default function Agenda() {
     // Last Minute encore libre d'après la carte : si un client de l'app l'a repris entre-temps, le
     // serveur refuse (409) au lieu de déplacer son rendez-vous sans confirmation (tour 7)
     const guard = !isBreak(apt) && apt.status === 'last_minute' ? { if_free_last_minute: true } : {};
-    quickSave(apt, fields, `${isBreak(apt) ? 'Pause déplacée' : 'Créneau déplacé'} à ${fields.start_time}`, guard);
+    quickSave(apt, fields, `${isBreak(apt) ? 'Pause déplacée' : 'Créneau déplacé'} à ${fields.start_time}`, guard, lastMinutes);
   };
 
   // ─── Pause étirée par ses poignées, ou horaires saisis dans sa fenêtre ───
@@ -474,14 +511,12 @@ export default function Agenda() {
       toast.error('La fin doit être après le début');
       return;
     }
-    if (start_time !== String(apt.start_time).slice(0, 5)) {
-      const clash = clashFor(apt, String(apt.date).slice(0, 10), start_time, duration, apt.employee_id);
-      if (clash) {
-        toast.error(clash);
-        return;
-      }
+    const { clash, lastMinutes } = issuesFor(apt, String(apt.date).slice(0, 10), start_time, duration, apt.employee_id);
+    if (clash && start_time !== String(apt.start_time).slice(0, 5)) {
+      toast.error(clash);
+      return;
     }
-    quickSave(apt, { start_time, end_time, total_duration: duration }, `Pause : ${start_time} – ${end_time}`);
+    quickSave(apt, { start_time, end_time, total_duration: duration }, `Pause : ${start_time} – ${end_time}`, {}, lastMinutes);
   };
 
   // ─── Last Minute ───
@@ -579,15 +614,17 @@ export default function Agenda() {
         onDateChange={setDate}
         onStep={step}
         onExport={handleExport}
-        onAddClient={() => setWalkInOpen(true)}
+        onAddClient={() => openWalkIn()}
         loading={isFetching}
       />
 
       {/* Rendez-vous passés à confirmer : venu ou absent (carte Gang des clients) */}
       <AttendanceCheck user={user} onOpen={(apt) => setSelected(apt)} />
 
-      {/* Barbers, annulés, Last Minute */}
-      <div className="flex items-center gap-2 mb-3 overflow-x-auto scrollbar-hide -mx-1 px-1 pb-0.5">
+      {/* Barbers et annulés (rangée qui défile) ; nombre de RDV et Last Minute toujours visibles à
+          droite : au bout de la rangée, ils sortaient de l'écran d'un téléphone (390 px, 3 barbers) */}
+      <div className="flex items-center gap-2 mb-3 min-w-0">
+      <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide -mx-1 px-1 pb-0.5 min-w-0 flex-1">
         <button
           type="button"
           onClick={() => setEmployeeFilter('all')}
@@ -615,11 +652,13 @@ export default function Agenda() {
           type="button"
           onClick={() => setShowCancelled((v) => !v)}
           className={`shrink-0 px-3 py-1.5 text-xs rounded-full border transition-all ${showCancelled ? 'bg-red-500/15 text-red-400 border-red-500/40' : 'border-border text-muted-foreground hover:border-red-400/40'}`}
-          title={showCancelled ? 'Masquer les rendez-vous annulés' : 'Afficher les rendez-vous annulés'}
+          title={showCancelled ? 'Masquer les rendez-vous annulés et les Last Minute non pris' : 'Afficher les rendez-vous annulés et les Last Minute non pris'}
+          aria-pressed={showCancelled}
         >
           Annulés{cancelledCount ? ` (${cancelledCount})` : ''}
         </button>
-        <span className="shrink-0 text-xs text-muted-foreground ml-auto pl-2">{agendaFailed ? '–' : realAppointmentCount} rdv</span>
+      </div>
+        <span className="shrink-0 text-xs text-muted-foreground max-[359px]:hidden">{agendaFailed ? '–' : realAppointmentCount} rdv</span>
         <button
           type="button"
           onClick={() => setLastMinute((s) => ({ open: true, key: s.key + 1 }))}
@@ -664,6 +703,7 @@ export default function Agenda() {
             onSelect={setSelected}
             onBreakClick={setSelectedBreak}
             onCreateBreak={handleCreateBreak}
+            onSlotClick={openWalkIn}
             onFocusBarber={setEmployeeFilter}
             onMoveRequest={handleMoveRequest}
             onResizeRequest={handleResizeRequest}
@@ -680,6 +720,7 @@ export default function Agenda() {
             onSelect={setSelected}
             onBreakClick={setSelectedBreak}
             onCreateBreak={handleCreateBreak}
+            onSlotClick={openWalkIn}
             onDayClick={openDay}
             onMoveRequest={handleMoveRequest}
             onResizeRequest={handleResizeRequest}
@@ -712,6 +753,7 @@ export default function Agenda() {
         employees={employees}
         defaultEmployeeId={walkInEmployeeId}
         defaultDate={walkInDate}
+        defaultTime={walkInSlot?.start_time}
         onCreated={handleWalkInCreated}
       />
 

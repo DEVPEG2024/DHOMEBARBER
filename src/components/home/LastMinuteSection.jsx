@@ -11,9 +11,9 @@
  * Animations en CSS (`.lm-*` d'index.css, transform / opacity seulement, coupées avec la réduction
  * des mouvements).
  */
-import React from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRight, Send, Zap } from 'lucide-react';
+import { ArrowRight, ChevronLeft, ChevronRight, Send, Zap } from 'lucide-react';
 import { toast } from 'sonner';
 import SnapCarousel from '@/components/motion/SnapCarousel';
 import { BARBER_PHOTO_ASPECT, BARBER_PHOTO_BG } from '@/lib/barberPhoto';
@@ -130,6 +130,76 @@ export function LastMinuteCard({ slot, now, inCarousel = false, from = 'home' })
   );
 }
 
+/** Espace entre deux cartes du carrousel (px). */
+const CAROUSEL_GAP = 10;
+/**
+ * Ordinateur (souris ou pavé, écran large) : flèches à la place de « Faites glisser ». À la souris,
+ * le carrousel ne se glisse pas et la molette fait défiler la page : seuls ses petits points
+ * menaient aux cartes suivantes (relevé le 24 oct. 2026, Chrome et Safari à 1366 px).
+ */
+const DESKTOP_ONLY = 'hidden [@media(hover:hover)_and_(pointer:fine)_and_(min-width:768px)]:inline-flex';
+const TOUCH_ONLY = '[@media(hover:hover)_and_(pointer:fine)_and_(min-width:768px)]:hidden';
+
+function LastMinuteCarousel({ slots, total, now }) {
+  const sectionRef = useRef(null);
+  const [edges, setEdges] = useState({ prev: false, next: true });
+
+  // Zone qui défile : celle du carrousel (SnapCarousel), retrouvée par son rôle
+  const scroller = useCallback(() => sectionRef.current?.querySelector('[aria-roledescription="carrousel"]') || null, []);
+
+  useEffect(() => {
+    const el = scroller();
+    if (!el) return undefined;
+    const update = () => {
+      const max = el.scrollWidth - el.clientWidth;
+      setEdges({ prev: el.scrollLeft > 4, next: el.scrollLeft < max - 4 });
+    };
+    update();
+    el.addEventListener('scroll', update, { passive: true });
+    window.addEventListener('resize', update);
+    return () => { el.removeEventListener('scroll', update); window.removeEventListener('resize', update); };
+  }, [scroller, slots.length]);
+
+  const go = (dir) => {
+    const el = scroller();
+    const card = el?.querySelector('[data-carousel-item]');
+    if (!el || !card) return;
+    const reduce = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    el.scrollBy({ left: dir * (card.offsetWidth + CAROUSEL_GAP), behavior: reduce ? 'auto' : 'smooth' });
+  };
+
+  const arrowClass = 'w-8 h-8 shrink-0 items-center justify-center rounded-full border border-orange-500/40 text-orange-700 dark:text-orange-300 bg-orange-500/10 hover:bg-orange-500/20 disabled:opacity-35 disabled:cursor-default transition-colors';
+
+  // Pas de nom sur la section : le carrousel est déjà une région nommée « Créneaux Last Minute »
+  return (
+    <section ref={sectionRef}>
+      <div className="flex items-center justify-between gap-3 mb-1">
+        <p className="inline-flex items-center gap-2 text-xs font-extrabold tracking-[0.16em] uppercase whitespace-nowrap text-orange-700 dark:text-orange-400">
+          <Zap className="lm-bolt w-4 h-4 fill-current" aria-hidden="true" />
+          {/* Plus de créneaux que de cartes : les plus proches seulement, et l'en-tête le dit */}
+          {total > slots.length ? `${slots.length} prochains Last Minute` : `${slots.length} créneaux Last Minute`}
+        </p>
+        {/* Sous 360 px, le titre seul tient sur une ligne */}
+        <span className={`hidden min-[360px]:inline shrink-0 whitespace-nowrap text-xs text-muted-foreground ${TOUCH_ONLY}`}>Faites glisser</span>
+        <span className={`${DESKTOP_ONLY} shrink-0 items-center gap-1.5`}>
+          <button type="button" onClick={() => go(-1)} disabled={!edges.prev} aria-label="Créneau Last Minute précédent" className={`inline-flex ${arrowClass}`}>
+            <ChevronLeft className="w-4 h-4" aria-hidden="true" />
+          </button>
+          <button type="button" onClick={() => go(1)} disabled={!edges.next} aria-label="Créneau Last Minute suivant" className={`inline-flex ${arrowClass}`}>
+            <ChevronRight className="w-4 h-4" aria-hidden="true" />
+          </button>
+        </span>
+      </div>
+      {/* 90 % : la carte suivante dépasse juste assez pour inviter à glisser, les deux boutons tiennent à 320 px */}
+      <SnapCarousel itemWidth="90%" gap={CAROUSEL_GAP} autoplay={5200} label="Créneaux Last Minute" activeDotClass="bg-orange-500">
+        {slots.map((slot) => (
+          <LastMinuteCard key={slot.id ?? `${slot.employeeId}-${slot.date}-${slot.start}`} slot={slot} now={now} inCarousel />
+        ))}
+      </SnapCarousel>
+    </section>
+  );
+}
+
 export default function LastMinuteSection() {
   const { slots, total, now } = useOpenLastMinutes();
   if (slots.length === 0) return null;
@@ -142,24 +212,5 @@ export default function LastMinuteSection() {
     );
   }
 
-  // Pas de nom sur la section : le carrousel est déjà une région nommée « Créneaux Last Minute »
-  return (
-    <section>
-      <div className="flex items-center justify-between gap-3 mb-1">
-        <p className="inline-flex items-center gap-2 text-xs font-extrabold tracking-[0.16em] uppercase whitespace-nowrap text-orange-700 dark:text-orange-400">
-          <Zap className="lm-bolt w-4 h-4 fill-current" aria-hidden="true" />
-          {/* Plus de créneaux que de cartes : les plus proches seulement, et l'en-tête le dit */}
-          {total > slots.length ? `${slots.length} prochains Last Minute` : `${slots.length} créneaux Last Minute`}
-        </p>
-        {/* Sous 360 px, le titre seul tient sur une ligne */}
-        <span className="hidden min-[360px]:inline shrink-0 whitespace-nowrap text-xs text-muted-foreground">Faites glisser</span>
-      </div>
-      {/* 90 % : la carte suivante dépasse juste assez pour inviter à glisser, les deux boutons tiennent à 320 px */}
-      <SnapCarousel itemWidth="90%" gap={10} autoplay={5200} label="Créneaux Last Minute" activeDotClass="bg-orange-500">
-        {slots.map((slot) => (
-          <LastMinuteCard key={slot.id ?? `${slot.employeeId}-${slot.date}-${slot.start}`} slot={slot} now={now} inCarousel />
-        ))}
-      </SnapCarousel>
-    </section>
-  );
+  return <LastMinuteCarousel slots={slots} total={total} now={now} />;
 }

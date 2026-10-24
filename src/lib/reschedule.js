@@ -204,7 +204,8 @@ export async function moveAppointment({ appointment, employee, user, slot, withR
     await api.entities.Appointment.update(
       appointment.id,
       withReason
-        ? { status: 'cancelled', cancellation_reason: `Client : déplacé au ${slot.label} ${slot.time}` }
+        // Même écriture que le serveur (« Client : déplacé au … à 10:00 »), relue par Mes rendez-vous
+        ? { status: 'cancelled', cancellation_reason: `Client : déplacé au ${slot.label} à ${slot.time}` }
         : { status: 'cancelled' },
     );
   } catch {

@@ -17,7 +17,7 @@ import LoadError, { isNetworkError, queryFailed } from '@/components/shared/Load
 import { appointmentEvent, calendarTargets, openCalendar, parisInstant } from '@/lib/calendarLinks';
 import {
   SALON_PHONE, SALON_PHONE_HREF, CANCEL_REASON_MAX, APPOINTMENT_CANCEL_REASONS,
-  useCancelFeatures, friendlyCancelError, cancelledByLabel, cleanReason,
+  useCancelFeatures, friendlyCancelError, cancelledByLabel, cleanReason, isRescheduledCancel,
 } from '@/lib/cancellation';
 import { isClientPlaceholder } from '@/components/agenda/agendaUtils';
 import { findRescheduleSlots, moveAppointment, currentServices, appointmentDuration } from '@/lib/reschedule';
@@ -101,7 +101,29 @@ const statusConfig = {
   completed: { label: 'Terminé',    bg: 'bg-primary/10 text-primary border-primary/20' },
   cancelled: { label: 'Annulé',     bg: 'bg-red-500/10 text-red-400 border-red-500/20' },
   no_show:   { label: 'Absent',     bg: 'bg-red-500/10 text-red-400 border-red-500/20' },
+  moved:     { label: 'Déplacé',    bg: 'bg-white/5 text-muted-foreground border-white/15' },
 };
+
+/**
+ * Statut montré au client. Un déplacement n'est pas une annulation (« Client : déplacé au … »,
+ * même règle que la carte Gang et le tableau de bord) : « Déplacé ». Un RDV confirmé dont l'heure
+ * de fin est passée est une visite (`isVisit` du Profil, carte Gang ; le salon ne passe presque
+ * jamais ses RDV en « completed ») : « Terminé », pas « Confirmé » dans l'historique.
+ */
+function displayStatusOf(apt, now) {
+  if (isRescheduledCancel(apt)) return 'moved';
+  if (apt.status === 'confirmed' && apt.date && endsAt(apt) <= now) return 'completed';
+  return apt.status;
+}
+
+/** « au mercredi 4 novembre à 10:00 » d'un motif « Client : déplacé au … », '' si illisible. */
+function movedToOf(apt) {
+  const m = /d[ée]plac[ée]\s+(au\s+.+)$/i.exec(String(apt?.cancellation_reason || '').trim());
+  return m ? m[1].trim() : '';
+}
+
+/** Navigateur qui se sait hors connexion (le réseau peut aussi tomber sans qu'il le sache). */
+const isOffline = () => typeof navigator !== 'undefined' && navigator.onLine === false;
 
 export default function Appointments() {
   const [tab, setTab] = useState('upcoming');
@@ -124,15 +146,22 @@ export default function Appointments() {
 
   const appointmentsQuery = useQuery({
     queryKey: ['myAppointments', user?.email],
-    // Fiches « Ajouter / Importer » des Clients (RDV fantômes annulés) : jamais montrées au client
-    queryFn: async () => ((await api.entities.Appointment.filter({ client_email: user.email }, '-date', 100)) || []).filter(a => !isClientPlaceholder(a)),
+    // Même requête que la réservation, le Profil et Mes commandes (cache partagé, rempli par
+    // n'importe laquelle) : les fiches fantômes sont donc retirées à l'affichage, plus bas
+    queryFn: () => api.entities.Appointment.filter({ client_email: user.email }, '-date', 100),
     enabled: !!user?.email,
     refetchInterval: 30000, // Auto-refresh toutes les 30s
     // Retour dans l'app (déplacement ou annulation faits ailleurs, par le salon) : relu tout de
     // suite, pas jusqu'à 30 s d'un état périmé qui laisse croire que l'ancien RDV est resté
     refetchOnWindowFocus: true,
   });
-  const appointments = appointmentsQuery.data || NO_APPOINTMENTS;
+  // Fiches « Ajouter / Importer » des Clients (RDV fantômes annulés) : jamais montrées au client.
+  // Filtrées ici et non dans la requête : le Profil ou la réservation, passés juste avant,
+  // laissaient dans le cache la liste brute, et ces fiches vides apparaissaient dans l'historique
+  const appointments = useMemo(
+    () => (Array.isArray(appointmentsQuery.data) ? appointmentsQuery.data.filter(a => !isClientPlaceholder(a)) : NO_APPOINTMENTS),
+    [appointmentsQuery.data],
+  );
   // Requête mise en pause hors connexion (réseau tombé en cours d'usage) : ni chargement, ni
   // erreur pour React Query, mais aucune donnée non plus
   const appointmentsPaused = appointmentsQuery.isPending && appointmentsQuery.fetchStatus === 'paused';
@@ -156,11 +185,16 @@ export default function Appointments() {
 
   // Délai d'annulation du salon (même requête et même cache que l'accueil). Dans ce délai le
   // serveur refuse l'annulation : on affiche le téléphone du salon au lieu du bouton.
-  const { data: settingsData = [] } = useQuery({
+  const settingsQuery = useQuery({
     queryKey: ['salonSettings'],
     staleTime: 5 * 60 * 1000,
     queryFn: () => api.entities.SalonSettings.list(),
   });
+  const settingsData = settingsQuery.data || [];
+  // Délai pas encore connu (page ouverte directement, paramètres arrivés après la liste) : ni
+  // « Déplacer » / « Annuler » ni le téléphone, sinon un RDV de moins de 24 h montrait un instant
+  // des boutons que le serveur refuse. En échec, les boutons reviennent (le serveur tranche).
+  const delayKnown = !settingsQuery.isPending;
   const settings = settingsData[0] || null;
   const cancelHours = parseInt(settings?.cancellation_hours, 10) || 0;
   // Téléphone du salon : celui des paramètres, sinon le numéro connu
@@ -245,6 +279,16 @@ export default function Appointments() {
     || (slotsQuery.fetchStatus === 'paused' && slotsQuery.isPending)
   );
   const barberGone = !!cancelApt && employeesQuery.isSuccess && !moveBarber;
+  // Texte de la fenêtre : « Plutôt que d'annuler » seulement si le client a touché « Annuler » ;
+  // jamais « avec Kevin » quand aucun créneau avec lui ne peut être proposé (barber parti,
+  // prestation retirée, RDV sans prestation : seule « Choisir une autre date » reste)
+  const quickMovePossible = !barberGone && !serviceRetired && !noServices;
+  const moveHint = quickMovePossible
+    ? `choisissez un autre créneau${cancelApt?.employee_name ? ` avec ${cancelApt.employee_name}` : ''}`
+    : 'choisissez une nouvelle date';
+  const moveDescription = intent === 'cancel'
+    ? `Plutôt que d'annuler, ${moveHint} : l'ancien sera libéré automatiquement.`
+    : `${moveHint.charAt(0).toUpperCase()}${moveHint.slice(1)} : l'ancien sera libéré automatiquement.`;
   const loadingSuggestions = !!cancelApt && !barberGone && !suggestionsLoadFailed && !serviceRetired && !noServices
     && (employeesPending || timeOffsQuery.isPending || !catalogSettled || slotsQuery.isPending);
 
@@ -287,6 +331,10 @@ export default function Appointments() {
   };
 
   const cancelMutation = useMutation({
+    // Hors connexion, React Query met par défaut un envoi en pause : « Annulation… » tournait sans
+    // fin et la fenêtre ne se fermait plus (croix et Échap ignorées pendant l'envoi). L'envoi part
+    // tout de suite et une coupure arrive dans onError.
+    networkMode: 'always',
     // Règle : sans `features.appointmentCancelReason`, exactement `{ status: 'cancelled' }` comme
     // avant (un champ inconnu ferait refuser une annulation qui fonctionne).
     mutationFn: ({ id, reason }) => api.entities.Appointment.update(
@@ -327,6 +375,9 @@ export default function Appointments() {
       if (e.refetch) {
         queryClient.invalidateQueries({ queryKey: ['salonSettings'] });
         queryClient.invalidateQueries({ queryKey: ['myAppointments'] });
+      } else if (isNetworkError(err)) {
+        // Réponse perdue : l'annulation est peut-être passée, la liste est relue dès que possible
+        queryClient.invalidateQueries({ queryKey: ['myAppointments'] });
       }
     },
     onSettled: () => setCancelApt(null),
@@ -334,6 +385,8 @@ export default function Appointments() {
 
   /** Déplacement en un geste vers un créneau proposé : nouveau RDV créé, puis l'ancien annulé. */
   const moveMutation = useMutation({
+    // Comme l'annulation : jamais en pause hors connexion (fenêtre bloquée sur « Déplacement… »)
+    networkMode: 'always',
     mutationFn: (slot) => moveAppointment({
       appointment: liveCancelApt,
       employee: moveBarber,
@@ -422,6 +475,11 @@ export default function Appointments() {
 
   const confirmCancel = () => {
     if (!cancelApt || cancelMutation.isPending) return;
+    // Hors connexion : rien n'est envoyé, la fenêtre reste ouverte pour réessayer
+    if (isOffline()) {
+      toast.error('Pas de connexion internet : le rendez-vous n\'a pas été annulé. Réessayez une fois connecté.');
+      return;
+    }
     cancelMutation.mutate({ id: cancelApt.id, reason: chosenReason() });
   };
 
@@ -429,6 +487,10 @@ export default function Appointments() {
   const confirmMove = () => {
     if (!chosenSlot || busy) return;
     if (tooLateNow(cancelApt)) { refuseTooLate(); return; }
+    if (isOffline()) {
+      toast.error('Pas de connexion internet : le rendez-vous n\'a pas été déplacé. Réessayez une fois connecté.');
+      return;
+    }
     moveMutation.mutate(chosenSlot);
   };
 
@@ -556,18 +618,22 @@ export default function Appointments() {
           <div className="space-y-3">
             <AnimatePresence>
               {list.map((apt, i) => {
-                const status = statusConfig[apt.status] || statusConfig.pending;
+                const shownStatus = displayStatusOf(apt, now);
+                const status = statusConfig[shownStatus] || statusConfig.pending;
+                const moved = shownStatus === 'moved';
                 // Annulation : RDV confirmé pas encore commencé, hors du délai d'annulation du salon
                 // (le serveur applique la même règle). Dans le délai : téléphone du salon à la place.
                 const startMs = startsAt(apt);
                 const notStarted = apt.status === 'confirmed' && startMs > now;
                 const tooLateToCancel = notStarted && cancelHours > 0 && startMs - now < cancelHours * 3600 * 1000;
-                const canCancel = notStarted && !tooLateToCancel;
+                const canCancel = delayKnown && notStarted && !tooLateToCancel;
                 // RDV à venir qu'on ne peut pas annuler en ligne (délai dépassé, en attente…) : téléphone du salon
-                const callInstead = !canCancel && !CLOSED_STATUSES.includes(apt.status) && startMs > now;
+                const callInstead = delayKnown && !canCancel && !CLOSED_STATUSES.includes(apt.status) && startMs > now;
                 // Historique : qui a annulé et pourquoi (rien pour le last minute expiré : cancelledByLabel renvoie null)
-                const cancelledLabel = apt.status === 'cancelled' ? cancelledByLabel(apt, 'client', 'rdv') : null;
+                // Déplacé par le client : ni « Annulé par vous » ni « Motif : déplacé au … »
+                const cancelledLabel = apt.status === 'cancelled' && !moved ? cancelledByLabel(apt, 'client', 'rdv') : null;
                 const cancelledReason = cancelledLabel ? cleanReason(apt.cancellation_reason) : '';
+                const movedTo = moved ? movedToOf(apt) : '';
                 // À venir (fin du RDV pas encore passée) et ni annulé ni terminé : proposer l'ajout au calendrier
                 const canAddToCalendar = !CLOSED_STATUSES.includes(apt.status) && endsAt(apt) > now;
                 const calendarEvent = canAddToCalendar ? appointmentEvent(apt) : null;
@@ -584,7 +650,7 @@ export default function Appointments() {
                     className="rounded-2xl overflow-hidden border border-white/8 bg-white/4 backdrop-blur-xl"
                   >
                     {/* Top accent bar */}
-                    <div className={`h-0.5 w-full ${apt.status === 'confirmed' ? 'bg-gradient-to-r from-emerald-500/60 to-transparent' : apt.status === 'completed' ? 'bg-gradient-to-r from-primary/60 to-transparent' : 'bg-gradient-to-r from-white/10 to-transparent'}`} />
+                    <div className={`h-0.5 w-full ${shownStatus === 'confirmed' ? 'bg-gradient-to-r from-emerald-500/60 to-transparent' : shownStatus === 'completed' ? 'bg-gradient-to-r from-primary/60 to-transparent' : 'bg-gradient-to-r from-white/10 to-transparent'}`} />
 
                     <div className="p-4">
                       {/* Header row */}
@@ -661,6 +727,15 @@ export default function Appointments() {
                               <ChevronRight className="w-3.5 h-3.5 text-muted-foreground mt-0.5 shrink-0" />
                             </Link>
                           ))}
+                        </div>
+                      )}
+
+                      {/* Déplacé par le client : le nouveau rendez-vous est dans « À venir » */}
+                      {moved && (
+                        <div className="mt-3 pt-3 border-t border-white/6">
+                          <p className="text-[11px] font-semibold text-muted-foreground break-words">
+                            {movedTo ? `Déplacé par vous ${movedTo}` : 'Déplacé par vous'}
+                          </p>
                         </div>
                       )}
 
@@ -785,9 +860,7 @@ export default function Appointments() {
                     : intent === 'cancel' ? 'Et si on le déplaçait ?' : 'Déplacer ce rendez-vous'}
                 </DialogTitle>
                 <DialogDescription className="text-muted-foreground text-sm">
-                  {dialogMode === 'cancel'
-                    ? 'Le créneau sera libéré.'
-                    : `Plutôt que d'annuler, choisissez un autre créneau${cancelApt.employee_name ? ` avec ${cancelApt.employee_name}` : ''} : l'ancien sera libéré automatiquement.`}
+                  {dialogMode === 'cancel' ? 'Le créneau sera libéré.' : moveDescription}
                 </DialogDescription>
               </DialogHeader>
 
@@ -925,7 +998,7 @@ export default function Appointments() {
                     onClick={() => { hapticFeedback(); setDialogMode('cancel'); }}
                     className="mx-auto block text-xs font-semibold text-red-400 hover:text-red-300 disabled:opacity-50"
                   >
-                    Non merci, je veux annuler
+                    {intent === 'cancel' ? 'Non merci, je veux annuler' : 'Annuler plutôt ce rendez-vous'}
                   </button>
                 </>
               ) : (

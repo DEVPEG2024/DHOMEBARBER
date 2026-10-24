@@ -1,13 +1,14 @@
 import React, { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Check, CheckCircle2, Clock, Loader2, Minus, Plus, Search, UserPlus, UserRound } from 'lucide-react';
+import { AlertTriangle, Check, CheckCircle2, Clock, Loader2, Minus, Plus, Search, UserPlus, UserRound, Zap } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/api/apiClient';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import ClientAccountPicker, { foldText } from './ClientAccountPicker';
+import { GUEST_NAME_MAX, guestNameError, normalizeGuestName, useGuestBooking } from '@/lib/guest';
 import {
   timeToMinutes, minutesToTime, addMinutesToTime, parseDateParam, slotIssues, appointmentEndParis,
-  invalidateAppointmentQueries, agendaErrorMessage,
+  invalidateAppointmentQueries, agendaErrorMessage, coveredLastMinuteNote, removeCoveredLastMinutes,
 } from './agendaUtils';
 
 const inputCls = 'w-full min-w-0 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-primary/50';
@@ -32,17 +33,22 @@ const formatEuros = (n) => `${Number.isInteger(n) ? n : n.toFixed(2).replace('.'
  * Le compte du client (s'il en a un) est rattaché au rendez-vous : la visite compte alors sur sa
  * carte Gang une fois la prestation passée. `onCreated(rdv, { done })` après l'enregistrement.
  */
-function WalkInForm({ employees, defaultEmployeeId, defaultDate, onCancel, onCreated }) {
+function WalkInForm({ employees, defaultEmployeeId, defaultDate, defaultTime, onCancel, onCreated }) {
   const queryClient = useQueryClient();
   const isToday = defaultDate === parisTodayStr();
 
   const [account, setAccount] = useState(null); // { email, full_name, phone }
   const [clientMode, setClientMode] = useState('search'); // search | account | free
   const [freeName, setFreeName] = useState('');
+  // Proche venu avec le compte choisi (fils, frère…) : prénom seulement, vide = le client lui-même.
+  // Proposé quand le serveur accepte la colonne (`features.guestBooking`), comme dans « Modifier »
+  const guestFeature = useGuestBooking();
+  const [guestInput, setGuestInput] = useState('');
   const [freePhone, setFreePhone] = useState('');
   const [employeeId, setEmployeeId] = useState(defaultEmployeeId || (employees.length === 1 ? String(employees[0].id) : ''));
   const [date, setDate] = useState(defaultDate);
-  const [startTime, setStartTime] = useState(isToday ? nowRounded() : '09:00');
+  // Heure de la case cliquée dans la grille, sinon maintenant (aujourd'hui) ou 09:00
+  const [startTime, setStartTime] = useState(/^\d{2}:\d{2}$/.test(defaultTime || '') ? defaultTime : (isToday ? nowRounded() : '09:00'));
   const [selectedIds, setSelectedIds] = useState([]);
   const [duration, setDuration] = useState(0);
   const [durationTouched, setDurationTouched] = useState(false);
@@ -88,10 +94,11 @@ function WalkInForm({ employees, defaultEmployeeId, defaultDate, onCancel, onCre
   }, [validDate, validTime, date, startTime, endTime]);
   const done = doneChoice ?? endPassed;
 
-  const { clash, warnings } = useMemo(() => (
+  // Last Minute libres recouverts : ils ne bloquent pas, ils sont retirés après l'enregistrement
+  const { clash, warnings, lastMinutes } = useMemo(() => (
     validDate && validTime && employeeId
       ? slotIssues({ selfId: null, date, startTime, duration: effectiveDuration, employee, employeeId, dayApts, timeOffs })
-      : { clash: null, warnings: [] }
+      : { clash: null, warnings: [], lastMinutes: [] }
   ), [validDate, validTime, employeeId, startTime, effectiveDuration, dayApts, timeOffs, employee, date]);
 
   const shownServices = useMemo(() => {
@@ -105,6 +112,8 @@ function WalkInForm({ employees, defaultEmployeeId, defaultDate, onCancel, onCre
   };
 
   const clientName = clientMode === 'account' ? (account?.full_name || account?.email || '') : freeName.trim();
+  const guestName = guestFeature && clientMode === 'account' ? normalizeGuestName(guestInput) : '';
+  const guestError = guestName ? guestNameError(guestInput, { filter: false }) : null;
   const clientReady = clientMode === 'account' ? !!account : (clientMode === 'free' && freeName.trim().length > 0);
   const durationOk = effectiveDuration >= 5 && effectiveDuration <= 600;
   const tooLate = validTime && timeToMinutes(startTime) + effectiveDuration > 24 * 60;
@@ -113,7 +122,7 @@ function WalkInForm({ employees, defaultEmployeeId, defaultDate, onCancel, onCre
     !employeeId && 'le barber',
     selected.length === 0 && 'au moins une prestation',
   ].filter(Boolean);
-  const canSave = !saving && missing.length === 0 && validDate && validTime && durationOk && !tooLate && !clash;
+  const canSave = !saving && missing.length === 0 && validDate && validTime && durationOk && !tooLate && !clash && !guestError;
 
   const handleSave = async () => {
     if (!canSave) return;
@@ -137,11 +146,14 @@ function WalkInForm({ employees, defaultEmployeeId, defaultDate, onCancel, onCre
       status: 'confirmed',
     };
     if (notes.trim()) payload.internal_notes = notes.trim().slice(0, 1000);
+    if (guestName) payload.guest_name = guestName;
 
     setSaving(true);
     try {
       const created = await api.entities.Appointment.create(payload);
       invalidateAppointmentQueries(queryClient);
+      // Créneau pris : le Last Minute qu'il recouvre n'est plus proposé aux clients
+      removeCoveredLastMinutes(queryClient, lastMinutes);
       onCreated({ ...payload, ...(created || {}) }, { done });
     } catch (e) {
       if (e?.status === 409) {
@@ -179,10 +191,19 @@ function WalkInForm({ employees, defaultEmployeeId, defaultDate, onCancel, onCre
               <p className="text-sm font-semibold truncate">{account.full_name || account.email}</p>
               <p className="text-[11px] text-muted-foreground truncate">{account.email}{account.phone ? ` · ${account.phone}` : ''}</p>
             </div>
-            <button type="button" onClick={() => setClientMode('search')}
+            <button type="button" onClick={() => { setClientMode('search'); setGuestInput(''); }}
               className="shrink-0 text-xs font-semibold text-primary px-2 py-1 rounded-lg hover:bg-primary/15">
               Changer
             </button>
+          </div>
+        )}
+        {clientMode === 'account' && account && guestFeature && (
+          <div className="min-w-0">
+            <label className={labelCls} htmlFor="walkin-guest">Pour un proche (prénom, facultatif)</label>
+            <input id="walkin-guest" type="text" value={guestInput} maxLength={GUEST_NAME_MAX} autoComplete="off" autoCapitalize="words"
+              placeholder="Vide : le client lui-même" onChange={(e) => setGuestInput(e.target.value)}
+              aria-invalid={!!guestError} className={inputCls} />
+            {guestError && <p role="alert" className="mt-1 text-[11px] text-red-400">{guestError}</p>}
           </div>
         )}
         {clientMode === 'free' && (
@@ -322,6 +343,13 @@ function WalkInForm({ employees, defaultEmployeeId, defaultDate, onCancel, onCre
           ))}
         </div>
       )}
+      {!clash && lastMinutes.length > 0 && (
+        <div role="status" className="rounded-xl px-3 py-2 space-y-1 border border-orange-500/30 bg-orange-500/10">
+          {lastMinutes.map((lm) => (
+            <p key={lm.id} className="text-xs text-orange-300 flex items-start gap-1.5 break-words"><Zap className="w-3.5 h-3.5 mt-px shrink-0" />{coveredLastMinuteNote(lm)}</p>
+          ))}
+        </div>
+      )}
 
       {missing.length > 0 && (
         <p className="text-[11px] text-muted-foreground">Il manque {missing.join(', ')}.</p>
@@ -346,7 +374,7 @@ function WalkInForm({ employees, defaultEmployeeId, defaultDate, onCancel, onCre
  * Fenêtre « Ajouter un client » de l'agenda (fermeture par la croix ou « Annuler »).
  * Le formulaire est démonté à la fermeture : il repart à chaque ouverture des valeurs du jour affiché.
  */
-export default function WalkInDialog({ open, onClose, employees, defaultEmployeeId, defaultDate, onCreated }) {
+export default function WalkInDialog({ open, onClose, employees, defaultEmployeeId, defaultDate, defaultTime, onCreated }) {
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
       <DialogContent className="bg-card border-border max-w-md w-[calc(100vw-1rem)] sm:w-full max-h-[90dvh] overflow-y-auto overflow-x-hidden p-4 sm:p-6 rounded-2xl">
@@ -363,6 +391,7 @@ export default function WalkInDialog({ open, onClose, employees, defaultEmployee
             employees={employees}
             defaultEmployeeId={defaultEmployeeId}
             defaultDate={defaultDate}
+            defaultTime={defaultTime}
             onCancel={onClose}
             onCreated={onCreated}
           />

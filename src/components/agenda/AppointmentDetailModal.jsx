@@ -7,7 +7,7 @@ import { api } from '@/api/apiClient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import AppointmentEditForm from './AppointmentEditForm';
-import { STATUS_META, invalidateAppointmentQueries, withLastMinuteMarker, stripLastMinuteMarker, isConvertedLastMinute, agendaErrorMessage, appointmentEndParis, slotIssues, aptDuration } from './agendaUtils';
+import { STATUS_META, invalidateAppointmentQueries, withLastMinuteMarker, stripLastMinuteMarker, isConvertedLastMinute, agendaErrorMessage, appointmentEndParis, slotIssues, aptDuration, coveredLastMinuteNote, removeCoveredLastMinutes, addMinutesToTime } from './agendaUtils';
 import ClientAccountPicker from './ClientAccountPicker';
 import { useAuth } from '@/lib/AuthContext';
 import { parisInstant } from '@/lib/calendarLinks';
@@ -366,8 +366,11 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
     }
   };
 
-  /** Rétablit le RDV (confirmé, ou last minute s'il en était un) et rend compte des produits rouverts. */
-  const doRestore = async () => {
+  /**
+   * Rétablit le RDV (confirmé, ou last minute s'il en était un) et rend compte des produits rouverts.
+   * `issues` (contrôle de checkRestore) : Last Minute libres que le RDV rétabli recouvre, retirés.
+   */
+  const doRestore = async (issues = restoreCheck) => {
     dispatch({ type: 'SAVING', value: true });
     try {
       const notified = canNotifyRestore && notifyOnRestore;
@@ -376,6 +379,7 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
         cancellation_reason: null,
         ...((movedByClient || (canNotifyRestore && !notifyOnRestore)) ? { notify_client: false } : {}),
       });
+      if (!wasLastMinute) removeCoveredLastMinutes(queryClient, issues?.lastMinutes);
       const restored = Number(saved?.linked_orders_restored) || 0;
       const failed = Number(saved?.linked_orders_failed) || 0;
       const base = notified ? 'Rendez-vous rétabli, client prévenu' : 'Rendez-vous rétabli';
@@ -417,6 +421,8 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
         employeeId: appointment.employee_id,
         dayApts: dayApts || [],
         timeOffs: timeOffs || [],
+        // Un Last Minute non pris redevient Last Minute : les autres Last Minute comptent
+        keepLastMinutes: wasLastMinute,
       });
     } catch (e) {
       // Jamais de rétablissement à l'aveugle
@@ -430,7 +436,22 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
       setRestoreCheck(issues);
       return;
     }
-    await doRestore();
+    await doRestore(issues);
+  };
+
+  /**
+   * Prestations choisies pour un Last Minute pris sur place : prix, durée, et fin recalculée (début +
+   * durée). Avant, la fin restait celle du créneau publié (15:00 – 15:40 pour une coupe de 30 min).
+   */
+  const chosenServicesFields = () => {
+    const duration = selectedServices.reduce((sum, s) => sum + (Number(s.duration) || 0), 0);
+    const start = String(appointment.start_time || '').slice(0, 5);
+    return {
+      services: selectedServices.map(s => ({ service_id: s.id, name: s.name, price: s.price, duration: s.duration })),
+      total_price: manualServiceTotal,
+      total_duration: duration,
+      ...(duration > 0 && /^\d{2}:\d{2}$/.test(start) ? { end_time: addMinutesToTime(start, duration) } : {}),
+    };
   };
 
   /** Last minute pris par un client de passage : client et prestation enregistrés, pour le débit de la carte. */
@@ -446,9 +467,7 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
         internal_notes: withLastMinuteMarker(appointment.internal_notes),
       };
       if (selectedServices.length > 0 && !appointment.services?.length) {
-        updateData.services = selectedServices.map(s => ({ service_id: s.id, name: s.name, price: s.price, duration: s.duration }));
-        updateData.total_price = manualServiceTotal;
-        updateData.total_duration = selectedServices.reduce((sum, s) => sum + (s.duration || 0), 0);
+        Object.assign(updateData, chosenServicesFields());
       }
       if (appointment.status === 'last_minute') updateData.if_free_last_minute = true;
       await api.entities.Appointment.update(appointment.id, updateData);
@@ -484,9 +503,7 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
       };
       // For last_minute: include selected services if none existed
       if (selectedServices.length > 0 && (!appointment.services || appointment.services.length === 0)) {
-        updateData.services = selectedServices.map(s => ({ service_id: s.id, name: s.name, price: s.price, duration: s.duration }));
-        updateData.total_price = manualServiceTotal;
-        updateData.total_duration = selectedServices.reduce((sum, s) => sum + (s.duration || 0), 0);
+        Object.assign(updateData, chosenServicesFields());
       }
       // Last minute validé sur place (walk-in) : compté comme converti par le tableau de bord
       if (isLastMinute || wasLastMinute) updateData.internal_notes = withLastMinuteMarker(appointment.internal_notes);
@@ -614,6 +631,9 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
               <p className="font-semibold">Rétablir ce rendez-vous ?</p>
             )
           )}
+          {!restoreCheck.clash && !wasLastMinute && (restoreCheck.lastMinutes || []).map((lm) => (
+            <p key={lm.id} className="break-words text-orange-300">{coveredLastMinuteNote(lm)}</p>
+          ))}
           {!restoreCheck.clash && movedByClient && (
             <p className="break-words">
               Le client a déplacé ce rendez-vous{movedLabel ? ` (« ${movedLabel} »)` : ''} : il a déjà un nouveau RDV. Le rétablir garderait les deux et bloquerait ce créneau.
@@ -646,7 +666,7 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
               {restoreCheck.clash ? 'Fermer' : 'Annuler'}
             </button>
             {!restoreCheck.clash && (
-              <button type="button" onClick={doRestore} disabled={state.saving}
+              <button type="button" onClick={() => doRestore()} disabled={state.saving}
                 className="flex-1 py-2 rounded-lg bg-amber-500 text-black font-semibold disabled:opacity-60">
                 {state.saving ? 'Rétablissement…' : (restoreCheck.warnings.length > 0 || movedByClient) ? 'Rétablir quand même' : 'Rétablir le rendez-vous'}
               </button>
@@ -1310,6 +1330,9 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
                 onClick={async () => {
                   dispatch({ type: 'SAVING', value: true });
                   try {
+                    // Last Minute : 409 avant toute écriture si un client l'a repris entre-temps (fiche
+                    // restée ouverte), comme « Annuler » et « Supprimer »
+                    if (appointment.status === 'last_minute') await api.entities.Appointment.update(appointment.id, { if_free_last_minute: true });
                     await api.entities.Appointment.update(appointment.id, { status: 'no_show' });
                     // Part déjà débitée d'une carte cadeau : à rendre, rien ne le fait tout seul (tour 7)
                     if (giftCents > 0) {
@@ -1333,6 +1356,7 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
                     onUpdate?.();
                   } catch (e) {
                     toast.error(errorMessage(e, 'Modification impossible'));
+                    if (e?.status === 409) invalidateAppointmentQueries(queryClient);
                   } finally {
                     dispatch({ type: 'SAVING', value: false });
                   }

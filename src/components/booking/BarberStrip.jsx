@@ -4,10 +4,11 @@
  * écran. Le barber de la dernière visite porte « Habituel » ; celui du look choisi sur son profil
  * (réservation depuis une photo des réalisations) porte « Ce look », qui prime.
  */
-import React from 'react';
+import React, { useRef } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { Check, Users } from 'lucide-react';
 import { BARBER_PHOTO_ASPECT, BARBER_PHOTO_BG } from '@/lib/barberPhoto';
+import { useMouseScroll } from '@/components/booking/useMouseScroll';
 
 const TILE = 'w-[72px] shrink-0 flex flex-col items-center gap-1.5 text-center';
 
@@ -30,9 +31,12 @@ export default function BarberStrip({
 }) {
   const reduceMotion = useReducedMotion();
   const tap = reduceMotion ? undefined : { scale: 0.95 };
+  // Ordinateur : plus de barbers que la largeur de la page, défilés à la molette ou au glisser
+  const rowRef = useRef(null);
+  useMouseScroll(rowRef);
 
   return (
-    <div className="flex gap-3 overflow-x-auto scrollbar-hide -mx-4 px-4 pt-2 pb-1" role="group" aria-label="Choix du barber">
+    <div ref={rowRef} className="flex gap-3 overflow-x-auto scrollbar-hide -mx-4 px-4 pt-2 pb-1" role="group" aria-label="Choix du barber">
       <motion.button type="button" whileTap={tap} onClick={onAny} aria-pressed={!!anyBarber} className={TILE}>
         <span
           className={`relative w-full rounded-[14px] flex items-center justify-center transition-colors duration-300 ${

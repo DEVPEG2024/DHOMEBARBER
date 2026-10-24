@@ -1,5 +1,6 @@
 import React, { Children, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { motion, useMotionValue, useTransform, useReducedMotion } from 'framer-motion';
+import { useMouseScroll } from '@/components/booking/useMouseScroll';
 
 /**
  * Carrousel horizontal à défilement natif (glissé fluide, aimanté sur chaque carte) :
@@ -7,7 +8,10 @@ import { motion, useMotionValue, useTransform, useReducedMotion } from 'framer-m
  * - points de position sous le carrousel (tap = aller à la carte) ;
  * - défilement automatique facultatif (`autoplay` en ms) : en pause dès que le client touche
  *   le carrousel (8 s), quand il est hors de l'écran, onglet caché ou mouvement réduit ;
- * - couleur du point actif : `activeDotClass` (vert du salon par défaut, orange pour le Last Minute).
+ * - couleur du point actif : `activeDotClass` (vert du salon par défaut, orange pour le Last Minute) ;
+ * - à la souris (ordinateur) : glisser, et molette d'une carte par cran (`useMouseScroll`). Avant le
+ *   24 oct. 2026, rien ne bougeait à la souris : sur dhomebarber.fr, seules les 2 ou 3 premières
+ *   cartes (prochaines disponibilités, prestations, avis) étaient visibles, hors des petits points.
  *
  * Le carrousel déborde jusqu'aux bords de l'écran (`-mx-4 px-4`, la page a 16 px de marge) ;
  * la page n'en défile pas pour autant : la zone de défilement est le carrousel lui-même.
@@ -53,6 +57,11 @@ export default function SnapCarousel({ children, itemWidth = '78%', gap = 12, au
   }, [step, reduce]);
 
   const pause = () => { pausedUntil.current = Date.now() + 8000; };
+
+  // Ordinateur : glisser à la souris (aimanté au relâchement) et molette d'une carte par cran
+  useMouseScroll(ref, count > 0, {
+    onWheelStep: (dir) => { pause(); goTo(Math.max(0, Math.min(count - 1, index + dir))); },
+  });
 
   useEffect(() => {
     const el = ref.current;

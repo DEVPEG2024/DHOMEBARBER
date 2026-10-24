@@ -10,7 +10,7 @@ import { descriptionLead, formatDuration, formatPrice } from './serviceUtils';
  * La zone texte + prix est un vrai bouton qui ouvre la fiche ; l'action est un second bouton à côté.
  * Une prestation choisie est soulignée d'un fond vert léger (couleur seulement, rien ne bouge).
  */
-export default function ServiceRow({ service, selected = false, isNew = false, mode, pickLabel, onOpen, onAction, reduceMotion = false }) {
+export default function ServiceRow({ service, selected = false, replaces, isNew = false, mode, pickLabel, onOpen, onAction, reduceMotion = false }) {
   const name = String(service?.name || '').trim();
   const lead = descriptionLead(service);
   return (
@@ -43,6 +43,7 @@ export default function ServiceRow({ service, selected = false, isNew = false, m
         mode={mode}
         pickLabel={pickLabel}
         selected={selected}
+        replaces={replaces}
         serviceName={name}
         onClick={() => onAction?.(service)}
         reduceMotion={reduceMotion}

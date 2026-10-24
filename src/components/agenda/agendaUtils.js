@@ -72,11 +72,24 @@ export function invalidateAppointmentQueries(queryClient) {
   for (const key of ['appointments', 'agendaAppointments', 'adminAppointments', 'allAppointments', 'planningAppointments', 'attendanceCheck']) {
     queryClient.invalidateQueries({ queryKey: [key] });
   }
+  // « Mon espace » des barbers (BarberHome.jsx) : sans elle, un RDV annulé ou déplacé dans l'agenda
+  // restait « Prochain client » au retour sur la page (cache frais 60 s)
+  queryClient.invalidateQueries({ queryKey: ['barberHome', 'appointments'] });
 }
 
 export const isBreak = (apt) => apt.status === 'break';
 export const isLastMinuteSlot = (apt) => apt.status === 'last_minute';
 export const isCancelledLike = (apt) => apt.status === 'cancelled' || apt.status === 'no_show';
+
+/**
+ * Last Minute encore libre : statut `last_minute`, ni email ni nom de client (mêmes critères que
+ * `isClaimableLastMinute` du serveur). Il n'occupe pas le barber : le serveur l'exclut de l'index
+ * unique et des chevauchements, un client qui réserve le reprend. Depuis le 22 oct. 2026, chaque
+ * demi-heure libre dans les 6 h en devient un (Last Minute automatiques, lib/lastMinuteAuto.js).
+ */
+export const isFreeLastMinute = (apt) => !!apt && apt.status === 'last_minute'
+  && !String(apt.client_email || '').trim()
+  && ['', 'Last Minute'].includes(String(apt.client_name || '').trim());
 
 // ─── Last minute ───
 /**
@@ -279,19 +292,33 @@ export async function fetchLeaveConflicts(employeeId, startDate, endDate) {
 /**
  * Contrôle d'un nouvel horaire pour un rendez-vous (fiche « Modifier » et glisser-déposer).
  * `clash` (bloquant) : un autre créneau non annulé du même barber commence à la même heure, ce que
- * refuse l'index idx_appointments_unique_slot. `warnings` (non bloquants) : chevauchement, congé,
+ * refuse l'index idx_appointments_unique_slot_v2. `warnings` (non bloquants) : chevauchement, congé,
  * jour non travaillé, horaires du barber — le salon peut vouloir caser un client quand même.
+ *
+ * Les Last Minute libres ne bloquent pas (l'index et le serveur les ignorent) : avant le 24 oct.
+ * 2026, un client appelé pour 15:00 était refusé (« Last Minute commence déjà à 15:00 ») dès que le
+ * serveur avait publié un Last Minute automatique à cette heure. Ceux que le nouvel horaire recouvre
+ * sont rendus dans `lastMinutes`, à retirer après l'enregistrement (`removeCoveredLastMinutes`).
+ * `keepLastMinutes` : on place un Last Minute lui-même, les autres comptent comme avant.
  */
-export function slotIssues({ selfId, date, startTime, duration, employee, employeeId, dayApts = [], timeOffs = [] }) {
+export function slotIssues({ selfId, date, startTime, duration, employee, employeeId, dayApts = [], timeOffs = [], keepLastMinutes = false }) {
   const warnings = [];
   const who = employee?.name || 'ce barber';
   const s = timeToMinutes(startTime);
   const e = s + duration;
-  const others = dayApts.filter((a) =>
+  const sameBarber = dayApts.filter((a) =>
     a.id !== selfId
     && String(a.date).slice(0, 10) === date
     && String(a.employee_id) === String(employeeId)
     && !isCancelledLike(a));
+  const others = keepLastMinutes ? sameBarber : sameBarber.filter((a) => !isFreeLastMinute(a));
+  const lastMinutes = keepLastMinutes ? [] : sameBarber.filter((a) => {
+    if (!isFreeLastMinute(a)) return false;
+    // Last Minute sans fin (ancienne saisie) : il occupe sa minute de départ, comme côté serveur
+    const ls = timeToMinutes(a.start_time);
+    const le = Math.max(timeToMinutes(a.end_time || a.start_time), ls + 1);
+    return ls < e && le > s;
+  });
   const sameStart = others.find((a) => String(a.start_time).slice(0, 5) === startTime);
   for (const a of others) {
     if (a === sameStart) continue;
@@ -313,7 +340,34 @@ export function slotIssues({ selfId, date, startTime, duration, employee, employ
   const clash = sameStart
     ? `${isBreak(sameStart) ? 'Une pause' : (sameStart.client_name || 'Un rendez-vous')} commence déjà à ${startTime} pour ${who}`
     : null;
-  return { clash, warnings };
+  return { clash, warnings, lastMinutes };
+}
+
+/** « Le Last Minute de 15:00 – 15:40 sera retiré de l'agenda (créneau pris). » */
+export function coveredLastMinuteNote(lm) {
+  const start = String(lm.start_time || '').slice(0, 5);
+  const end = String(lm.end_time || lm.start_time || '').slice(0, 5);
+  return `Le Last Minute de ${start}${end && end !== start ? ` – ${end}` : ''} sera retiré de l'agenda (créneau pris).`;
+}
+
+/**
+ * Last Minute libres recouverts par un rendez-vous ou une pause que l'équipe vient d'enregistrer :
+ * plus réservables, ils sont retirés. Sinon l'accueil et le fil des clients montraient encore le
+ * créneau (le client tombait sur « plus disponible »), et la carte orange restait sur le
+ * rendez-vous. Le serveur ne retire de lui-même que les automatiques, toutes les 5 min.
+ * Pour chacun : contrôle « encore libre » d'abord (`if_free_last_minute` seul, 409 si un client
+ * l'a repris entre-temps : il n'est alors jamais supprimé), puis suppression. Jamais d'exception ;
+ * rend le nombre de Last Minute retirés.
+ */
+export async function removeCoveredLastMinutes(queryClient, lastMinutes) {
+  const list = (Array.isArray(lastMinutes) ? lastMinutes : []).filter(isFreeLastMinute);
+  if (list.length === 0) return 0;
+  const results = await Promise.allSettled(list.map(async (lm) => {
+    await api.entities.Appointment.update(lm.id, { if_free_last_minute: true });
+    await api.entities.Appointment.delete(lm.id);
+  }));
+  if (queryClient) invalidateAppointmentQueries(queryClient);
+  return results.filter((r) => r.status === 'fulfilled').length;
 }
 
 /** Position verticale d'un créneau dans la grille. */

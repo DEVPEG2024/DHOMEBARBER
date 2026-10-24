@@ -15,6 +15,16 @@
 - **Snap** : revue approuvée (vu le 24 sept. 2026). Reste : *Push to Production* dans le portail Camera Kit, puis coller le jeton de production dans Admin → Filtres Snap → Camera Kit. Source : `docs/fonctions/snap-essayage.md`.
 - **RDV de production signalés au salon le 18 oct. 2026** (aucune écriture faite) : absence du 14 oct. 10:00 avec Kevin probablement à requalifier (client venu à 10:30). Source : `docs/fonctions/reservation-rendez-vous.md`.
 
+- **Audit de la réservation du 24 oct. 2026, suites** (source : `docs/fonctions/reservation-rendez-vous.md`, « Audit de la réservation sur le site ») :
+  - à voir avec le propriétaire : heures du jour sous la ligne de flottaison à l'arrivée sur l'écran Créneau ; barber habituel choisi d'office même complet ce jour-là ;
+  - données : « Huile de barbe » existe deux fois dans les produits (deux fois dans « Ajouter un produit » de la réservation) ; Denis n'est plus parmi les barbers réservables (24 oct.) ;
+  - afficher la mesure `booking_error` dans Admin → Trafic (aujourd'hui lisible seulement en base, `analytics_events`) ;
+  - journaux Heroku qui écrivent encore un email : `jobs/birthdayReminder.js:105`, `routes/auth.js` (803, 816, 823, 1203), `routes/push.js:178`, `routes/aiWriter.js:30`, `routes/hairUltra.js:44` ;
+  - apps antérieures au build 12 (déplacement en deux temps, sans `reschedule_of`) : un déplacement vers exactement son créneau dans les 10 min de la réservation peut encore perdre le RDV (renvoi rendu tel quel, puis annulé par le `PUT` de l'app) ;
+  - bouton de fermeture des fenêtres nommé « Close » pour les lecteurs d'écran (`src/components/ui/dialog.jsx:64`) : « Fermer » demanderait d'adapter les tests qui cherchent `Close` ;
+  - tests sous WebKit instables avec l'horloge simulée (`page.clock.install` gèle les animations de sortie des étapes) : nos tests restent en Chromium ;
+  - les créneaux proposés par « Déplacer » (Mes rendez-vous) partent d'aujourd'hui : pour reculer un RDV lointain, passer par « Choisir une autre date » ; l'événement de calendrier ne dit pas « Pour Léo ».
+
 ## Échéances
 
 - **Certificat Pass Type ID** `pass.fr.dhomebarber.giftcard` valable jusqu'au **16 nov. 2027** : le renouveler avant (passé cette date, le serveur éteint seul `features.appleWallet`). Source : `docs/fonctions/cartes-cadeau-wallet.md`.

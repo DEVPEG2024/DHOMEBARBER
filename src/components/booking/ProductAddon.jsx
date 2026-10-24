@@ -8,7 +8,7 @@
  * Rien n'est rendu tant que le catalogue n'est pas là, s'il n'a pas pu être chargé ou si aucun
  * produit n'est proposable : ce bloc ne doit jamais gêner la réservation.
  */
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { Minus, Plus, ShoppingBag } from 'lucide-react';
@@ -16,6 +16,7 @@ import { api } from '@/api/apiClient';
 import { hapticFeedback } from '@/lib/capacitor';
 import { MAX_ADDON_QUANTITY, suggestAddonProducts } from '@/lib/appointmentProducts';
 import { formatPrice, productImages, stockInfo } from '@/components/shop/productUtils';
+import { useMouseScroll } from '@/components/booking/useMouseScroll';
 
 /** Requête du catalogue, identique à celle de la Boutique. */
 export const addonProductsQuery = {
@@ -130,8 +131,12 @@ export default function ProductAddon({ services, selection, onChange }) {
   const reduceMotion = useReducedMotion();
   const { data } = useQuery(addonProductsQuery);
   const products = useMemo(() => suggestAddonProducts(data || [], services || []), [data, services]);
+  // Ordinateur : rangée plus large que l'écran dès 4 produits, défilée à la molette ou au glisser
+  const rowRef = useRef(null);
+  const shown = !!data && products.length > 0;
+  useMouseScroll(rowRef, shown);
 
-  if (!data || products.length === 0) return null;
+  if (!shown) return null;
 
   const setQuantity = (product, quantity) => {
     const next = { ...(selection || {}) };
@@ -155,7 +160,7 @@ export default function ProductAddon({ services, selection, onChange }) {
         </div>
       </div>
       {/* La rangée défile seule : la page ne s'élargit jamais */}
-      <div className="mt-3 flex gap-2.5 overflow-x-auto px-4 pb-1 scrollbar-hide overscroll-x-contain">
+      <div ref={rowRef} className="mt-3 flex gap-2.5 overflow-x-auto px-4 pb-1 scrollbar-hide overscroll-x-contain">
         {products.map((product, i) => (
           <AddonCard
             key={product.id}

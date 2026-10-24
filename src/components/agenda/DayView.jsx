@@ -13,6 +13,7 @@ const LABEL_WIDTH = 48; // colonne des heures (w-12)
 const MIN_COLUMN = 76; // px par barber avant défilement horizontal
 const MIN_CARD = 20; // px = 15 min : deux prestations courtes qui se suivent restent l'une sous l'autre
 const MIN_CARD_MINUTES = Math.ceil((MIN_CARD / HOUR_HEIGHT) * 60);
+const TAP_AFTER_SCROLL_MS = 400; // tap au doigt juste après un défilement : il l'arrête, rien d'autre
 
 function DragPreview({ startMin, endMin }) {
   const top = ((startMin - START_HOUR * 60) / 60) * HOUR_HEIGHT;
@@ -28,8 +29,10 @@ function DragPreview({ startMin, endMin }) {
   );
 }
 
-export default function DayView({ date, appointments, employees, employeeFilter, timeOffs = [], onSelect, onBreakClick, onCreateBreak, onFocusBarber, onMoveRequest, onResizeRequest, linkedOrders }) {
+export default function DayView({ date, appointments, employees, employeeFilter, timeOffs = [], onSelect, onBreakClick, onCreateBreak, onSlotClick, onFocusBarber, onMoveRequest, onResizeRequest, linkedOrders }) {
   const scrollRef = useRef();
+  // Dernier défilement de la grille (tap au doigt pendant un défilement : pas d'« Ajouter un client »)
+  const lastScrollAt = useRef(0);
   const isToday = date === toDateStr(new Date());
 
   // À l'ouverture : on arrive sur l'heure actuelle (aujourd'hui) ou sur 8 h
@@ -56,6 +59,12 @@ export default function DayView({ date, appointments, employees, employeeFilter,
   const drag = useBreakDrag({
     hourHeight: HOUR_HEIGHT,
     onCreate: ({ start_time, end_time, column }) => onCreateBreak({ start_time, end_time, employee_id: column, date }),
+    // Clic sur une case vide : « Ajouter un client » avec ce barber, ce jour et cette heure
+    // Au doigt, un tap qui arrête un défilement en cours n'ouvre rien
+    onTap: onSlotClick ? ({ start_time, column, touch }) => {
+      if (touch && Date.now() - lastScrollAt.current < TAP_AFTER_SCROLL_MS) return;
+      onSlotClick({ date, employee_id: column, start_time });
+    } : undefined,
   });
 
   const cols = employeeFilter === 'all'
@@ -74,7 +83,11 @@ export default function DayView({ date, appointments, employees, employeeFilter,
   const renderColumn = ({ key, emp, apts }) => {
     const onLeave = emp.id !== 'other' && isOnLeave(timeOffs, emp.id, date);
     const bookings = apts.filter((a) => !isBreak(a) && !isLastMinuteSlot(a));
-    const meta = layoutOverlaps(bookings, MIN_CARD_MINUTES);
+    // Les Last Minute partagent la mise en page des RDV (comme en vue Semaine) : dessinés sur toute
+    // la largeur et au-dessus, ils recouvraient le client posé à la même heure (carte invisible, un
+    // clic ouvrait le Last Minute)
+    const lastMinutes = apts.filter(isLastMinuteSlot);
+    const meta = layoutOverlaps([...bookings, ...lastMinutes], MIN_CARD_MINUTES);
     const preview = drag.previewFor(key);
     const color = emp.color || '#3fcf8e';
 
@@ -109,10 +122,18 @@ export default function DayView({ date, appointments, employees, employeeFilter,
             style={{ ...verticalPlacement(apt.start_time, apt.end_time, HOUR_HEIGHT, 20), left: 2, right: 2 }} />
         ))}
 
-        {apts.filter(isLastMinuteSlot).map((apt) => (
-          <LastMinuteCard key={apt.id} apt={apt} onSelect={selectCard} dragProps={dragProps(apt)} ghosted={moving?.apt.id === apt.id}
-            style={{ ...verticalPlacement(apt.start_time, apt.end_time, HOUR_HEIGHT, 24), left: 2, right: 2 }} />
-        ))}
+        {lastMinutes.map((apt) => {
+          const { col, cols: n } = meta[apt.id] || { col: 0, cols: 1 };
+          const width = 100 / n;
+          return (
+            <LastMinuteCard key={apt.id} apt={apt} onSelect={selectCard} dragProps={dragProps(apt)} ghosted={moving?.apt.id === apt.id}
+              style={{
+                ...verticalPlacement(apt.start_time, apt.end_time, HOUR_HEIGHT, MIN_CARD),
+                left: `calc(${col * width}% + 2px)`,
+                width: `calc(${width}% - 4px)`,
+              }} />
+          );
+        })}
 
         {bookings.map((apt) => {
           const { col, cols: n } = meta[apt.id] || { col: 0, cols: 1 };
@@ -151,7 +172,7 @@ export default function DayView({ date, appointments, employees, employeeFilter,
 
   return (
     <div className="bg-card border border-border rounded-xl overflow-hidden flex flex-col h-[calc(100dvh-220px)] min-h-[420px]">
-      <div ref={scrollRef} data-scroll-container className="overflow-auto flex-1 overscroll-contain">
+      <div ref={scrollRef} data-scroll-container onScroll={() => { lastScrollAt.current = Date.now(); }} className="overflow-auto flex-1 overscroll-contain">
         {multi && (
           <div className="flex border-b border-border sticky top-0 z-30 bg-card" style={rowStyle}>
             <div className="w-12 shrink-0 sticky left-0 bg-card z-10" />

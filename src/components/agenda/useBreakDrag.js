@@ -14,11 +14,15 @@ function yToMinutes(clientY, colElement, hourHeight) {
   return clampMinutes(Math.round(raw / SNAP_GRID) * SNAP_GRID);
 }
 
+const TAP_GRID = 15; // min : un clic sur une case vide propose le quart d'heure touché
+
 /**
  * Glisser sur une colonne vide pour tracer une pause : immédiat à la souris, après un appui long
  * d'une seconde au doigt. `onCreate({ start_time, end_time, column })` reçoit la colonne d'origine.
+ * Un simple clic (ou un tap court) sans glisser : `onTap({ start_time, column, touch })` (facultatif),
+ * heure arrondie au quart d'heure inférieur — avant le 24 oct. 2026, il ne se passait rien.
  */
-export default function useBreakDrag({ hourHeight, onCreate }) {
+export default function useBreakDrag({ hourHeight, onCreate, onTap }) {
   const [dragging, setDragging] = useState(null); // { startMin, currentMin, column }
   const longPressTimer = useRef(null);
 
@@ -32,6 +36,8 @@ export default function useBreakDrag({ hourHeight, onCreate }) {
     const point = isTouch ? e.touches[0] : e;
     const origin = { x: point.clientX, y: point.clientY };
     const startMin = yToMinutes(point.clientY, colElement, hourHeight);
+    const rawMin = START_HOUR * 60 + ((point.clientY - colElement.getBoundingClientRect().top) / hourHeight) * 60;
+    const tapMin = Math.min(clampMinutes(Math.floor(rawMin / TAP_GRID) * TAP_GRID), END_HOUR * 60 - TAP_GRID);
     let active = !isTouch;
     let moved = false;
 
@@ -54,6 +60,10 @@ export default function useBreakDrag({ hourHeight, onCreate }) {
     const onEnd = () => {
       clearTimeout(longPressTimer.current);
       cleanup();
+      // Clic à la souris, ou tap court au doigt (avant l'appui long qui trace une pause), sans glisser
+      if (!moved && onTap && (isTouch ? !active : true)) {
+        setTimeout(() => onTap({ start_time: minutesToTime(tapMin), column, touch: isTouch }), 0);
+      }
       setDragging((prev) => {
         if (prev && moved) {
           const s = Math.min(prev.startMin, prev.currentMin);
@@ -87,7 +97,7 @@ export default function useBreakDrag({ hourHeight, onCreate }) {
         setDragging({ startMin, currentMin: startMin, column });
       }, LONG_PRESS_MS);
     }
-  }, [hourHeight, onCreate]);
+  }, [hourHeight, onCreate, onTap]);
 
   /** Aperçu de la pause en cours de tracé dans cette colonne, ou null. */
   const previewFor = (column) => {

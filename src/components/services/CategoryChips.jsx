@@ -1,10 +1,14 @@
 import React, { useEffect, useRef } from 'react';
-import { motion } from 'framer-motion';
 
 /**
  * Chips de rubriques collantes (fond flouté), compteur par rubrique (pas de chip « Tout »).
- * Le fond de la chip active glisse d'une chip à l'autre (`layoutId`), et la chip active est
- * ramenée au centre de la rangée quand elle change (défilement de la page ou tap).
+ * Le fond de la chip active apparaît en fondu (opacité, CSS), et la chip active est ramenée au
+ * centre de la rangée quand elle change (défilement de la page ou tap).
+ *
+ * Jamais de `layoutId` / `layout` ici : ce catalogue est l'étape 1 de la réservation, qui sort dans
+ * un `AnimatePresence` (Booking.jsx). Un fond glissant en `layoutId` qui avait changé de chip une
+ * fois ne laissait plus framer-motion retirer l'étape : le catalogue restait, invisible, par-dessus
+ * l'écran Créneau, et le tap sur une heure ou un jour tombait sur ses boutons (24 oct. 2026).
  * Hauteur visible 40 px, zone de tap étendue à 48 px par un pseudo-élément.
  */
 export default function CategoryChips({ items, activeId, onSelect, reduceMotion = false, barRef }) {
@@ -41,15 +45,14 @@ export default function CategoryChips({ items, activeId, onSelect, reduceMotion 
                 active ? 'text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
               }`}
             >
-              {active && (
-                <motion.span
-                  layoutId="services-chip-active"
-                  aria-hidden="true"
-                  className="absolute inset-0 rounded-full bg-primary shadow-lg shadow-primary/25"
-                  transition={reduceMotion ? { duration: 0 } : { type: 'spring', stiffness: 420, damping: 32 }}
-                />
-              )}
-              {!active && <span aria-hidden="true" className="absolute inset-0 rounded-full bg-card border border-border" />}
+              <span
+                aria-hidden="true"
+                className={`absolute inset-0 rounded-full bg-card border border-border transition-opacity duration-300 motion-reduce:transition-none ${active ? 'opacity-0' : 'opacity-100'}`}
+              />
+              <span
+                aria-hidden="true"
+                className={`absolute inset-0 rounded-full bg-primary shadow-lg shadow-primary/25 transition-opacity duration-300 motion-reduce:transition-none ${active ? 'opacity-100' : 'opacity-0'}`}
+              />
               <span className="relative">{item.label}</span>
               {typeof item.count === 'number' && (
                 <span className={`relative text-[10px] font-bold tabular-nums ${active ? 'opacity-80' : 'opacity-60'}`}>{item.count}</span>

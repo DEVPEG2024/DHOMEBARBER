@@ -50,11 +50,23 @@ const parisDateFmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris'
 /** Jour de Paris (AAAA-MM-JJ) de l'instant `now`. */
 export const parisDateKey = (now = Date.now()) => parisDateFmt.format(new Date(now));
 
+/** Plage [début, fin) en minutes d'une ligne (fin absente : une minute), ou null. */
+function intervalOf(row) {
+  const start = toMinutes(row?.start_time);
+  if (start == null) return null;
+  const end = toMinutes(row?.end_time);
+  return { start, end: end != null && end > start ? end : start + 1 };
+}
+
 /**
  * Créneaux à montrer, du plus proche au plus lointain : statut `last_minute`, **du jour** (Paris),
  * libre pour un client (`blocks_client` pas vrai), qui commence dans plus de 10 min, barber visible
- * des clients (fiche publique, pas de fiche de test). Un même barber, jour et heure n'apparaît
- * qu'une fois. Tous les créneaux sont rendus (le carrousel en garde `MAX_LAST_MINUTE_SLOTS`).
+ * des clients (fiche publique, pas de fiche de test), et **que rien ne recouvre** : un RDV, une
+ * pause ou un Last Minute attribué posés par l'équipe par-dessus (autre ligne du même barber et du
+ * même jour avec `blocks_client` vrai) le rendent impossible à réserver (« plus disponible »).
+ * `rows` : les lignes du jour (toutes, pour voir ce qui recouvre ; seules les `last_minute` sont
+ * proposées). Un même barber, jour et heure n'apparaît qu'une fois. Tous les créneaux sont rendus
+ * (le carrousel en garde `MAX_LAST_MINUTE_SLOTS`).
  * Chaque élément : `{ id, employeeId, barber, date, start, end, startsAt }`.
  */
 export function selectOpenLastMinutes(rows, barbers, now = Date.now()) {
@@ -62,9 +74,20 @@ export function selectOpenLastMinutes(rows, barbers, now = Date.now()) {
   const byId = new Map((Array.isArray(barbers) ? barbers : [])
     .filter((b) => b && !b.is_hidden)
     .map((b) => [String(b.id), b]));
+  const list = Array.isArray(rows) ? rows : [];
+  // Lignes qui occupent un créneau pour un client, par barber et jour (calcul du serveur)
+  const blockers = new Map();
+  for (const row of list) {
+    if (!row || row.blocks_client !== true) continue;
+    const iv = intervalOf(row);
+    if (!iv) continue;
+    const key = `${row.employee_id}|${String(row.date || '').slice(0, 10)}`;
+    if (!blockers.has(key)) blockers.set(key, []);
+    blockers.get(key).push({ ...iv, id: String(row.id) });
+  }
   const seen = new Set();
   const out = [];
-  for (const row of Array.isArray(rows) ? rows : []) {
+  for (const row of list) {
     if (!row || row.status !== 'last_minute' || row.blocks_client === true) continue;
     const date = String(row.date || '').slice(0, 10);
     const start = hhmm(row.start_time);
@@ -75,6 +98,10 @@ export function selectOpenLastMinutes(rows, barbers, now = Date.now()) {
     if (!(startsAt > now + LAST_MINUTE_MIN_LEAD_MS)) continue;
     const barber = byId.get(String(row.employee_id));
     if (!barber) continue;
+    const iv = intervalOf(row);
+    const covered = (blockers.get(`${row.employee_id}|${date}`) || [])
+      .some((b) => b.id !== String(row.id) && b.start < iv.end && iv.start < b.end);
+    if (covered) continue;
     const key = `${row.employee_id}|${date}|${start}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -242,9 +269,31 @@ export function lastMinuteSlotOfPost(post, barbers, now = Date.now()) {
 }
 
 /**
- * Créneaux Last Minute libres **du jour** : `{ slots, total, now }` (`slots` limité à
- * `MAX_LAST_MINUTE_SLOTS`). Relu chaque minute et au retour sur l'app ; l'horloge locale avance
- * toutes les 30 s (compte à rebours, créneau commencé retiré).
+ * Lignes du jour lues au plus (une liste pleine peut être tronquée). Toutes les lignes du jour, pas
+ * seulement les `last_minute` : il faut voir le RDV ou la pause qui recouvre un créneau. Un client
+ * n'en reçoit que les colonnes de créneau (une centaine de petites lignes un jour chargé).
+ */
+const LAST_MINUTE_FETCH_LIMIT = 500;
+
+/**
+ * Publication Last Minute du fil encore affichable d'après la liste à jour des créneaux libres
+ * (`useOpenLastMinutes`) : le fil n'est relu qu'à la demande, alors que cette liste l'est chaque
+ * minute (et tout de suite après une réservation). Créneau pris, annulé ou supprimé depuis : la
+ * publication part, comme la carte de l'accueil. Liste inconnue (chargement, échec, liste pleine)
+ * ou publication sans créneau rattaché : rien n'est retiré.
+ */
+export function lastMinutePostStillOpen(post, { openIds, complete } = {}) {
+  if (!complete || !(openIds instanceof Set)) return true;
+  const id = post?.appointment_id;
+  if (id == null || String(id) === '') return true;
+  return openIds.has(String(id));
+}
+
+/**
+ * Créneaux Last Minute libres **du jour** : `{ slots, total, now, openIds, complete }` (`slots`
+ * limité à `MAX_LAST_MINUTE_SLOTS` ; `openIds` : identifiants de tous les créneaux libres ;
+ * `complete` : la liste du serveur est lue, à jour et entière). Relu chaque minute et au retour sur
+ * l'app ; l'horloge locale avance toutes les 30 s (compte à rebours, créneau commencé retiré).
  * Ne rejette jamais : en échec, aucune carte (la section se cache).
  */
 export function useOpenLastMinutes({ enabled = true } = {}) {
@@ -254,7 +303,8 @@ export function useOpenLastMinutes({ enabled = true } = {}) {
   const today = parisDay(0).key;
   const slotsQuery = useQuery({
     queryKey: [...LAST_MINUTE_QUERY_KEY, today],
-    queryFn: () => api.entities.Appointment.filter({ status: 'last_minute', date: [today] }, 'start_time', 50),
+    // Sans filtre de statut (comme la réservation) : `selectOpenLastMinutes` écarte les créneaux recouverts
+    queryFn: () => api.entities.Appointment.filter({ date: [today] }, 'start_time', LAST_MINUTE_FETCH_LIMIT),
     enabled,
     // À minuit la clé change : la réponse de la veille sert le temps de relire, ses créneaux sont
     // écartés par la date (selectOpenLastMinutes)
@@ -276,6 +326,11 @@ export function useOpenLastMinutes({ enabled = true } = {}) {
     () => selectOpenLastMinutes(slotsQuery.data, barbersQuery.data, now),
     [slotsQuery.data, barbersQuery.data, now],
   );
+  const openIds = useMemo(() => new Set(open.map((s) => String(s.id))), [open]);
+  // Liste du jour lue avec succès (pas celle de la veille gardée à minuit), barbers connus, et
+  // entière (une réponse pleine peut avoir laissé des créneaux de côté)
+  const complete = slotsQuery.isSuccess && !slotsQuery.isPlaceholderData && Array.isArray(slotsQuery.data)
+    && slotsQuery.data.length < LAST_MINUTE_FETCH_LIMIT && Array.isArray(barbersQuery.data);
   // `total` : tous les créneaux libres (l'en-tête du carrousel le dit quand il en montre moins)
-  return { slots: open.slice(0, MAX_LAST_MINUTE_SLOTS), total: open.length, now };
+  return { slots: open.slice(0, MAX_LAST_MINUTE_SLOTS), total: open.length, now, openIds, complete };
 }

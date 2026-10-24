@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Bell, Clock, Minus, Plus, X, Loader2, UserRound, Link2 } from 'lucide-react';
+import { AlertTriangle, Bell, Clock, Minus, Plus, X, Loader2, UserRound, Link2, Zap } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/api/apiClient';
 import { getServiceColor } from '@/utils/serviceColors';
@@ -10,6 +10,7 @@ import { GUEST_NAME_MAX, guestNameError, guestOf, normalizeGuestName, useGuestBo
 import {
   timeToMinutes, addMinutesToTime, parseDateParam, slotIssues, isUpcomingSlot,
   LAST_MINUTE_MARKER, withLastMinuteMarker, stripLastMinuteMarker, agendaErrorMessage, invalidateAppointmentQueries,
+  isFreeLastMinute, coveredLastMinuteNote, removeCoveredLastMinutes,
 } from './agendaUtils';
 
 const inputCls = 'w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-primary/50';
@@ -117,11 +118,14 @@ export default function AppointmentEditForm({ appointment, employees, onCancel, 
   };
 
   // ─── Contrôles (avertissements, sauf le même horaire de départ) ───
-  const { clash, warnings } = useMemo(() => (
+  // Last Minute libres recouverts : retirés après l'enregistrement (sauf si l'on modifie un Last
+  // Minute libre lui-même : les autres comptent alors comme avant)
+  const editingFreeLastMinute = isFreeLastMinute(appointment);
+  const { clash, warnings, lastMinutes } = useMemo(() => (
     validDate && validTime && employeeId
-      ? slotIssues({ selfId: appointment.id, date, startTime, duration, employee, employeeId, dayApts, timeOffs })
-      : { clash: null, warnings: [] }
-  ), [validDate, validTime, employeeId, startTime, duration, dayApts, appointment.id, timeOffs, employee, date]);
+      ? slotIssues({ selfId: appointment.id, date, startTime, duration, employee, employeeId, dayApts, timeOffs, keepLastMinutes: editingFreeLastMinute })
+      : { clash: null, warnings: [], lastMinutes: [] }
+  ), [validDate, validTime, employeeId, startTime, duration, dayApts, appointment.id, timeOffs, employee, date, editingFreeLastMinute]);
 
   const moved = date !== String(appointment.date || '').slice(0, 10)
     || startTime !== String(appointment.start_time || '').slice(0, 5)
@@ -179,6 +183,8 @@ export default function AppointmentEditForm({ appointment, employees, onCancel, 
     try {
       const updated = await api.entities.Appointment.update(appointment.id, payload);
       delete payload.if_free_last_minute;
+      // Rendez-vous annulé ou absent : il ne prend pas le créneau, le Last Minute reste
+      if (!['cancelled', 'no_show'].includes(appointment.status)) removeCoveredLastMinutes(queryClient, lastMinutes);
       toast.success(moved
         ? (canNotify && notify ? 'Rendez-vous déplacé · client prévenu' : 'Rendez-vous déplacé')
         : (accountChanged && clientEmail ? 'Compte client rattaché au rendez-vous' : 'Rendez-vous modifié'));
@@ -370,6 +376,13 @@ export default function AppointmentEditForm({ appointment, employees, onCancel, 
           )}
           {warnings.map((w) => (
             <p key={w} className="text-xs text-amber-300 flex items-start gap-1.5"><AlertTriangle className="w-3.5 h-3.5 mt-px shrink-0" />{w}</p>
+          ))}
+        </div>
+      )}
+      {!clash && lastMinutes.length > 0 && !['cancelled', 'no_show'].includes(appointment.status) && (
+        <div role="status" className="rounded-xl px-3 py-2 space-y-1 border border-orange-500/30 bg-orange-500/10">
+          {lastMinutes.map((lm) => (
+            <p key={lm.id} className="text-xs text-orange-300 flex items-start gap-1.5 break-words"><Zap className="w-3.5 h-3.5 mt-px shrink-0" />{coveredLastMinuteNote(lm)}</p>
           ))}
         </div>
       )}

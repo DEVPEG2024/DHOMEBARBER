@@ -383,6 +383,11 @@ function mergeSectionOrder(saved) {
 
 /** Avis chargés pour la note du hero (limite par défaut du serveur) ; au-delà, « N+ ». */
 const REVIEWS_STATS_LIMIT = 500;
+/**
+ * Publications lues pour « News Gang » : assez pour dépasser les publications Last Minute du jour
+ * (une par créneau libre à moins de 6 h, retirées dès qu'il n'est plus libre : une trentaine au plus).
+ */
+const LATEST_POSTS_LIMIT = 40;
 
 export default function Home() {
   const [showHours, setShowHours] = useState(false);
@@ -441,7 +446,9 @@ export default function Home() {
   const { data: posts = [] } = useQuery({
     // Sous le préfixe ['posts'] : création, suppression, blocage ou modération dans le fil l'invalident aussi
     queryKey: ['posts', 'latest'],
-    queryFn: () => api.entities.Post.list('-created_at', 1),
+    // Plusieurs publications : celles des Last Minute (une par créneau libre du jour, posées par le
+    // serveur depuis le 22 oct. 2026) sont sautées, voir `latestPost`
+    queryFn: () => api.entities.Post.list('-created_at', LATEST_POSTS_LIMIT),
   });
 
   const { data: settingsData = [] } = useQuery({
@@ -471,7 +478,10 @@ export default function Home() {
   });
   const partnersVisible = useMemo(() => visiblePartners(partnersData).length > 0, [partnersData]);
 
-  const latestPost = posts[0] || null;
+  // « News Gang » : la dernière vraie actualité. Une publication Last Minute (« réserve-le vite
+  // depuis l'accueil ! ») y prenait la place des nouvelles du salon, et restait affichée une fois le
+  // créneau pris : les créneaux libres ont leur propre section (`last-minute`), à jour chaque minute
+  const latestPost = posts.find(p => p && p.kind !== 'last_minute') || null;
   const settings = settingsData[0] || null;
 
   // Load saved section order from settings

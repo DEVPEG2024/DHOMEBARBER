@@ -5,6 +5,9 @@
  * pas (complet, repos, fermé…). Un jour sans place reste touchable : la page explique pourquoi.
  * Les places se calculent au fil du défilement : `onVisibleRange` dit à la page quels jours sont
  * à l'écran, elle charge leurs semaines (en attendant, un trait pulse sous le numéro).
+ * Sur ordinateur : molette et glisser à la souris (`useMouseScroll`), flèches gauche / droite du
+ * clavier d'un jour à l'autre (avant le 24 oct. 2026, seuls les 7 premiers jours d'un mois étaient
+ * atteignables à la souris sur dhomebarber.fr).
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { format } from 'date-fns';
@@ -12,6 +15,7 @@ import { fr } from 'date-fns/locale';
 import { motion, useReducedMotion } from 'framer-motion';
 import { emptyDayLabel } from '@/lib/availability';
 import { hapticFeedback } from '@/lib/capacitor';
+import { useMouseScroll } from '@/components/booking/useMouseScroll';
 
 /** En dessous de ce nombre de créneaux libres, le jour est « presque complet ». */
 export const LOW_SLOTS = 3;
@@ -80,6 +84,21 @@ export default function DayStrip({ days = [], selectedKey, onSelect, onVisibleRa
     frame.current = requestAnimationFrame(measure);
   };
 
+  // Ordinateur : la molette et le glisser à la souris font défiler la bande
+  useMouseScroll(stripRef);
+
+  /** Flèches gauche / droite (Début / Fin) : jour voisin, ramené à l'écran par le focus. */
+  const onKeyDown = (e) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+    const key = e.target?.closest?.('[data-day]')?.getAttribute('data-day');
+    const index = key ? days.findIndex(d => d.key === key) : -1;
+    if (index < 0) return;
+    const next = e.key === 'ArrowRight' ? index + 1 : e.key === 'ArrowLeft' ? index - 1 : e.key === 'Home' ? 0 : days.length - 1;
+    const el = days[next] && dayRefs.current.get(days[next].key);
+    e.preventDefault();
+    if (el && !el.disabled) el.focus();
+  };
+
   useEffect(() => {
     measure();
     window.addEventListener('resize', measure);
@@ -135,7 +154,8 @@ export default function DayStrip({ days = [], selectedKey, onSelect, onVisibleRa
       <div
         ref={stripRef}
         onScroll={onScroll}
-        className="relative flex gap-2 overflow-x-auto snap-x snap-proximity scrollbar-hide -mx-4 px-4 pb-1 overscroll-x-contain"
+        onKeyDown={onKeyDown}
+        className="relative flex gap-2 overflow-x-auto snap-x snap-proximity scrollbar-hide -mx-4 px-4 pb-1 overscroll-x-contain [@media(pointer:fine)]:cursor-grab"
         style={{ scrollPaddingLeft: PAD }}
       >
         {days.map((day, i) => {
@@ -148,6 +168,7 @@ export default function DayStrip({ days = [], selectedKey, onSelect, onVisibleRa
             <motion.button
               key={day.key}
               ref={el => { if (el) dayRefs.current.set(day.key, el); else dayRefs.current.delete(day.key); }}
+              data-day={day.key}
               type="button"
               initial={reduceMotion || i > 10 ? false : { opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}

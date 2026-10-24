@@ -12,8 +12,12 @@ const lastMinute = (id, barber, date, debut, finCreneau) => rendezVous({
   id, barber, prestations: [], date, debut, statut: 'last_minute', end_time: finCreneau, total_duration: 30,
 });
 
-/** Lectures des créneaux Last Minute faites par l'accueil. */
-const lecturesLastMinute = (api) => api.requetesVers('GET', '/entities/Appointment').filter((r) => r.q?.status === 'last_minute');
+/**
+ * Lecture des créneaux Last Minute faite par l'accueil : les lignes d'un seul jour, sans filtre de
+ * statut (depuis le 24 oct. 2026, pour voir un RDV ou une pause posés par-dessus un créneau).
+ */
+const estLectureLastMinute = (r) => Array.isArray(r.q?.date) && r.q.date.length === 1 && Object.keys(r.q).length === 1;
+const lecturesLastMinute = (api) => api.requetesVers('GET', '/entities/Appointment').filter(estLectureLastMinute);
 
 const boutonsReserverCreneau = (page) => page.getByRole('link', { name: /^Réserver ce créneau/ });
 
@@ -103,7 +107,7 @@ test.describe('Last Minute sur l\'accueil', () => {
     // du créneau pris ne doit pas réapparaître le temps de la relire
     let relecturesServies = 0;
     api.surcharger('GET', '/entities/Appointment', async (req) => {
-      if (req.q?.status !== 'last_minute') return undefined;
+      if (!estLectureLastMinute(req)) return undefined;
       await new Promise((r) => { setTimeout(r, 2500); });
       relecturesServies += 1;
       return undefined;

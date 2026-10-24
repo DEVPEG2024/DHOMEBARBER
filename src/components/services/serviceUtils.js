@@ -247,6 +247,39 @@ export function serviceRubric(service) {
   return 'other';
 }
 
+// ─── Doublons dans une sélection ──────────────────────────────────────────
+
+/**
+ * La prestation comprend-elle une coupe ? Coupe, coupe enfant, tête rasée, formule coupe + barbe.
+ * D'après le mot « coupe » (pas d'après la rubrique : « Shampoing » ou « Brushing » s'ajoutent à une
+ * coupe, ils ne la remplacent pas). Jamais un abonnement.
+ */
+export function hasCutPart(service) {
+  const rubric = serviceRubric(service);
+  if (rubric === 'pack') return false;
+  return rubric === 'kids' || rubric === 'head' || rubric === 'combo' || CUT_WORD.test(normalizeText(service?.name));
+}
+
+/**
+ * Prestations de la sélection que `service` ferait doublon, et qu'il doit donc remplacer plutôt que
+ * s'y ajouter : deux coupes (« Coupe » puis « Coupe + Barbe », coupe adulte puis coupe enfant), ou
+ * une formule coupe + barbe touchée alors qu'une barbe seule est choisie (la formule la comprend).
+ * Rien pour une barbe, un soin, une couleur… ajoutés à une coupe : c'est un vrai complément.
+ * Relevé le 24 oct. 2026 : revenu à l'étape Prestation par « Modifier » avec « Coupe », le client
+ * qui touchait « Coupe + Barbe » pour en changer réservait les deux (durée et prix doublés).
+ * @param {object} service   prestation touchée (pas encore choisie)
+ * @param {Array} selected   prestations déjà choisies
+ * @returns {object[]}       prestations à retirer (vide : simple ajout)
+ */
+export function replacedBy(service, selected) {
+  if (!service) return [];
+  const id = String(service.id);
+  const cut = hasCutPart(service);
+  const combo = serviceRubric(service) === 'combo';
+  return (selected || []).filter(s => s && String(s.id) !== id
+    && ((cut && hasCutPart(s)) || (combo && isPlainBeard(s))));
+}
+
 // ─── Compléments ──────────────────────────────────────────────────────────
 
 const defaultKindOf = (s) => serviceKind(s, '');

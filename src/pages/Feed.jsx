@@ -17,7 +17,7 @@ import { useAndroidBack } from '@/lib/useAndroidBack';
 import LoadError, { isNetworkError } from '@/components/shared/LoadError';
 import GangLeaderboard from '@/components/gang/GangLeaderboard';
 import { LastMinuteCard } from '@/components/home/LastMinuteSection';
-import { lastMinuteSlotOfPost, useLastMinuteClock } from '@/lib/lastMinute';
+import { lastMinutePostStillOpen, lastMinuteSlotOfPost, useOpenLastMinutes } from '@/lib/lastMinute';
 import { GANG_LEADERBOARD_QUERY_KEY } from '@/lib/gangCardApi';
 import { contentFilterError } from '@/lib/contentFilter';
 
@@ -803,10 +803,15 @@ export default function Feed() {
     (!!row.author_key && blockedKeys.has(row.author_key)) ||
     (!!row.author_email && blockedEmails.has(String(row.author_email).toLowerCase()));
   // Publications Last Minute : seulement tant que le créneau est à venir (le serveur les retire
-  // aussi, au plus tard 5 min après) ; leur créneau au format de la carte de l'accueil
-  const lastMinuteNow = useLastMinuteClock();
+  // aussi, au plus tard 5 min après) ; leur créneau au format de la carte de l'accueil. Le fil
+  // n'est relu qu'à la demande : la liste des créneaux libres de l'accueil (relue chaque minute, et
+  // tout de suite après une réservation) retire aussi la carte d'un créneau pris entre-temps, sinon
+  // « Réserver » menait à une heure qui n'était plus libre
+  const hasLastMinutePosts = posts.some(p => p.kind === 'last_minute');
+  const openLastMinutes = useOpenLastMinutes({ enabled: hasLastMinutePosts });
+  const lastMinuteNow = openLastMinutes.now;
   const lastMinuteSlots = new Map(posts.filter(p => p.kind === 'last_minute')
-    .map(p => [String(p.id), lastMinuteSlotOfPost(p, employees, lastMinuteNow)]));
+    .map(p => [String(p.id), lastMinutePostStillOpen(p, openLastMinutes) ? lastMinuteSlotOfPost(p, employees, lastMinuteNow) : null]));
   const visiblePosts = posts.filter(p => !isBlocked(p) && (p.kind !== 'last_minute' || lastMinuteSlots.get(String(p.id))));
 
   // Admin : nombre de clients qui ont vu chaque publication (mesure d'audience)

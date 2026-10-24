@@ -66,16 +66,22 @@ export default function RebookCard({ user, employees = [], services = [] }) {
     // Ids mixtes (UUID / number) selon la source : comparaison en chaîne
     const barber = employees.find(e => String(e.id) === String(last.employee_id)) || null;
     const items = Array.isArray(last.services) ? last.services : [];
-    // Seules les prestations encore actives sont pré-sélectionnées
-    const activeServices = items
-      .map(s => services.find(sv => String(sv.id) === String(s?.service_id || s?.id)))
-      .filter(Boolean);
+    // Prestations de la dernière visite, dans leur ordre, sans doublon
+    const lastIds = [...new Set(items.map(s => s?.service_id || s?.id).filter(id => id != null && String(id) !== '').map(String))];
+    // Seules les prestations encore actives comptent dans le prix et la durée
+    const activeServices = lastIds.map(id => services.find(sv => String(sv.id) === id)).filter(Boolean);
+    // Catalogue lu et une prestation de la visite n'y est plus : ni prix ni durée (le total serait faux)
+    const retired = services.length > 0 && activeServices.length < lastIds.length;
     const serviceNames = items.map(s => s?.name).filter(Boolean);
     const barberName = barber?.name || last.employee_name || null;
 
+    // Le lien garde le barber et TOUTES les prestations de la visite, même retirés depuis : la
+    // réservation présélectionne ce qui existe encore et explique le reste (bandeau « une prestation
+    // n'est plus proposée », barber « plus disponible à la réservation »). Les retirer ici menait
+    // droit aux créneaux avec moins de prestations, ou avec un autre barber, sans un mot.
     const params = new URLSearchParams();
-    if (barber) params.set('barber', String(barber.id));
-    if (activeServices.length > 0) params.set('services', activeServices.map(s => String(s.id)).join(','));
+    if (last.employee_id != null && String(last.employee_id) !== '') params.set('barber', String(last.employee_id));
+    if (lastIds.length > 0) params.set('services', lastIds.join(','));
     // Dernière visite d'un proche (réservée pour Léo) : « Pour qui ? » le reprend d'office
     if (guestOf(last)) params.set('pour', guestOf(last));
     const query = params.toString();
@@ -95,12 +101,13 @@ export default function RebookCard({ user, employees = [], services = [] }) {
       href: isFuture ? '/appointments' : (query ? `/booking?${query}` : '/booking'),
       dateLabel: isFuture && last.start_time ? `${dateLabel} à ${last.start_time}` : dateLabel,
       isFuture,
+      retired,
     };
   }, [last, employees, services]);
 
   if (!user?.email || !details) return null;
 
-  const { barber, barberName, serviceNames, activeServices, total, duration, href, dateLabel, isFuture } = details;
+  const { barber, barberName, serviceNames, activeServices, total, duration, href, dateLabel, isFuture, retired } = details;
   const subtitle = [serviceNames.join(' + ') || 'Votre prestation', barberName ? `avec ${barberName}` : null,
     guestOf(last) ? `pour ${guestOf(last)}` : null]
     .filter(Boolean).join(' · ');
@@ -141,7 +148,7 @@ export default function RebookCard({ user, employees = [], services = [] }) {
           <p className="text-xs text-muted-foreground leading-snug line-clamp-2">{subtitle}</p>
           <p className="text-[11px] text-muted-foreground/80 mt-1 leading-snug">
             {isFuture ? '' : 'Dernière visite : '}<span className="text-foreground/80">{dateLabel}</span>
-            {!isFuture && activeServices.length > 0 && (
+            {!isFuture && !retired && activeServices.length > 0 && (
               <span className="text-foreground/60 whitespace-nowrap"> · {formatPrice(total)} · {duration} min</span>
             )}
           </p>

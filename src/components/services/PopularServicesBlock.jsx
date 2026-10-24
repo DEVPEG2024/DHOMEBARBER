@@ -10,7 +10,7 @@ import { EASE, formatDuration, formatPrice } from './serviceUtils';
  * d'action. Le haut de la carte (pastille, nom, durée) est un bouton qui ouvre la fiche, l'action
  * est un second bouton. L'appelant ne la monte qu'avec au moins deux prestations.
  */
-export default function PopularServicesBlock({ services, selectedIds, mode, pickLabel, onOpen, onAction, reduceMotion = false }) {
+export default function PopularServicesBlock({ services, selectedIds, replacesOf, mode, pickLabel, onOpen, onAction, reduceMotion = false }) {
   if (!services || services.length < 2) return null;
   return (
     <section aria-labelledby="popular-services" className="mb-5">
@@ -62,6 +62,7 @@ export default function PopularServicesBlock({ services, selectedIds, mode, pick
                   mode={mode}
                   pickLabel={pickLabel}
                   selected={selected}
+                  replaces={replacesOf?.(service)}
                   serviceName={name}
                   variant="solid"
                   onClick={() => onAction?.(service)}

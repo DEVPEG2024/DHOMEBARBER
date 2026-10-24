@@ -30,6 +30,7 @@ import {
   matchesSearch,
   formatDuration,
   formatPrice,
+  replacedBy,
 } from './serviceUtils';
 
 /** Marge sous la barre de chips collante pour qu'un en-tête de rubrique ciblé reste visible. */
@@ -49,7 +50,10 @@ const FAVORITES_GROUP_ID = 'favoris';
  * compactes. Un tap sur une ligne ouvre la fiche de la prestation (`ServiceSheet`).
  *
  * Boutons : sélection vide → `pickLabel` (« Réserver », « Choisir ») → `onPick([prestation])` ;
- * dès que le client compose plusieurs prestations → bascule « Ajouter » / « Ajouté ✓ » (`onToggle`).
+ * dès que le client compose plusieurs prestations → bascule « Ajouter » / « Ajouté ✓ » (`onToggle`),
+ * sauf pour une prestation qui ferait doublon avec la sélection (deuxième coupe, formule coupe +
+ * barbe après une barbe) : « Remplacer », qui la met à la place (`onSwap`, `replacedBy`). Sans cela,
+ * revenu par « Modifier » avec « Coupe », le client qui touchait « Coupe + Barbe » réservait les deux.
  * La fiche garde toujours son action principale (`onPick` avec les compléments cochés) et ajoute à
  * la sélection en un seul rendu (`onSwap([], […])`). Aucune barre fixe ici : l'appelant la gère.
  *
@@ -234,14 +238,31 @@ export default function ServicePicker({
     else fresh.forEach(s => onToggle?.(s));
   }, [onSwap, onToggle, selectedSet]);
 
+  // Prestations de la sélection qu'une prestation pas encore choisie remplacerait (doublon)
+  const replacedOf = useCallback(
+    (service) => (mode === 'toggle' && !selectedSet.has(String(service.id)) ? replacedBy(service, selectedServices) : []),
+    [mode, selectedSet, selectedServices],
+  );
+  const replaceNamesOf = useCallback(
+    (service) => replacedOf(service).map(s => String(s.name || '').trim()).filter(Boolean),
+    [replacedOf],
+  );
+
   const rowAction = useCallback((service) => {
     if (mode === 'pick') {
       hapticFeedback();
       onPick?.([service]);
       return;
     }
+    const replaced = replacedOf(service);
+    if (replaced.length > 0) {
+      hapticFeedback();
+      if (onSwap) onSwap(replaced, [service]);
+      else { replaced.forEach(s => onToggle?.(s)); onToggle?.(service); }
+      return;
+    }
     onToggle?.(service);
-  }, [mode, onPick, onToggle]);
+  }, [mode, onPick, onToggle, onSwap, replacedOf]);
 
   const openSheet = useCallback((service) => { hapticFeedback(); setSheetService(service); }, []);
   const closeSheet = useCallback(() => setSheetService(null), []);
@@ -380,6 +401,7 @@ export default function ServicePicker({
         <PopularServicesBlock
           services={popularServices}
           selectedIds={selectedSet}
+          replacesOf={replaceNamesOf}
           mode={mode}
           pickLabel={pickLabel}
           onOpen={openSheet}
@@ -441,6 +463,7 @@ export default function ServicePicker({
                     key={`${group.id}-${id}`}
                     service={service}
                     selected={selectedSet.has(id)}
+                    replaces={replaceNamesOf(service)}
                     isNew={newIds.has(id)}
                     mode={mode}
                     pickLabel={pickLabel}

@@ -1,13 +1,13 @@
 import React, { useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { ArrowDown, AlertTriangle, Bell, Loader2, MoveVertical } from 'lucide-react';
+import { ArrowDown, AlertTriangle, Bell, Loader2, MoveVertical, Zap } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/api/apiClient';
 import { agendaClientName } from '@/lib/guest';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   addMinutesToTime, aptDuration, invalidateAppointmentQueries, isBreak, isUpcomingSlot, shortDayLabel, slotIssues,
-  agendaErrorMessage,
+  agendaErrorMessage, coveredLastMinuteNote, removeCoveredLastMinutes,
 } from './agendaUtils';
 
 /** Champs écrits par un déplacement : jour, heure, fin recalculée (même durée), barber. */
@@ -71,12 +71,12 @@ export default function MoveDialog({ move, employees, appointments, timeOffs, on
   const apt = move?.apt;
   const fields = useMemo(() => (move ? buildMoveFields(apt, move, employees) : null), [move, apt, employees]);
   const employee = move ? employees.find((e) => String(e.id) === String(move.employee_id)) : null;
-  const { clash, warnings } = useMemo(() => (move
+  const { clash, warnings, lastMinutes } = useMemo(() => (move
     ? slotIssues({
       selfId: apt.id, date: fields.date, startTime: fields.start_time, duration: aptDuration(apt),
       employee, employeeId: move.employee_id, dayApts: appointments, timeOffs,
     })
-    : { clash: null, warnings: [] }), [move, apt, fields, employee, appointments, timeOffs]);
+    : { clash: null, warnings: [], lastMinutes: [] }), [move, apt, fields, employee, appointments, timeOffs]);
 
   if (!move) return null;
 
@@ -91,6 +91,7 @@ export default function MoveDialog({ move, employees, appointments, timeOffs, on
     setSaving(true);
     try {
       await saveMove(queryClient, apt, fields, canNotify && notify);
+      removeCoveredLastMinutes(queryClient, lastMinutes);
       toast.success(canNotify && notify ? 'Rendez-vous déplacé · client prévenu' : 'Rendez-vous déplacé');
       onClose();
     } catch (e) {
@@ -131,6 +132,13 @@ export default function MoveDialog({ move, employees, appointments, timeOffs, on
               {clash && <p className="text-xs text-red-400 flex items-start gap-1.5"><AlertTriangle className="w-3.5 h-3.5 mt-px shrink-0" />{clash}</p>}
               {warnings.map((w) => (
                 <p key={w} className="text-xs text-amber-300 flex items-start gap-1.5"><AlertTriangle className="w-3.5 h-3.5 mt-px shrink-0" />{w}</p>
+              ))}
+            </div>
+          )}
+          {!clash && lastMinutes.length > 0 && (
+            <div role="status" className="rounded-xl px-3 py-2 space-y-1 border border-orange-500/30 bg-orange-500/10">
+              {lastMinutes.map((lm) => (
+                <p key={lm.id} className="text-xs text-orange-300 flex items-start gap-1.5 break-words"><Zap className="w-3.5 h-3.5 mt-px shrink-0" />{coveredLastMinuteNote(lm)}</p>
               ))}
             </div>
           )}

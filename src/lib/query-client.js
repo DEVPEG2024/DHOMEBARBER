@@ -12,5 +12,13 @@ export const queryClientInstance = new QueryClient({
 			retry: 1,
 			staleTime: 60 * 1000,
 		},
+		// Envois (création, annulation, déplacement, commande…) : toujours partis tout de suite. En
+		// mode « online » (défaut), React Query les met en pause quand le navigateur se croit hors
+		// connexion : le bouton tournait sans fin, sans message, et la fenêtre ne se fermait plus
+		// (relevé le 24 oct. 2026 sur la réservation, Mes rendez-vous et Mes commandes). La coupure
+		// arrive ainsi dans onError, qui dit « Pas de connexion ».
+		mutations: {
+			networkMode: 'always',
+		},
 	},
 });

@@ -13,6 +13,7 @@ import {
 const HOUR_HEIGHT = 72;
 const MIN_CARD = 18; // px = 15 min (voir DayView)
 const MIN_CARD_MINUTES = Math.ceil((MIN_CARD / HOUR_HEIGHT) * 60);
+const TAP_AFTER_SCROLL_MS = 400; // tap au doigt juste après un défilement : il l'arrête, rien d'autre
 // En deçà, une pause se range avec les RDV (vue « Tous ») ; au-delà, c'est une journée bloquée
 const SHORT_BREAK_MINUTES = 180;
 // Vue « Tous » : bande (px) laissée libre à droite des cartes posées sur la pause longue d'un autre
@@ -39,8 +40,10 @@ function DragPreview({ startMin, endMin }) {
   );
 }
 
-export default function WeekView({ currentDate, appointments, employees, employeeFilter, timeOffs = [], onSelect, onBreakClick, onCreateBreak, onDayClick, onMoveRequest, onResizeRequest, linkedOrders }) {
+export default function WeekView({ currentDate, appointments, employees, employeeFilter, timeOffs = [], onSelect, onBreakClick, onCreateBreak, onSlotClick, onDayClick, onMoveRequest, onResizeRequest, linkedOrders }) {
   const scrollRef = useRef();
+  // Dernier défilement de la grille (tap au doigt pendant un défilement : pas d'« Ajouter un client »)
+  const lastScrollAt = useRef(0);
   const weekStart = startOfWeek(currentDate, { weekStartsOn: 1 });
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   const single = employeeFilter !== 'all' ? employees.find((e) => String(e.id) === String(employeeFilter)) : null;
@@ -71,6 +74,12 @@ export default function WeekView({ currentDate, appointments, employees, employe
     onCreate: ({ start_time, end_time, column }) => onCreateBreak({
       start_time, end_time, date: column, employee_id: single ? single.id : null,
     }),
+    // Clic sur une case vide : « Ajouter un client » ce jour-là à cette heure (barber filtré, sinon à choisir)
+    // Au doigt, un tap qui arrête un défilement en cours n'ouvre rien
+    onTap: onSlotClick ? ({ start_time, column, touch }) => {
+      if (touch && Date.now() - lastScrollAt.current < TAP_AFTER_SCROLL_MS) return;
+      onSlotClick({ date: column, employee_id: single ? single.id : null, start_time });
+    } : undefined,
   });
 
   const colorOf = (empId) => employees.find((e) => String(e.id) === String(empId))?.color || '#94a3b8';
@@ -112,7 +121,7 @@ export default function WeekView({ currentDate, appointments, employees, employe
         })}
       </div>
 
-      <div ref={scrollRef} data-scroll-container className="overflow-y-auto overflow-x-hidden flex-1 overscroll-contain [scrollbar-gutter:stable]">
+      <div ref={scrollRef} data-scroll-container onScroll={() => { lastScrollAt.current = Date.now(); }} className="overflow-y-auto overflow-x-hidden flex-1 overscroll-contain [scrollbar-gutter:stable]">
         <div className="flex" style={{ minHeight: TOTAL_HOURS * HOUR_HEIGHT }}>
           <div className="w-10 sm:w-12 shrink-0 relative">
             {Array.from({ length: TOTAL_HOURS }).map((_, i) => (
