@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { ArrowDown, AlertTriangle, Bell, Loader2, MoveVertical } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/api/apiClient';
+import { agendaClientName } from '@/lib/guest';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   addMinutesToTime, aptDuration, invalidateAppointmentQueries, isBreak, isUpcomingSlot, shortDayLabel, slotIssues,
@@ -112,7 +113,7 @@ export default function MoveDialog({ move, employees, appointments, timeOffs, on
         <div className="space-y-3">
           {!isBreak(apt) && (
             <p className="text-sm font-semibold">
-              {apt.client_name || 'Client'}
+              {agendaClientName(apt)}
               {apt.services?.length > 0 && (
                 <span className="font-normal text-muted-foreground"> · {apt.services.map((s) => s.name).join(' + ')}</span>
               )}

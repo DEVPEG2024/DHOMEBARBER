@@ -1,7 +1,7 @@
 import React, { useReducer } from 'react';
 import { Link } from 'react-router-dom';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Clock, User, Phone, Mail, Scissors, CreditCard, FileText, Calendar, Banknote, CheckCircle, Heart, ShoppingBag, ChevronDown, Check, BadgeCheck, X, AlertTriangle, Trash2, UserX, Gift, Pencil, RotateCcw, Undo2, Coins } from 'lucide-react';
+import { Clock, User, Users, Phone, Mail, Scissors, CreditCard, FileText, Calendar, Banknote, CheckCircle, Heart, ShoppingBag, ChevronDown, Check, BadgeCheck, X, AlertTriangle, Trash2, UserX, Gift, Pencil, RotateCcw, Undo2, Coins } from 'lucide-react';
 import { getServiceColor } from '@/utils/serviceColors';
 import { api } from '@/api/apiClient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -18,6 +18,7 @@ import { useGangSummaries } from '@/lib/gangCardApi';
 import { gangPalette } from '@/components/gang/gangTheme';
 import { paymentSplitOf, SPLIT_PAYMENT } from '@/lib/revenue';
 import { usePaymentFeatures } from '@/lib/paymentFeatures';
+import { guestOf } from '@/lib/guest';
 
 /** Pastille « Or · 12 visites » du client (carte Gang) ; rien sans données ou en cas d'erreur. */
 function GangClientBadge({ email }) {
@@ -711,6 +712,14 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
         </div>
       ) : (
         <div className="bg-secondary rounded-xl p-3 space-y-2">
+          {/* Proche venu avec le compte de ce client (réservé « Pour qui ? ») : c'est lui qui s'assoit */}
+          {guestOf(appointment) && (
+            <div className="flex items-center gap-2 min-w-0">
+              <Users className="w-3.5 h-3.5 text-primary shrink-0" />
+              <span className="text-sm font-bold text-primary truncate">Pour {guestOf(appointment)}</span>
+              <span className="text-[11px] text-muted-foreground shrink-0">(compte du client ci-dessous)</span>
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <User className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
             <span className="text-sm font-semibold">{assignedClient?.name || appointment.client_name}</span>

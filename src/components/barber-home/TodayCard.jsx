@@ -4,6 +4,7 @@ import { CalendarDays, Check, Clock, Coffee, Phone } from 'lucide-react';
 import SnapCarousel from '@/components/motion/SnapCarousel';
 import { stripLastMinuteMarker } from '@/components/agenda/agendaUtils';
 import { aptEnd, countdownLabel, dayLabel, serviceNames, telHref } from './barberHomeUtils';
+import { agendaClientName } from '@/lib/guest';
 
 /** Recalcul chaque minute et au retour au premier plan. */
 function useNow() {
@@ -44,7 +45,7 @@ export default function TodayCard({ today, upcoming, agendaLink, loading }) {
             </p>
             <div className="flex items-end justify-between gap-3 mt-1">
               <div className="min-w-0">
-                <p className="font-display text-2xl font-bold text-foreground leading-tight truncate">{next.client_name || 'Client'}</p>
+                <p className="font-display text-2xl font-bold text-foreground leading-tight truncate">{agendaClientName(next)}</p>
                 <p className="text-xs text-muted-foreground">{countdownLabel(next, now)} · {hhmm(next.start_time)} – {hhmm(next.end_time)}</p>
               </div>
               <span className="shrink-0 text-[11px] font-semibold text-primary bg-primary/10 border border-primary/20 rounded-full px-2.5 py-1">
@@ -84,7 +85,7 @@ export default function TodayCard({ today, upcoming, agendaLink, loading }) {
             </p>
             <p className="text-xs text-muted-foreground mt-1">
               {later
-                ? `Prochain : ${dayLabel(later.date)} à ${hhmm(later.start_time)}${later.client_name ? ` avec ${later.client_name}` : ''}`
+                ? `Prochain : ${dayLabel(later.date)} à ${hhmm(later.start_time)}${later.client_name ? ` avec ${agendaClientName(later)}` : ''}`
                 : 'Aucun autre rendez-vous cette semaine.'}
             </p>
           </div>
@@ -102,7 +103,7 @@ export default function TodayCard({ today, upcoming, agendaLink, loading }) {
                 <p className="text-[11px] font-semibold text-primary flex items-center gap-1 tabular-nums">
                   {done ? <Check className="w-3 h-3" /> : <Clock className="w-3 h-3" />}{hhmm(a.start_time)}
                 </p>
-                <p className="text-xs font-semibold text-foreground mt-1 truncate">{a.client_name || 'Client'}</p>
+                <p className="text-xs font-semibold text-foreground mt-1 truncate">{agendaClientName(a)}</p>
                 <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-2">{serviceNames(a).join(' + ') || '—'}</p>
               </div>
             );

@@ -5,7 +5,7 @@ import { fetchPublicBarbers } from '@/lib/publicBarbers';
 import { useAuth } from '@/lib/AuthContext';
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
-import { Calendar, CalendarPlus, Check, ChevronDown, Info, MessageSquare, Scissors, ShoppingBag, Zap } from 'lucide-react';
+import { Calendar, CalendarPlus, Check, ChevronDown, Info, MessageSquare, Scissors, ShoppingBag, UserPlus, Zap } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
@@ -27,7 +27,7 @@ import {
 } from '@/lib/availability';
 import { addonItems, addonTotal, suggestAddonProducts } from '@/lib/appointmentProducts';
 import { formatPrice } from '@/components/shop/productUtils';
-import { formatDuration } from '@/components/services/serviceUtils';
+import { formatDuration, serviceRubric } from '@/components/services/serviceUtils';
 import ProductAddon, { addonMaxQuantity, addonProductsQuery } from '@/components/booking/ProductAddon';
 import LookHeader from '@/components/booking/LookHeader';
 import { findLook, lookLinkFor, lookServices, lookTitle, lookTotals } from '@/lib/barberGallery';
@@ -38,6 +38,8 @@ import NextSlots from '@/components/booking/NextSlots';
 import DayStrip from '@/components/booking/DayStrip';
 import SlotGroups from '@/components/booking/SlotGroups';
 import ConfirmSummary from '@/components/booking/ConfirmSummary';
+import GuestPicker from '@/components/booking/GuestPicker';
+import { guestNameError, guestOf, knownGuests, normalizeGuestName, samePerson, useGuestBooking } from '@/lib/guest';
 import { track } from '@/lib/analytics';
 import { barberFirstName, forgetBookedLastMinute } from '@/lib/lastMinute';
 
@@ -64,6 +66,13 @@ const stepVariants = {
 const stepTransition = { x: { type: 'spring', stiffness: 380, damping: 34 }, opacity: { duration: 0.18 } };
 /** Durée de l'écran de succès avant la redirection vers Mes rendez-vous (ms). */
 const SUCCESS_DURATION = 4200;
+/** Avec « Réserver aussi pour un proche » : le temps de lire et de toucher le bouton (ms). */
+const SUCCESS_DURATION_CHAIN = 8000;
+/** Heure « HH:MM » d'un paramètre d'adresse, sinon null. */
+const timeParam = (value) => {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(value || '');
+  return m ? `${m[1].padStart(2, '0')}:${m[2]}` : null;
+};
 
 // Première lettre en majuscule seulement (« Mardi 20 octobre ») : la classe `capitalize` en met une
 // à chaque mot (« Mardi 20 Octobre À 11:00 »), contraire à l'usage français
@@ -197,8 +206,12 @@ function BladeBurst({ reduceMotion }) {
   );
 }
 
-/** Écran de succès : onde de choc, coche qui se dessine, pluie de lames, barre de redirection. */
-export function SuccessOverlay({ barberName, detail, calendarEvent = null, duration = SUCCESS_DURATION }) {
+/**
+ * Écran de succès : onde de choc, coche qui se dessine, pluie de lames, barre de redirection.
+ * `guestName` : rendez-vous pris pour un proche ; `onChain` : « Réserver aussi pour un proche »
+ * (même barber, même jour, juste après), qui annule la redirection.
+ */
+export function SuccessOverlay({ barberName, detail, calendarEvent = null, duration = SUCCESS_DURATION, guestName = '', onChain = null }) {
   const reduceMotion = useReducedMotion();
   return (
     <motion.div
@@ -276,7 +289,9 @@ export function SuccessOverlay({ barberName, detail, calendarEvent = null, durat
           transition={{ delay: 0.9, duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
           className="text-sm text-muted-foreground mt-2"
         >
-          {barberName ? `${barberName} vous attend au salon.` : 'À très vite au salon.'}
+          {guestName
+            ? (barberName ? `${barberName} attend ${guestName} au salon.` : `À très vite au salon avec ${guestName}.`)
+            : (barberName ? `${barberName} vous attend au salon.` : 'À très vite au salon.')}
         </motion.p>
         {detail && (
           <motion.p
@@ -311,6 +326,21 @@ export function SuccessOverlay({ barberName, detail, calendarEvent = null, durat
               </motion.button>
             ))}
           </motion.div>
+        )}
+        {/* Rendez-vous suivant pour un proche (fils, frère…) : même barber, même jour, juste après */}
+        {onChain && (
+          <motion.button
+            type="button"
+            initial={{ opacity: 0, y: reduceMotion ? 0 : 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 1.2, duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+            whileTap={reduceMotion ? undefined : { scale: 0.96 }}
+            onClick={() => { hapticFeedback(); onChain(); }}
+            className="mt-5 inline-flex items-center gap-2 min-h-[44px] px-5 rounded-full bg-primary text-primary-foreground text-sm font-semibold shadow-lg shadow-primary/25"
+          >
+            <UserPlus className="w-4 h-4" aria-hidden="true" />
+            Réserver aussi pour un proche
+          </motion.button>
         )}
         {/* Barre qui se remplit pendant l'attente avant la redirection */}
         <motion.div
@@ -393,7 +423,19 @@ function lastVisitBarber(appointments, employees) {
   return null;
 }
 
+/**
+ * « Réserver aussi pour un proche » repart d'une réservation neuve à la même adresse (`chain` =
+ * numéro du rendez-vous suivant) : la page est remontée de zéro, rien du précédent n'est gardé.
+ * Les autres changements d'adresse (« Déplacer plutôt », « Ne pas déplacer ») gardent `chain` :
+ * la sélection en cours reste.
+ */
 export default function Booking() {
+  const location = useLocation();
+  const chain = new URLSearchParams(location.search).get('chain') || '';
+  return <BookingFlow key={chain} />;
+}
+
+function BookingFlow() {
   const navigate = useNavigate();
   const location = useLocation();
   const queryClient = useQueryClient();
@@ -439,9 +481,20 @@ export default function Booking() {
   // Date & Heure (l'heure seulement si elle est encore libre pour ses prestations). Appliqué une fois.
   const presetDateParam = urlParams.get('date') || '';
   const presetDateKey = /^\d{4}-\d{2}-\d{2}$/.test(presetDateParam) ? presetDateParam : null;
-  const presetTimeMatch = /^(\d{1,2}):(\d{2})$/.exec(urlParams.get('time') || '');
-  const presetTime = presetTimeMatch ? `${presetTimeMatch[1].padStart(2, '0')}:${presetTimeMatch[2]}` : null;
+  const presetTime = timeParam(urlParams.get('time'));
   const presetApplied = useRef({ date: false, time: false });
+  // Rendez-vous suivant pour un proche (« Réserver aussi pour un proche » de l'écran de succès) :
+  // `barber` et `date` du précédent, `after` = son heure de fin. La première heure libre à partir de
+  // `after` est choisie à l'écran Créneau ; « Pour qui ? » est alors demandé (sans « Moi » d'office).
+  const isChain = !!urlParams.get('chain');
+  const chainAfter = isChain ? timeParam(urlParams.get('after')) : null;
+  const chainApplied = useRef(false);
+  const [chainMiss, setChainMiss] = useState(false);
+  // Proche du lien (« Comme la dernière fois » d'un RDV pris pour Léo) : choisi d'office s'il est lisible
+  const pourParam = normalizeGuestName(urlParams.get('pour'));
+  // Réservation pour un proche sans compte (`features.guestBooking`) : null = pas encore choisi
+  const guestFeature = useGuestBooking();
+  const [guest, setGuest] = useState(() => (pourParam && !guestNameError(pourParam) ? { kind: 'guest', name: pourParam } : null));
   // Heure du lien non proposée : 'gone' (prise, passée, date hors du bandeau) ou 'duration'
   // (le créneau tiendrait pour une prestation courte). Un bandeau l'explique au lieu du silence.
   const [presetMiss, setPresetMiss] = useState(null);
@@ -483,6 +536,8 @@ export default function Booking() {
     if (notesPrefilled.current || !oldApt) return;
     notesPrefilled.current = true;
     if (oldApt.notes) setNotes(prev => prev || String(oldApt.notes).slice(0, NOTES_MAX));
+    // Déplacement du RDV d'un proche : c'est toujours pour lui (modifiable dans « Pour qui ? »)
+    setGuest(prev => prev || (guestOf(oldApt) ? { kind: 'guest', name: guestOf(oldApt) } : { kind: 'me' }));
   }, [oldApt]);
   const oldAptLabel = oldApt
     ? `${format(new Date(`${oldApt.date}T12:00:00`), 'EEE d MMM', { locale: fr })} à ${oldApt.start_time}`
@@ -523,6 +578,25 @@ export default function Booking() {
     const list = servicesData || EMPTY_LIST;
     return selectedServices.map(s => list.find(x => String(x.id) === String(s.id)) || s);
   }, [selectedServices, servicesData]);
+
+  // « Pour qui ? » : une prestation Enfants ou un rendez-vous suivant le demandent explicitement
+  // (« Moi » n'est pas choisi d'office) ; sinon « Moi » par défaut, comme avant. Sans le drapeau du
+  // serveur, aucun proche (rien n'est envoyé : jamais un prénom affiché qui ne serait pas enregistré)
+  const kidsSelected = liveSelected.some(s => serviceRubric(s) === 'kids');
+  const guestAsked = guestFeature && !isStaffRole && (kidsSelected || isChain);
+  const guestChoice = guest ?? (guestAsked ? null : { kind: 'me' });
+  const guestName = guestFeature && guestChoice && guestChoice.kind !== 'me' ? normalizeGuestName(guestChoice.name) : '';
+  const guestReady = !guestFeature || (!!guestChoice && (guestChoice.kind === 'me' || !guestNameError(guestChoice.name)));
+  // Personne pas encore choisie : on ne sait pas encore à qui comparer les autres rendez-vous
+  const guestPending = guestFeature && !guestChoice;
+  // « Réserver aussi pour un proche » après le succès (pas après un déplacement)
+  const canChain = guestFeature && !isStaffRole && !rescheduleId;
+  // Proches déjà venus avec ce compte, et celui du lien ou du RDV déplacé s'il n'y figure pas
+  const guestShortcuts = useMemo(() => {
+    const list = knownGuests(myAppointments);
+    const current = guest?.kind === 'guest' ? guest.name : '';
+    return current && !list.some(n => samePerson(n, current)) ? [current, ...list] : list;
+  }, [myAppointments, guest]);
 
   const employeesQuery = useQuery({
     queryKey: ['employees'],
@@ -623,12 +697,15 @@ export default function Booking() {
   const selectedDateStr = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : null;
   const selectedWeekKey = selectedDate ? weekKeyOf(selectedDate) : null;
   const selectedServiceKey = useMemo(() => serviceKey(selectedServices), [selectedServices]);
-  // Même sélection que l'envoi dont la réponse s'est perdue (barber, jour, heure, prestations)
+  // Même sélection que l'envoi dont la réponse s'est perdue (barber, jour, heure, prestations, et
+  // la même personne : changer « Pour qui ? » en fait une autre réservation, que le serveur ne
+  // prend pas pour un renvoi)
   const uncertainMatch = !!uncertainSend && !!selectedEmployee
     && uncertainSend.employeeId === String(selectedEmployee.id)
     && uncertainSend.date === selectedDateStr
     && uncertainSend.time === selectedTime
-    && uncertainSend.services === selectedServiceKey;
+    && uncertainSend.services === selectedServiceKey
+    && samePerson(uncertainSend.guest, guestName);
 
   // Lignes servant au calcul des créneaux, chargées **par semaine et pour tous les barbers** :
   // changer de barber ou de jour ne recharge rien, et les places de chaque jour se calculent
@@ -713,8 +790,9 @@ export default function Booking() {
       && (!r.date || String(r.date).slice(0, 10) === selectedDateStr)
       && String(r.start_time || '').slice(0, 5) === selectedTime
       && r.status === 'confirmed'
-      && serviceKey(r.services) === selectedServiceKey) || null;
-  }, [dayRows, uncertainRows, user?.email, selectedEmployee, selectedTime, selectedDateStr, selectedServiceKey]);
+      && serviceKey(r.services) === selectedServiceKey
+      && (!guestFeature || samePerson(guestOf(r), guestName))) || null;
+  }, [dayRows, uncertainRows, user?.email, selectedEmployee, selectedTime, selectedDateStr, selectedServiceKey, guestFeature, guestName]);
 
   // Créneaux d'une semaine calculables seulement quand ses RDV et pauses, les congés et les barbers
   // sont là : sans eux, toute la journée paraîtrait libre. Chargement → squelette ; échec (sans
@@ -960,14 +1038,20 @@ export default function Booking() {
   // jour, ou les mêmes prestations à moins de 72 h (même règle que le serveur, qui refuse en 409 si
   // l'ancien est déjà dans le délai d'annulation sans `confirm_second`). Le client choisit
   // explicitement : « Déplacer plutôt celui-ci » (hors délai) ou « C'est un rendez-vous en plus ».
+  // Avec « Pour qui ? », seulement les RDV de la même personne : celui de Léo à côté de celui de
+  // son père n'est jamais un déplacement (le serveur ne le refuse pas non plus)
   const [extraAck, setExtraAck] = useState(false);
   const existingConflicts = useMemo(() => {
-    if (rescheduleId || isStaffRole || !selectedDateStr || !selectedTime) return [];
+    // Personne pas encore choisie (prestation Enfants, rendez-vous suivant) : rien à comparer, sinon
+    // le bandeau parlait du RDV du parent et « Déplacer plutôt » l'aurait annulé pour son fils.
+    // « Confirmer » reste bloqué tant que « Pour qui ? » est vide (guestReady).
+    if (rescheduleId || isStaffRole || !selectedDateStr || !selectedTime || guestPending) return [];
     const now = Date.now();
     const newStart = parisInstant(selectedDateStr, selectedTime);
     return myAppointments
       .filter((a) => {
         if (!a || !['confirmed', 'pending'].includes(a.status) || !a.date) return false;
+        if (guestFeature && !samePerson(guestOf(a), guestName)) return false;
         // Renvoi du même envoi (réponse perdue) : c'est ce rendez-vous-là, pas un autre
         if (a.date === selectedDateStr && String(a.start_time || '').slice(0, 5) === selectedTime
           && selectedEmployee && String(a.employee_id) === String(selectedEmployee.id)) return false;
@@ -981,9 +1065,9 @@ export default function Booking() {
         locked: withinCancelDelay(a, now),
         label: `${format(new Date(`${a.date}T12:00:00`), 'EEE d MMM', { locale: fr })} à ${String(a.start_time || '').slice(0, 5)}`,
       }));
-  }, [myAppointments, rescheduleId, isStaffRole, selectedDateStr, selectedTime, selectedEmployee, selectedServiceKey, cancelHours]);
+  }, [myAppointments, rescheduleId, isStaffRole, selectedDateStr, selectedTime, selectedEmployee, selectedServiceKey, cancelHours, guestFeature, guestName, guestPending]);
   // Nouvelle sélection : le choix « rendez-vous en plus » est redemandé
-  useEffect(() => { setExtraAck(false); }, [selectedDateStr, selectedTime, selectedEmployee?.id, selectedServiceKey]);
+  useEffect(() => { setExtraAck(false); }, [selectedDateStr, selectedTime, selectedEmployee?.id, selectedServiceKey, guestName]);
   /** « Déplacer plutôt celui-ci » : la même sélection devient le déplacement de ce rendez-vous. */
   const moveInstead = (apt) => {
     const params = new URLSearchParams(window.location.search);
@@ -1014,6 +1098,20 @@ export default function Booking() {
       && analyzeDay(liveEmployee, selectedDate, appointments.filter(a => String(a.employee_id) === String(liveEmployee.id)), timeOffs, shortLength, shortestDuration, privateEvents).slots.includes(presetTime);
     setPresetMiss(fitsShort ? 'duration' : 'gone');
   }, [step, slotsReady, slotOptions, selectedDate, selectedEmployee]);
+
+  // Rendez-vous suivant pour un proche : à l'arrivée sur l'écran Créneau, la première heure libre à
+  // partir de la fin du précédent, avec le même barber, ce jour-là (une fois). Aucune : on le dit.
+  useEffect(() => {
+    if (chainApplied.current || !chainAfter || !presetDateKey) return;
+    if (step !== 1 || !slotsReady || !selectedDate || !selectedEmployee || selectedServices.length === 0) return;
+    chainApplied.current = true;
+    if (anyBarber || selectedTime) return;
+    if (selectedDateStr !== presetDateKey || String(selectedEmployee.id) !== String(preSelectedBarberId)) return;
+    const next = slotOptions.find(o => o.time >= chainAfter);
+    if (next) setSelectedTime(next.time);
+    else setChainMiss(true);
+  }, [step, slotsReady, slotOptions, selectedDate, selectedEmployee]);
+  useEffect(() => { if (selectedTime) setChainMiss(false); }, [selectedTime]);
 
   // Le client choisit une autre heure, une autre date ou d'autres prestations : bandeau retiré
   // (pas à la présélection des prestations du lien, qui peut arriver après le bandeau)
@@ -1249,6 +1347,7 @@ export default function Booking() {
         date: format(selectedDate, 'yyyy-MM-dd'),
         time: selectedTime,
         services: selectedServiceKey,
+        guest: guestName,
         previous,
       };
       const created = await api.entities.Appointment.create({
@@ -1268,6 +1367,9 @@ export default function Booking() {
         ...(previous ? { reschedule_of: previous.id } : {}),
         // Rendez-vous en plus assumé par le client (un autre RDV reste prévu, bandeau coché)
         ...(!previous && extraAck && existingConflicts.length > 0 ? { confirm_second: true } : {}),
+        // Pour qui : prénom du proche, null = le client lui-même (choix explicite, suivi aussi par
+        // un déplacement). Jamais envoyé sans `features.guestBooking` (colonne inconnue du serveur)
+        ...(guestFeature ? { guest_name: guestName || null } : {}),
       });
       // Produits ajoutés : commande rattachée au RDV, créée seulement une fois le RDV confirmé.
       // Son échec ne remet jamais en cause la réservation (stock épuisé entre-temps, quota…).
@@ -1304,7 +1406,7 @@ export default function Booking() {
       if (!created?.duplicate) {
         track('booking_done', {
           services: liveSelected.length, products: addon?.ok ? addon.count : 0,
-          from_gallery: fromGallery, reschedule: !!previous,
+          from_gallery: fromGallery, reschedule: !!previous, guest: !!guestOf(created), chain: isChain,
         });
       }
       // Last Minute repris par cette réservation : retiré de l'accueil tout de suite (avant
@@ -1344,11 +1446,12 @@ export default function Booking() {
         if (previous) cancelPreviousAppointment(previous); // indispensable même hors de la page
         return;
       }
-      // Explosion de lames, puis la liste des rendez-vous
+      // Explosion de lames, puis la liste des rendez-vous (plus tard si « Réserver aussi pour un
+      // proche » est proposé : le temps de le lire)
       setSuccess(true);
       hapticFeedback();
       clearTimeout(successTimer.current);
-      successTimer.current = setTimeout(() => navigate('/appointments'), SUCCESS_DURATION);
+      successTimer.current = setTimeout(() => navigate('/appointments'), canChain && !previous ? SUCCESS_DURATION_CHAIN : SUCCESS_DURATION);
       // Déplacement : le nouveau RDV est confirmé, on annule l'ancien (jamais avant)
       if (previous) cancelPreviousAppointment(previous);
     },
@@ -1456,7 +1559,7 @@ export default function Booking() {
   // que le client n'a pas choisi « Réserver quand même » (l'ancien resterait prévu sans le savoir).
   // Autre RDV que celui-ci ne remplacera pas : choix explicite demandé (bandeau)
   const canConfirm = !!selectedEmployee && !!selectedDate && !!selectedTime && !reschedulePending && !rescheduleTooLate && !isStaffAccount
-    && selectedSlotValid !== false && !rescheduleCheckFailed && (existingConflicts.length === 0 || extraAck);
+    && selectedSlotValid !== false && !rescheduleCheckFailed && (existingConflicts.length === 0 || extraAck) && guestReady;
 
   // Bouton retour d'Android : étape précédente (même règle que « Retour ») au lieu de quitter la
   // page et de perdre la sélection ; sur l'écran de succès, « Mes rendez-vous » tout de suite (sans
@@ -1522,6 +1625,39 @@ export default function Booking() {
   const barberLabel = (liveEmployee || selectedEmployee)?.name;
   // Vignette du look : prestations, durée et prix de la sélection réelle (catalogue à jour)
   const lookLive = lookTotals(liveSelected);
+  // Proche du rendez-vous créé, tel que le serveur l'a enregistré (jamais le seul choix de l'écran :
+  // un renvoi reconnu comme doublon, ou un serveur sans la colonne, ne l'ont pas forcément pris)
+  const successGuest = guestOf(createdAppointment);
+
+  /**
+   * « Réserver aussi pour un proche » : réservation neuve avec le même barber, le même jour, à
+   * partir de la fin de celui-ci (`after`) ; `chain` remonte la page de zéro (voir `Booking`).
+   */
+  const chainNext = () => {
+    clearTimeout(successTimer.current);
+    const created = createdAppointment || {};
+    const params = new URLSearchParams();
+    const empId = created.employee_id ?? selectedEmployee?.id;
+    const date = String(created.date || selectedDateStr || '').slice(0, 10);
+    const after = timeParam(String(created.end_time || endTime || '').slice(0, 5));
+    if (empId != null) params.set('barber', String(empId));
+    if (/^\d{4}-\d{2}-\d{2}$/.test(date)) params.set('date', date);
+    if (after) params.set('after', after);
+    params.set('chain', String(Date.now()));
+    track('booking_chain', { guest: !!successGuest });
+    window.scrollTo({ top: 0, behavior: 'auto' });
+    navigate(`/booking?${params.toString()}`, { replace: true });
+  };
+  // Rendez-vous suivant : rappel du barber, du jour et de l'heure à l'étape Prestation
+  const chainLink = isChain && chainAfter && presetDateKey && preSelectedBarber
+    ? {
+        barber: barberFirstName(preSelectedBarber),
+        day: presetDateKey === todayKey ? "aujourd'hui"
+          : presetDateKey === tomorrowKey ? 'demain'
+          : format(dateFromKey(presetDateKey), 'EEEE d MMMM', { locale: fr }),
+        time: chainAfter,
+      }
+    : null;
 
   return (
     <div className="min-h-screen relative overflow-x-clip">
@@ -1558,6 +1694,14 @@ export default function Booking() {
                 <span>
                   <span className="font-semibold">Last Minute avec {lastMinuteLink.barber}, {lastMinuteLink.day} à {lastMinuteLink.time}.</span>
                   {' '}Choisissez votre prestation : l'heure sera proposée à l'étape suivante.
+                </span>
+              </p>
+            ) : chainLink ? (
+              <p className="mt-2 flex items-start gap-2.5 rounded-2xl border border-primary/30 bg-primary/10 px-3.5 py-2.5 text-sm text-foreground">
+                <UserPlus className="w-4 h-4 mt-0.5 shrink-0 text-primary" aria-hidden="true" />
+                <span>
+                  <span className="font-semibold">Rendez-vous suivant avec {chainLink.barber}, {chainLink.day} à partir de {chainLink.time}.</span>
+                  {' '}Choisissez la prestation de votre proche : l'heure sera proposée à l'étape suivante.
                 </span>
               </p>
             ) : (
@@ -1732,6 +1876,13 @@ export default function Booking() {
                 onSelect={chooseNext}
               />
 
+              {/* Rendez-vous suivant : plus rien de libre après le précédent avec ce barber ce jour-là */}
+              {chainMiss && !selectedTime && chainLink && (
+                <div role="status" className="rounded-2xl border border-amber-500/25 bg-amber-500/10 px-3.5 py-3 text-xs leading-relaxed text-amber-200/90 break-words">
+                  {chainLink.barber} n'a plus de place à partir de {chainLink.time} ce jour-là : choisissez une autre heure, un autre barber ou un autre jour.
+                </div>
+              )}
+
               {/* Lien Last Minute dont l'heure n'est pas proposée : on dit pourquoi */}
               {presetMiss && presetTime && !selectedTime && (!selectedDate || selectedDateStr === presetDateKey) && (
                 <div role="status" className="rounded-2xl border border-amber-500/25 bg-amber-500/10 px-3.5 py-3 text-xs leading-relaxed text-amber-200/90 break-words">
@@ -1822,12 +1973,26 @@ export default function Booking() {
                 </div>
               )}
 
+              {/* Pour qui : moi ou un proche sans compte (le RDV reste sur ce compte). Avant le bandeau
+                  « autre rendez-vous », qui ne concerne que la personne choisie */}
+              {guestFeature && !isStaffAccount && !success && (
+                <GuestPicker
+                  value={guestChoice}
+                  known={guestShortcuts}
+                  onChange={setGuest}
+                  required={guestAsked}
+                  prompt={guestAsked && !guestChoice
+                    ? (isChain ? 'Choisissez la personne de ce rendez-vous.' : 'Prestation enfant : pour qui est ce rendez-vous ?')
+                    : ''}
+                />
+              )}
+
               {/* Autre rendez-vous que celui-ci ne remplacera pas : choix explicite avant « Confirmer » */}
               {!success && existingConflicts.length > 0 && (
                 <div role="status" className="p-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 text-xs text-amber-200 leading-relaxed break-words">
                   {existingConflicts.map(({ apt, locked, label }) => (
                     <p key={apt.id} className="mb-2">
-                      Vous avez déjà rendez-vous le <span className="font-semibold text-amber-100">{label}</span>
+                      {guestFeature && guestName ? <><span className="font-semibold text-amber-100">{guestName}</span> a</> : 'Vous avez'} déjà rendez-vous le <span className="font-semibold text-amber-100">{label}</span>
                       {apt.employee_name ? <> avec <span className="font-semibold text-amber-100">{apt.employee_name}</span></> : null}.
                       {' '}Ce nouveau rendez-vous s'ajoutera : <span className="font-semibold text-amber-100">celui-ci restera prévu</span>.
                       {locked ? (
@@ -1835,7 +2000,9 @@ export default function Booking() {
                           {' '}Il est dans moins de {cancelHours} h : il ne peut plus être déplacé ni annulé en ligne. Pour le déplacer,{' '}
                           <a href={SALON_PHONE_HREF} className="font-semibold text-amber-100 underline whitespace-nowrap">appelez le salon au {SALON_PHONE}</a>.
                         </>
-                      ) : (
+                      ) : isChain ? null : (
+                        // Rendez-vous suivant : jamais « Déplacer plutôt » (il remplacerait celui
+                        // qui vient d'être pris, souvent pour une autre personne de la famille)
                         <>
                           {' '}
                           <button type="button" onClick={() => moveInstead(apt)} className="font-semibold text-primary underline underline-offset-2">
@@ -2009,6 +2176,9 @@ export default function Booking() {
             barberName={selectedEmployee?.name}
             detail={selectedDate && selectedTime ? `${upperFirst(format(selectedDate, 'EEEE d MMMM', { locale: fr }))} · ${selectedTime}` : ''}
             calendarEvent={calendarEvent}
+            guestName={successGuest}
+            onChain={canChain ? chainNext : null}
+            duration={canChain ? SUCCESS_DURATION_CHAIN : SUCCESS_DURATION}
           />
         )}
       </AnimatePresence>

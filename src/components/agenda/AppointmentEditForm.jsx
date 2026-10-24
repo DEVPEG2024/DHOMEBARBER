@@ -6,6 +6,7 @@ import { api } from '@/api/apiClient';
 import { getServiceColor } from '@/utils/serviceColors';
 import { useAppointmentOrders, orderItemsLabel } from '@/lib/appointmentProducts';
 import ClientAccountPicker from './ClientAccountPicker';
+import { GUEST_NAME_MAX, guestNameError, guestOf, normalizeGuestName, useGuestBooking } from '@/lib/guest';
 import {
   timeToMinutes, addMinutesToTime, parseDateParam, slotIssues, isUpcomingSlot,
   LAST_MINUTE_MARKER, withLastMinuteMarker, stripLastMinuteMarker, agendaErrorMessage, invalidateAppointmentQueries,
@@ -46,6 +47,18 @@ export default function AppointmentEditForm({ appointment, employees, onCancel, 
   const [durationTouched, setDurationTouched] = useState(false);
   const [clientName, setClientName] = useState(appointment.client_name || '');
   const [clientPhone, setClientPhone] = useState(appointment.client_phone || '');
+  // Proche venu à la place du client (fils, frère…), prénom seulement ; vide = le client lui-même.
+  // Proposé seulement quand le serveur accepte la colonne (`features.guestBooking`)
+  const guestFeature = useGuestBooking();
+  const [guestInput, setGuestInput] = useState(guestOf(appointment));
+  const guestChanged = normalizeGuestName(guestInput) !== guestOf(appointment);
+  const guestError = guestChanged && normalizeGuestName(guestInput) ? guestNameError(guestInput, { filter: false }) : null;
+  // Autre compte rattaché : le proche de l'ancien compte ne le suit pas (champ vidé s'il n'a pas
+  // été retouché ; l'équipe peut en saisir un autre)
+  const dropGuestOfOtherAccount = (email) => {
+    const same = String(email || '').toLowerCase() === String(appointment.client_email || '').toLowerCase();
+    if (!same && normalizeGuestName(guestInput) === guestOf(appointment)) setGuestInput('');
+  };
   // Compte client rattaché (email) : la visite compte sur sa carte Gang
   const [clientEmail, setClientEmail] = useState(appointment.client_email || '');
   const [pickingAccount, setPickingAccount] = useState(false);
@@ -124,6 +137,7 @@ export default function AppointmentEditForm({ appointment, employees, onCancel, 
     if (!(duration >= 5 && duration <= 600)) return toast.error('Durée entre 5 min et 10 h');
     if (timeToMinutes(startTime) + duration > 24 * 60) return toast.error('Le rendez-vous dépasserait minuit');
     if (clash) return toast.error(clash);
+    if (guestFeature && guestError) return toast.error(`Prénom du proche : ${guestError}`);
 
     const payload = {
       date,
@@ -135,6 +149,7 @@ export default function AppointmentEditForm({ appointment, employees, onCancel, 
       client_name: clientName.trim() || appointment.client_name,
       client_phone: clientPhone.trim(),
       ...(accountChanged ? { client_email: clientEmail } : {}),
+      ...(guestFeature && guestChanged ? { guest_name: normalizeGuestName(guestInput) || null } : {}),
       internal_notes: hadLastMinuteMarker ? withLastMinuteMarker(internalNotes) : internalNotes.trim(),
       notify_client: canNotify ? notify : false,
     };
@@ -282,6 +297,15 @@ export default function AppointmentEditForm({ appointment, employees, onCancel, 
           <label className={labelCls} htmlFor="apt-phone">Téléphone</label>
           <input id="apt-phone" type="tel" value={clientPhone} maxLength={30} onChange={(e) => setClientPhone(e.target.value)} className={inputCls} />
         </div>
+        {guestFeature && (
+          <div className="col-span-2 min-w-0">
+            <label className={labelCls} htmlFor="apt-guest">Pour un proche (prénom, facultatif)</label>
+            <input id="apt-guest" type="text" value={guestInput} maxLength={GUEST_NAME_MAX} autoComplete="off" autoCapitalize="words"
+              placeholder="Vide : le client lui-même" onChange={(e) => setGuestInput(e.target.value)}
+              aria-invalid={!!guestError} className={inputCls} />
+            {guestError && <p role="alert" className="mt-1 text-[11px] text-red-400">{guestError}</p>}
+          </div>
+        )}
       </div>
 
       {/* Compte client rattaché */}
@@ -293,9 +317,10 @@ export default function AppointmentEditForm({ appointment, employees, onCancel, 
             setClientEmail(acc.email);
             setClientName(acc.full_name || acc.email);
             if (acc.phone) setClientPhone(acc.phone);
+            dropGuestOfOtherAccount(acc.email);
             setPickingAccount(false);
           }}
-          onNoAccount={clientEmail ? () => { setClientEmail(''); setPickingAccount(false); } : undefined}
+          onNoAccount={clientEmail ? () => { setClientEmail(''); dropGuestOfOtherAccount(''); setPickingAccount(false); } : undefined}
           noAccountLabel="Détacher le compte (nom libre)"
         />
       ) : (

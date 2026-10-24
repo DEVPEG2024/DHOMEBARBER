@@ -5,7 +5,7 @@ import { fetchPublicBarbers } from '@/lib/publicBarbers';
 import { useAuth } from '@/lib/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
-import { Calendar, CalendarPlus, CalendarClock, CalendarSearch, Clock, User, X, Scissors, Plus, Phone, Loader2, ArrowLeft, ShoppingBag, ChevronRight } from 'lucide-react';
+import { Calendar, CalendarPlus, CalendarClock, CalendarSearch, Clock, User, Users, X, Scissors, Plus, Phone, Loader2, ArrowLeft, ShoppingBag, ChevronRight } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { toast } from 'sonner';
@@ -23,6 +23,7 @@ import { isClientPlaceholder } from '@/components/agenda/agendaUtils';
 import { findRescheduleSlots, moveAppointment, currentServices, appointmentDuration } from '@/lib/reschedule';
 import { openOrdersByAppointment, orderItemsLabel } from '@/lib/appointmentProducts';
 import { formatPrice } from '@/components/shop/productUtils';
+import { guestOf } from '@/lib/guest';
 
 /** Aucune commande : valeur stable (évite de recalculer la carte des commandes à chaque rendu). */
 const NO_ORDERS = [];
@@ -596,6 +597,13 @@ export default function Appointments() {
                             <Clock className="w-3 h-3 text-primary" />
                             <p className="text-xs text-muted-foreground font-medium">{apt.start_time} — {apt.end_time}</p>
                           </div>
+                          {/* Rendez-vous pris pour un proche sans compte */}
+                          {guestOf(apt) && (
+                            <p className="mt-1.5 inline-flex items-center gap-1.5 max-w-full px-2 py-0.5 rounded-full bg-primary/10 border border-primary/20 text-[11px] font-semibold text-primary">
+                              <Users className="w-3 h-3 shrink-0" aria-hidden="true" />
+                              <span className="truncate">Pour {guestOf(apt)}</span>
+                            </p>
+                          )}
                         </div>
                         <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${status.bg}`}>
                           {status.label}
@@ -792,6 +800,12 @@ export default function Appointments() {
                   <Clock className="w-3 h-3 text-primary shrink-0" />
                   {cancelApt.start_time}{cancelApt.end_time ? ` — ${cancelApt.end_time}` : ''}
                 </p>
+                {guestOf(cancelApt) && (
+                  <p className="flex items-center gap-1.5 text-xs font-semibold text-primary min-w-0">
+                    <Users className="w-3 h-3 shrink-0" aria-hidden="true" />
+                    <span className="truncate">Pour {guestOf(cancelApt)}</span>
+                  </p>
+                )}
                 <p className="flex items-center gap-1.5 text-xs text-muted-foreground min-w-0">
                   <User className="w-3 h-3 text-primary shrink-0" />
                   <span className="truncate">{cancelApt.employee_name || 'Barber non assigné'}</span>

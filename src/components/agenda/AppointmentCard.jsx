@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Coffee, Zap, Check, X, UserX, Euro, ShoppingBag } from 'lucide-react';
 import { needsClosing, isCancelledLike, START_HOUR, END_HOUR, STATUS_META, minutesToTime } from './agendaUtils';
+import { agendaClientName, guestOf, staffClientLabel } from '@/lib/guest';
 
 const activate = (fn) => ({
   role: 'button',
@@ -18,7 +19,8 @@ function describe(apt, hasProducts = false) {
   const services = apt.services?.map((s) => s.name).filter(Boolean).join(' + ');
   return [
     `${apt.start_time}${apt.end_time ? ` – ${apt.end_time}` : ''}`,
-    apt.client_name,
+    // Proche venu avec le compte d'un client : « Léo (Marc Dupont) »
+    guestOf(apt) ? staffClientLabel(apt) : apt.client_name,
     services,
     apt.employee_name,
     STATUS_META[apt.status]?.label,
@@ -65,7 +67,7 @@ export function AppointmentCard({ apt, style, color, showBarber = false, dense =
             {apt.start_time}
           </span>
           <span className={`${dense ? 'text-[10px]' : 'text-xs'} font-semibold text-foreground truncate ${cancelled ? 'line-through' : ''}`}>
-            {apt.client_name || 'Client'}
+            {agendaClientName(apt)}
           </span>
           <span className="ml-auto shrink-0 flex items-center gap-0.5">
             {apt.status === 'completed' && apt.payment_method && <Check className="w-3 h-3 text-primary" />}
@@ -239,7 +241,7 @@ export function DragGhost({ apt, startMin, duration, hourHeight, label }) {
         <p className="text-[10px] font-bold text-primary tabular-nums truncate">
           {minutesToTime(startMin)} – {minutesToTime(startMin + duration)}
         </p>
-        {height >= 34 && <p className="text-[10px] font-semibold text-foreground truncate">{apt.client_name || 'Pause'}</p>}
+        {height >= 34 && <p className="text-[10px] font-semibold text-foreground truncate">{apt.client_name ? agendaClientName(apt) : 'Pause'}</p>}
         {label && height >= 48 && <p className="text-[9px] text-muted-foreground truncate">{label}</p>}
       </div>
     </div>

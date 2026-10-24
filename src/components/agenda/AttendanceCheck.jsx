@@ -5,6 +5,7 @@ import { fr } from 'date-fns/locale';
 import { Check, UserX, ChevronDown, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/api/apiClient';
+import { agendaClientName } from '@/lib/guest';
 import { hapticFeedback } from '@/lib/capacitor';
 import { parisDay } from '@/lib/slots';
 import { appointmentEndParis, invalidateAppointmentQueries, agendaErrorMessage } from './agendaUtils';
@@ -84,7 +85,7 @@ export default function AttendanceCheck({ user, onOpen }) {
     if (busy[apt.id]) return;
     hapticFeedback();
     setBusy((b) => ({ ...b, [apt.id]: kind }));
-    const name = apt.client_name || 'Le client';
+    const name = apt.client_name ? agendaClientName(apt) : 'Le client';
     try {
       if (kind === 'came') {
         await api.entities.Appointment.update(apt.id, { attended_at: new Date().toISOString() });
@@ -167,7 +168,7 @@ export default function AttendanceCheck({ user, onOpen }) {
               return (
                 <li key={a.id} className="flex flex-col min-[420px]:flex-row min-[420px]:items-center gap-2 py-2.5 min-w-0">
                   <button type="button" onClick={() => onOpen?.(a)} className="flex-1 min-w-0 text-left">
-                    <span className="block text-sm font-semibold text-foreground truncate">{a.client_name || 'Client'}</span>
+                    <span className="block text-sm font-semibold text-foreground truncate">{agendaClientName(a)}</span>
                     <span className="block text-[11px] text-muted-foreground truncate">
                       {day} · {String(a.start_time || '').slice(0, 5)}{a.employee_name ? ` · ${a.employee_name}` : ''}{services ? ` · ${services}` : ''}
                     </span>

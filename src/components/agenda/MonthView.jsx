@@ -2,6 +2,7 @@ import React from 'react';
 import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays, isSameDay, isSameMonth } from 'date-fns';
 import { Euro } from 'lucide-react';
 import { isBreak, isCancelledLike, isLastMinuteSlot, needsClosing, toDateStr } from './agendaUtils';
+import { agendaClientName } from '@/lib/guest';
 
 const statusDot = {
   pending: 'bg-yellow-400',
@@ -82,7 +83,7 @@ export default function MonthView({ currentDate, appointments, employees, onDayC
                   >
                     <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${statusDot[apt.status] || 'bg-primary'}`} />
                     <span className={`text-[10px] text-foreground truncate ${isCancelledLike(apt) ? 'line-through opacity-60' : ''}`}>
-                      {apt.start_time} {apt.client_name}
+                      {apt.start_time} {apt.client_name ? agendaClientName(apt) : ''}
                     </span>
                   </button>
                 ))}

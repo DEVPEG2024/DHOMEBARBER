@@ -22,6 +22,7 @@ import BreakModal from '@/components/agenda/BreakModal';
 import AppointmentDetailModal from '@/components/agenda/AppointmentDetailModal';
 import MoveDialog, { buildMoveFields, saveMove } from '@/components/agenda/MoveDialog';
 import WalkInDialog from '@/components/agenda/WalkInDialog';
+import { agendaClientName } from '@/lib/guest';
 import AttendanceCheck, { useParisTodayKey } from '@/components/agenda/AttendanceCheck';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
@@ -365,7 +366,7 @@ export default function Agenda() {
     Promise.resolve(exportToCSV(
       visible.filter((a) => a.status !== 'break').map((a) => ({
         date: a.date, heure_debut: a.start_time, heure_fin: a.end_time,
-        client: a.client_name, email: a.client_email, telephone: a.client_phone || '',
+        client: a.client_name, pour: a.guest_name || '', email: a.client_email, telephone: a.client_phone || '',
         barber: a.employee_name, services: a.services?.map((s) => s.name).join(' + ') || '',
         duree_min: a.total_duration, prix_eur: a.total_price, statut: a.status, notes: a.notes || '',
       })),
@@ -410,7 +411,7 @@ export default function Agenda() {
       params.barber = String(apt.employee_id);
     }
     if (Object.keys(params).length) updateParams(params);
-    const who = apt?.client_name || 'Client';
+    const who = apt?.client_name ? agendaClientName(apt) : 'Client';
     // Prestation déjà terminée : la fiche s'ouvre pour « Valider la prestation » (encaissement) ; pas de
     // notification par-dessus, elle cachait la croix de la fiche
     if (done && apt?.id) {

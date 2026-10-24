@@ -264,6 +264,7 @@ export function creerDonnees() {
         appointmentCancelReason: true,
         orderCancelStatuses: ['pending', 'confirmed'],
         splitPayment: true,
+        guestBooking: true,
         appleWallet: false,
         googleWallet: false,
       },

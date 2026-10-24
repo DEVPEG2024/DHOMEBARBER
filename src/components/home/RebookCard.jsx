@@ -9,6 +9,7 @@ import { api } from '@/api/apiClient';
 import { BARBER_PHOTO_ASPECT, BARBER_PHOTO_BG } from '@/lib/barberPhoto';
 import { parisInstant } from '@/lib/calendarLinks';
 import { formatPrice } from '@/components/services/serviceUtils';
+import { guestOf } from '@/lib/guest';
 
 // Statuts qui ne correspondent pas à une vraie visite du client (absent = pas venu)
 const IGNORED_STATUSES = ['cancelled', 'break', 'no_show'];
@@ -75,6 +76,8 @@ export default function RebookCard({ user, employees = [], services = [] }) {
     const params = new URLSearchParams();
     if (barber) params.set('barber', String(barber.id));
     if (activeServices.length > 0) params.set('services', activeServices.map(s => String(s.id)).join(','));
+    // Dernière visite d'un proche (réservée pour Léo) : « Pour qui ? » le reprend d'office
+    if (guestOf(last)) params.set('pour', guestOf(last));
     const query = params.toString();
 
     const parsed = parseISO(last.date);
@@ -98,7 +101,8 @@ export default function RebookCard({ user, employees = [], services = [] }) {
   if (!user?.email || !details) return null;
 
   const { barber, barberName, serviceNames, activeServices, total, duration, href, dateLabel, isFuture } = details;
-  const subtitle = [serviceNames.join(' + ') || 'Votre prestation', barberName ? `avec ${barberName}` : null]
+  const subtitle = [serviceNames.join(' + ') || 'Votre prestation', barberName ? `avec ${barberName}` : null,
+    guestOf(last) ? `pour ${guestOf(last)}` : null]
     .filter(Boolean).join(' · ');
 
   return (
