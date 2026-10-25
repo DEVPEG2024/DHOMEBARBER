@@ -10,6 +10,7 @@ import { formatNumber, pageLabel } from '@/components/analytics/trafficFormat';
  */
 
 const SOURCE_LABELS = { react: 'Écran planté', window: 'Erreur', promise: 'Erreur non gérée' };
+export const errorSourceLabel = (source) => SOURCE_LABELS[source] || source;
 const PLATFORM_SHORT = { ios: 'iPhone', android: 'Android', web: 'Site', pwa: 'App installée' };
 const NEW_MS = 7 * 86400000;
 
@@ -26,7 +27,7 @@ export function formatRate(rate) {
 }
 
 /** « ios 1.0.8 » → « iPhone 1.0.8 » ; « web web » / « web » → « Site ». */
-function versionLabel(v) {
+export function versionLabel(v) {
   const [platform, version] = String(v).split(' ');
   const name = PLATFORM_SHORT[platform] || platform;
   return version && version !== 'web' ? `${name} ${version}` : name;
@@ -59,7 +60,7 @@ function ErrorRow({ item }) {
         <span className="min-w-0 flex-1">
           <span className="flex flex-wrap items-center gap-1.5 mb-1">
             <span className={`text-[10px] font-semibold rounded-full px-2 py-0.5 ${item.source === 'react' ? 'bg-red-500/15 text-red-700 dark:text-red-300' : 'bg-secondary text-muted-foreground'}`}>
-              {SOURCE_LABELS[item.source] || item.source}
+              {errorSourceLabel(item.source)}
             </span>
             {fresh && <span className="text-[10px] font-semibold rounded-full px-2 py-0.5 bg-amber-500/15 text-amber-700 dark:text-amber-300" title="Apparue pour la première fois il y a moins de 7 jours">Nouvelle</span>}
           </span>

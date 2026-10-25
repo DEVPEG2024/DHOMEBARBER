@@ -66,3 +66,24 @@ export async function exportToCSV(rows, filename = 'export') {
   await saveTextFile('\uFEFF' + csvContent, `${filename}.csv`, 'text/csv;charset=utf-8');
   return true;
 }
+
+/**
+ * CSV en plusieurs rubriques (Admin \u2192 Trafic) : par rubrique une ligne de titre, une ligne
+ * d'en-t\u00EAtes, ses lignes, puis une ligne vide. M\u00EAmes cellules neutralis\u00E9es que `exportToCSV`.
+ * @param {Array<{ title?: string, headers?: string[], rows: Array<Array> }>} sections
+ */
+export function sectionsToCSV(sections) {
+  const lines = [];
+  for (const s of sections) {
+    if (lines.length) lines.push('');
+    if (s.title) lines.push(csvCell(s.title));
+    if (s.headers) lines.push(s.headers.map(csvCell).join(';'));
+    for (const row of s.rows) lines.push(row.map((v) => csvCell(v ?? '')).join(';'));
+  }
+  return lines.join('\n');
+}
+
+/** Enregistre `sections` (voir `sectionsToCSV`) dans `<filename>.csv`, BOM pour Excel. */
+export function exportSectionsToCSV(sections, filename) {
+  return saveTextFile('\uFEFF' + sectionsToCSV(sections), `${filename}.csv`, 'text/csv;charset=utf-8');
+}

@@ -1,9 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
-import { TrendingUp, ArrowUpRight, ArrowDownRight, Info, Eye, Images } from 'lucide-react';
+import { TrendingUp, ArrowUpRight, ArrowDownRight, Info, Eye, Images, Download } from 'lucide-react';
+import { toast } from 'sonner';
 import { apiRequest, apiUrl } from '@/api/apiClient';
 import { useAuth } from '@/lib/AuthContext';
-import LoadError, { queryFailed } from '@/components/shared/LoadError';
+import LoadError, { friendlyError, queryFailed } from '@/components/shared/LoadError';
+import { exportTraffic } from '@/components/analytics/trafficExport';
 import BarList from '@/components/analytics/BarList';
 import HourHeatmap from '@/components/analytics/HourHeatmap';
 import TrendChart from '@/components/analytics/TrendChart';
@@ -65,6 +67,7 @@ export default function AdminTraffic() {
   const { user } = useAuth();
   const [days, setDays] = useState(30);
   const [scope, setScope] = useState('clients');
+  const [exporting, setExporting] = useState(false);
   const to = parisDay();
   const from = addDays(to, -(days - 1));
 
@@ -84,6 +87,21 @@ export default function AdminTraffic() {
     key: f.key, label: f.label, value: f.visitors,
     hint: firstStep ? `(${Math.round((f.visitors / firstStep) * 100)} %)` : undefined,
   })), [data, firstStep]);
+
+  // Exporte ce qui est affiché ; jamais les chiffres de l'ancienne période pendant le chargement
+  // de la nouvelle (`keepPreviousData`)
+  const canExport = !!data && !query.isPlaceholderData && !exporting;
+  const handleExport = async () => {
+    if (!canExport) return;
+    setExporting(true);
+    try {
+      await exportTraffic(data);
+    } catch (err) {
+      toast.error(friendlyError(err, 'Export impossible, réessayez'));
+    } finally {
+      setExporting(false);
+    }
+  };
 
   if (user && user.role !== 'admin') {
     return <p className="text-sm text-muted-foreground">Réservé à l'administrateur.</p>;
@@ -127,6 +145,10 @@ export default function AdminTraffic() {
             </button>
           ))}
         </div>
+        <button type="button" onClick={handleExport} disabled={!canExport}
+          className="ml-auto inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-secondary disabled:opacity-50">
+          <Download className="w-3.5 h-3.5" aria-hidden="true" /> {exporting ? 'Export…' : 'Exporter'}
+        </button>
       </div>
 
       {queryFailed(query) ? (
