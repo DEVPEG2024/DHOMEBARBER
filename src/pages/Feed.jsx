@@ -32,8 +32,14 @@ function timeAgo(dateStr) {
   return date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
 }
 
+// L'admin publie et commente au nom du salon (26 oct. 2026) : le serveur écrit « D'Home Barber »
+// et ce logo (dhomebarber-api/lib/salonAuthor.js) ; badge « Officiel » (rôle posé par le serveur,
+// jamais par l'app : un client ne peut pas l'imiter)
+const SALON_NAME = "D'Home Barber";
+const SALON_LOGO = '/icons/icon-192.png';
+
 function getRoleBadge(role) {
-  if (role === 'admin') return { label: 'Admin', color: '#ef4444' };
+  if (role === 'admin') return { label: 'Officiel', color: '#d4a72c' };
   if (role === 'barber') return { label: 'Barber', color: '#3fcf8e' };
   return null;
 }
@@ -646,7 +652,7 @@ function PostCard({
           maxLength={1000}
           onChange={(e) => setCommentText(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmitComment(); } }}
-          placeholder="Écrire un commentaire..."
+          placeholder={currentUser?.role === 'admin' ? `Répondre au nom de ${SALON_NAME}...` : 'Écrire un commentaire...'}
           className="bg-secondary/50 border-border text-xs h-8 flex-1"
         />
         <motion.button
@@ -854,7 +860,8 @@ export default function Feed() {
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   const getAuthorPhoto = () => {
-    if (user?.role === 'barber' || user?.role === 'admin') {
+    if (user?.role === 'admin') return SALON_LOGO;
+    if (user?.role === 'barber') {
       const emp = employees.find(e => String(e.id) === String(user?.employee_id));
       return emp?.photo_url || user?.photo_url || '';
     }
@@ -1108,6 +1115,8 @@ export default function Feed() {
 
       {/* Floating publish button */}
       <motion.button
+        type="button"
+        aria-label="Nouvelle publication"
         onClick={() => setShowComposer(true)}
         className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom,0px))] right-5 z-50 w-14 h-14 rounded-full bg-green-500 text-white shadow-lg shadow-green-500/30 flex items-center justify-center"
         animate={{ boxShadow: ['0 0 0 0 rgba(34,197,94,0.4)', '0 0 0 12px rgba(34,197,94,0)', '0 0 0 0 rgba(34,197,94,0.4)'] }}
@@ -1164,7 +1173,9 @@ export default function Feed() {
                     value={content}
                     maxLength={5000}
                     onChange={(e) => setContent(e.target.value)}
-                    placeholder="Quoi de neuf ? Partagez un moment, une photo..."
+                    placeholder={user?.role === 'admin'
+                      ? `Publier au nom de ${SALON_NAME} : une nouvelle, une photo…`
+                      : 'Quoi de neuf ? Partagez un moment, une photo...'}
                     className="bg-secondary/50 border-border text-sm resize-none min-h-[80px]"
                     rows={3}
                     autoFocus

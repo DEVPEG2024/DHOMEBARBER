@@ -91,7 +91,7 @@ npm run android:release             # build, sync, versionCode +1, .aab signé, 
 
 # Backend
 cd /Users/zoomproject/Downloads/dhomebarber-api
-npm test                            # harnais sans base réelle (95 au 24 oct. 2026)
+npm test                            # harnais sans base réelle (96 au 26 oct. 2026)
 git add -A && git commit -m "message" && git push heroku main   # npm test lancé avant l'envoi (.githooks/pre-push)
 heroku run "node scripts/app-errors.js --days=7" --app dhomebarber-api   # erreurs remontées par l'app (--stack)
 heroku logs --tail --app dhomebarber-api
@@ -318,6 +318,7 @@ Chaque ligne est un invariant : la casser réintroduit un bug déjà corrigé ou
 - Signaler, bloquer, modérer (App Store 1.2) ne se retirent pas ; chacun ne lit que ses blocages, **admin compris** ; `blocked_email` peut valoir `key:<clé>` (garder le `NOT NULL`).
 - **Avis publiés d'office** : tout client connecté, `is_visible = true`, 5 par compte, suppression par le staff ; ni condition de visite ni modération préalable. « Publier aussi sur Google » proposé après **tout** avis.
 - Fil : 3 publications / min et 20 / jour, 10 commentaires / min et 100 / jour ; doublon rendu tel quel 10 min (30 s pour un commentaire) ; 5000 / 1000 caractères ; réactions ❤️ 🔥 💪 😂 👏 💈 ; auteur sans nom = « Membre du Gang », jamais l'email.
+- **L'admin parle au nom du salon** (26 oct. 2026) : ses publications et commentaires = « D'Home Barber » + logo (`lib/salonAuthor.js`, appliqué par le serveur dans `authorFields`), jamais son nom ni sa photo ; badge « Officiel » d'après `author_role` (écrit par le serveur seulement) ; nom « D'Home Barber » et variantes refusés à un client (inscription, profil). Toute nouvelle façon pour l'admin d'écrire à un client parle aussi au nom du salon. Détail : `docs/fonctions/securite-moderation-nettoyage.md`.
 
 ### Médias et ramasse-miettes
 
@@ -363,9 +364,9 @@ Chaque ligne est un invariant : la casser réintroduit un bug déjà corrigé ou
 
 ### Tests, vérifications, nettoyage en production
 
-- Backend : `npm test` (95 harnais au 24 oct. 2026, sans base) ; un correctif sérieux = un test, et une mutation ciblée qui le fait échouer. **Lancé automatiquement avant chaque `git push heroku main`** (`.githooks/pre-push`, activé par `git config core.hooksPath .githooks`, à refaire sur un nouveau clone ; `--no-verify` en urgence seulement).
+- Backend : `npm test` (96 harnais au 26 oct. 2026, sans base) ; un correctif sérieux = un test, et une mutation ciblée qui le fait échouer. **Lancé automatiquement avant chaque `git push heroku main`** (`.githooks/pre-push`, activé par `git config core.hooksPath .githooks`, à refaire sur un nouveau clone ; `--no-verify` en urgence seulement).
 - **Jamais de date écrite en dur qui finira dans le passé, jamais l'heure réelle dans un cas qui dépend de l'heure** : six harnais allaient échouer entre le 21 oct. 2026 et 2028. Dates relatives (« l'an prochain », `Date.now() + …`) ou horloge simulée `test/fake-clock.js` (`install()`, `set(instant)` : `Date.now()` **et** `new Date()`, car le code lit l'heure de Paris par `new Date()`). Contrôle : `npm run test:futur` (suite complète avec l'horloge avancée de 400 jours, `SHIFT_DAYS=30 npm run test:futur` pour un autre écart ; `test/shift-clock.js`).
-- Frontend : `npm run lint` et **`npm run test:e2e`** (build puis 144 vérifications Playwright de bout en bout, ~2 min ; `test:e2e:fast` sans rebuild ; plusieurs séries en parallèle : `E2E_DIST` / `E2E_PORT`) : connexion, réservation, Mes rendez-vous, ajout au calendrier, agenda, encaissement « CB + Espèces » (fiche, correction, tableau de bord), Last Minute de l'accueil et son partage, Last Minute dans le fil, niveau choisi des cartes Gang, looks de la galerie (profil, éditeur, réservation), réservation pour un proche (« Pour qui ? », rendez-vous suivant, agenda), scanner QR des cartes cadeau (image vide de Safari), export du Trafic, 320 / 390 px, console, hors connexion, fenêtre du gyroscope (iPhone seulement). **API simulée en mémoire** (`e2e/support/mockApi.js`), proxy injoignable en second filet : rien n'atteint la production. Un test échoue sur une route API non simulée (répondue 501), une erreur JS non rattrapée ou une erreur remontée par `reportError`. Horloge du navigateur figée (mardi 10 h Paris), animations réduites. Mode d'emploi : `e2e/LISEZMOI.md`. Toute nouvelle fonction importante = un test ici ; une route nouvelle = une réponse dans le faux serveur.
+- Frontend : `npm run lint` et **`npm run test:e2e`** (build puis 146 vérifications Playwright de bout en bout, ~2 min ; `test:e2e:fast` sans rebuild ; plusieurs séries en parallèle : `E2E_DIST` / `E2E_PORT`) : connexion, réservation, Mes rendez-vous, ajout au calendrier, agenda, encaissement « CB + Espèces » (fiche, correction, tableau de bord), Last Minute de l'accueil et son partage, Last Minute dans le fil, niveau choisi des cartes Gang, looks de la galerie (profil, éditeur, réservation), réservation pour un proche (« Pour qui ? », rendez-vous suivant, agenda), scanner QR des cartes cadeau (image vide de Safari), export du Trafic, l'admin au nom du salon dans le fil, 320 / 390 px, console, hors connexion, fenêtre du gyroscope (iPhone seulement). **API simulée en mémoire** (`e2e/support/mockApi.js`), proxy injoignable en second filet : rien n'atteint la production. Un test échoue sur une route API non simulée (répondue 501), une erreur JS non rattrapée ou une erreur remontée par `reportError`. Horloge du navigateur figée (mardi 10 h Paris), animations réduites. Mode d'emploi : `e2e/LISEZMOI.md`. Toute nouvelle fonction importante = un test ici ; une route nouvelle = une réponse dans le faux serveur.
 - **Vérification automatique sur GitHub** (`.github/workflows/verifications.yml`, en service depuis le 20 oct. 2026) à chaque push sur `main` : `npm ci`, lint, Chromium, `npm run test:e2e`, rapport en artefact si échec. Elle **ne bloque pas Vercel** (qui déploie seul) : regarder le résultat (`gh run list --limit 3`) après chaque push, et corriger tout de suite un échec. Publier ou modifier un fichier de `.github/workflows/` demande le droit `workflow` du jeton GitHub (`gh auth refresh -h github.com -s workflow`, validation dans le navigateur par l'utilisateur).
 - Vérifications ponctuelles plus larges (autres écrans, captures) : Playwright sur un build local avec API simulée (`page.route`), même règle.
 - Un audit **n'écrit jamais en production**.
@@ -393,6 +394,7 @@ Chaque ligne est un invariant : la casser réintroduit un bug déjà corrigé ou
 - Pas de vérification de l'email à l'inscription (21 oct. 2026).
 - Export comptable des cartes cadeau : format à voir plus tard (21 oct. 2026).
 - Réservation pour un proche : libellé « Un proche », visite comptée sur la carte Gang du parent, plafond de 6 RDV à venir gardé, pas de réservation groupée en un passage (24 oct. 2026).
+- L'admin s'adresse aux clients sous le nom « D'Home Barber » (26 oct. 2026).
 
 ## Restes à faire (les plus importants)
 
