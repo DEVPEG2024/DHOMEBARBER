@@ -6,7 +6,7 @@ import { useQuery, useInfiniteQuery, useQueryClient } from '@tanstack/react-quer
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { motion, AnimatePresence, useScroll, useTransform } from 'framer-motion';
-import { Send, Heart, Trash2, Loader2, Camera, MessageCircle, Plus, X, MoreHorizontal, Flag, Ban, ShieldAlert, Check, Eye } from 'lucide-react';
+import { Send, Heart, Trash2, Loader2, Camera, MessageCircle, Plus, X, MoreHorizontal, Flag, Ban, ShieldAlert, Check, Eye, Star } from 'lucide-react';
 import LegalLink from '@/components/shared/LegalLink';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -33,15 +33,25 @@ function timeAgo(dateStr) {
 }
 
 // L'admin publie et commente au nom du salon (26 oct. 2026) : le serveur écrit « D'Home Barber »
-// et ce logo (dhomebarber-api/lib/salonAuthor.js) ; badge « Officiel » (rôle posé par le serveur,
-// jamais par l'app : un client ne peut pas l'imiter)
+// et ce logo (dhomebarber-api/lib/salonAuthor.js) ; petite étoile bleue à côté du nom (rôle posé
+// par le serveur, jamais par l'app : un client ne peut pas l'imiter)
 const SALON_NAME = "D'Home Barber";
 const SALON_LOGO = '/icons/icon-192.png';
 
 function getRoleBadge(role) {
-  if (role === 'admin') return { label: 'Officiel', color: '#d4a72c' };
+  if (role === 'admin') return { star: true };
   if (role === 'barber') return { label: 'Barber', color: '#3fcf8e' };
   return null;
+}
+
+/** Étoile bleue du salon, à côté du nom de l'auteur. */
+function SalonStar({ className }) {
+  return (
+    <span className="inline-flex shrink-0" title="Compte officiel du salon">
+      <Star className={`${className} text-blue-500 fill-blue-500`} aria-hidden="true" />
+      <span className="sr-only">Compte officiel du salon</span>
+    </span>
+  );
 }
 
 // 20 publications par page : le fil en chargeait 100 d'un coup (des dizaines de Mo d'images)
@@ -111,7 +121,8 @@ function CommentItem({ comment, currentUser, onDelete, onOpenMenu }) {
         <div className="bg-secondary/50 rounded-xl px-3 py-2">
           <div className="flex items-center gap-1.5">
             <span className="text-xs font-semibold text-foreground">{comment.author_name}</span>
-            {badge && (
+            {badge?.star && <SalonStar className="w-3 h-3" />}
+            {badge?.label && (
               <span className="text-[9px] font-bold px-1 py-0.5 rounded-full" style={{ backgroundColor: badge.color + '20', color: badge.color }}>
                 {badge.label}
               </span>
@@ -416,7 +427,8 @@ function PostCard({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <p className="text-sm font-semibold text-foreground truncate">{post.author_name}</p>
-            {badge && (
+            {badge?.star && <SalonStar className="w-3.5 h-3.5" />}
+            {badge?.label && (
               <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ backgroundColor: badge.color + '20', color: badge.color }}>
                 {badge.label}
               </span>

@@ -1,7 +1,7 @@
 // L'admin parle au nom du salon dans le fil (26 oct. 2026) : le serveur écrit « D'Home Barber » et
 // le logo du salon sur ses publications et commentaires (dhomebarber-api/lib/salonAuthor.js).
-// L'app affiche le badge « Officiel » (plus « Admin »), et l'admin voit le logo et « au nom de
-// D'Home Barber » en écrivant.
+// L'app affiche une petite étoile bleue à côté du nom (plus le badge « Admin », 26 oct. 2026), et
+// l'admin voit le logo et « au nom de D'Home Barber » en écrivant.
 import { test, expect } from './support/test.js';
 import { ADMIN, CLIENT } from './support/donnees.js';
 import { jour } from './support/temps.js';
@@ -21,7 +21,7 @@ function remplirFil(api) {
 }
 
 test.describe('Fil : l\'admin au nom du salon', () => {
-  test('un client voit « D\'Home Barber », le logo et le badge « Officiel », jamais « Admin »', async ({ page, api, connecter }) => {
+  test('un client voit « D\'Home Barber », le logo et l\'étoile bleue, jamais « Admin »', async ({ page, api, connecter }) => {
     remplirFil(api);
     await connecter(CLIENT);
     await page.goto('/feed');
@@ -30,7 +30,10 @@ test.describe('Fil : l\'admin au nom du salon', () => {
     await expect(publication).toBeVisible();
     const carte = page.locator('div.rounded-2xl').filter({ has: publication }).first();
     await expect(carte.getByText("D'Home Barber", { exact: true })).toBeVisible();
-    await expect(carte.getByText('Officiel', { exact: true })).toBeVisible();
+    const etoile = carte.getByTitle('Compte officiel du salon').locator('svg');
+    await expect(etoile).toBeVisible();
+    await expect(etoile).toHaveClass(/lucide-star/);
+    await expect(etoile).toHaveClass(/text-blue-500/);
     await expect(carte.locator(`img[src="${LOGO}"]`)).toHaveCount(1);
 
     // Commentaire du salon sous la publication d'un client
@@ -38,9 +41,12 @@ test.describe('Fil : l\'admin au nom du salon', () => {
     const commentaires = carteClient.getByRole('button', { name: /1/ }).filter({ has: page.locator('svg.lucide-message-circle') });
     if (await commentaires.count()) await commentaires.first().click();
     await expect(carteClient.getByText('Merci Yanis, à bientôt !')).toBeVisible();
-    await expect(carteClient.getByText('Officiel', { exact: true })).toBeVisible();
+    await expect(carteClient.getByTitle('Compte officiel du salon').locator('svg')).toBeVisible();
 
     await expect(page.getByText('Admin', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('Officiel', { exact: true })).toHaveCount(0);
+    // Une seule étoile par contenu du salon, aucune pour un client
+    await expect(page.getByTitle('Compte officiel du salon')).toHaveCount(2);
   });
 
   test('l\'admin écrit au nom du salon : logo et « au nom de D\'Home Barber »', async ({ page, api, connecter }) => {

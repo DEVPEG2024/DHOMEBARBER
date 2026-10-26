@@ -318,7 +318,7 @@ Chaque ligne est un invariant : la casser réintroduit un bug déjà corrigé ou
 - Signaler, bloquer, modérer (App Store 1.2) ne se retirent pas ; chacun ne lit que ses blocages, **admin compris** ; `blocked_email` peut valoir `key:<clé>` (garder le `NOT NULL`).
 - **Avis publiés d'office** : tout client connecté, `is_visible = true`, 5 par compte, suppression par le staff ; ni condition de visite ni modération préalable. « Publier aussi sur Google » proposé après **tout** avis.
 - Fil : 3 publications / min et 20 / jour, 10 commentaires / min et 100 / jour ; doublon rendu tel quel 10 min (30 s pour un commentaire) ; 5000 / 1000 caractères ; réactions ❤️ 🔥 💪 😂 👏 💈 ; auteur sans nom = « Membre du Gang », jamais l'email.
-- **L'admin parle au nom du salon** (26 oct. 2026) : ses publications et commentaires = « D'Home Barber » + logo (`lib/salonAuthor.js`, appliqué par le serveur dans `authorFields`), jamais son nom ni sa photo ; badge « Officiel » d'après `author_role` (écrit par le serveur seulement) ; nom « D'Home Barber » et variantes refusés à un client (inscription, profil). Toute nouvelle façon pour l'admin d'écrire à un client parle aussi au nom du salon. Détail : `docs/fonctions/securite-moderation-nettoyage.md`.
+- **L'admin parle au nom du salon** (26 oct. 2026) : ses publications et commentaires = « D'Home Barber » + logo (`lib/salonAuthor.js`, appliqué par le serveur dans `authorFields`), jamais son nom ni sa photo ; petite étoile bleue à côté du nom (jamais de badge écrit), d'après `author_role` (écrit par le serveur seulement) ; nom « D'Home Barber » et variantes refusés à un client (inscription, profil). Toute nouvelle façon pour l'admin d'écrire à un client parle aussi au nom du salon. Détail : `docs/fonctions/securite-moderation-nettoyage.md`.
 
 ### Médias et ramasse-miettes
 
@@ -394,7 +394,7 @@ Chaque ligne est un invariant : la casser réintroduit un bug déjà corrigé ou
 - Pas de vérification de l'email à l'inscription (21 oct. 2026).
 - Export comptable des cartes cadeau : format à voir plus tard (21 oct. 2026).
 - Réservation pour un proche : libellé « Un proche », visite comptée sur la carte Gang du parent, plafond de 6 RDV à venir gardé, pas de réservation groupée en un passage (24 oct. 2026).
-- L'admin s'adresse aux clients sous le nom « D'Home Barber » (26 oct. 2026).
+- L'admin s'adresse aux clients sous le nom « D'Home Barber », marqué d'une petite étoile bleue, sans badge écrit (26 oct. 2026).
 
 ## Restes à faire (les plus importants)
 
