@@ -39,7 +39,7 @@ Les documents de `docs/fonctions/` et `docs/historique/` sont des extraits mot p
 | Document | Contenu |
 |---|---|
 | `restes-a-faire.md` | **tous les restes à faire, limites connues et points non corrigés**, dédoublonnés, datés, avec leur source |
-| `stores.md` | chaque envoi aux stores (iOS 1.0 → 1.0.7, Android → 1.0.15), refus Google, DSA, identifiants de soumission |
+| `stores.md` | chaque envoi aux stores (iOS 1.0 → 1.0.9, Android → 1.0.17), refus Google, DSA, identifiants de soumission |
 | `2026-09-05-revue-securite-et-bugs.md` | revue de sécurité et de charge, bugs du 5 sept. |
 | `2026-10-07-verification-complete.md` | vérification par 7 agents du 7 oct. |
 | `2026-10-14-revue-et-2026-10-16-audit.md` | revue du 14 oct. (listes en échec), audit du 16 oct. (décisions du salon) |
@@ -118,15 +118,16 @@ curl -s -o /dev/null -w "%{http_code}\n" https://dhomebarber-api-3aabb8313cb6.he
 
 ## Apps natives et stores
 
-### État au 21 oct. 2026
+### État au 26 oct. 2026
 
-- **En ligne** : iOS **1.0.7 (build 15)** et Android **1.0.15 (code 16)**, toutes deux constatées en ligne le 21 oct. 2026 à 12:44 (disponibles dans l'UE, France comprise, depuis la validation DSA du 12 oct.).
-- **En examen (envoyées le 21 oct. 2026 vers 19 h)** : iOS **1.0.8 build 16** (version `3d82fc8e-e7c0-4e9e-ac91-cda01d2fc47c`, reviewSubmission `ecc6f2a1-5ed3-4796-9f46-11857f59515a`, publication automatique `AFTER_APPROVAL`) ; Android **1.0.16 (code 17)** (piste production = « 1.0.16 » seule). Contenu : Last Minute sur l'accueil et son partage, looks de la galerie, « Ajouter au calendrier » (Calendrier Apple), niveau choisi des cartes Gang, prestation validée comptée tout de suite, remontée des erreurs de l'app.
-- **Prochains numéros : iOS build 17, Android versionCode 18.**
-- **iOS build 17 : à compiler avec Xcode 27.1 (kit iOS 27.1)** pour remplir l’écran intérieur de l’iPhone Duo (pliable, en vente le 23 oct. 2026 ; sinon l’app y tourne réduite avec des bandes noires) ; Xcode 27.1 exige macOS ≥ 26.6 (ce Mac : 26.5.1 au 22 oct.). Vérifier sur le simulateur iPhone Duo (plié, déplié, clavier). Détail : `docs/historique/restes-a-faire.md`.
+- **En ligne** : iOS **1.0.8 (build 16)** et Android **1.0.16 (code 17)**, constatées en ligne le 22 oct. 2026 à 03:59 (disponibles dans l'UE, France comprise, depuis la validation DSA du 12 oct.).
+- **En examen (envoyées le 26 oct. 2026 vers 18 h 55)** : iOS **1.0.9 build 17** (version `84555277-199e-478b-bb63-27473f31ecde`, reviewSubmission `88dd441c-9ece-4318-8d85-679f2411dcb5`, publication automatique `AFTER_APPROVAL`) ; Android **1.0.17 (code 18)** (piste production = « 1.0.17 » seule). Contenu : réservation pour un proche, l'admin au nom de « D'Home Barber » (étoile bleue), Last Minute dans le fil, « CB + Espèces », export du Trafic, correctifs de la réservation et du scanner QR.
+- **Prochains numéros : iOS build 18, Android versionCode 19.**
+- **iPhone Duo : le build 17 est encore compilé avec Xcode 26.3 (kit iOS 26.2)**, l'app reste réduite avec des bandes noires sur l'écran intérieur déplié. Pour le remplir : macOS ≥ 26.6 (ce Mac : 26.5.1 au 26 oct., la mise à jour redémarre le Mac), puis Xcode 27.1, puis un build 18 vérifié sur le simulateur iPhone Duo (plié, déplié, clavier). Détail : `docs/historique/restes-a-faire.md`.
+- **Scripts d'envoi** (client de l'API App Store Connect, soumission, mise en production Play, `exportOptions.plist`) : `~/store-watch/envoi/`, hors du dossier temporaire des sessions (effacé à chaque redémarrage). Copier `submit109.mjs` / `play-promote-18.mjs` en changeant les numéros.
 - **Remontée des erreurs déclarée aux deux stores le 21 oct. 2026** : App Store « Données de plantage » (fonctionnement de l'app, liées, publiée) ; Play « Journaux de plantage » (collectés, non partagés, facultatifs, fonctionnement de l'appli et analyse). Toute nouvelle donnée collectée suit la même voie (règle des stores plus bas).
-- **Après cette revue** : nettoyer les avis, publications et RDV de démonstration du compte `reviewer@dhomebarber.fr`, sans supprimer le compte (règle de nettoyage plus bas). La carte cadeau de démonstration `DHB-LTWB-WDEZ` n'existe déjà plus (constaté le 21 oct.) : les notes de revue de la 1.0.8 ne la promettent plus.
-- **Surveillance** : LaunchAgent `~/store-watch` (toutes les 3 h, se décharge seul, messages tirés de `IOS_VERSION` / `ANDROID_VERSION`) relancé le 21 oct. sur iOS 1.0.8 / Android 1.0.16. Rien ne tourne quand le Mac dort.
+- **Après cette revue** : nettoyer les avis, publications et RDV de démonstration du compte `reviewer@dhomebarber.fr`, sans supprimer le compte (règle de nettoyage plus bas). La carte cadeau de démonstration `DHB-LTWB-WDEZ` n'existe déjà plus (constaté le 21 oct.) : les notes de revue de la 1.0.8 et de la 1.0.9 ne la promettent plus.
+- **Surveillance** : LaunchAgent `~/store-watch` (toutes les 3 h, se décharge seul, messages tirés de `IOS_VERSION` / `ANDROID_VERSION`) relancé le 26 oct. sur iOS 1.0.9 / Android 1.0.17. Rien ne tourne quand le Mac dort.
 - **Chrome dédié aux consoles** (Apple et Google, pilotable par CDP, port 9333) : `open -na "Google Chrome" --args --remote-debugging-port=9333 --user-data-dir="$HOME/Library/Application Support/DHB Chrome Consoles"` ; sessions App Store Connect et Play Console ouvertes par l'utilisateur le 21 oct. 2026 (profil hors dossier temporaire : il survit aux redémarrages).
 - **Snap** : revue approuvée ; reste *Push to Production* dans le portail puis le jeton de production dans Admin → Filtres Snap → Camera Kit (sans déploiement). Les filtres restent éteints tant que la lentille n'a pas d'effet.
 - Apps gratuites : contrat « applications payantes », compte bancaire et questionnaire fiscal américain inutiles.
@@ -400,7 +401,7 @@ Chaque ligne est un invariant : la casser réintroduit un bug déjà corrigé ou
 
 Liste complète, dédoublonnée et datée : `docs/historique/restes-a-faire.md`.
 
-1. Après la revue d'iOS 1.0.8 / Android 1.0.16 (en examen depuis le 21 oct.) : nettoyer les contenus de démonstration du compte `reviewer@dhomebarber.fr`.
+1. Après la revue d'iOS 1.0.9 / Android 1.0.17 (en examen depuis le 26 oct.) : nettoyer les contenus de démonstration du compte `reviewer@dhomebarber.fr` (celui de la revue de la 1.0.8 n'a pas été fait).
 2. Snap : *Push to Production* et jeton de production ; la lentille « DHB Couleur » est vide, à refaire.
 3. Activité clients : retirer la seconde requête des annulations sans auteur vers le 27 oct. 2026.
 4. Dom et Romain sans notifications sur leur téléphone, Kevin sur le web seulement : leur faire activer l'app.
