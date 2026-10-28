@@ -28,6 +28,7 @@ Les documents de `docs/fonctions/` et `docs/historique/` sont des extraits mot p
 | `boutique-commandes-bons-plans.md` | Boutique, commandes et leur annulation, fiche produit, bons plans du Gang |
 | `cartes-cadeau-wallet.md` | cartes cadeau (débit, historique, suppression) et Apple / Google Wallet |
 | `carte-gang.md` | carte Gang des clients (niveaux, stats, écussons, saisons, effets, admin) |
+| `coupe-du-gang.md` | La Coupe du Gang, mini-jeu de foot façon air hockey : cahier des charges validé le 28 oct. 2026, **pas encore codé** |
 | `textile.md` | drops textile, Labo, précommandes |
 | `evenements-privatisation.md` | Privatiser le salon (devis, suivi) et événements du salon (invitations, RSVP) |
 | `snap-essayage.md` | filtres Snap (Camera Kit, Lens Studio, revue Snap) et essayage couleur « Nouvelle tête » |
@@ -396,6 +397,7 @@ Chaque ligne est un invariant : la casser réintroduit un bug déjà corrigé ou
 - Export comptable des cartes cadeau : format à voir plus tard (21 oct. 2026).
 - Réservation pour un proche : libellé « Un proche », visite comptée sur la carte Gang du parent, plafond de 6 RDV à venir gardé, pas de réservation groupée en un passage (24 oct. 2026).
 - L'admin s'adresse aux clients sous le nom « D'Home Barber », marqué d'une petite étoile bleue, sans badge écrit (26 oct. 2026).
+- La Coupe du Gang (28 oct. 2026) : foot façon air hockey en temps réel, premier à 3 buts ; victoire +3, défaite −1 en Points de Coupe **séparés du niveau Gang** ; l'admin joue sous « D'Home Barber » ; barbers « Dispo pour un match » ; aucun lot, seulement un classement. Détail : `docs/fonctions/coupe-du-gang.md`.
 
 ## Restes à faire (les plus importants)
 
