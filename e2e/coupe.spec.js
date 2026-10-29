@@ -1055,6 +1055,24 @@ test.describe('La Coupe du Gang : thème stade', () => {
     await expect(page.getByText('Score : Toi 1 – 0 Kevin')).toBeAttached();
   });
 
+  test('fin du match : le terrain ne bouge pas avant l\'écran de fin (réactions gardées jusque-là)', async ({ page, api, connecter }) => {
+    const cnx = await rejoindreParCode(page, api, connecter);
+    api.coupe.etat(cnx, { ph: 'live' });
+    await expect(jeu(page)).toHaveAttribute('data-play', '1');
+    // Hauteurs du terrain tant que l'écran de fin n'est pas ouvert
+    await page.evaluate(() => {
+      const stage = document.querySelector('.cdg-stage');
+      window.__terrain = [Math.round(stage.getBoundingClientRect().height)];
+      new ResizeObserver(() => {
+        if (!document.querySelector('.cdg-end')) window.__terrain.push(Math.round(stage.getBoundingClientRect().height));
+      }).observe(stage);
+    });
+    cnx.envoyer(FIN_VICTOIRE);
+    await expect(page.getByRole('heading', { name: 'Victoire' })).toBeVisible();
+    const hauteurs = await page.evaluate(() => window.__terrain);
+    expect(new Set(hauteurs).size, JSON.stringify(hauteurs)).toBe(1);
+  });
+
   test('sans durée annoncée (serveur d\'avant le thème stade) : pas d\'avant-match, le terrain tout de suite', async ({ page, api, connecter }) => {
     await noterCamera(page);
     await rejoindreParCode(page, api, connecter);

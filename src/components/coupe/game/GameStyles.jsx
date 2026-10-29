@@ -74,8 +74,8 @@ export const GAME_CSS = `
 /* Caméra en voyage (stade entier, zoom) : terrain dessiné, barre du haut et réactions effacés, et
    hors d'atteinte du clavier et des lecteurs d'écran (visibility, après le fondu) */
 .cdg-root[data-stadium="on"]:not([data-play]) .cdg-canvas { opacity: 0; }
-.cdg-root[data-stadium="on"]:not([data-play]) .cdg-hud,
-.cdg-root[data-stadium="on"]:not([data-play]) .cdg-reacts { opacity: 0; visibility: hidden; pointer-events: none; }
+.cdg-root:not([data-play]) .cdg-hud,
+.cdg-root:not([data-play]) .cdg-reacts { opacity: 0; visibility: hidden; pointer-events: none; }
 
 .cdg-reacts { position: relative; z-index: 18; flex: none; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 0 4px; }
 .cdg-reacts-row { display: flex; gap: 12px; }
@@ -87,12 +87,13 @@ export const GAME_CSS = `
 .cdg-clock { position: absolute; z-index: 15; left: 10px; top: 8px; display: flex; align-items: center; gap: 6px; padding: 6px 10px;
   border-radius: 999px; pointer-events: none; background: ${noir(0.86)}; border: 1px solid ${blanc(0.28)};
   font: 700 15px/1 var(--cdg-display); letter-spacing: .06em; color: var(--cdg-blanc); font-variant-numeric: tabular-nums; }
-.cdg-clock svg { color: var(--cdg-or); }
+.cdg-clock svg { color: var(--cdg-gris-clair); }
 .cdg-clock.cdg-urgent { color: var(--cdg-rouge-vif); border-color: ${alpha(C.rougeVif, 0.6)}; }
 .cdg-clock.cdg-urgent svg { color: var(--cdg-rouge-vif); }
-.cdg-hint { position: absolute; z-index: 30; left: 50%; top: 12px; transform: translateX(-50%); width: max-content; max-width: calc(100% - 24px);
+/* Astuce du début : juste dans le terrain, sous le nom de l'adversaire (--cdg-pitch-top, StadiumStage) */
+.cdg-hint { position: absolute; z-index: 30; left: 50%; top: calc(var(--cdg-pitch-top, 6px) + 6px); transform: translateX(-50%); width: max-content; max-width: calc(100% - 24px);
   box-sizing: border-box; padding: 10px 14px; border-radius: 999px; pointer-events: none; text-align: center;
-  background: ${noir(0.92)}; border: 1px solid var(--cdg-or-bord); font: 600 13px/1.3 var(--cdg-body); color: var(--cdg-blanc); }
+  background: ${noir(0.92)}; border: 1px solid ${blanc(0.22)}; font: 600 13px/1.3 var(--cdg-body); color: var(--cdg-blanc); }
 .cdg-bubble { position: absolute; z-index: 14; pointer-events: none; }
 .cdg-bubble.cdg-mine { left: 18px; bottom: 18px; font-size: 34px; line-height: 1; }
 .cdg-bubble.cdg-theirs { right: 30px; top: 14px; padding: 6px 10px; border-radius: 999px; background: ${noir(0.86)};
@@ -100,7 +101,7 @@ export const GAME_CSS = `
 .cdg-bubble.cdg-theirs b { color: var(--cdg-blanc); font-weight: 600; }
 .cdg-bubble.cdg-theirs span { font-size: 16px; line-height: 1; }
 
-.cdg-float { position: absolute; z-index: 16; left: 50%; top: 50%; transform: translate(-50%, -50%); width: max-content; max-width: calc(100% - 32px);
+.cdg-float { position: absolute; z-index: 16; left: 50%; top: 50%; transform: translate(-50%, -50%); width: max-content; max-width: calc(100% - 112px);
   box-sizing: border-box; padding: 14px 18px; border-radius: 18px; text-align: center; background: ${noir(0.92)};
   border: 1px solid ${blanc(0.16)}; display: flex; flex-direction: column; align-items: center; gap: 6px; }
 .cdg-float strong { font: 800 22px/1.05 var(--cdg-display); letter-spacing: .04em; text-transform: uppercase; }
@@ -161,6 +162,7 @@ export const GAME_CSS = `
 .cdg-link:disabled { opacity: .5; cursor: default; }
 .cdg-message { margin: 0; font: 800 34px/1 var(--cdg-display); text-transform: uppercase; text-wrap: balance; }
 .cdg-message.cdg-sm { font-size: 28px; }
+.cdg-panel .cdg-message { padding-right: 40px; }
 .cdg-code { margin: 0; text-align: center; font: 800 104px/.9 var(--cdg-display); letter-spacing: .12em; color: var(--cdg-blanc); font-variant-numeric: tabular-nums; }
 .cdg-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .cdg-row.cdg-single { grid-template-columns: minmax(0, 1fr); }
@@ -186,8 +188,9 @@ export const GAME_CSS = `
 /* Avant-match (MatchIntro) : bandeau et affiche des deux joueurs sur le stade entier */
 .cdg-intro { position: absolute; inset: 0; z-index: 12; pointer-events: none; display: flex; align-items: center; justify-content: center;
   padding: 0 max(24px, env(safe-area-inset-right, 0px)) 0 max(24px, env(safe-area-inset-left, 0px)); }
-.cdg-intro-band { position: absolute; left: 0; right: 0; top: calc(env(safe-area-inset-top, 0px) + 18px); display: flex; flex-direction: column;
-  align-items: center; gap: 7px; text-align: center; text-shadow: ${TEXT_SHADOW}; }
+.cdg-intro-band { position: absolute; left: 0; right: 0; top: 0; padding: calc(env(safe-area-inset-top, 0px) + 18px) 16px 34px;
+  display: flex; flex-direction: column; align-items: center; gap: 7px; text-align: center; text-shadow: ${TEXT_SHADOW};
+  background: linear-gradient(${noir(0.92)}, ${noir(0.7)} 55%, ${noir(0)}); }
 .cdg-intro-title { margin: 0; font: 800 16px/1 var(--cdg-display); letter-spacing: .3em; text-transform: uppercase; }
 .cdg-intro-title span { color: var(--cdg-or); }
 .cdg-intro-mode { margin: 0; display: flex; align-items: center; gap: 8px; font: 600 11px/1 var(--cdg-body); letter-spacing: .14em;
@@ -197,8 +200,8 @@ export const GAME_CSS = `
   border: 1px solid ${blanc(0.16)}; display: flex; flex-direction: column; gap: 14px; }
 .cdg-vs-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .cdg-vs-side { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; }
-.cdg-vs-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font: 800 20px/1.05 var(--cdg-display); letter-spacing: .06em; text-transform: uppercase; }
+.cdg-vs-name { max-width: 100%; min-height: 2.1em; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+  overflow-wrap: break-word; text-align: center; font: 800 20px/1.05 var(--cdg-display); letter-spacing: .06em; text-transform: uppercase; }
 .cdg-vs-mark { flex: none; width: 56px; height: 56px; margin: 0 4px; display: grid; place-items: center; transform: rotate(45deg);
   background: var(--cdg-rouge); box-shadow: 0 0 0 4px ${alpha(C.rouge, 0.25)}; }
 .cdg-vs-mark span { transform: rotate(-45deg); font: 800 26px/1 var(--cdg-display); }
@@ -233,6 +236,13 @@ export const GAME_CSS = `
 .cdg-stakes > div span:first-child { color: var(--cdg-gris); }
 .cdg-stakes b { font: 800 18px/1 var(--cdg-display); }
 .cdg-stakes > p { margin: 0; padding: 12px 14px; font-size: 12.5px; line-height: 1.45; color: var(--cdg-gris); }
+@media (max-height: 640px) {
+  .cdg-defi { gap: 10px; padding: 12px 16px 14px; }
+  .cdg-defi-title { font-size: 32px; }
+  .cdg-ring { width: 46px; height: 46px; }
+  .cdg-ring b { width: 38px; height: 38px; font-size: 15px; }
+  .cdg-stakes > div, .cdg-stakes > p { padding-top: 8px; padding-bottom: 8px; }
+}
 
 /* Fin du match : la place de l'écran de fin, par-dessus le stade (EndScreen pose son voile, ses
    dégradés et ses textes ; aucun transform, filter ou contain ici : son voile est en position fixed) */
@@ -268,8 +278,8 @@ export const GAME_CSS = `
   .cdg-dim { transition: opacity .4s ease; }
   .cdg-canvas { transition: opacity .2s ease; }
   .cdg-hud, .cdg-reacts { transition: opacity .2s ease, visibility 0s; }
-  .cdg-root[data-stadium="on"]:not([data-play]) .cdg-hud,
-  .cdg-root[data-stadium="on"]:not([data-play]) .cdg-reacts { transition: opacity .2s ease, visibility 0s .2s; }
+  .cdg-root:not([data-play]) .cdg-hud,
+  .cdg-root:not([data-play]) .cdg-reacts { transition: opacity .2s ease, visibility 0s .2s; }
   .cdg-intro .cdg-intro-band { animation: cdg-fade-in .3s ease-out both; }
   .cdg-intro .cdg-vs { animation: cdg-vs-in .45s cubic-bezier(.2, .8, .2, 1) both; }
   .cdg-intro.cdg-out .cdg-intro-band { animation: cdg-fade-out .3s ease-in both; }

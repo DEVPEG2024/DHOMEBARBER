@@ -696,7 +696,7 @@ export default function CoupeGame({
         <Panel labelledBy="cdg-connecting" onClose={exit} closeLabel="Annuler">
           <p className="cdg-eyebrow">La Coupe du Gang</p>
           <h2 className="cdg-message" id="cdg-connecting">Connexion au serveur de jeu</h2>
-          <Loader2 className="h-7 w-7 self-center text-[#ebc15e] cdg-spin" aria-hidden="true" />
+          <Loader2 className="h-7 w-7 self-center text-[#ff3d44] cdg-spin" aria-hidden="true" />
           <button type="button" className="cdg-btn cdg-ghost" onClick={exit}>Annuler</button>
         </Panel>
       );
@@ -871,14 +871,14 @@ export default function CoupeGame({
           )))}
           {online && ui.status === 'match' && ui.abandoning && (
             <div className="cdg-float" role="status">
-              <Loader2 className="h-6 w-6 text-[#ebc15e] cdg-spin" aria-hidden="true" />
+              <Loader2 className="h-6 w-6 text-[#ff3d44] cdg-spin" aria-hidden="true" />
               <strong>Abandon</strong>
               <span>Fin du match…</span>
             </div>
           )}
           {online && ui.status === 'match' && !ui.abandoning && ui.reconnecting && (
             <div className="cdg-float" role="status">
-              <Loader2 className="h-6 w-6 text-[#ebc15e] cdg-spin" aria-hidden="true" />
+              <Loader2 className="h-6 w-6 text-[#ff3d44] cdg-spin" aria-hidden="true" />
               <strong>{reconnectTitle}</strong>
               <span>Reconnexion…</span>
             </div>
@@ -935,13 +935,17 @@ export default function CoupeGame({
           )}
           <StoryFallback url={storyShare.fallbackUrl} onClose={storyShare.closeFallback} />
         </div>
-        {online && ui.status === 'match' && <Reactions onReact={react} disabled={reactLocked || ui.abandoning || !!ui.reconnecting} />}
+        {/* Gardées (inactives) jusqu'à l'écran de fin : sans elles le terrain grandirait d'un coup à
+            « FIN DU MATCH » */}
+        {online && (ui.status === 'match' || (ui.status === 'over' && !endShown)) && (
+          <Reactions onReact={react} disabled={ui.status !== 'match' || reactLocked || ui.abandoning || !!ui.reconnecting} />
+        )}
       </div>
       {/* Affiche VS de l'avant-match, « FIN DU MATCH » : sur tout l'écran, au-dessus du terrain */}
       <MatchIntro fx={fx} mode={online ? 'online' : mode} players={introPlayers} />
       {rotate && (
         <div className="cdg-rotate" role="alert">
-          <Smartphone className="h-10 w-10 text-[#ebc15e]" aria-hidden="true" />
+          <Smartphone className="h-10 w-10 text-[#ff3d44]" aria-hidden="true" />
           <strong>Tourne ton téléphone</strong>
           <span>La Coupe du Gang se joue téléphone tenu droit{!online && off.status === 'match' ? ' : le match attend.' : '.'}</span>
         </div>

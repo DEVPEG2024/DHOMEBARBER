@@ -221,18 +221,19 @@ const tagFont = (tag) => font(800, tag.length > 3 ? 12 : tag.length > 2 ? 14 : t
  * Nom d'un joueur sur sa pastille noire (maquette StadeMatch), autour de y = 0 : bord droit de la
  * pastille en x = 0 (`alignEnd`), sinon bord gauche en x = 0 ; étoile du salon devant le nom. Un nom
  * trop long pour la marge est écrit plus petit, puis coupé (« … ») : la pastille ne passe jamais
- * sur la cage.
+ * sur la cage. `minPx` : taille du texte au moins (unités du terrain), pour qu'il reste lisible sur
+ * un petit écran.
  */
-function namePill(c, badge, color, alignEnd) {
+function namePill(c, badge, color, alignEnd, minPx = 0) {
   const pad = 7;
   const lead = badge.star ? 15 : 0;
   const room = NAME_MAX - lead - pad * 2;
   let label = badge.name.toUpperCase();
-  let px = 14;
+  let px = Math.max(14, minPx);
   c.font = font(800, px);
   let tw = c.measureText(label).width;
   if (tw > room) {
-    px = Math.max(11, Math.floor((px * room) / tw));
+    px = Math.max(11, minPx, Math.floor((px * room) / tw));
     c.font = font(800, px);
     tw = c.measureText(label).width;
     const chars = Array.from(label);
@@ -244,7 +245,8 @@ function namePill(c, badge, color, alignEnd) {
   }
   const pw = tw + lead + pad * 2;
   const x0 = alignEnd ? -pw : 0;
-  rrect(c, x0, -10.5, pw, 21, 6);
+  const ph = Math.max(21, Math.round(px * 1.5));
+  rrect(c, x0, -ph / 2, pw, ph, 6);
   c.fillStyle = COLORS.pill;
   c.fill();
   if (badge.star) star(c, x0 + pad + 5.5, 0, 5.5, COLORS.star);
@@ -324,16 +326,18 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
   // Noms dans les marges, sur une pastille noire, au bord droit du terrain (le bas en rouge vif, le
   // haut en blanc) ; à deux, celui du haut tourné vers son joueur
   function drawNames(c) {
+    // Jamais moins de 9 px à l'écran (iPhone SE : 6 px sans ce plancher)
+    const minPx = Math.min(22, 9 / Math.max(0.01, view.s));
     c.save();
     c.translate(W, H + MG / 2);
-    namePill(c, players[0], COLORS.meText, true);
+    namePill(c, players[0], COLORS.meText, true, minPx);
     c.restore();
     c.save();
     c.translate(W, -MG / 2);
     if (twoPlayers) {
       c.rotate(Math.PI);
-      namePill(c, players[1], COLORS.rivalText, false);
-    } else namePill(c, players[1], COLORS.rivalText, true);
+      namePill(c, players[1], COLORS.rivalText, false, minPx);
+    } else namePill(c, players[1], COLORS.rivalText, true, minPx);
     c.restore();
     // Cadre noir du score, au bord droit, à cheval sur la ligne médiane (chiffres à chaque frame)
     c.save();

@@ -87,5 +87,17 @@ Décisions prises pendant l'assemblage (chef) :
 - Barre du haut et réactions cachées aussi au clavier et aux lecteurs d'écran pendant que la caméra voyage (`visibility`, après le fondu) ; plus de `will-change` sur la caméra (Chrome garderait l'image rendue à l'échelle du stade entier, floue sur le terrain) ; écran de fin presque opaque quand l'image du stade manque.
 - Affiche : « Match en ligne » et « +3 à la victoire, −1 à la défaite quand vous y avez droit tous les deux » (les droits aux points ne sont connus qu'à la fin).
 - Image : le but parasite de l'image d'origine, au-dessus de la tribune du logo, est repeint en tribune (`docs/prototypes/stade-coupe/tribune_haut.py`).
+- Contre-expertise dans le navigateur (29 oct. 2026), corrigé :
+  - réactions gardées, inactives, jusqu'à l'écran de fin, sinon le terrain grandissait d'un coup à « FIN DU MATCH » (44 px à 390, environ 20 % à 320) ;
+  - noms de l'affiche sur deux lignes au plus (« Joueur du bas », « D'Home Barber ») ;
+  - bandeau de l'avant-match sur un dégradé noir ;
+  - barre du haut cachée pendant l'avant-match même sans l'image du stade ;
+  - or réservé au trophée, aux points, au mot « Coupe », à la 1re place et à la victoire (roues de chargement et icône de rotation en rouge, bord de l'astuce et horloge sans or) ;
+  - titre d'un panneau jamais sous la croix ;
+  - astuce du début juste dans le terrain, sous le nom de l'adversaire (`--cdg-pitch-top`, posé par StadiumStage) ;
+  - avis au centre jamais sur le cadre du score ;
+  - noms des joueurs jamais sous 9 px à l'écran ;
+  - « Défi reçu » sans défiler sur un écran de 568 px ;
+  - caméra verrouillée sur le terrain une fois partie (une heure du serveur corrigée ne la ramène plus au stade).
 
-Tests : `e2e/coupe.spec.js`, section « thème stade » (avant-match complet, défaite en gris, retour de l'adversaire sans avant-match, match repris depuis l'accueil sur le terrain, serveur sans durée) ; le faux serveur annonce le vrai premier coup d'envoi avec `api.coupe.avantMatchCd = 4.5` (temps écoulé qui avance) ; « contre le salon » attend 282 images de compte à rebours. Serveur : `test-coupe-rooms.js` (`cd` dans `start` et `state`, 4,5 s au coup d'envoi et à la revanche, 3 s après un retour, même pendant l'avant-match, absent en jeu).
+Tests : `e2e/coupe.spec.js`, section « thème stade » (avant-match complet, défaite en gris, retour de l'adversaire sans avant-match, match repris depuis l'accueil sur le terrain, terrain immobile jusqu'à l'écran de fin, serveur sans durée) ; le faux serveur annonce le vrai premier coup d'envoi avec `api.coupe.avantMatchCd = 4.5` (temps écoulé qui avance) ; « contre le salon » attend 282 images de compte à rebours. Serveur : `test-coupe-rooms.js` (`cd` dans `start` et `state`, 4,5 s au coup d'envoi et à la revanche, 3 s après un retour, même pendant l'avant-match, absent en jeu).

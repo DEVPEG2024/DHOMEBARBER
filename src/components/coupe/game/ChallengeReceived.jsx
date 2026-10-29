@@ -18,6 +18,8 @@ export default function ChallengeReceived({ invite, isBarber, onAccept, onDeclin
   const expiredRef = useRef(false);
   const from = invite?.from || {};
   const name = from.name || 'Un joueur';
+  // Écran bas (iPhone SE) : pion plus petit, Accepter et Pas maintenant visibles sans défiler
+  const pawnSize = typeof window !== 'undefined' && window.innerHeight <= 640 ? 72 : 104;
 
   useEffect(() => {
     if (left > 0 || expiredRef.current || !invite) return;
@@ -39,7 +41,7 @@ export default function ChallengeReceived({ invite, isBarber, onAccept, onDeclin
           <X className="h-5 w-5" aria-hidden="true" />
         </button>
         <p className="cdg-eyebrow">La <span style={{ color: COUPE_COLORS.or }}>Coupe</span> du Gang · défi</p>
-        <Pawn name={from.name} role={from.role} tone="rival" size={104} />
+        <Pawn name={from.name} role={from.role} tone="rival" size={pawnSize} />
         <span className="cdg-chip">{roleLabel(from.role)}</span>
         <h1 className="cdg-defi-title" id="cdg-defi-title">{name} <br />te défie</h1>
         <div className="cdg-countdown">

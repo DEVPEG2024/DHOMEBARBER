@@ -64,6 +64,9 @@ export function createStadiumDirector(root, { reducedMotion = false, onIntro, on
   // Images lues seulement après le coup d'envoi (`newMatch`) ou une reprise (`resume`) : une image
   // passée avant posait la caméra sur le terrain, puis l'avant-match la ramenait au stade
   let armed = false;
+  // Caméra partie vers le terrain pendant ce match : elle n'en revient plus (une heure du serveur
+  // corrigée peut faire reculer `phaseT` sous 1 s), et le jeu, une fois montré, ne se cache plus
+  let zoomed = false;
   let pitchAt = -Infinity; // arrivée de la caméra sur le terrain (performance.now)
 
   const camera = (value, now) => {
@@ -96,6 +99,7 @@ export function createStadiumDirector(root, { reducedMotion = false, onIntro, on
     newMatch() {
       intro = 'pending';
       armed = true;
+      zoomed = false;
       held = false;
       showPoster(false);
       outro(false);
@@ -104,6 +108,7 @@ export function createStadiumDirector(root, { reducedMotion = false, onIntro, on
     resume() {
       intro = 'off';
       armed = true;
+      zoomed = true;
       held = false;
       showPoster(false);
       outro(false);
@@ -116,6 +121,7 @@ export function createStadiumDirector(root, { reducedMotion = false, onIntro, on
     idle() {
       intro = 'pending';
       armed = false;
+      zoomed = false;
       held = false;
       showPoster(false);
       outro(false);
@@ -133,17 +139,18 @@ export function createStadiumDirector(root, { reducedMotion = false, onIntro, on
       // une coupure) reste sur le terrain
       if (intro === 'on' && f.phase !== 'count') intro = 'off';
       const lead = intro === 'on' && f.phase === 'count' && f.countS > 3;
-      if (intro === 'pending' || (lead && f.phaseT < 1)) {
+      if (!zoomed && (intro === 'pending' || (lead && f.phaseT < 1))) {
         camera('full', now);
         play(false);
         showPoster(lead);
         return;
       }
+      zoomed = true;
       showPoster(false);
       camera('pitch', now);
       // Jamais deux terrains l'un sur l'autre : le canvas attend la fin du zoom
       const landed = reduced || now - pitchAt >= ZOOM_IN_MS;
-      play(landed && (!lead || f.phaseT >= (reduced ? 1 : 2)));
+      if (landed && (!lead || f.phaseT >= (reduced ? 1 : 2))) play(true);
     },
     /** Fin du match : « FIN DU MATCH » sur le terrain, le canvas reste (l'écran de jeu l'affiche). */
     finish() {
@@ -154,6 +161,7 @@ export function createStadiumDirector(root, { reducedMotion = false, onIntro, on
     /** Puis la caméra recule jusqu'au stade entier et le canvas s'efface. */
     pullBack() {
       held = true;
+      zoomed = false;
       showPoster(false);
       outro(false);
       camera('full', 0);
@@ -207,8 +215,10 @@ export default function StadiumStage({ onReady, onFail }) {
           PITCH_X0 * s,
         ].map(px).join(' ');
         cam.style.setProperty('--cdg-cam-full', cameraCss(cameraTransform(at, full)));
-        // Centre du terrain dans l'écran : « FIN DU MATCH » (MatchIntro)
+        // Centre du terrain dans l'écran : « FIN DU MATCH » (MatchIntro) ; haut du terrain dans le
+        // stage : l'astuce du début, sous le nom de l'adversaire
         root.style.setProperty('--cdg-pitch-cy', `${(sr.top - rr.top + pitch.top + pitch.height / 2).toFixed(1)}px`);
+        stage.style.setProperty('--cdg-pitch-top', `${pitch.top.toFixed(1)}px`);
       });
     };
 
