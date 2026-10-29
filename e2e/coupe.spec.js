@@ -1110,17 +1110,30 @@ test.describe('La Coupe du Gang : photos des clients', () => {
   });
 });
 
-// Musique de tribune : lectures demandées par l'app (`HTMLMediaElement.play`), notées dans la page ;
-// `window.__musique` = le lecteur de la musique du jeu
-async function noterLectures(page) {
+// Musique de tribune : jouée en boucle par le contexte audio des bruitages (src/lib/coupe/audioUnlock.js).
+// Départs des sources longues (> 60 s : la musique, pas un bruitage) notés dans `window.__musique` :
+// réglages de la boucle, contexte, et nombre de lectures en cours (fin à l'arrêt) ; `__fichiers` :
+// fichiers de la musique demandés au réseau
+async function noterMusique(page) {
   await page.addInitScript(() => {
-    window.__lectures = [];
-    const play = HTMLMediaElement.prototype.play;
-    HTMLMediaElement.prototype.play = function lecture() {
-      const src = this.currentSrc || this.src || '';
-      window.__lectures.push(src);
-      if (/tribune/.test(src)) window.__musique = this;
-      return play.call(this);
+    window.__musique = { departs: [], enCours: 0, sources: [] };
+    window.__fichiers = [];
+    const start = AudioBufferSourceNode.prototype.start;
+    AudioBufferSourceNode.prototype.start = function depart(...args) {
+      if (this.buffer && this.buffer.duration > 60) {
+        const m = window.__musique;
+        m.departs.push({ loop: this.loop, loopStart: this.loopStart, loopEnd: this.loopEnd, duree: this.buffer.duration, offset: args[1] ?? 0 });
+        m.sources.push(this);
+        m.enCours += 1;
+        this.addEventListener('ended', () => { m.enCours -= 1; });
+      }
+      return start.apply(this, args);
+    };
+    const fetchOrigine = window.fetch;
+    window.fetch = function chercher(input, ...rest) {
+      const url = String(input?.url || input);
+      if (/tribune/.test(url)) window.__fichiers.push(url);
+      return fetchOrigine.call(this, input, ...rest);
     };
   });
 }
@@ -1188,20 +1201,32 @@ test.describe('La Coupe du Gang : défi à un ami en image', () => {
 });
 
 test.describe('La Coupe du Gang : musique de tribune', () => {
-  test('lancée au coup d\'envoi, arrêtée avec le son du jeu, relancée avec lui', async ({ page, api, connecter }) => {
-    await noterLectures(page);
+  test('lancée au coup d\'envoi en boucle sans couture, arrêtée avec le son du jeu, reprise où elle était', async ({ page, api, connecter }) => {
+    await noterMusique(page);
     const cnx = await rejoindreParCode(page, api, connecter);
     api.coupe.etat(cnx, { ph: 'live' });
-    await expect.poll(() => page.evaluate(() => !!window.__musique && !window.__musique.paused)).toBe(true);
-    expect(await page.evaluate(() => window.__musique.loop)).toBe(true);
+    await expect.poll(() => page.evaluate(() => window.__musique.enCours)).toBe(1);
+    // Contexte en marche (débloqué par le clic sur « Rejoindre ») : la musique avance
+    await expect.poll(() => page.evaluate(() => window.__musique.sources[0].context.state)).toBe('running');
+    // Boucle de 293 s entre les deux marges d'une seconde du fichier (293 + 2 s)
+    const [depart] = await page.evaluate(() => window.__musique.departs);
+    expect(depart).toMatchObject({ loop: true, loopStart: 1, loopEnd: 294, offset: 1 });
+    expect(depart.duree).toBeGreaterThan(294.9);
+    expect(depart.duree).toBeLessThan(295.2);
     await page.getByRole('button', { name: 'Couper le son' }).click();
-    await expect.poll(() => page.evaluate(() => window.__musique.paused)).toBe(true);
+    await expect.poll(() => page.evaluate(() => window.__musique.enCours)).toBe(0);
     await page.getByRole('button', { name: 'Activer le son' }).click();
-    await expect.poll(() => page.evaluate(() => window.__musique.paused)).toBe(false);
+    await expect.poll(() => page.evaluate(() => window.__musique.enCours)).toBe(1);
+    // Reprise là où elle s'était arrêtée, pas au début ; le fichier n'est chargé qu'une fois
+    const departs = await page.evaluate(() => window.__musique.departs);
+    expect(departs).toHaveLength(2);
+    expect(departs[1].offset).toBeGreaterThan(1);
+    expect(departs[1].offset).toBeLessThan(294);
+    expect(await page.evaluate(() => window.__fichiers.length)).toBe(1);
   });
 
   test('bruitages et musique ensemble dès le coup d\'envoi, sans toucher l\'écran de jeu (un seul clic : « Rejoindre »)', async ({ page, api, connecter }) => {
-    await noterLectures(page);
+    await noterMusique(page);
     // Contextes audio créés par la page (bruitages)
     await page.addInitScript(() => {
       window.__contextes = [];
@@ -1215,20 +1240,22 @@ test.describe('La Coupe du Gang : musique de tribune', () => {
     });
     await rejoindreParCode(page, api, connecter);
     await expect.poll(() => page.evaluate(() => window.__contextes.some((c) => c.state === 'running'))).toBe(true);
-    await expect.poll(() => page.evaluate(() => !!window.__musique && !window.__musique.paused)).toBe(true);
-    // Un seul contexte pour toute la session (partagé par les écrans de jeu)
+    await expect.poll(() => page.evaluate(() => window.__musique.enCours)).toBe(1);
+    // Un seul contexte pour toute la session (partagé par les écrans de jeu), qui joue aussi la musique
     expect(await page.evaluate(() => window.__contextes.length)).toBe(1);
+    expect(await page.evaluate(() => window.__musique.sources[0].context === window.__contextes[0])).toBe(true);
   });
 
-  test('coupée par le serveur (COUPE_MUSIC=off) : jamais lancée, le jeu marche', async ({ page, api, connecter }) => {
+  test('coupée par le serveur (COUPE_MUSIC=off) : ni chargée ni lancée, le jeu marche', async ({ page, api, connecter }) => {
     api.donnees.parametresPublics.features.coupeMusic = false;
-    await noterLectures(page);
+    await noterMusique(page);
     const cnx = await rejoindreParCode(page, api, connecter);
     api.coupe.etat(cnx, { ph: 'live' });
     await expect(jeu(page)).toHaveAttribute('data-play', '1');
     await page.getByRole('button', { name: 'Réagir : En feu' }).click();
     await expect.poll(() => api.coupe.messages('react')).toEqual([{ t: 'react', r: 1 }]);
-    expect(await page.evaluate(() => window.__lectures.filter((s) => /tribune/.test(s)))).toEqual([]);
+    expect(await page.evaluate(() => window.__musique.departs)).toEqual([]);
+    expect(await page.evaluate(() => window.__fichiers)).toEqual([]);
   });
 });
 

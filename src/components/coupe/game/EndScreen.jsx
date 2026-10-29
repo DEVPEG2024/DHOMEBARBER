@@ -28,7 +28,8 @@ const TEXT_SHADOW = '0 1px 3px rgba(0, 0, 0, .9), 0 0 14px rgba(0, 0, 0, .55)';
  * défaite ») : ici plutôt que dans GameStyles, préfixés « cdg-fin- ». `.cdg-end` (GameStyles) garde
  * la place de l'écran (au-dessus du stade, défilement) ; son fond est retiré : le stade se voit à
  * travers. Le voile et les dégradés couvrent tout l'écran (`position: fixed`), marges et zones sûres
- * comprises, sans défiler avec le texte. Animations seulement sans « mouvement réduit ».
+ * comprises, sans défiler avec le texte ; la pluie de lames tombe par-dessus le tout. Animations
+ * seulement sans « mouvement réduit ».
  */
 const END_CSS = `
 .cdg-end.cdg-fin { background: none; }
@@ -39,6 +40,9 @@ const END_CSS = `
 .cdg-fin-top { position: absolute; left: 0; right: 0; top: 0; height: calc(env(safe-area-inset-top, 0px) + 120px);
   background: linear-gradient(${C.noir} 45%, rgba(11, 11, 12, 0)); }
 .cdg-fin-bottom { position: absolute; left: 0; right: 0; top: 40%; bottom: 0; background: linear-gradient(rgba(11, 11, 12, 0), ${C.noir} 46%); }
+/* Pluie de lames de la victoire : par-dessus tout l'écran de fin (sous les dégradés noirs, elle ne
+   se voyait que dans la bande du stade et s'arrêtait à mi-écran), jamais cliquable */
+.cdg-fin-rain { position: fixed; inset: 0; z-index: 2; overflow: hidden; pointer-events: none; }
 .cdg-fin-body { position: relative; z-index: 1; width: 100%; max-width: 420px; min-height: 100%; margin: 0 auto; box-sizing: border-box;
   padding: 14px 8px 12px; display: flex; flex-direction: column; gap: 16px; }
 .cdg-fin-eyebrow { margin: 0; text-align: center; font: 600 11px/1.3 ${BODY}; letter-spacing: .16em; text-transform: uppercase;
@@ -246,7 +250,6 @@ export default function EndScreen({
     <section className="cdg-end cdg-fin" data-tone={tone} aria-labelledby="cdg-end-title" style={{ background: 'transparent' }}>
       <style>{END_CSS}</style>
       <div className="cdg-fin-bg" aria-hidden="true">
-        {tone === 'victoire' && <BladeRain />}
         <span className="cdg-fin-top" />
         <span className="cdg-fin-bottom" />
       </div>
@@ -298,6 +301,11 @@ export default function EndScreen({
           </div>
         </div>
       </div>
+      {tone === 'victoire' && (
+        <div className="cdg-fin-rain" aria-hidden="true">
+          <BladeRain />
+        </div>
+      )}
     </section>
   );
 }

@@ -3,9 +3,9 @@
  *
  * Bruitages : WebAudio synthétisé, sur le contexte audio partagé de `audioUnlock.js`, débloqué
  * pendant un geste (clic qui ouvre le jeu, toucher dans l'écran de jeu : `unlock()`), exigence des
- * navigateurs et de WKWebView. Musique de tribune : lecteur partagé du même module, voulue à partir
- * du coup d'envoi (`music(true)`) si le serveur la permet (`allowMusic`). Choix « Son : coupé »
- * gardé sur l'appareil.
+ * navigateurs et de WKWebView. Musique de tribune : jouée en boucle par le même contexte (module
+ * `audioUnlock.js`), voulue à partir du coup d'envoi (`music(true)`) si le serveur la permet
+ * (`allowMusic`). Choix « Son : coupé » gardé sur l'appareil.
  * Vibrations : Haptics de Capacitor dans les apps, `navigator.vibrate` sur le web (toujours dans
  * un try : iOS Safari n'a pas de vibreur, un refus ne doit jamais casser le jeu).
  */

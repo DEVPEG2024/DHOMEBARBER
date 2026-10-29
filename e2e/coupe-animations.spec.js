@@ -4,7 +4,9 @@
 //  - jamais le dessin du match (joueurs, ballon, score) posé sur le stade entier, même 0,2 s : il
 //    est caché d'un coup quand la caméra quitte le terrain ou que l'image du stade arrive, et
 //    pendant le chargement de l'image (sinon l'ancien terrain dessiné, puis le stade d'un coup) ;
-//  - la bannière « BUT ! » ne reste pas sous « FIN DU MATCH ».
+//  - la bannière « BUT ! » ne reste pas sous « FIN DU MATCH » ;
+//  - la pluie de lames de la victoire tombe par-dessus tout l'écran de fin (30 oct. 2026 : sous les
+//    dégradés noirs, elle ne se voyait que dans la bande du stade et s'arrêtait à mi-écran).
 import { test, expect } from './support/test.js';
 import { ADMIN } from './support/donnees.js';
 import { CODE_MATCH } from './support/fauxCoupe.js';
@@ -93,5 +95,15 @@ test.describe('La Coupe du Gang : animations du stade (mouvement non réduit)', 
     expect(rouges).toBe(0);
     await expect(page.getByRole('heading', { name: 'Victoire' })).toBeVisible();
     expect(await visibles(page)).toEqual([]);
+    // Pluie de lames : couche à part, sur tout l'écran, au-dessus du texte et des dégradés
+    await expect(page.locator('.cdg-fin-rain .cdg-blade').first()).toBeAttached();
+    await expect(page.locator('.cdg-fin-bg .cdg-blade')).toHaveCount(0);
+    const couches = await page.evaluate(() => {
+      const z = (sel) => Number(getComputedStyle(document.querySelector(sel)).zIndex);
+      const r = document.querySelector('.cdg-fin-rain').getBoundingClientRect();
+      return { pluie: z('.cdg-fin-rain'), texte: z('.cdg-fin-body'), plein: r.top <= 0 && r.left <= 0 && r.bottom >= innerHeight && r.right >= innerWidth };
+    });
+    expect(couches.pluie).toBeGreaterThan(couches.texte);
+    expect(couches.plein).toBe(true);
   });
 });
