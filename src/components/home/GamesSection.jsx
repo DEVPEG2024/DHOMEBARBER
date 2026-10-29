@@ -42,20 +42,20 @@ import { STADIUM_URL as stadiumUrl } from '@/lib/coupe/stadiumImage';
 export const COUPE_GOLD = C.or;
 // Rouge presque noir des maquettes du thème stade (fonds des cartes, voile de la carte de la Coupe)
 const ROUGE_NUIT = '#2a0b0d';
-// Rouge des boutons (`C.rouge`, #e01f26) en transparence : bords et fonds teintés
-const RED_BORDER = 'rgba(224, 31, 38, 0.5)';
-const RED_TINT = 'rgba(224, 31, 38, 0.18)';
 const LINE = 'rgba(255, 255, 255, 0.1)';
 const BLOCK_BG = `linear-gradient(160deg, ${ROUGE_NUIT} 0%, ${C.noir2} 60%)`;
-// Entrée « Jeux » du fil : au vert de l'app (bouton « + » du fil, green-500), pas au rouge du stade
-// (demande du propriétaire, 29 oct. 2026)
+// Carte « Jeux » de l'accueil et entrée du fil : au vert de l'app (bouton « + » du fil, green-500),
+// pas au rouge du stade (demande du propriétaire, 29 oct. 2026)
 const VERT = '#22c55e';
 const VERT_CLAIR = '#4ade80';
 const FEED_BG = `linear-gradient(135deg, #0b2416 0%, ${C.noir2} 65%)`;
 const FEED_BORDER = 'rgba(34, 197, 94, 0.5)';
 const FEED_TINT = 'rgba(34, 197, 94, 0.16)';
-// Voiles sur le stade (maquette « JeuxRouge ») : noir à gauche sous les textes, l'image à droite
-const HOME_VEIL = 'linear-gradient(90deg, rgba(11, 11, 12, 0.97) 0%, rgba(11, 11, 12, 0.85) 60%, rgba(11, 11, 12, 0.45) 100%)';
+// Voiles sur le stade : noir à gauche sous les textes, l'image à droite. Carte de l'accueil au vert
+// de l'app (demande du propriétaire, 29 oct. 2026) : stade en gris sous un voile vert nuit, sinon
+// ses tribunes rouges juraient avec le vert
+const HOME_VEIL = 'linear-gradient(90deg, rgba(6, 20, 12, 0.97) 0%, rgba(6, 20, 12, 0.85) 60%, rgba(9, 38, 22, 0.5) 100%)';
+const HOME_IMAGE = { filter: 'grayscale(1)' };
 const COUPE_VEIL = 'linear-gradient(100deg, rgba(11, 11, 12, 0.96) 0%, rgba(11, 11, 12, 0.82) 55%, rgba(42, 11, 13, 0.55) 100%)';
 // Textes clairs posés sur l'image : une ombre légère les détache des tribunes éclairées
 const ON_IMAGE = { textShadow: '0 1px 2px rgba(0, 0, 0, 0.6)' };
@@ -150,7 +150,7 @@ export function CoupeBallIcon({ className = 'w-5 h-5', style }) {
  * (`object-position`). Image absente (hors connexion sur le web) : cachée, le fond noir de la carte
  * reste.
  */
-function StadiumBackdrop({ position, veil, lazy = false }) {
+function StadiumBackdrop({ position, veil, lazy = false, imageStyle }) {
   return (
     <>
       <img
@@ -161,7 +161,7 @@ function StadiumBackdrop({ position, veil, lazy = false }) {
         draggable={false}
         onError={(e) => { e.currentTarget.style.visibility = 'hidden'; }}
         className="absolute inset-0 w-full h-full object-cover pointer-events-none select-none"
-        style={{ objectPosition: position }}
+        style={{ objectPosition: position, ...imageStyle }}
       />
       <div className="absolute inset-0 pointer-events-none" style={{ background: veil }} aria-hidden="true" />
     </>
@@ -177,9 +177,10 @@ export function GameIcon({ id, className = 'w-4 h-4', style }) {
 // ─── Accueil : section « Jeux » ─────────────────────────────────────
 
 /**
- * Carte « Jeux » de l'accueil (maquette « JeuxRouge ») : sur le haut du stade assombri, bord rouge,
- * le nom de chaque jeu ouvert (ballon en or pour la Coupe), et tout mène à la page « Jeux ». Image en
- * chargement différé : la carte est sous « Comme la dernière fois », rarement à l'écran à l'arrivée.
+ * Carte « Jeux » de l'accueil : sur le haut du stade, en gris sous un voile vert, au vert de l'app
+ * comme l'entrée du fil (bord, « Le Gang joue », puces, flèche), le nom de chaque jeu ouvert, et
+ * tout mène à la page « Jeux ». Image en chargement différé : la carte est sous « Comme la dernière
+ * fois », rarement à l'écran à l'arrivée.
  */
 export default function GamesSection() {
   const { games } = useGames();
@@ -190,11 +191,11 @@ export default function GamesSection() {
     <section aria-label="Jeux">
       <Link to="/jeux" className="block rounded-3xl" aria-label={`Jeux : ${games.map((g) => g.title).join(', ')}`}>
         <motion.div whileTap={reduceMotion ? undefined : { scale: 0.98 }} className="rounded-3xl">
-          <div className="shine-sweep relative overflow-hidden rounded-3xl border" style={{ background: C.noir, borderColor: RED_BORDER }}>
-            <StadiumBackdrop position="50% 12%" veil={HOME_VEIL} lazy />
+          <div className="shine-sweep relative overflow-hidden rounded-3xl border" style={{ background: C.noir, borderColor: FEED_BORDER }}>
+            <StadiumBackdrop position="50% 12%" veil={HOME_VEIL} imageStyle={HOME_IMAGE} lazy />
             <div className="relative flex items-center gap-4 p-5" style={ON_IMAGE}>
               <div className="flex-1 min-w-0">
-                <p className="text-[10px] tracking-[0.3em] uppercase font-semibold" style={{ color: C.rougeVif }}>Le Gang joue</p>
+                <p className="text-[10px] tracking-[0.3em] uppercase font-semibold" style={{ color: VERT_CLAIR }}>Le Gang joue</p>
                 <h2 className="mt-1 font-fut text-[34px] font-extrabold uppercase leading-none tracking-wide text-white">Jeux</h2>
                 <p className="mt-1.5 text-xs leading-snug" style={{ color: C.grisClair }}>Choisis ton jeu et défie le Gang.</p>
                 <ul className="mt-3 flex flex-wrap gap-2">
@@ -202,15 +203,15 @@ export default function GamesSection() {
                     <li
                       key={g.id}
                       className="flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold text-white min-w-0 max-w-full"
-                      style={{ background: RED_TINT, borderColor: 'rgba(255, 255, 255, 0.25)' }}
+                      style={{ background: FEED_TINT, borderColor: 'rgba(255, 255, 255, 0.25)' }}
                     >
-                      <GameIcon id={g.id} className="w-3.5 h-3.5 shrink-0" style={{ color: C.or }} />
+                      <GameIcon id={g.id} className="w-3.5 h-3.5 shrink-0" style={{ color: VERT_CLAIR }} />
                       <span className="truncate">{g.title}</span>
                     </li>
                   ))}
                 </ul>
               </div>
-              <span className="w-11 h-11 shrink-0 rounded-full grid place-items-center" style={{ background: C.rouge, color: C.blanc }}>
+              <span className="w-11 h-11 shrink-0 rounded-full grid place-items-center" style={{ background: VERT, color: C.blanc }}>
                 <ChevronRight className="w-5 h-5" aria-hidden="true" />
               </span>
             </div>
