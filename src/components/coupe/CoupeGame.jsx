@@ -32,7 +32,8 @@ import { useMediaQuery, useSalonMusicPaused, useSecondsLeft, useTyping, useWakeL
  *   <CoupeGame
  *     mode="online" | "bot" | "local"
  *     level="apprenti" | "barber" | "boss"          // mode "bot"
- *     action={{ t: 'create' } | { t: 'join', code } | { t: 'defi', link } | { t: 'challenge', employeeId } | { t: 'resume' }}
+ *     action={{ t: 'create' } | { t: 'join', code } | { t: 'defi', link } | { t: 'challenge', employeeId }
+ *             | { t: 'challenge', keyHash } | { t: 'resume' }}   // keyHash : un joueur de la liste « Défier un joueur »
  *     onExit={() => …}                              // croix, « Retour », « Annuler », abandon
  *     onFinished={(result) => …}                    // fin d'un match : relire points et classement
  *   />
@@ -399,6 +400,7 @@ export default function CoupeGame({
       } else if (a.t === 'resume') match.resumeFrom(null);
       else if (a.t === 'join') match.join(a.code);
       else if (a.t === 'defi') match.peek(a.link);
+      else if (a.t === 'challenge' && a.keyHash) match.challengePlayer(a.keyHash);
       else if (a.t === 'challenge') match.challenge(a.employeeId);
       else match.create();
       renderer.paint(null);

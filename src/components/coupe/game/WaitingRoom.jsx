@@ -19,7 +19,8 @@ const SHARE_MESSAGES = {
  * Salle d'attente : le code à 4 chiffres en grand (à montrer en personne) et « Envoyer le défi » :
  * une image (« <Nom> te défie », le code ; challengeImage.js) avec le lien
  * https://dhomebarber.fr/coupe?defi=…, ou le lien seul si l'appareil ne partage pas d'image.
- * Défi lancé à un barber : son pion, l'attente et le temps qui reste (il a reçu une notification).
+ * Défi lancé à un barber ou à un joueur de la liste : son pion (photo d'un client), l'attente et le
+ * temps qui reste (il a reçu une notification, ou le défi s'il a le jeu ouvert).
  * `reconnecting` : connexion reprise après un passage par une autre app (le serveur garde la salle,
  * le code reste le même). `me` : { name (nom montré à l'adversaire), role, photo } pour l'image.
  */
@@ -59,12 +60,12 @@ export default function WaitingRoom({ code, link, invited, roomAt, onCancel, rec
       <Panel labelledBy="cdg-invited" onClose={onCancel} closeLabel="Annuler le défi">
         <p className="cdg-eyebrow">Défi envoyé</p>
         <div className="flex items-center gap-4">
-          <Pawn name={invited.name} role={invited.role || 'barber'} tone="rival" size={64} />
-          <h2 className="cdg-message" id="cdg-invited">{invited.name || 'Le barber'}</h2>
+          <Pawn name={invited.name} role={invited.role || 'barber'} photo={invited.photo || null} tone="rival" size={64} />
+          <h2 className="cdg-message" id="cdg-invited">{invited.name || (invited.role === 'user' ? 'Ce joueur' : 'Le barber')}</h2>
         </div>
         <p className="cdg-wait" role="status"><span className="cdg-dot" aria-hidden="true" />{waitLine(invited.name || 'son accord')}</p>
         <p className="cdg-lead">
-          Il a reçu une notification et a {left > 0 ? mmss(left) : 'peu de temps'} pour accepter.
+          Défi envoyé : {left > 0 ? mmss(left) : 'peu de temps'} pour l&apos;accepter.
         </p>
         <button type="button" className="cdg-btn cdg-ghost" onClick={onCancel}>Annuler le défi</button>
       </Panel>

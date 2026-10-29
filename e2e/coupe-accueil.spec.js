@@ -55,6 +55,110 @@ function elementsQuiDepassent(page) {
   });
 }
 
+// Liste « Défier un joueur » (29 oct. 2026) : clients volontaires, seulement avec `features.coupePlayers`
+const blocJoueurs = (page) => page.getByRole('region', { name: 'Défier un joueur' });
+const interrupteurDefis = (page) => page.getByRole('switch', { name: 'Me proposer aux défis' });
+const CLE_LUCAS_LISTE = 'a1'.repeat(16);
+
+test.describe('La Coupe du Gang : défier un joueur', () => {
+  test('serveur sans la liste (`features.coupePlayers` absent) : ni section, ni lecture de la liste', async ({ page, api, connecter }) => {
+    await connecter(CLIENT);
+    await page.goto('/coupe');
+    await accueilPret(page);
+    await expect(blocJoueurs(page)).toHaveCount(0);
+    await expect(interrupteurDefis(page)).toHaveCount(0);
+    expect(api.requetesVers('GET', '/coupe/players')).toEqual([]);
+  });
+
+  test('liste : joignables « Défier », les autres « Pas dispo » ; « Me proposer aux défis » ; « Défier » ouvre le défi', async ({ page, api, connecter }) => {
+    api.donnees.parametresPublics.features.coupePlayers = true;
+    await connecter(CLIENT);
+    await page.goto('/coupe');
+    await accueilPret(page);
+    const bloc = blocJoueurs(page);
+    await expect(bloc).toContainText('En ligne · points en jeu');
+    const lignes = bloc.getByRole('listitem');
+    await expect(lignes).toHaveCount(3);
+    await expect(lignes.nth(0)).toContainText('Lucas M.');
+    await expect(lignes.nth(0)).toContainText('Dispo');
+    await expect(lignes.nth(0).locator('img')).toHaveAttribute('src', /\/api\/media\//);
+    await expect(bloc.getByRole('button', { name: 'Défier Lucas M.' })).toBeEnabled();
+    await expect(bloc.getByRole('button', { name: 'Défier Sarah K.' })).toBeEnabled();
+    await expect(lignes.nth(2)).toContainText('Pas dispo');
+    await expect(bloc.getByRole('button', { name: 'Défier Yanis B. : pas dispo' })).toBeDisabled();
+
+    // Se proposer aux défis : à part du classement (qui reste coché)
+    await expect(interrupteurDefis(page)).not.toBeChecked();
+    await interrupteurDefis(page).click();
+    await expect(toast(page, 'Tu es dans la liste des joueurs à défier')).toBeVisible();
+    await expect(interrupteurDefis(page)).toBeChecked();
+    await expect(interrupteur(page)).toBeChecked();
+    expect(api.requetesVers('PATCH', '/coupe/settings').map((r) => r.corps)).toEqual([{ challenge_opt_in: true }]);
+
+    // « Défier » : l'adresse du défi (`?player=<clé>`), retour = accueil
+    await bloc.getByRole('button', { name: 'Défier Lucas M.' }).click();
+    await expect(page).toHaveURL((url) => url.pathname === '/coupe' && url.searchParams.get('player') === CLE_LUCAS_LISTE);
+    await expect(partie(page)).toHaveAttribute('data-coupe-partie', 'online');
+    await expect(partie(page)).toHaveAttribute('data-coupe-action', 'challenge');
+    await page.goBack();
+    await expect(titre(page)).toBeVisible();
+    await expect(interrupteurDefis(page)).toBeChecked();
+  });
+
+  test('fiche d\'un joueur de la liste : Bloquer le retire de la liste ; liste vide ; l\'équipe défie sans y figurer', async ({ page, api, connecter }) => {
+    api.donnees.parametresPublics.features.coupePlayers = true;
+    await connecter(CLIENT);
+    await page.goto('/coupe');
+    await accueilPret(page);
+    const bloc = blocJoueurs(page);
+    await bloc.getByRole('button', { name: 'Fiche de Sarah K.' }).click();
+    const fiche = page.getByRole('dialog', { name: 'Sarah K.' });
+    await expect(fiche).toBeVisible();
+    await fiche.getByRole('button', { name: 'Bloquer' }).click();
+    await fiche.getByRole('button', { name: 'Bloquer' }).click();
+    await expect(toast(page, 'Sarah K. ne pourra plus te défier')).toBeVisible();
+    await fiche.getByRole('button', { name: 'Fermer' }).click();
+    await expect(bloc.getByRole('listitem')).toHaveCount(2);
+    await expect(bloc).not.toContainText('Sarah K.');
+    expect(api.requetesVers('POST', '/coupe/block').map((r) => r.corps)).toEqual([{ key_hash: 'b2'.repeat(16) }]);
+
+    // Personne dans la liste : on le dit, et comment y figurer
+    api.coupeRest.listeJoueurs = [];
+    await page.reload();
+    await accueilPret(page);
+    await expect(bloc).toContainText('Personne n’est dans la liste pour l’instant.');
+    await expect(bloc).toContainText('Active « Me proposer aux défis » pour y figurer.');
+  });
+
+  test('l\'équipe (admin, barber) voit la liste et peut défier, sans interrupteur', async ({ page, api, connecter }) => {
+    api.donnees.parametresPublics.features.coupePlayers = true;
+    await connecter(ADMIN);
+    await page.goto('/coupe');
+    await expect(titre(page)).toBeVisible();
+    await expect(blocJoueurs(page).getByRole('button', { name: 'Défier Lucas M.' })).toBeEnabled();
+    await expect(interrupteurDefis(page)).toHaveCount(0);
+  });
+
+  test('320 px : liste et interrupteur sans débordement', async ({ page, api, connecter }) => {
+    api.donnees.parametresPublics.features.coupePlayers = true;
+    api.coupeRest.listeJoueurs.push(
+      ...['Mohamed-Amine D.', 'Inès B.', 'Théo L.', 'Zoé P.'].map((name, i) => ({ key_hash: `${'d'.repeat(31)}${i}`, name, photo_url: null, reachable: i % 2 === 0 })),
+    );
+    await page.setViewportSize({ width: 320, height: 700 });
+    await connecter(CLIENT);
+    await page.goto('/coupe');
+    await accueilPret(page);
+    const bloc = blocJoueurs(page);
+    await expect(bloc.getByRole('listitem')).toHaveCount(5);
+    await bloc.getByRole('button', { name: 'Voir les 7 joueurs' }).click();
+    await expect(bloc.getByRole('listitem')).toHaveCount(7);
+    await expect(bloc.getByRole('button', { name: 'Voir moins' })).toHaveAttribute('aria-expanded', 'true');
+    await interrupteurDefis(page).scrollIntoViewIfNeeded();
+    expect(await elementsQuiDepassent(page)).toEqual([]);
+    await attendreSansDebordement(page, 'la liste des joueurs');
+  });
+});
+
 test.describe('La Coupe du Gang : accueil', () => {
   test('points, barbers, modes de jeu et haut du classement', async ({ page, api, connecter }) => {
     await connecter(CLIENT);

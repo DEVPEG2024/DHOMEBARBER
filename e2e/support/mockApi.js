@@ -16,7 +16,7 @@
  * ou `undefined` (comportement par défaut).
  */
 import { creerDonnees, CLIENT, media } from './donnees.js';
-import { FauxCoupe } from './fauxCoupe.js';
+import { FauxCoupe, CLE_LISTE_LUCAS, PHOTO_LUCAS } from './fauxCoupe.js';
 import { MAINTENANT, cleDuJourParis, instantParis } from './temps.js';
 
 export const API_HOTE = 'dhomebarber-api-3aabb8313cb6.herokuapp.com';
@@ -454,7 +454,10 @@ const ilYA = (minutes) => new Date(MAINTENANT.getTime() - minutes * 60_000).toIS
  *    fiches (et celles d'un compte de connexion) sont listées, comme le serveur ;
  *  - `blocages`, `signalements`, `rapports` (signalements vus par l'admin, avec le compte signalé) ;
  *  - `exclus` (clés exclues des classements par l'admin : opt-in refusé en 403 `banned`) et
- *    `remisAZero` (clés dont l'admin a remis les points à zéro).
+ *    `remisAZero` (clés dont l'admin a remis les points à zéro) ;
+ *  - `listeJoueurs` : liste « Défier un joueur » (`GET /coupe/players`, sans les joueurs bloqués
+ *    par le lecteur), servie seulement avec `features.coupePlayers` vrai ; `challenge_opt_in` d'un
+ *    compte dans `etats` (« Me proposer aux défis », clients seulement : 403 `not_client`).
  * Jeu fermé (`features.coupe` faux) : 404 `{ code: 'disabled' }`, comme avec COUPE_WS=off.
  */
 export class FauxCoupeRest {
@@ -486,6 +489,12 @@ export class FauxCoupeRest {
     this.signalements = [];
     this.exclus = new Set();
     this.remisAZero = [];
+    // Lucas M. : joignable, avec sa photo ; Sarah K. : joignable ; Yanis B. : pas joignable
+    this.listeJoueurs = [
+      { key_hash: CLE_LISTE_LUCAS, name: 'Lucas M.', photo_url: PHOTO_LUCAS, reachable: true },
+      { key_hash: 'b2'.repeat(16), name: 'Sarah K.', photo_url: null, reachable: true },
+      { key_hash: 'c3'.repeat(16), name: 'Yanis B.', photo_url: null, reachable: false },
+    ];
     this.rapports = [
       {
         id: 'rapport-1', reported_name: 'Yanis B.', reason: 'behavior', details: 'Réactions en boucle pendant le match.',
@@ -616,16 +625,35 @@ export class FauxCoupeRest {
     }
 
     if (methode === 'PATCH' && sous === '/settings') {
-      if (typeof corps.opt_in !== 'boolean') return { status: 400, json: { error: 'Choix invalide', code: 'invalid' } };
+      // `opt_in` (classement) et / ou `challenge_opt_in` (liste « Défier un joueur », clients seulement)
+      const valide = (v) => v === undefined || typeof v === 'boolean';
+      if (!valide(corps.opt_in) || !valide(corps.challenge_opt_in) || (corps.opt_in === undefined && corps.challenge_opt_in === undefined)) {
+        return { status: 400, json: { error: 'Choix invalide', code: 'invalid' } };
+      }
+      if (corps.challenge_opt_in === true && compte.role !== 'user') {
+        return { status: 403, json: { error: 'Réservé aux clients : les barbers ont « Dispo pour un match »', code: 'not_client' } };
+      }
       // Compte exclu des classements par le salon : il ne peut pas s'y remettre (contrat, section 7) ;
       // s'en retirer reste permis
-      if (corps.opt_in && this.exclus.has(this.cleDe(compte))) {
+      if ((corps.opt_in || corps.challenge_opt_in) && this.exclus.has(this.cleDe(compte))) {
         return { status: 403, json: { error: 'Le salon t\'a retiré du classement. Contacte-le si tu penses que c\'est une erreur.', code: 'banned' } };
       }
-      const j = this.joueurs.find((x) => x.cle === this.cleDe(compte));
-      if (j) j.opt_in = j.cle === 'salon' ? true : corps.opt_in;
-      else this.etats[compte.id] = { ...this.etatDe(compte), opt_in: corps.opt_in };
-      return { json: { opt_in: this.etatDe(compte).opt_in } };
+      if (corps.opt_in !== undefined) {
+        const j = this.joueurs.find((x) => x.cle === this.cleDe(compte));
+        if (j) j.opt_in = j.cle === 'salon' ? true : corps.opt_in;
+        else this.etats[compte.id] = { ...this.etatDe(compte), opt_in: corps.opt_in };
+      }
+      if (corps.challenge_opt_in !== undefined && compte.role === 'user') {
+        this.etats[compte.id] = { ...this.etatDe(compte), challenge_opt_in: corps.challenge_opt_in };
+      }
+      const etat = this.etatDe(compte);
+      return { json: { opt_in: !!etat.opt_in, challenge_opt_in: compte.role === 'user' && etat.challenge_opt_in === true } };
+    }
+
+    if (methode === 'GET' && sous === '/players') {
+      if (this.serveur.donnees.parametresPublics.features?.coupePlayers !== true) return null;
+      const bloques = new Set((this.blocages.get(compte.id) || []).map((b) => b.key_hash));
+      return { json: this.listeJoueurs.filter((p) => !bloques.has(p.key_hash)) };
     }
 
     if (methode === 'GET' && sous === '/barbers') {
@@ -769,6 +797,7 @@ export class FauxCoupeRest {
       eligible: !!etat.eligible,
       eligible_reason: etat.eligible ? null : etat.eligible_reason || 'not_eligible',
       opt_in: !!etat.opt_in,
+      challenge_opt_in: compte.role === 'user' && etat.challenge_opt_in === true && !this.exclus.has(cle),
       banned: this.exclus.has(cle),
       season_stats: { ...statsDe(etat.saison), rank: rang('saison') },
       total_stats: { ...statsDe(etat.total), rank: rang('total') },
@@ -780,7 +809,9 @@ export class FauxCoupeRest {
   joueur(cle, lecteur) {
     const saison = this.classement('saison', lecteur).find((l) => l.cle === cle);
     const total = this.classement('total', lecteur).find((l) => l.cle === cle);
-    const ligne = saison || total;
+    // Un joueur de la liste « Défier un joueur » a aussi sa fiche (Signaler, Bloquer), sans points
+    const deLaListe = this.listeJoueurs.find((p) => p.key_hash === cle);
+    const ligne = saison || total || (deLaListe ? { name: deLaListe.name, role: 'user' } : null);
     if (!ligne) return { status: 404, json: { error: 'Joueur introuvable', code: 'not_found' } };
     const stats = (l) => (l ? { points: l.points, rank: l.rank, wins: l.wins, losses: l.losses, matches: l.matches } : { points: 0, rank: null, wins: 0, losses: 0, matches: 0 });
     return { json: { name: ligne.name, role: ligne.role, season_stats: stats(saison), total_stats: stats(total) } };

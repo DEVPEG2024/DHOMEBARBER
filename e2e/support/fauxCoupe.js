@@ -20,6 +20,8 @@
  *    le test appelle `rejoint()` → `start {you: 0}` ;
  *  - `challenge {employee_id}` → salle réservée au barber (`invited`), ou `barber_unavailable` si
  *    `barberIndispo` ; `rejoint()` quand il accepte ;
+ *  - `challenge {key_hash}` (liste « Défier un joueur ») : CLE_LISTE_LUCAS → salle réservée à Lucas M.
+ *    (`invited` avec sa photo) ; autre clé ou `joueurIndispo` → `player_unavailable` ;
  *  - `join {code}` (CODE_MATCH) ou `join {link}` (LIEN_MATCH, LIEN_DEFI, LIEN_INVITE) → `room
  *    {side: 1}` puis `start {you: 1}` et un `state` ; si `createurAbsent`, `waiting_opponent {}`
  *    d'abord (le `start` part à `createurRevient()`) ; autre code ou lien → `error no_room` ;
@@ -56,6 +58,10 @@ export const LIEN_INVITE = 'n0uv3aud3f1x';
 /** Clés publiques des adversaires (Signaler, Bloquer). */
 export const CLE_KEVIN = 'cle-kevin-0123';
 export const CLE_LUCAS = 'cle-lucas-4567';
+/** Clé publique de Lucas M. dans la liste « Défier un joueur » (32 caractères hexadécimaux, GET /coupe/players). */
+export const CLE_LISTE_LUCAS = 'a1'.repeat(16);
+/** Photo de profil de Lucas M. (média de l'app), portée par `invited` d'un défi depuis la liste. */
+export const PHOTO_LUCAS = 'https://dhomebarber-api-3aabb8313cb6.herokuapp.com/api/media/0b9f0c1e-3c1f-4b8e-9a52-2f6a1c0d9e11';
 
 /** Écart fictif entre l'horloge du serveur et celle du navigateur (ms). */
 const DECALAGE_HORLOGE = 5000;
@@ -98,6 +104,8 @@ export class FauxCoupe {
     this.refuser = false;
     this.injoignable = false;
     this.barberIndispo = false;
+    /** `challenge {key_hash}` refusé (`player_unavailable`) : le joueur n'est plus dans la liste. */
+    this.joueurIndispo = false;
     this.retenirReprise = false;
     this.reprisesEnAttente = [];
     this.createurAbsent = false;
@@ -509,6 +517,16 @@ export class FauxCoupe {
       case 'challenge': {
         if (this.refusCreation) {
           cnx.envoyer({ t: 'error', code: this.refusCreation });
+          break;
+        }
+        if (m.employee_id === undefined && m.key_hash !== undefined) {
+          if (this.joueurIndispo || m.key_hash !== CLE_LISTE_LUCAS) {
+            cnx.envoyer({ t: 'error', code: 'player_unavailable' });
+            break;
+          }
+          const invited = { name: 'Lucas M.', role: 'user', photo: PHOTO_LUCAS };
+          this.nouvelleSalle(cnx, { you: 0, adversaire: LUCAS, lien: LIEN_MATCH, invited });
+          cnx.envoyer({ t: 'room', code: CODE_MATCH, link: LIEN_MATCH, side: 0, invited });
           break;
         }
         if (this.barberIndispo) {

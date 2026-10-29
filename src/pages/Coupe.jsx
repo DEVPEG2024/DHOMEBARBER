@@ -7,6 +7,7 @@ import { useAuth } from '@/lib/AuthContext';
 import { hapticFeedback } from '@/lib/capacitor';
 import {
   COUPE_ENABLED_KEY, invalidateCoupe, useCoupeBarbers, useCoupeLeaderboard, useCoupeMe, useCoupeMusic,
+  useCoupePlayers, useCoupePlayersEnabled,
 } from '@/lib/coupe/coupeApi';
 import { RESUME_EVENT, readPendingResume } from '@/lib/coupe/onlineMatch';
 import { preloadStadium } from '@/lib/coupe/stadiumImage';
@@ -16,6 +17,7 @@ import CoupeShell, { HERO_BUTTON } from '@/components/coupe/hub/CoupeShell';
 import { COUPE_VARS } from '@/components/coupe/hub/theme';
 import PointsCard from '@/components/coupe/hub/PointsCard';
 import BarberChallenge from '@/components/coupe/hub/BarberChallenge';
+import PlayerChallenge from '@/components/coupe/hub/PlayerChallenge';
 import FriendChallenge from '@/components/coupe/hub/FriendChallenge';
 import PlayModes from '@/components/coupe/hub/PlayModes';
 import LeaderboardPreview from '@/components/coupe/hub/LeaderboardPreview';
@@ -23,13 +25,14 @@ import OptInSwitch from '@/components/coupe/hub/OptInSwitch';
 import BlockedPlayers from '@/components/coupe/hub/BlockedPlayers';
 import { TrophyIcon } from '@/components/coupe/hub/icons';
 import {
-  BOT_LEVELS, ROLE_BARBER, ROLE_SALON, hasAppHistory, homeFor, isCoupeClosed, roleOfUser,
+  BOT_LEVELS, ROLE_BARBER, ROLE_SALON, ROLE_USER, hasAppHistory, homeFor, isCoupeClosed, roleOfUser,
 } from '@/components/coupe/hub/coupeFormat';
 
 /*
  * Accueil de La Coupe du Gang (/coupe), d'après l'artboard « Accueil de la Coupe » validé par le
  * propriétaire (contrat : docs/fonctions/coupe-du-gang-contrat.md, sections 2 et 5) : tes Points
- * de Coupe, défier un barber ou un ami, contre le salon, à deux sur ce téléphone, le haut du
+ * de Coupe, défier un barber, un joueur de la liste des volontaires (29 oct. 2026, seulement avec
+ * `features.coupePlayers`) ou un ami, contre le salon, à deux sur ce téléphone, le haut du
  * classement et l'interrupteur « Apparaître dans le classement ».
  *
  * Thème stade (planche du 29 oct. 2026, maquette « CoupeAccueilRouge », docs/fonctions/
@@ -42,7 +45,8 @@ import {
  *
  * Partie ouverte : l'écran de jeu (`CoupeGame`, plein écran) remplace l'accueil.
  *  - Par l'adresse (contrat 5.1) : `?defi=<lien>` (défi reçu), `?challenge=<employee_id>` (bouton
- *    « Défier » du profil d'un barber), `?mode=bot&level=apprenti|barber|boss`, `?mode=local`.
+ *    « Défier » du profil d'un barber), `?player=<key_hash>` (« Défier » de la liste des joueurs),
+ *    `?mode=bot&level=apprenti|barber|boss`, `?mode=local`.
  *  - Depuis l'accueil : une entrée d'historique est ajoutée (mêmes paramètres ; état `coupeAction`
  *    pour « Défier un ami » et « J'ai un code ») : le retour du navigateur (ou d'Android, quand le
  *    jeu ne l'a pas pris) ramène à l'accueil de la Coupe, pas à la page d'avant.
@@ -58,6 +62,8 @@ const LEVELS = BOT_LEVELS.map((l) => l.value);
 // Lien d'un défi : 12 caractères [a-z0-9] (contrat 4.2), un peu de marge ; id d'une fiche barber
 const LINK_RE = /^[A-Za-z0-9]{4,64}$/;
 const EMPLOYEE_RE = /^[A-Za-z0-9-]{1,64}$/;
+// Clé publique d'un joueur de la liste (GET /coupe/players)
+const PLAYER_RE = /^[0-9a-f]{32}$/;
 
 /** Partie demandée par l'adresse ou par l'entrée d'historique posée par l'accueil ; null sinon. */
 function gameFromLocation(params, state) {
@@ -69,6 +75,12 @@ function gameFromLocation(params, state) {
   if (challenge !== null) {
     return EMPLOYEE_RE.test(challenge)
       ? { mode: 'online', action: { t: 'challenge', employeeId: challenge } }
+      : { invalid: 'challenge' };
+  }
+  const player = params.get('player');
+  if (player !== null) {
+    return PLAYER_RE.test(player)
+      ? { mode: 'online', action: { t: 'challenge', keyHash: player } }
       : { invalid: 'challenge' };
   }
   const mode = params.get('mode');
@@ -170,8 +182,11 @@ function CoupeHub({ openGame }) {
   // Seul écran qui relit les barbers toutes les 30 s (« Dispo » change pendant qu'on regarde)
   const barbersQuery = useCoupeBarbers({ poll: true });
   const leaderboardQuery = useCoupeLeaderboard('season');
+  // Liste « Défier un joueur » : seulement si le serveur la connaît, relue toutes les 30 s
+  const playersOn = useCoupePlayersEnabled();
+  const playersQuery = useCoupePlayers({ enabled: playersOn, poll: true });
   const pendingResume = usePendingResume();
-  const closed = [meQuery, barbersQuery, leaderboardQuery].some((q) => isCoupeClosed(q.error));
+  const closed = [meQuery, barbersQuery, leaderboardQuery, playersQuery].some((q) => isCoupeClosed(q.error));
 
   // Coupure par le serveur : le drapeau est relu (l'accueil de l'app et le fil cachent la Coupe)
   useEffect(() => {
@@ -226,6 +241,15 @@ function CoupeHub({ openGame }) {
             eligible={meData ? meData.eligible !== false : true}
             onChallenge={(b) => openGame(`?challenge=${encodeURIComponent(b.employee_id)}`)}
           />
+          {playersOn && (
+            <PlayerChallenge
+              query={playersQuery}
+              me={meData}
+              isClient={role === ROLE_USER}
+              eligible={meData ? meData.eligible !== false : true}
+              onChallenge={(p) => openGame(`?player=${encodeURIComponent(p.key_hash)}`)}
+            />
+          )}
           <FriendChallenge
             onCreate={() => openGame('', { coupeAction: { t: 'create' } })}
             onJoin={(code) => openGame('', { coupeAction: { t: 'join', code } })}

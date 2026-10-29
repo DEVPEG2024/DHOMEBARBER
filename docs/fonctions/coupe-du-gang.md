@@ -139,6 +139,15 @@ Aller-retour mesuré depuis le Mac (fixe) vers la région us : médiane 106 ms, 
   - au plafond de 20 pushs de l'heure (`barberCapped`, lecture seule), plus proposé sans jeu ouvert ;
   - push web en urgence haute (`urgency: 'high'`, `pushHelper.sendToSubscriptions`) : un Android en veille le reçoit dans les 2 minutes ;
   - « jeu ouvert » (`isOnline` des salles) compté seulement en salle d'attente ou sur l'écran de fin, les seuls écrans où l'app affiche « Défi reçu ».
+### Défier un joueur : liste des clients volontaires (29 oct. 2026 au soir)
+
+Demande du propriétaire : « ajoute la possibilité de jouer entre clients via une liste de personnes à défier qui auront autorisé à figurer sur cette liste comme au classement ».
+- Interrupteur **« Me proposer aux défis »** (`users.coupe_challenge_opt_in`, clients seulement, **à part** de celui du classement ; compte exclu par le salon : bloqué), en bas de la section « Défier un joueur » de `/coupe` (`src/components/coupe/hub/PlayerChallenge.jsx`, `OptInSwitch kind="challenge"`).
+- Liste `GET /coupe/players` : les volontaires, « Défier » rouge s'ils sont joignables (jeu ouvert, ou notifications du site de jour, sous 10 défis de l'heure), « Pas dispo » sinon ; 5 lignes puis « Voir les N joueurs » ; avatar ou nom → fiche (Signaler, Bloquer : un joueur bloqué disparaît de la liste). L'équipe défie depuis la liste sans y figurer. On ne cherche jamais un client par son nom.
+- « Défier » → `/coupe?player=<key_hash>` → `challenge {key_hash}` sur `/ws/coupe` ; l'attente montre son pion avec sa photo ; refus `player_unavailable` (« Ce joueur n'est plus disponible pour un match »).
+- Section affichée seulement avec `features.coupePlayers` (serveur v164 et suivants). Serveur : `challengeablePlayers`, `canChallengePlayer`, `resolveChallengeKey` (`lib/coupeResults.js`), `playerCapped` (`lib/coupeNotify.js`). Contrat : `coupe-du-gang-contrat.md` (sections 1, 2, 4.2, 4.4). Confidentialité : `public/privacy.html` section 7 bis (la phrase « jamais votre photo » corrigée en même temps : les photos des clients sont montrées dans le jeu depuis le 29 oct.).
+- **Limite** : comme pour les barbers, un client n'est prévenu que par une notification **web** (les apps publiées n'ont pas le jeu) ou s'il a le jeu ouvert ; dans les apps, il faudra les pushs natifs du build 18.
+
 - **Qui reçoit un défi aujourd'hui** : push web seulement (les apps 1.0.9 / 1.0.17 n'ont pas le jeu) ; seul Kevin a un abonnement web (Dom et Romain : iOS seulement) : leur faire activer les notifications web, ou attendre les pushs natifs du build 18. Défi entre amis : lien partagé, aucune notification, valable 2 minutes.
 
 ### Avant d'ouvrir les points (revue de sécurité du 29 oct. 2026)

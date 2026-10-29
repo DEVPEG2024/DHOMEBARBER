@@ -6,7 +6,7 @@ import { Switch } from '@/components/ui/switch';
 import { hapticFeedback } from '@/lib/capacitor';
 import { COUPE_BANNED_TEXT, coupeErrorText } from '../coupeErrors';
 import { COUPE_COLORS } from '../palette';
-import { COUPE_ME_KEY, invalidateCoupe, setCoupeOptIn } from '@/lib/coupe/coupeApi';
+import { COUPE_ME_KEY, invalidateCoupe, setCoupeChallengeOptIn, setCoupeOptIn } from '@/lib/coupe/coupeApi';
 
 /**
  * Interrupteur « Apparaître dans le classement » de la Coupe (à part de celui de la carte Gang,
@@ -17,15 +17,39 @@ import { COUPE_ME_KEY, invalidateCoupe, setCoupeOptIn } from '@/lib/coupe/coupeA
  * Compte exclu des classements par le salon (`banned` de `GET /coupe/me`) : interrupteur éteint et
  * bloqué, avec la raison (le serveur refuserait en 403 `banned`).
  * Thème stade : allumé en rouge ; zone de toucher agrandie à 44 px autour de l'interrupteur.
+ *
+ * `kind="challenge"` (29 oct. 2026) : « Me proposer aux défis », figurer dans la liste « Défier un
+ * joueur » (`challenge_opt_in`, clients seulement : la section ne le montre pas à l'équipe), à part
+ * du classement, avec les mêmes règles (compte exclu : bloqué).
  */
 const STAR_STYLE = { color: COUPE_COLORS.etoile, fill: COUPE_COLORS.etoile };
 
-export default function OptInSwitch({ value, isSalon = false, banned = false, id = 'coupe-optin' }) {
+const KINDS = {
+  leaderboard: {
+    field: 'opt_in',
+    save: setCoupeOptIn,
+    label: 'Apparaître dans le classement',
+    hint: 'Sinon tu joues quand même, sans figurer ici.',
+    on: 'Tu apparais dans le classement de la Coupe',
+    off: 'Tu n’apparais plus dans le classement de la Coupe',
+  },
+  challenge: {
+    field: 'challenge_opt_in',
+    save: setCoupeChallengeOptIn,
+    label: 'Me proposer aux défis',
+    hint: 'Les joueurs te voient dans cette liste et peuvent te défier. Tu reçois le défi si le jeu est ouvert ou si les notifications du site sont activées.',
+    on: 'Tu es dans la liste des joueurs à défier',
+    off: 'Tu n’es plus dans la liste des joueurs à défier',
+  },
+};
+
+export default function OptInSwitch({ value, isSalon = false, banned = false, id = 'coupe-optin', kind = 'leaderboard' }) {
+  const k = KINDS[kind] || KINDS.leaderboard;
   const queryClient = useQueryClient();
   const [pending, setPending] = useState(null);
   const checked = banned ? false : pending ?? !!value;
 
-  if (isSalon) {
+  if (isSalon && kind === 'leaderboard') {
     return (
       <div className="flex items-start gap-3 rounded-2xl border border-white/10 bg-[color:var(--coupe-noir2)] p-3.5">
         <Star className="mt-0.5 h-4 w-4 shrink-0" style={STAR_STYLE} strokeWidth={1.5} aria-hidden="true" />
@@ -42,14 +66,16 @@ export default function OptInSwitch({ value, isSalon = false, banned = false, id
     setPending(next);
     hapticFeedback();
     try {
-      const res = await setCoupeOptIn(next);
-      const saved = typeof res?.opt_in === 'boolean' ? res.opt_in : next;
-      queryClient.setQueryData(COUPE_ME_KEY, (d) => (d && typeof d === 'object' ? { ...d, opt_in: saved } : d));
-      queryClient.setQueriesData({ queryKey: ['coupe', 'leaderboard'] }, (d) => (
-        d && typeof d === 'object' && d.me ? { ...d, me: { ...d.me, opt_in: saved } } : d
-      ));
+      const res = await k.save(next);
+      const saved = typeof res?.[k.field] === 'boolean' ? res[k.field] : next;
+      queryClient.setQueryData(COUPE_ME_KEY, (d) => (d && typeof d === 'object' ? { ...d, [k.field]: saved } : d));
+      if (kind === 'leaderboard') {
+        queryClient.setQueriesData({ queryKey: ['coupe', 'leaderboard'] }, (d) => (
+          d && typeof d === 'object' && d.me ? { ...d, me: { ...d.me, opt_in: saved } } : d
+        ));
+      }
       invalidateCoupe(queryClient);
-      toast.success(saved ? 'Tu apparais dans le classement de la Coupe' : 'Tu n’apparais plus dans le classement de la Coupe');
+      toast.success(saved ? k.on : k.off);
     } catch (err) {
       // Compte exclu des classements par le salon : 403 `banned` (« Tu ne peux plus apparaître… »)
       toast.error(coupeErrorText(err, 'Impossible d’enregistrer ton choix. Réessaie.'));
@@ -62,10 +88,10 @@ export default function OptInSwitch({ value, isSalon = false, banned = false, id
     <div className="flex items-center gap-3.5 rounded-2xl border border-white/10 bg-[color:var(--coupe-noir2)] p-3.5">
       <div className="min-w-0 flex-1">
         <label htmlFor={id} className="block text-sm font-semibold text-white">
-          Apparaître dans le classement
+          {k.label}
         </label>
         <p className="mt-1 text-xs leading-snug text-[color:var(--coupe-gris)]">
-          {banned ? COUPE_BANNED_TEXT : 'Sinon tu joues quand même, sans figurer ici.'}
+          {banned ? COUPE_BANNED_TEXT : k.hint}
         </p>
       </div>
       <Switch

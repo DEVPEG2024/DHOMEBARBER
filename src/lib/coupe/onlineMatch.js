@@ -23,7 +23,8 @@
  * de 180° (flipPoint / flipVel) à l'entrée comme à la sortie du réseau.
  *
  *   const match = new OnlineMatch({ onChange: (ui) => …, onEvent: (type, data) => … });
- *   match.create();   // ou join('4821'), joinLink(lien), peek(lien) puis accept(), challenge(idFiche)
+ *   match.create();   // ou join('4821'), joinLink(lien), peek(lien) puis accept(), challenge(idFiche),
+ *                     // challengePlayer(cléPublique) (liste « Défier un joueur »)
  *   // à chaque frame : match.update(dt); renderer.render(match.getFrame(), dt);
  *   match.destroy();  // écran fermé : en plein match, ce n'est PAS un abandon (voir plus bas)
  *
@@ -206,6 +207,8 @@ const ERRORS = {
     retry: false,
   },
   barber_unavailable: { message: "Ce barber n'est plus dispo pour un match", retry: false },
+  // Liste « Défier un joueur » : sorti de la liste, plus joignable, déjà en match…
+  player_unavailable: { message: "Ce joueur n'est plus disponible pour un match", retry: false },
   rate_limited: { message: "Trop d'essais : attends quelques minutes avant de recommencer", retry: false },
   server_full: { message: 'Trop de matchs en ce moment : réessaie dans une minute', retry: true },
   update_required: { message: "Mets l'app à jour pour jouer en ligne", retry: false },
@@ -216,7 +219,7 @@ const ERRORS = {
 
 const SERVER_CODES = new Set(['not_allowed', 'disabled', 'no_room', 'own_room', 'room_expired', 'rate_limited',
   'server_full', 'update_required', 'replaced', 'server_error', 'blocked', 'barber_unavailable',
-  'already_playing', 'idle', 'salon_vs_salon']);
+  'player_unavailable', 'already_playing', 'idle', 'salon_vs_salon']);
 
 // Fermetures sans message `error` préalable (ou arrivées seules)
 const CLOSE_KINDS = {
@@ -404,6 +407,16 @@ export class OnlineMatch {
     const id = String(employeeId ?? '').trim().slice(0, 64);
     if (!id) { this._failNow('barber_unavailable', { t: 'challenge', employee_id: '' }); return; }
     this._begin({ t: 'challenge', employee_id: id });
+  }
+
+  /**
+   * Défie un client de la liste « Défier un joueur » (clé publique `key_hash` de GET /coupe/players) :
+   * salle réservée à son compte, il reçoit une notification (ou le défi, jeu ouvert).
+   */
+  challengePlayer(keyHash) {
+    const key = String(keyHash ?? '').trim().toLowerCase();
+    if (!/^[0-9a-f]{32}$/.test(key)) { this._failNow('player_unavailable', { t: 'challenge', key_hash: '' }); return; }
+    this._begin({ t: 'challenge', key_hash: key });
   }
 
   /**
@@ -600,8 +613,10 @@ export class OnlineMatch {
   /** Le dernier essai visait un lien (défi) plutôt qu'un code. */
   viaLink() { return !!(this.lastAction && (this.lastAction.t === 'peek' || this.lastAction.link !== undefined)); }
 
-  /** Prénom du barber défié (messages d'erreur). */
-  invitedName() { return this.ui.invited?.name || 'Le barber'; }
+  /** Prénom du barber ou du joueur défié (messages d'erreur). */
+  invitedName() {
+    return this.ui.invited?.name || (this.lastAction?.key_hash !== undefined ? 'Ce joueur' : 'Le barber');
+  }
 
   // ─── Boucle (appelée à chaque frame) ──────────────────────────────
 
@@ -1032,8 +1047,9 @@ export class OnlineMatch {
     if (back) this._endResume();
     const link = cleanChallengeLink(m.link);
     if (link) this.link = link;
+    // `photo` : celle d'un client défié depuis la liste des joueurs (jamais d'un barber)
     const inv = m.invited && typeof m.invited === 'object'
-      ? { name: String(m.invited.name || '').slice(0, 60), role: String(m.invited.role || 'barber') }
+      ? { name: String(m.invited.name || '').slice(0, 60), role: String(m.invited.role || 'barber'), photo: photoUrlOrNull(m.invited.photo) }
       : null;
     this._set({
       status: 'room',
@@ -1058,7 +1074,8 @@ export class OnlineMatch {
   }
 
   _onInvite(m) {
-    const from = { name: String(m.from?.name || '').slice(0, 60), role: String(m.from?.role || 'user') };
+    // `photo` : celle du client qui défie (serveur du 29 oct. 2026 au soir), jamais d'un barber
+    const from = { name: String(m.from?.name || '').slice(0, 60), role: String(m.from?.role || 'user'), photo: photoUrlOrNull(m.from?.photo) };
     const link = cleanChallengeLink(m.link);
     const secs = clampN(Number(m.expires_in) || 120, 0, 600);
     if (this.ui.status === 'connecting' && this.lastAction?.t === 'peek') {

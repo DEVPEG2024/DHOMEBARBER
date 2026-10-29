@@ -9,9 +9,11 @@
  *   useCoupeLeaderboard(scope)     → `GET /coupe/leaderboard?scope=season|total`
  *   useCoupeFlagQuery()            → requête du drapeau (chargement, erreur) pour la garde de `/coupe`
  *   useCoupeBarbers({ poll })      → `GET /coupe/barbers` (relu toutes les 30 s avec `poll`)
+ *   useCoupePlayersEnabled()       → liste « Défier un joueur » connue du serveur (`features.coupePlayers`)
+ *   useCoupePlayers({ poll })      → `GET /coupe/players` (relu toutes les 30 s avec `poll`)
  *   useCoupeBlocks()               → `GET /coupe/blocks`
  *   useCoupeAdminOverview()        → `GET /coupe/admin/overview` (admin)
- * Envois (promesses) : setCoupeOptIn, setCoupeAvailability, blockCoupePlayer, unblockCoupePlayer,
+ * Envois (promesses) : setCoupeOptIn, setCoupeChallengeOptIn, setCoupeAvailability, blockCoupePlayer, unblockCoupePlayer,
  * reportCoupePlayer, setCoupeReportStatus, setCoupePlayerBanned, resetCoupePlayer (admin). Après
  * un envoi, `invalidateCoupe(queryClient)`.
  */
@@ -23,6 +25,9 @@ export const COUPE_ENABLED_KEY = ['coupe', 'enabled'];
 export const COUPE_ME_KEY = ['coupe', 'me'];
 export const coupeLeaderboardKey = (scope) => ['coupe', 'leaderboard', scope === 'total' ? 'total' : 'season'];
 export const COUPE_BARBERS_KEY = ['coupe', 'barbers'];
+export const COUPE_PLAYERS_KEY = ['coupe', 'players'];
+// Drapeau `features.coupePlayers` : sous `enabled` pour échapper à invalidateCoupe comme le drapeau du jeu
+export const COUPE_PLAYERS_FLAG_KEY = ['coupe', 'enabled', 'players'];
 export const COUPE_BLOCKS_KEY = ['coupe', 'blocks'];
 export const COUPE_ADMIN_KEY = ['coupe', 'admin'];
 export const COUPE_MUSIC_KEY = ['coupe', 'music'];
@@ -78,6 +83,24 @@ export function useCoupeMusic() {
   return data === true;
 }
 
+/**
+ * Liste « Défier un joueur » (29 oct. 2026) : vraie seulement si le serveur annonce
+ * `features.coupePlayers` (un serveur plus ancien n'a ni la liste ni le défi par `key_hash`).
+ * Rejette sur une panne.
+ */
+export async function fetchCoupePlayersEnabled() {
+  const res = await fetch(`${API_SERVER_URL}/api/apps/public/prod/public-settings/by-id/${resolvedAppId}`);
+  if (!res.ok) throw new Error(`Paramètres publics : ${res.status}`);
+  const data = await res.json();
+  return data?.features?.coupePlayers === true;
+}
+
+/** Liste des joueurs à défier proposée ? Faux tant que rien n'est chargé ou si la lecture a échoué. */
+export function useCoupePlayersEnabled() {
+  const { data } = useQuery({ queryKey: COUPE_PLAYERS_FLAG_KEY, queryFn: fetchCoupePlayersEnabled, staleTime: 5 * 60 * 1000, retry: 1 });
+  return data === true;
+}
+
 /** Le jeu est-il ouvert ? Faux tant que rien n'est chargé ou si la lecture a échoué (entrées cachées). */
 export function useCoupeEnabled() {
   const { data } = useCoupeFlagQuery();
@@ -104,6 +127,12 @@ export const fetchCoupeLeaderboard = (scope = 'season') =>
 
 /** `[{ employee_id, name, photo_url, available, busy }]` */
 export const fetchCoupeBarbers = () => apiRequest('GET', apiUrl('/coupe/barbers'));
+
+/**
+ * Liste « Défier un joueur » : `[{ key_hash, name, photo_url, reachable }]`, les clients qui ont
+ * accepté d'y figurer, joignables d'abord (`reachable` : le défi les préviendra maintenant).
+ */
+export const fetchCoupePlayers = () => apiRequest('GET', apiUrl('/coupe/players'));
 
 /** `{ name, role, season_stats, total_stats }` */
 export const fetchCoupePlayer = (keyHash) => apiRequest('GET', apiUrl(`/coupe/player/${encodeURIComponent(keyHash)}`));
@@ -145,6 +174,17 @@ export function useCoupeBarbers({ enabled = true, poll = false } = {}) {
   });
 }
 
+/** `poll` : relire toutes les 30 s (accueil de la Coupe : « joignable » change pendant qu'on regarde). */
+export function useCoupePlayers({ enabled = true, poll = false } = {}) {
+  return useQuery({
+    queryKey: COUPE_PLAYERS_KEY,
+    queryFn: fetchCoupePlayers,
+    enabled,
+    staleTime: 15 * 1000,
+    refetchInterval: enabled && poll ? 30 * 1000 : false,
+  });
+}
+
 export function useCoupeBlocks({ enabled = true } = {}) {
   return useQuery({ queryKey: COUPE_BLOCKS_KEY, queryFn: fetchCoupeBlocks, enabled, staleTime: 60 * 1000 });
 }
@@ -157,6 +197,10 @@ export function useCoupeAdminOverview({ enabled = true } = {}) {
 
 /** Apparaître (ou non) dans le classement de la Coupe (interrupteur à part de celui de la carte Gang). */
 export const setCoupeOptIn = (optIn) => apiRequest('PATCH', apiUrl('/coupe/settings'), { opt_in: !!optIn });
+
+/** Client : figurer (ou non) dans la liste « Défier un joueur » → `{ opt_in, challenge_opt_in }`. */
+export const setCoupeChallengeOptIn = (optIn) =>
+  apiRequest('PATCH', apiUrl('/coupe/settings'), { challenge_opt_in: !!optIn });
 
 /** Barber : « Dispo pour un match ». */
 export const setCoupeAvailability = (available) =>

@@ -8,7 +8,7 @@
 // à la souris, partie rejouée image par image et simulée à l'identique ici) et à deux sur un téléphone.
 import { test, expect } from './support/test.js';
 import { ADMIN, CLIENT, MOT_DE_PASSE, media } from './support/donnees.js';
-import { CODE_MATCH, LIEN_MATCH, LIEN_DEFI, LIEN_INVITE, CLE_KEVIN } from './support/fauxCoupe.js';
+import { CODE_MATCH, LIEN_MATCH, LIEN_DEFI, LIEN_INVITE, CLE_KEVIN, CLE_LISTE_LUCAS, PHOTO_LUCAS } from './support/fauxCoupe.js';
 import { attendreSansDebordement, toast } from './support/outils.js';
 import { LocalMatch } from '../src/lib/coupe/localMatch.js';
 import { MS, MG, viewOf, screenToWorld } from '../src/lib/coupe/renderer.js';
@@ -275,6 +275,29 @@ test.describe('La Coupe du Gang : en ligne (protocole v2)', () => {
     api.coupe.barberIndispo = true;
     await page.goto('/coupe-test?challenge=emp-kevin');
     await expect(page.getByRole('alert')).toHaveText('Ce barber n\'est plus dispo pour un match');
+  });
+
+  test('défier un joueur de la liste : joueur plus disponible ; sinon son pion avec sa photo, l\'attente, puis le match', async ({ page, api, connecter }) => {
+    await connecter(CLIENT);
+    // Sorti de la liste (ou plus joignable) entre-temps : le serveur refuse, l'app le dit
+    api.coupe.joueurIndispo = true;
+    await page.goto(`/coupe?player=${CLE_LISTE_LUCAS}`);
+    await expect(page.getByRole('alert')).toHaveText('Ce joueur n\'est plus disponible pour un match');
+    await expect(page.getByRole('button', { name: 'Réessayer' })).toHaveCount(0);
+
+    api.coupe.joueurIndispo = false;
+    await page.goto(`/coupe?player=${CLE_LISTE_LUCAS}`);
+    await expect(page.getByRole('heading', { name: 'Lucas M.' })).toBeVisible();
+    await expect(page.getByText('En attente de Lucas M.')).toBeVisible();
+    await expect(page.getByText(/^Défi envoyé : \d:\d\d pour l'accepter\.$/)).toBeVisible();
+    await expect(page.locator('.cdg-pawn img')).toHaveAttribute('src', PHOTO_LUCAS);
+    expect(api.coupe.messages('challenge')).toEqual([
+      { t: 'challenge', key_hash: CLE_LISTE_LUCAS },
+      { t: 'challenge', key_hash: CLE_LISTE_LUCAS },
+    ]);
+    api.coupe.rejoint();
+    await expect(page.getByText('En ligne', { exact: true })).toBeVisible();
+    await expect(page.getByText('Score : Toi 0 – 0 Lucas M.')).toBeAttached();
   });
 
   test('fin du match : Signaler puis Bloquer l\'adversaire', async ({ page, api, connecter }) => {
