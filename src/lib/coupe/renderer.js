@@ -404,10 +404,11 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
     c.lineWidth = 2;
     c.lineCap = 'round';
     c.strokeRect(1, 1, W - 2, H - 2);
+    // Ligne médiane arrêtée au rond central, comme sur l'image du stade : le rond ne garde que le logo
     c.beginPath();
     c.moveTo(1, H / 2);
-    c.lineTo(W / 2 - 30, H / 2);
-    c.moveTo(W / 2 + 30, H / 2);
+    c.lineTo(W / 2 - 48, H / 2);
+    c.moveTo(W / 2 + 48, H / 2);
     c.lineTo(W - 1, H / 2);
     c.stroke();
     c.beginPath();
@@ -431,8 +432,9 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
       c.arc(x, y, 10, s, s + Math.PI / 2);
       c.stroke();
     });
+    // Points de penalty seulement : pas de point central sur le logo
     c.fillStyle = COLORS.chalk;
-    [[W / 2, H / 2], [W / 2, 72], [W / 2, H - 72]].forEach(([x, y]) => {
+    [[W / 2, 72], [W / 2, H - 72]].forEach(([x, y]) => {
       c.beginPath();
       c.arc(x, y, 2.6, 0, TAU);
       c.fill();

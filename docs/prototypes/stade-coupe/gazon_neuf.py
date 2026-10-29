@@ -165,11 +165,12 @@ for top in (True, False):
         xx += step
     layer.alpha_composite(hatch, (int(a[0]), int(a[1])))
 rect_stroke(1, 1, W - 1, H - 1)
-# Ligne médiane coupée autour du logo du centre
-LOGO_GAP = 38
-d.line([Pt(1, H / 2), Pt(W / 2 - LOGO_GAP, H / 2)], fill=CHALK, width=LW)
-d.line([Pt(W / 2 + LOGO_GAP, H / 2), Pt(W - 1, H / 2)], fill=CHALK, width=LW)
-arc(W / 2, H / 2, 48, 0, 2 * math.pi)
+# Ligne médiane arrêtée au rond central, jamais dedans : le rond ne garde que le logo (demande du
+# propriétaire du 29 oct. 2026 au soir : « pas de rond au milieu du logo, pas de lignes dans le rond »)
+CENTER_R = 48
+d.line([Pt(1, H / 2), Pt(W / 2 - CENTER_R, H / 2)], fill=CHALK, width=LW)
+d.line([Pt(W / 2 + CENTER_R, H / 2), Pt(W - 1, H / 2)], fill=CHALK, width=LW)
+arc(W / 2, H / 2, CENTER_R, 0, 2 * math.pi)
 bx0, sx0 = (W - BBW) / 2, (W - SBW) / 2
 rect_stroke(bx0, 1, bx0 + BBW, BBD)
 rect_stroke(bx0, H - BBD, bx0 + BBW, H - 1)
@@ -180,13 +181,15 @@ arc(W / 2, 72, 48, a, math.pi - a)
 arc(W / 2, H - 72, 48, math.pi + a, 2 * math.pi - a)
 for (x, y, s) in [(1, 1, 0), (W - 1, 1, math.pi / 2), (W - 1, H - 1, math.pi), (1, H - 1, math.pi * 1.5)]:
     arc(x, y, 10, s, s + math.pi / 2)
-for (x, y) in [(W / 2, H / 2), (W / 2, 72), (W / 2, H - 72)]:
+# Points de penalty seulement : pas de point central sur le logo
+for (x, y) in [(W / 2, 72), (W / 2, H - 72)]:
     disc(x, y, 2.6, CHALK)
 # Logo Nova : masque blanc sur fond transparent (nova-spirale.png, découpé de l'image du
-# propriétaire sans la croix bleue de repère), 64 unités de large pour la spirale, son centre (le
-# repère, point 432 ; 324,5 de la découpe) sur le point central ; peint comme les lignes, plus pâle
+# propriétaire sans la croix bleue de repère), 64 unités de large pour la spirale, centrée dans le
+# rond sur sa forme (milieu de la découpe, 404 ; 310, et non plus son œil 432 ; 324,5 : sans point
+# central, l'œil décalait la spirale de 2 unités vers la gauche) ; peint comme les lignes, plus pâle
 LOGO = Image.open(logo_path).convert("RGBA")
-LOGO_EYE = (432.0, 324.5)
+LOGO_EYE = (404.0, 310.0)
 LOGO_W = 64 / (LOGO.width - 12)  # unités par pixel de la découpe (6 px de marge de chaque côté)
 LOGO_ALPHA = 0.5
 lw, lh = round(LOGO.width * LOGO_W * U), round(LOGO.height * LOGO_W * U)
