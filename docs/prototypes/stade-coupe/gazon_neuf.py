@@ -1,10 +1,12 @@
 """Gazon refait d'un seul tenant (aucun raccord) puis terrain du jeu tracé dessus, aux mesures de
 src/lib/coupe/engine.js et renderer.js. Les personnes, drapeaux et la piste autour sont gardés.
-Usage : python3 gazon_neuf.py <stade-propre.png> <police.ttf> <sortie.png>"""
+Logo Nova (spirale, demande du propriétaire du 29 oct. 2026) peint au centre du rond central, à
+la place de l'ancien « DHB » pâle.
+Usage : python3 gazon_neuf.py <stade-propre.png> <nova-spirale.png> <sortie.png>"""
 import sys, math, random
-from PIL import Image, ImageDraw, ImageFilter, ImageChops, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageChops
 
-src, font_path, out = sys.argv[1:4]
+src, logo_path, out = sys.argv[1:4]
 im = Image.open(src).convert("RGB")
 WD, HD = im.size
 random.seed(5)
@@ -163,8 +165,10 @@ for top in (True, False):
         xx += step
     layer.alpha_composite(hatch, (int(a[0]), int(a[1])))
 rect_stroke(1, 1, W - 1, H - 1)
-d.line([Pt(1, H / 2), Pt(W / 2 - 30, H / 2)], fill=CHALK, width=LW)
-d.line([Pt(W / 2 + 30, H / 2), Pt(W - 1, H / 2)], fill=CHALK, width=LW)
+# Ligne médiane coupée autour du logo du centre
+LOGO_GAP = 38
+d.line([Pt(1, H / 2), Pt(W / 2 - LOGO_GAP, H / 2)], fill=CHALK, width=LW)
+d.line([Pt(W / 2 + LOGO_GAP, H / 2), Pt(W - 1, H / 2)], fill=CHALK, width=LW)
 arc(W / 2, H / 2, 48, 0, 2 * math.pi)
 bx0, sx0 = (W - BBW) / 2, (W - SBW) / 2
 rect_stroke(bx0, 1, bx0 + BBW, BBD)
@@ -178,8 +182,19 @@ for (x, y, s) in [(1, 1, 0), (W - 1, 1, math.pi / 2), (W - 1, H - 1, math.pi), (
     arc(x, y, 10, s, s + math.pi / 2)
 for (x, y) in [(W / 2, H / 2), (W / 2, 72), (W / 2, H - 72)]:
     disc(x, y, 2.6, CHALK)
-fnt = ImageFont.truetype(font_path, int(30 * U))
-d.text(Pt(W / 2, H / 2 + 1), "DHB", font=fnt, fill=(236, 248, 240, 41), anchor="mm")
+# Logo Nova : masque blanc sur fond transparent (nova-spirale.png, découpé de l'image du
+# propriétaire sans la croix bleue de repère), 64 unités de large pour la spirale, son centre (le
+# repère, point 432 ; 324,5 de la découpe) sur le point central ; peint comme les lignes, plus pâle
+LOGO = Image.open(logo_path).convert("RGBA")
+LOGO_EYE = (432.0, 324.5)
+LOGO_W = 64 / (LOGO.width - 12)  # unités par pixel de la découpe (6 px de marge de chaque côté)
+LOGO_ALPHA = 0.5
+lw, lh = round(LOGO.width * LOGO_W * U), round(LOGO.height * LOGO_W * U)
+alpha = LOGO.getchannel("A").resize((lw, lh), Image.LANCZOS).point(lambda v: round(v * LOGO_ALPHA))
+paint = Image.new("RGBA", (lw, lh), CHALK[:3] + (0,))
+paint.putalpha(alpha)
+cx, cy = Pt(W / 2, H / 2)
+layer.alpha_composite(paint, (round(cx - LOGO_EYE[0] * LOGO_W * U), round(cy - LOGO_EYE[1] * LOGO_W * U)))
 for (x, y) in [(GL, 0), (GR, 0), (GL, H), (GR, H)]:
     disc(x, y, POST, (255, 255, 255, 255))
 layer = layer.resize((WD, HD), Image.LANCZOS).filter(ImageFilter.GaussianBlur(0.35))
