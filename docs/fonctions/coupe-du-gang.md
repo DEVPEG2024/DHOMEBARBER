@@ -90,6 +90,19 @@ But : juger sur deux téléphones la sensation d'un match en ligne avec le serve
 - Coupure d'urgence : variable Heroku `COUPE_WS=off` (`/ws/coupe` refusé, `/ws/live` intact).
 - Chaque fin de match écrit une ligne `[Coupe] fin de match …` (frappes acceptées / refusées par raison, écarts p50 / p95), sans nom ni identifiant : elle sert à régler les tolérances.
 
+### Essai sur deux téléphones (29 oct. 2026, vers 02:50 Paris) : validé
+
+Serveur Heroku v157, app commit 8d6494f. Verdict du propriétaire : « c'est bien sur mobile ». Trois matchs (3-1, 3-0, 3-2) d'après les lignes `[Coupe] fin de match` :
+
+| | match 1 | match 2 | match 3 |
+|---|---|---|---|
+| frappes acceptées / refusées | 40 / 0 | 27 / 0 | 38 / 0 |
+| écart ballon p50 / p95 (unités) | 2,8 / 19,5 | 3,3 / 23,5 | 4,9 / 27 |
+| âge d'une frappe p50 / p95 | 67 / 96 ms | 66 / 85 ms | 65 / 90 ms |
+| recalage joueur p50 / p95 | 12,5 / 42,1 | 12,5 / 54 | 25 / 82,8 |
+
+Aller-retour mesuré depuis le Mac (fixe) vers la région us : médiane 106 ms, p95 178 ms (`scripts/coupe-latency.js measure`). Le principe réseau est retenu ; pas de déménagement du serveur. Ces mesures servent à resserrer les tolérances avant les points (écart ballon p95 ≈ 27 contre 30 + 0,06 × vitesse toléré aujourd'hui ; âge p95 < 100 ms contre 250 ms permis).
+
 ### Avant d'ouvrir les points (revue de sécurité du 29 oct. 2026)
 
 - Le serveur doit **recalculer lui-même chaque choc** (`collidePaddle` du moteur partagé) à partir de la position et de la vitesse du joueur, et ne plus croire le ballon envoyé : aujourd'hui un téléphone modifié peut annuler un but adverse ou tirer en téléguidé (démontré).
