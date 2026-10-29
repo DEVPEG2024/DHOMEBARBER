@@ -12,7 +12,7 @@ import Pawn from './Pawn';
  * annoncés par l'écran de jeu. Aucun point des joueurs (aucune requête de plus).
  *
  * `players` : [toi (ou le joueur du bas), l'adversaire (ou le joueur du haut)], chacun
- * { name, role, tag?, label } ; `label` est écrit sous la pastille.
+ * { name, role, tag?, photo?, label } ; `label` est écrit sous la pastille, `photo` (client) dedans.
  */
 
 const MODE_LINES = {
@@ -24,7 +24,7 @@ const MODE_LINES = {
 function Side({ player, tone }) {
   return (
     <span className="cdg-vs-side">
-      <Pawn name={player?.name} role={player?.role} tag={player?.tag} tone={tone} size={66} />
+      <Pawn name={player?.name} role={player?.role} tag={player?.tag} photo={player?.photo} tone={tone} size={66} />
       <span className="cdg-vs-name">{player?.label || player?.name}</span>
     </span>
   );

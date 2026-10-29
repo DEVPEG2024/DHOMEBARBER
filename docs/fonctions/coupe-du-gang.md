@@ -130,6 +130,17 @@ Serveur Heroku v157, app commit 8d6494f. Verdict du propriétaire : « c'est bie
 
 Aller-retour mesuré depuis le Mac (fixe) vers la région us : médiane 106 ms, p95 178 ms (`scripts/coupe-latency.js measure`). Le principe réseau est retenu ; pas de déménagement du serveur. Ces mesures servent à resserrer les tolérances avant les points (écart ballon p95 ≈ 27 contre 30 + 0,06 × vitesse toléré aujourd'hui ; âge p95 < 100 ms contre 250 ms permis).
 
+### Latence et notifications de défi : audit du 29 oct. 2026 au soir (lecture seule)
+
+- **Latence** : serveur Heroku en région **us**, une seule machine. Aller-retour depuis le Mac (fixe) : médiane 110 à 118 ms, p95 190 à 300 ms ; les pics se voient aussi sur les ouvertures TCP (ligne, pas le serveur). Même base que l'essai à deux téléphones ; le serveur accepte une frappe jusqu'à 400 ms d'âge. Rien n'indique un problème côté serveur. Déménager en Europe diviserait le plancher par trois, mais l'adresse de l'API est écrite dans les apps publiées : il faudrait d'abord un domaine à nous (`api.dhomebarber.fr`) dans un build (reste à faire).
+- **Mesures des vrais matchs gardées** (avant : seulement dans les journaux Heroku, effacés en moins d'une heure) : `coupe_matches.metrics` (JSONB : frappes acceptées / refusées et raisons, âge p50/p95, écart ballon, recalage joueur, parades tardives, secondes de jeu ; des nombres seulement, `metricsJson`), écrit avec le match ; un match annulé n'est jamais enregistré. Lecture : `heroku run "node scripts/coupe-mesures.js --days=7" --app dhomebarber-api`.
+- **Défis à un barber, corrigés** (`lib/coupeResults.js` `reachableUsers` / `canChallenge`, `lib/coupeNotify.js`, `lib/coupeHours.js`) :
+  - la nuit (21:00–08:00), aucun push de défi ne part : un barber n'est joignable que s'il a le jeu ouvert (avant : « Dispo » et défiable, le client attendait 2 min pour rien) ;
+  - au plafond de 20 pushs de l'heure (`barberCapped`, lecture seule), plus proposé sans jeu ouvert ;
+  - push web en urgence haute (`urgency: 'high'`, `pushHelper.sendToSubscriptions`) : un Android en veille le reçoit dans les 2 minutes ;
+  - « jeu ouvert » (`isOnline` des salles) compté seulement en salle d'attente ou sur l'écran de fin, les seuls écrans où l'app affiche « Défi reçu ».
+- **Qui reçoit un défi aujourd'hui** : push web seulement (les apps 1.0.9 / 1.0.17 n'ont pas le jeu) ; seul Kevin a un abonnement web (Dom et Romain : iOS seulement) : leur faire activer les notifications web, ou attendre les pushs natifs du build 18. Défi entre amis : lien partagé, aucune notification, valable 2 minutes.
+
 ### Avant d'ouvrir les points (revue de sécurité du 29 oct. 2026)
 
 - Le serveur doit **recalculer lui-même chaque choc** (`collidePaddle` du moteur partagé) à partir de la position et de la vitesse du joueur, et ne plus croire le ballon envoyé : aujourd'hui un téléphone modifié peut annuler un but adverse ou tirer en téléguidé (démontré).

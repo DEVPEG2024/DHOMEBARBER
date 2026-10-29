@@ -255,6 +255,7 @@ export const IDLE_UI = Object.freeze({
   names: [], // [moi, adversaire]
   roles: [],
   keys: [], // clés publiques (Signaler, Bloquer)
+  photos: [], // [moi, adversaire] : photo d'un client (`start.photos`), null sinon
   rankedHint: null, // les deux ont droit aux points : true / false, null inconnu (indicatif, la fin du match fait foi)
   result: null, // { won, winner (0 moi, 1 l'adversaire, null nul ou annulé), draw, score, forfeit, cancelled, reason, points }
   rematchAsked: false,
@@ -278,6 +279,16 @@ function notifyResume() {
 
 const pairOf = (arr, f) => (Array.isArray(arr) ? [f(arr[0]), f(arr[1])] : [f(null), f(null)]);
 
+const MEDIA_PHOTO = /^https:\/\/[A-Za-z0-9.-]+(?::\d+)?\/api\/media\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Photo d'un joueur (`start.photos`, photo de profil d'un client) : seulement une image envoyée à
+ * l'app (`https://<api>/api/media/<uuid>`), sinon null (jamais d'image d'un autre domaine).
+ */
+export function photoUrlOrNull(v) {
+  return typeof v === 'string' && v.length <= 500 && MEDIA_PHOTO.test(v) ? v : null;
+}
+
 /**
  * Match quitté il y a moins de 10 s sans l'abandonner (écran fermé, page cachée) : de quoi le
  * reprendre (`resume {link}`), ou null. `until` : fin de la place gardée par le serveur (heure de
@@ -299,6 +310,7 @@ export function readPendingResume(now = Date.now()) {
         names: pairOf(e.names, (v) => String(v ?? '').slice(0, 60)),
         roles: pairOf(e.roles, (v) => String(v ?? '').slice(0, 20)),
         keys: pairOf(e.keys, (v) => String(v ?? '').slice(0, 80)),
+        photos: pairOf(e.photos, photoUrlOrNull),
         score: pairOf(e.score, (v) => clampN(Math.round(num(v)), 0, 99)),
       };
     }
@@ -465,6 +477,7 @@ export class OnlineMatch {
       names: Array.isArray(entry.names) ? entry.names.slice(0, 2) : [],
       roles: Array.isArray(entry.roles) ? entry.roles.slice(0, 2) : [],
       keys: Array.isArray(entry.keys) ? entry.keys.slice(0, 2) : [],
+      photos: Array.isArray(entry.photos) ? entry.photos.slice(0, 2).map(photoUrlOrNull) : [],
     });
     this._startResume('match', { reason: 'return', serverUntil: Number(entry.until) || null });
   }
@@ -1085,6 +1098,8 @@ export class OnlineMatch {
       names: both(m.names),
       roles: both(m.roles),
       keys: both(m.keys),
+      // Photos des clients (serveur du 29 oct. 2026) ; absentes d'un serveur plus ancien : initiales
+      photos: Array.isArray(m.photos) ? [photoUrlOrNull(m.photos[you]), photoUrlOrNull(m.photos[1 - you])] : [null, null],
       // true / false ; null quand le serveur de salles ne sait pas (toujours null avec le serveur v2 :
       // l'écran n'affiche rien d'après lui, la fin du match fait foi)
       rankedHint: m.ranked_hint === true ? true : m.ranked_hint === false ? false : null,
@@ -1650,6 +1665,7 @@ export class OnlineMatch {
       names: this.ui.names,
       roles: this.ui.roles,
       keys: this.ui.keys,
+      photos: this.ui.photos,
       score: [...this.score],
     });
   }

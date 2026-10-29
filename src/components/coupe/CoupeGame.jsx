@@ -7,7 +7,7 @@ import { useAndroidBack } from '@/lib/useAndroidBack';
 import { H, LEVELS } from '@/lib/coupe/engine';
 import { createRenderer, isSalonRole } from '@/lib/coupe/renderer';
 import { createSound, buzz } from '@/lib/coupe/sound';
-import { OnlineMatch, IDLE_UI, readPendingResume } from '@/lib/coupe/onlineMatch';
+import { OnlineMatch, IDLE_UI, photoUrlOrNull, readPendingResume } from '@/lib/coupe/onlineMatch';
 import { LocalMatch } from '@/lib/coupe/localMatch';
 import { COUPE_ENABLED_KEY, fetchCoupeEnabled, invalidateCoupe, useCoupeMusic } from '@/lib/coupe/coupeApi';
 import { COUPE_PAUSED_TEXT } from './coupeErrors';
@@ -102,6 +102,10 @@ export default function CoupeGame({
   const reduceMotion = useReducedMotion();
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  // Ta photo sur ton pion contre le salon (client seulement) ; en ligne, le serveur envoie les photos
+  const myPhoto = user?.role === 'user' ? photoUrlOrNull(user?.photo_url) : null;
+  const myPhotoRef = useRef(myPhoto);
+  myPhotoRef.current = myPhoto;
   const landscape = useMediaQuery(LANDSCAPE_QUERY);
   // Clavier ouvert (fiche « Signaler ») : la fenêtre rétrécie n'est pas un téléphone tourné
   const typing = useTyping();
@@ -256,7 +260,7 @@ export default function CoupeGame({
     const onEvent = (type, data) => {
       switch (type) {
         case 'start': {
-          renderer.setPlayers(online ? onlinePlayers(data.names, data.roles) : offlinePlayers(mode, lvl));
+          renderer.setPlayers(online ? onlinePlayers(data.names, data.roles, data.photos) : offlinePlayers(mode, lvl, myPhotoRef.current));
           renderer.reset();
           sound.blip();
           resetPointers();
@@ -282,7 +286,7 @@ export default function CoupeGame({
         case 'resumed':
           // Reprise après une coupure, ou match repris en rouvrant l'écran : mêmes joueurs, score du
           // serveur, caméra directement sur le terrain
-          renderer.setPlayers(onlinePlayers(data.names, data.roles));
+          renderer.setPlayers(onlinePlayers(data.names, data.roles, data.photos));
           resetPointers();
           if (Array.isArray(data.score)) setScore(data.score);
           clearOutro();
@@ -381,7 +385,7 @@ export default function CoupeGame({
       // Une autre demande ne pourrait pas aboutir avant la fin de celui-ci (un match à la fois)
       const pending = readPendingResume();
       if (pending) {
-        renderer.setPlayers(onlinePlayers(pending.names, pending.roles));
+        renderer.setPlayers(onlinePlayers(pending.names, pending.roles, pending.photos));
         setScore(pending.score);
         // Match repris : la caméra est déjà sur le terrain (pas d'avant-match)
         director.resume();
@@ -800,12 +804,12 @@ export default function CoupeGame({
 
   // Affiche VS de l'avant-match : toi (ou le joueur du bas) en rouge, l'adversaire en blanc
   const introPlayers = useMemo(() => {
-    if (!online) return offlinePlayers(mode, lvl).map((p) => ({ ...p, label: p.name }));
+    if (!online) return offlinePlayers(mode, lvl, myPhoto).map((p) => ({ ...p, label: p.name }));
     return [
-      { name: ui.names[0] || shownName(user), role: ui.roles[0], label: 'Toi' },
-      { name: opponent, role: ui.roles[1], label: opponent },
+      { name: ui.names[0] || shownName(user), role: ui.roles[0], photo: ui.photos?.[0] || null, label: 'Toi' },
+      { name: opponent, role: ui.roles[1], photo: ui.photos?.[1] || null, label: opponent },
     ];
-  }, [online, mode, lvl, ui.names, ui.roles, user, opponent]);
+  }, [online, mode, lvl, myPhoto, ui.names, ui.roles, ui.photos, user, opponent]);
 
   return (
     <div

@@ -100,6 +100,11 @@ Décisions prises pendant l'assemblage (chef) :
   - « Défi reçu » sans défiler sur un écran de 568 px ;
   - caméra verrouillée sur le terrain une fois partie (une heure du serveur corrigée ne la ramène plus au stade).
 
+## Photos des clients et logo Nova (29 oct. 2026, demandes du propriétaire)
+
+- **Photos** : la photo de profil d'un client remplace ses initiales dans son pion, sur le terrain (`renderer.js`, image chargée avec CORS puis posée dans le sprite du pion : rien de plus par image ; initiales tant qu'elle charge ou si elle échoue) et sur l'affiche VS (`Pawn.jsx`, prop `photo`). Jamais pour un barber (ses photos sont des portraits, jamais rondes), le salon ou le robot (`playerBadge`). Source : `start.photos` du serveur (contrat 4.2) ; contre le salon, ta propre photo (`user.photo_url`). « Défi reçu » garde les initiales (l'invitation ne porte pas de photo). Faux serveur : `photoAdversaire`, `sansPhotos`. Tests : « La Coupe du Gang : photos des clients ».
+- **Logo Nova** au centre du rond central, peint dans l'image du stade (`gazon_neuf.py`, `nova-spirale.png`, voir `docs/prototypes/stade-coupe/LISEZMOI.md`) : à la place de l'ancien « DHB » pâle. Le terrain dessiné de secours (image en panne) garde son « DHB ».
+
 ## Musique de tribune (29 oct. 2026)
 
 - **Choix du propriétaire** : « Best of AC Milan Ultras! La Curva Sud Milano » (chants de supporters, MP3 de 5 min téléchargé depuis une vidéo YouTube). **Droits non acquis** : enregistrement d'un tiers, chants qui nomment le club (le propriétaire avait choisi une image « sans les marques du club », règle Apple 5.2.1). Mis en garde avant (« une musique libre de droits, ou faite pour le salon »), il a confirmé. À trancher avant le build 18 : la garder (risque de refus de l'App Store ou de demande de retrait) ou la remplacer par une ambiance de stade libre de droits.

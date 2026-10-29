@@ -97,15 +97,18 @@ export const isSalonRole = (role) => role === 'admin' || role === 'salon';
  * Pastille d'un joueur d'après son nom et son rôle (rôles envoyés par le serveur dans `start`) :
  * salon → « DHB » + étoile, barber → initiale + ciseaux, client → initiales (« Camille T. » → « CT »).
  * `tag` impose le texte (contre le salon : « TOI », « BOSS » ; à deux : « J1 », « J2 »).
+ * `photo` : photo ronde d'un client à la place des initiales ; jamais pour le salon (logo et
+ * étoile), un barber (photos des barbers en portrait, jamais rondes) ni le salon en robot.
  */
-export function playerBadge(name, role, tag) {
+export function playerBadge(name, role, tag, photo) {
   const clean = String(name || '').trim();
-  if (isSalonRole(role)) return { name: clean || "D'Home Barber", tag: tag || 'DHB', star: true, scissors: false };
+  if (isSalonRole(role)) return { name: clean || "D'Home Barber", tag: tag || 'DHB', star: true, scissors: false, photo: null };
   const words = clean.split(/\s+/).filter(Boolean);
   const first = (words[0] || '?').charAt(0).toUpperCase();
-  if (role === 'barber') return { name: clean || 'Barber', tag: tag || first, star: false, scissors: true };
+  if (role === 'barber') return { name: clean || 'Barber', tag: tag || first, star: false, scissors: true, photo: null };
   const second = words[1] ? words[1].charAt(0).toUpperCase() : '';
-  return { name: clean || 'Joueur', tag: tag || `${first}${second}`, star: false, scissors: false };
+  const shot = role !== 'bot' && typeof photo === 'string' && /^https?:\/\//.test(photo) ? photo : null;
+  return { name: clean || 'Joueur', tag: tag || `${first}${second}`, star: false, scissors: false, photo: shot };
 }
 
 /** Échelle et marges du terrain dans une zone de `width` × `height` px (mêmes calculs partout). */
@@ -274,6 +277,10 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
   let labels = false; // noms et cadre du score (pendant un match)
   let stadium = false; // image du stade sous le canvas : aucun terrain dessiné
   let players = [playerBadge('Toi', 'user'), playerBadge('Adversaire', 'user')];
+  // Photos des joueurs (clients) : une image par côté, chargée une fois avec CORS (le canvas reste
+  // lisible), posée dans le pion à la place des initiales quand elle est prête (sprites refaits) ;
+  // en chargement ou en erreur, les initiales restent
+  const photos = [null, null]; // { url, img, ok }
   let boardTw = 1;
   let particles = [];
   let blades = [];
@@ -510,14 +517,29 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
     c.beginPath();
     c.arc(0, 0, PR - 4.5, 0, TAU);
     c.fill();
-    c.save();
-    if (i === 1 && twoPlayers) c.rotate(Math.PI);
-    c.fillStyle = COLORS.fg;
-    c.font = tagFont(badge.tag);
-    c.textAlign = 'center';
-    c.textBaseline = 'middle';
-    c.fillText(badge.tag, 0, 1);
-    c.restore();
+    const shot = photos[i];
+    if (shot && shot.ok && badge.photo === shot.url) {
+      // Photo recadrée en disque (comme `object-fit: cover`), dans l'anneau
+      const r = PR - 4.5;
+      const iw = shot.img.naturalWidth;
+      const ih = shot.img.naturalHeight;
+      const k = (2 * r) / Math.min(iw, ih);
+      c.save();
+      c.beginPath();
+      c.arc(0, 0, r, 0, TAU);
+      c.clip();
+      c.drawImage(shot.img, (-iw * k) / 2, (-ih * k) / 2, iw * k, ih * k);
+      c.restore();
+    } else {
+      c.save();
+      if (i === 1 && twoPlayers) c.rotate(Math.PI);
+      c.fillStyle = COLORS.fg;
+      c.font = tagFont(badge.tag);
+      c.textAlign = 'center';
+      c.textBaseline = 'middle';
+      c.fillText(badge.tag, 0, 1);
+      c.restore();
+    }
     c.save();
     c.globalAlpha = 0.2;
     c.fillStyle = '#ffffff';
@@ -543,6 +565,24 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
       c.setTransform(k, 0, 0, k, size / 2, size / 2);
       paintPaddle(c, i);
     });
+  }
+
+  function loadPhoto(i, url) {
+    if (photos[i] && photos[i].url === url) return;
+    photos[i] = null;
+    if (!url || typeof Image === 'undefined') return;
+    const shot = { url, img: new Image(), ok: false };
+    photos[i] = shot;
+    shot.img.crossOrigin = 'anonymous';
+    shot.img.decoding = 'async';
+    shot.img.onload = () => {
+      if (destroyed || photos[i] !== shot || !shot.img.naturalWidth || !shot.img.naturalHeight) return;
+      shot.ok = true;
+      buildSprites();
+      if (painted) paint(lastFrame);
+    };
+    shot.img.onerror = () => { /* image illisible : initiales */ };
+    shot.img.src = url;
   }
 
   function buildLayers() {
@@ -979,11 +1019,12 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
     toWorld,
     fingerTarget,
     /**
-     * Joueurs en repère local : [bas, haut], chacun { name, role, tag? }. Affiche leurs noms et le
+     * Joueurs en repère local : [bas, haut], chacun { name, role, tag?, photo? }. Affiche leurs noms et le
      * cadre du score (pendant un match).
      */
     setPlayers(list) {
-      players = [0, 1].map((i) => playerBadge(list?.[i]?.name, list?.[i]?.role, list?.[i]?.tag));
+      players = [0, 1].map((i) => playerBadge(list?.[i]?.name, list?.[i]?.role, list?.[i]?.tag, list?.[i]?.photo));
+      players.forEach((p, i) => loadPhoto(i, p.photo));
       labels = true;
       buildLayers();
     },

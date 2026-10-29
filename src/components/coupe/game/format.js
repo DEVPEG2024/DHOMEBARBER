@@ -62,8 +62,12 @@ export function roleLabel(role) {
   return 'Membre du Gang';
 }
 
-/** Joueurs d'un match hors ligne, en repère local : [bas, haut], pour le dessin et les textes. */
-export function offlinePlayers(mode, level) {
+/**
+ * Joueurs d'un match hors ligne, en repère local : [bas, haut], pour le dessin et les textes.
+ * `myPhoto` : photo du compte connecté (client), sur ton pion contre le salon ; jamais à deux sur
+ * un téléphone (deux joueurs, un seul compte).
+ */
+export function offlinePlayers(mode, level, myPhoto = null) {
   if (mode === 'local') {
     return [
       { name: 'Joueur du bas', role: 'user', tag: 'J1' },
@@ -72,20 +76,21 @@ export function offlinePlayers(mode, level) {
   }
   const L = LEVELS[level] || LEVELS.barber;
   return [
-    { name: 'Toi', role: 'user', tag: 'TOI' },
+    { name: 'Toi', role: 'user', tag: 'TOI', photo: myPhoto || null },
     { name: L.name, role: 'bot', tag: L.tag },
   ];
 }
 
 /**
  * Joueurs d'un match en ligne pour le dessin : « Toi » en bas (avec tes initiales sur ton pion,
- * comme sur la maquette « Match en ligne »), l'adversaire en haut.
+ * comme sur la maquette « Match en ligne »), l'adversaire en haut. `photos` (`start.photos`, [toi,
+ * l'adversaire]) : photo d'un client sur son pion, à la place des initiales.
  */
-export function onlinePlayers(names, roles) {
+export function onlinePlayers(names, roles, photos) {
   const myTag = playerBadge(names?.[0], roles?.[0]).tag;
   return [
-    { name: 'Toi', role: roles?.[0], tag: myTag },
-    { name: names?.[1] || 'Adversaire', role: roles?.[1] },
+    { name: 'Toi', role: roles?.[0], tag: myTag, photo: photos?.[0] || null },
+    { name: names?.[1] || 'Adversaire', role: roles?.[1], photo: photos?.[1] || null },
   ];
 }
 

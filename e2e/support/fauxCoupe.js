@@ -113,6 +113,13 @@ export class FauxCoupe {
      */
     this.avantMatchCd = null;
     /**
+     * Photo de l'adversaire simulé dans `start.photos` (url de média) ; null par défaut. Envoyée
+     * telle quelle, même pour un barber (le vrai serveur ne le fait pas : l'app doit l'ignorer).
+     */
+    this.photoAdversaire = null;
+    /** `start` sans `photos` (serveur d'avant les photos des clients). */
+    this.sansPhotos = false;
+    /**
      * Fin du match envoyée à celui qui abandonne (`leave` en plein match), sans `t` ni `sc` ;
      * null : rien (l'app fait sa fin elle-même au bout de 3,5 s). Par défaut : défaite classée.
      */
@@ -146,10 +153,16 @@ export class FauxCoupe {
    * plus le temps écoulé depuis (même horloge des deux côtés), plus un écart fixe.
    */
   heure(cnx = this.derniere()) {
-    // Nouvelle connexion (reprise) sans ping encore : la plus récente
+    return this.heureConnue(cnx) ?? DECALAGE_HORLOGE;
+  }
+
+  /**
+   * Même heure, ou null tant qu'aucun ping n'a jamais été reçu : l'horloge du navigateur est alors
+   * inconnue. Nouvelle connexion (reprise) sans ping encore : la plus récente.
+   */
+  heureConnue(cnx) {
     const ref = cnx?.dernierPing ? cnx : [...this.connexions].reverse().find((c) => c.dernierPing) || null;
-    if (!ref) return DECALAGE_HORLOGE;
-    return ref.dernierPing + (Date.now() - ref.pingRecuA) + DECALAGE_HORLOGE;
+    return ref ? ref.dernierPing + (Date.now() - ref.pingRecuA) + DECALAGE_HORLOGE : null;
   }
 
   /** Change l'état du match (`state`) de la connexion et l'envoie tout de suite (ballon au centre, en jeu par défaut). */
@@ -283,6 +296,11 @@ export class FauxCoupe {
   envoyerEtat(salle) {
     const cnx = salle.cnx;
     if (!cnx || cnx.ferme) return;
+    // Pas d'état avant le premier ping : son heure serait inventée, et l'app la corrigerait d'un
+    // coup au premier pong (temps de la phase faussé de plusieurs secondes, avant-match sauté).
+    // Le vrai serveur date toujours ses états de sa vraie heure ; l'état suivant part 100 ms après
+    const s = this.heureConnue(cnx);
+    if (s == null) return;
     const ack = [0, 0];
     const acc = [0, 0];
     ack[salle.you] = salle.dernierHit;
@@ -290,7 +308,7 @@ export class FauxCoupe {
     // `cd` seulement pendant un compte à rebours, comme le vrai serveur ; avant-match : `pt` avance
     const { cd, ...etat } = salle.etat;
     if (etat.ph === 'count' && salle.compteDepuis) etat.pt = Math.round(Date.now() - salle.compteDepuis) / 1000;
-    cnx.envoyer({ t: 'state', s: this.heure(cnx), ...etat, ...(etat.ph === 'count' && cd ? { cd } : {}), ack, acc });
+    cnx.envoyer({ t: 'state', s, ...etat, ...(etat.ph === 'count' && cd ? { cd } : {}), ack, acc });
   }
 
   /**
@@ -378,6 +396,8 @@ export class FauxCoupe {
       names: cote(nomDe(moi), a.nom),
       roles: cote(moi.role === 'admin' ? 'salon' : moi.role, a.role),
       keys: cote(moi.role === 'admin' ? 'salon' : `cle-${moi.id}`, a.cle),
+      // Photos des clients, comme le vrai serveur : celle du compte connecté s'il est client
+      ...(this.sansPhotos ? {} : { photos: cote(moi.role === 'user' ? moi.photo_url || null : null, this.photoAdversaire) }),
       kick: 0,
       ranked_hint: null,
       sc: salle.etat.sc,

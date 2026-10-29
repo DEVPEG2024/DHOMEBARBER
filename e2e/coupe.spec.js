@@ -7,7 +7,7 @@
 // jeu ouvert) ; musique du salon, clavier, son ; puis les modes sans réseau : contre le salon (un but
 // à la souris, partie rejouée image par image et simulée à l'identique ici) et à deux sur un téléphone.
 import { test, expect } from './support/test.js';
-import { ADMIN, CLIENT, MOT_DE_PASSE } from './support/donnees.js';
+import { ADMIN, CLIENT, MOT_DE_PASSE, media } from './support/donnees.js';
 import { CODE_MATCH, LIEN_MATCH, LIEN_DEFI, LIEN_INVITE, CLE_KEVIN } from './support/fauxCoupe.js';
 import { attendreSansDebordement, toast } from './support/outils.js';
 import { LocalMatch } from '../src/lib/coupe/localMatch.js';
@@ -987,6 +987,76 @@ async function noterCamera(page) {
     }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-cam', 'data-play'] });
   });
 }
+
+// Photos des clients (29 oct. 2026) : pions de l'affiche VS notés au fil de l'eau (l'affiche ne
+// dure qu'une seconde en mouvement réduit) ; `[{ photo, texte }]` par pion
+async function noterAffiche(page) {
+  await page.addInitScript(() => {
+    window.__affiche = [];
+    new MutationObserver(() => {
+      for (const pion of document.querySelectorAll('.cdg-vs .cdg-pawn-in')) {
+        const note = { photo: pion.querySelector('img')?.getAttribute('src') || null, texte: pion.textContent };
+        if (!window.__affiche.some((n) => n.photo === note.photo && n.texte === note.texte)) window.__affiche.push(note);
+      }
+    }).observe(document, { subtree: true, childList: true });
+  });
+}
+
+/** Couleur du terrain dessiné au point (x, y) du terrain (repère de l'écran, unités du moteur). */
+async function couleurDuTerrain(page, x, y) {
+  const cadre = await cadreDuTerrain(page);
+  const vue = viewOf(cadre.width, cadre.height);
+  const px = vue.ox + (x + MS) * vue.s;
+  const py = vue.oy + (y + MG) * vue.s;
+  return terrain(page).evaluate((c, [ex, ey]) => {
+    const k = c.width / c.getBoundingClientRect().width;
+    return [...c.getContext('2d').getImageData(Math.round(ex * k), Math.round(ey * k), 1, 1).data];
+  }, [px, py]);
+}
+const saturation = ([r, g, b]) => { const mx = Math.max(r, g, b); return mx ? (mx - Math.min(r, g, b)) / mx : 0; };
+// Pion de l'adversaire en haut (180 ; 100) : point sous ses initiales, dans le disque de la photo
+const SOUS_PION_ADVERSE = [180, 112];
+
+test.describe('La Coupe du Gang : photos des clients', () => {
+  test('photo de l\'adversaire client : sur l\'affiche VS et dans son pion sur le terrain', async ({ page, api, connecter }) => {
+    api.coupe.photoAdversaire = media(7);
+    api.coupe.avantMatchCd = 4.5;
+    await noterAffiche(page);
+    await connecter(ADMIN);
+    await page.goto(`/coupe-test?defi=${LIEN_DEFI}`);
+    await page.getByRole('button', { name: 'Accepter' }).click();
+    await expect(jeu(page)).toHaveAttribute('data-play', '1');
+    // Affiche : le salon (« DHB », jamais de photo) contre Lucas M. en photo
+    expect(await page.evaluate(() => window.__affiche)).toEqual([{ photo: null, texte: 'DHB' }, { photo: media(7), texte: '' }]);
+    // Terrain : le pion de Lucas M. porte la photo (couleurs vives), plus la pastille grise
+    await expect.poll(async () => saturation(await couleurDuTerrain(page, ...SOUS_PION_ADVERSE))).toBeGreaterThan(0.3);
+  });
+
+  test('serveur d\'avant les photos (pas de `photos` dans `start`) : initiales, rien ne casse', async ({ page, api, connecter }) => {
+    api.coupe.sansPhotos = true;
+    api.coupe.photoAdversaire = media(7);
+    api.coupe.avantMatchCd = 4.5;
+    await noterAffiche(page);
+    await connecter(ADMIN);
+    await page.goto(`/coupe-test?defi=${LIEN_DEFI}`);
+    await page.getByRole('button', { name: 'Accepter' }).click();
+    await expect(jeu(page)).toHaveAttribute('data-play', '1');
+    expect(await page.evaluate(() => window.__affiche)).toEqual([{ photo: null, texte: 'DHB' }, { photo: null, texte: 'LM' }]);
+    expect(saturation(await couleurDuTerrain(page, ...SOUS_PION_ADVERSE))).toBeLessThan(0.2);
+  });
+
+  test('barber : jamais de photo ronde, même si le serveur en envoyait une (initiale et ciseaux)', async ({ page, api, connecter }) => {
+    api.coupe.photoAdversaire = media(8);
+    api.coupe.avantMatchCd = 4.5;
+    await noterAffiche(page);
+    await rejoindreParCode(page, api, connecter);
+    await expect(jeu(page)).toHaveAttribute('data-play', '1');
+    expect(await page.evaluate(() => window.__affiche)).toEqual([{ photo: null, texte: 'DHB' }, { photo: null, texte: 'K' }]);
+    // Le temps que l'image se serait chargée : toujours la pastille grise
+    await page.waitForTimeout(500);
+    expect(saturation(await couleurDuTerrain(page, ...SOUS_PION_ADVERSE))).toBeLessThan(0.2);
+  });
+});
 
 // Musique de tribune : lectures demandées par l'app (`HTMLMediaElement.play`), notées dans la page ;
 // `window.__musique` = le lecteur de la musique du jeu
