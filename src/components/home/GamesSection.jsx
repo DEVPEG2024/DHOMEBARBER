@@ -46,8 +46,14 @@ const ROUGE_NUIT = '#2a0b0d';
 const RED_BORDER = 'rgba(224, 31, 38, 0.5)';
 const RED_TINT = 'rgba(224, 31, 38, 0.18)';
 const LINE = 'rgba(255, 255, 255, 0.1)';
-const CARD_BG = `linear-gradient(135deg, ${ROUGE_NUIT} 0%, ${C.noir2} 65%)`;
 const BLOCK_BG = `linear-gradient(160deg, ${ROUGE_NUIT} 0%, ${C.noir2} 60%)`;
+// Entrée « Jeux » du fil : au vert de l'app (bouton « + » du fil, green-500), pas au rouge du stade
+// (demande du propriétaire, 29 oct. 2026)
+const VERT = '#22c55e';
+const VERT_CLAIR = '#4ade80';
+const FEED_BG = `linear-gradient(135deg, #0b2416 0%, ${C.noir2} 65%)`;
+const FEED_BORDER = 'rgba(34, 197, 94, 0.5)';
+const FEED_TINT = 'rgba(34, 197, 94, 0.16)';
 // Voiles sur le stade (maquette « JeuxRouge ») : noir à gauche sous les textes, l'image à droite
 const HOME_VEIL = 'linear-gradient(90deg, rgba(11, 11, 12, 0.97) 0%, rgba(11, 11, 12, 0.85) 60%, rgba(11, 11, 12, 0.45) 100%)';
 const COUPE_VEIL = 'linear-gradient(100deg, rgba(11, 11, 12, 0.96) 0%, rgba(11, 11, 12, 0.82) 55%, rgba(42, 11, 13, 0.55) 100%)';
@@ -329,10 +335,10 @@ export function GamesFeedEntry({ className = '' }) {
     <Link
       to="/jeux"
       className={`flex items-center gap-3 rounded-2xl border p-3 active:opacity-90 transition-opacity ${className}`}
-      style={{ background: CARD_BG, borderColor: RED_BORDER }}
+      style={{ background: FEED_BG, borderColor: FEED_BORDER }}
     >
-      <span className="w-10 h-10 shrink-0 rounded-xl flex items-center justify-center" style={{ background: RED_TINT }}>
-        <Gamepad2 className="w-5 h-5" style={{ color: C.rougeVif }} aria-hidden="true" />
+      <span className="w-10 h-10 shrink-0 rounded-xl flex items-center justify-center" style={{ background: FEED_TINT }}>
+        <Gamepad2 className="w-5 h-5" style={{ color: VERT_CLAIR }} aria-hidden="true" />
       </span>
       <span className="flex-1 min-w-0">
         <span className="block font-fut text-lg font-extrabold uppercase tracking-wide leading-none text-white">Jeux</span>
@@ -340,13 +346,13 @@ export function GamesFeedEntry({ className = '' }) {
           {games.map((g, i) => (
             <React.Fragment key={g.id}>
               {i > 0 && ' · '}
-              <GameIcon id={g.id} className="inline-block w-3.5 h-3.5 mr-1 align-[-0.2em]" style={{ color: C.or }} />
+              <GameIcon id={g.id} className="inline-block w-3.5 h-3.5 mr-1 align-[-0.2em]" style={{ color: VERT_CLAIR }} />
               {g.title}
             </React.Fragment>
           ))}
         </span>
       </span>
-      <span className="w-8 h-8 shrink-0 rounded-full grid place-items-center" style={{ background: C.rouge, color: C.blanc }}>
+      <span className="w-8 h-8 shrink-0 rounded-full grid place-items-center" style={{ background: VERT, color: C.blanc }}>
         <ChevronRight className="w-4 h-4" aria-hidden="true" />
       </span>
     </Link>
