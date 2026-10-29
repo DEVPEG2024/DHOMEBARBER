@@ -821,7 +821,7 @@ export default function Home() {
         // positionner. Masquée par l'admin, l'entrée « Jeux » du fil disparaît aussi.
         if (editMode) {
           return (
-            <div className="rounded-3xl p-5 text-center border border-[#ebc15e]/40 bg-[#ebc15e]/10">
+            <div className="rounded-3xl p-5 text-center border border-[#e01f26]/40 bg-[#e01f26]/10">
               <p className="text-xs font-semibold text-foreground">Jeux</p>
               <p className="text-[11px] text-muted-foreground mt-1">Carte vers la page des jeux (La Coupe du Gang), aussi en tête du fil. Cachée tant qu'aucun jeu n'est ouvert.</p>
             </div>

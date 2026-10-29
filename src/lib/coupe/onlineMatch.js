@@ -126,6 +126,10 @@ const REACT_GAP = 1000; // réactions : 1 par seconde
 // Ralenti visuel après un but (comme le prototype)
 const GOAL_SLOW_MS = 750;
 const GOAL_SLOW = 0.22;
+// Compte à rebours en cours (`start.cd`, `state.cd`, secondes) : 4,5 au premier coup d'envoi d'un
+// match (thème stade, serveur du 29 oct. 2026), 3 après un but ou un retour ; absent d'un serveur
+// plus ancien : 3 s
+const COUNT_S = 3;
 // Reprise après une coupure : le serveur garde la place 10 s à partir du moment où il voit la
 // coupure (tout de suite si l'app ferme la socket, plus tard si le réseau est tombé net). L'app
 // essaie un peu plus longtemps : c'est le serveur qui dit si le match existe encore (`no_room`).
@@ -155,6 +159,8 @@ export const RESUME_EVENT = 'cdg:reprise';
 const clampN = (v, a, b) => (v < a ? a : v > b ? b : v);
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 const numOrNull = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
+// Durée de compte à rebours lisible (0 à 10 s), sinon null
+const countOf = (v) => { const cd = numOrNull(v); return cd !== null && cd > 0 && cd <= 10 ? cd : null; };
 const r1 = (v) => Math.round(v * 10) / 10;
 const r2 = (v) => Math.round(v * 100) / 100;
 
@@ -648,6 +654,8 @@ export class OnlineMatch {
     return {
       phase: this.phase,
       phaseT,
+      // Durée du compte à rebours en cours (secondes), null hors `count`
+      countS: this.phase === 'count' ? this.countS : null,
       keepT,
       score: this.score,
       flashBox: this.flash,
@@ -681,6 +689,9 @@ export class OnlineMatch {
     this.score = [0, 0];
     this.phase = 'count';
     this.phaseAt = null;
+    // Durée inconnue jusqu'à `start.cd` ou au premier état (le dessin compte alors 3 s, l'écran ne
+    // joue pas l'avant-match)
+    this.countS = null;
     this.keep = null;
     this.ball = createBall();
     this.me = createPaddle(0);
@@ -1102,7 +1113,10 @@ export class OnlineMatch {
     }
     this.you = you;
     this._resetMatch();
-    this.phaseAt = { pt: 0, s: this.serverNow() };
+    this.countS = countOf(m.cd); // 4,5 : avant-match dès cette image
+    // Temps de la phase compté dès maintenant si l'heure du serveur est connue ; sinon à partir du
+    // premier état : l'heure arrivée entre-temps (pong) le faisait sauter, et la caméra avec
+    this.phaseAt = this.hasClock || this.roughClock ? { pt: 0, s: this.serverNow() } : null;
     if (!this.fingerDown) this.target = null;
     this._set({
       ...info,
@@ -1135,6 +1149,8 @@ export class OnlineMatch {
     this.phase = ph;
     // `pt` / `kt` : secondes écoulées dans la phase / ballon dans la moitié `k`, à l'heure `s`
     this.phaseAt = { pt: num(m.pt), s };
+    // `cd` : durée du compte à rebours en cours (secondes) ; absente d'un serveur plus ancien : 3 s
+    if (ph === 'count') this.countS = countOf(m.cd) ?? COUNT_S;
     this.keep = { kt: num(m.kt), s };
     if (Array.isArray(m.sc) && m.sc.length === 2) this.score = this._pair(m.sc);
     if (ph !== 'pause' && this.ui.away) this._set({ away: null });

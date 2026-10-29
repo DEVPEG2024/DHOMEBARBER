@@ -549,7 +549,7 @@ test.describe('La Coupe du Gang : fins de match et refus du serveur', () => {
       const bmp = await createImageBitmap(fichier);
       return { titre: donnees.title, nom: fichier.name, type: fichier.type, largeur: bmp.width, hauteur: bmp.height };
     });
-    expect(image).toEqual({ titre: 'La Coupe du Gang', nom: 'coupe-du-gang.png', type: 'image/png', largeur: 1080, hauteur: 1920 });
+    expect(image).toEqual({ titre: 'La Coupe du Gang', nom: 'coupe-du-gang.jpg', type: 'image/jpeg', largeur: 1080, hauteur: 1920 });
   });
 
   test('Partager en story sans partage du navigateur : l\'image à enregistrer, dans une fenêtre', async ({ page, api, connecter }) => {
@@ -563,7 +563,7 @@ test.describe('La Coupe du Gang : fins de match et refus du serveur', () => {
     const image = fenetre.getByRole('img', { name: 'Score du match au format story' });
     await expect(image).toBeVisible();
     await expect.poll(() => image.evaluate((img) => [img.naturalWidth, img.naturalHeight])).toEqual([1080, 1920]);
-    await expect(fenetre.getByRole('link', { name: 'Télécharger l’image' })).toHaveAttribute('download', 'coupe-du-gang-dhomebarber.png');
+    await expect(fenetre.getByRole('link', { name: 'Télécharger l’image' })).toHaveAttribute('download', 'coupe-du-gang-dhomebarber.jpg');
     await fenetre.getByRole('button', { name: 'Fermer' }).click();
     await expect(fenetre).toHaveCount(0);
   });
@@ -867,8 +867,9 @@ function chercherFrappe(cadre, alea) {
     py: Math.round(cadre.top + vue.oy + (y + MG) * vue.s),
   });
   const versTerrain = (p) => screenToWorld(vue, cadre.left, cadre.top, p.px, p.py);
-  // Le ballon attend devant toi (180 ; 435) ; le compte à rebours dure 188 images
-  for (let attente = 200; attente <= 270; attente += 1) {
+  // Le ballon attend devant toi (180 ; 435) ; le premier compte à rebours dure 282 images (4,5 s :
+  // stade, zoom, puis 3, 2, 1, thème stade du 29 oct. 2026)
+  for (let attente = 294; attente <= 364; attente += 1) {
     for (let angle = -60; angle <= 60; angle += 3) {
       for (const recul of [60, 80]) {
         const a = (angle * Math.PI) / 180;
@@ -901,7 +902,8 @@ test.describe('La Coupe du Gang : sans réseau', () => {
     if (tic % 16) await page.clock.runFor(16 - (tic % 16));
     await page.getByRole('button', { name: 'Jouer contre le salon' }).click();
     await expect(jeu(page)).toHaveAttribute('data-phase', 'count');
-    await expect(page.getByText('Contre le salon · Apprenti')).toBeVisible();
+    // Horloge arrêtée au début de l'avant-match : barre du haut posée, encore cachée (stade entier)
+    await expect(page.getByText('Contre le salon · Apprenti')).toBeAttached();
     expect(api.coupe.connexions).toEqual([]);
 
     const plan = chercherFrappe(await cadreDuTerrain(page), ALEA);
@@ -961,5 +963,104 @@ test.describe('La Coupe du Gang : sans réseau', () => {
     await page.getByRole('button', { name: 'Reprendre', exact: true }).last().click();
     await expect(page.getByRole('heading', { name: 'Pause' })).toHaveCount(0);
     expect(api.coupe.connexions).toEqual([]);
+  });
+});
+
+// Thème stade (29 oct. 2026, docs/fonctions/coupe-du-gang-stade.md) : la caméra se lit sur la racine
+// du jeu (`data-cam` full / pitch, `data-play` quand joueurs, barre du haut et réactions sont là).
+// Les états sont notés au fil de l'eau : l'avant-match ne dure qu'une seconde en mouvement réduit.
+async function noterCamera(page) {
+  await page.addInitScript(() => {
+    window.__camera = [];
+    const noter = (v) => { if (window.__camera[window.__camera.length - 1] !== v) window.__camera.push(v); };
+    new MutationObserver(() => {
+      const r = document.querySelector('.cdg-root');
+      if (!r) return;
+      const affiche = [...r.querySelectorAll('*')].some((e) => e.childElementCount === 0 && e.textContent === 'VS');
+      noter(`${r.dataset.cam || '-'}${r.dataset.play ? '+jeu' : ''}${affiche ? '+affiche' : ''}`);
+    }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-cam', 'data-play'] });
+  });
+}
+
+test.describe('La Coupe du Gang : thème stade', () => {
+  test('avant-match (premier coup d\'envoi en 4,5 s) : stade entier et affiche, puis le terrain avec la barre du haut et les réactions ; le stade revient à la fin', async ({ page, api, connecter }) => {
+    await noterCamera(page);
+    api.coupe.avantMatchCd = 4.5;
+    const cnx = await rejoindreParCode(page, api, connecter);
+    // Caméra posée sur le terrain, puis joueurs, ballon, barre du haut et réactions (1 s en mouvement réduit)
+    await expect(jeu(page)).toHaveAttribute('data-cam', 'pitch');
+    await expect(jeu(page)).toHaveAttribute('data-play', '1');
+    const avant = await page.evaluate(() => window.__camera);
+    // Le stade entier avec l'affiche des deux joueurs, et rien du jeu, avant le terrain
+    const iAffiche = avant.findIndex((v) => v.startsWith('full') && v.includes('+affiche') && !v.includes('+jeu'));
+    const iTerrain = avant.findIndex((v) => v.startsWith('pitch+jeu'));
+    expect(iAffiche, JSON.stringify(avant)).toBeGreaterThanOrEqual(0);
+    expect(iTerrain, JSON.stringify(avant)).toBeGreaterThan(iAffiche);
+    // Un seul terrain : celui de l'image du stade, sous le canvas
+    await expect(page.locator('.cdg-camera img')).toBeVisible();
+    await page.getByRole('button', { name: 'Réagir : En feu' }).click();
+    await expect.poll(() => api.coupe.messages('react')).toEqual([{ t: 'react', r: 1 }]);
+
+    // Fin du match : le stade entier revient derrière l'écran de fin, sans le jeu
+    api.coupe.etat(cnx, { ph: 'live' });
+    cnx.envoyer(FIN_VICTOIRE);
+    await expect(page.getByRole('heading', { name: 'Victoire' })).toBeVisible();
+    await expect(jeu(page)).toHaveAttribute('data-cam', 'full');
+    await expect(jeu(page)).not.toHaveAttribute('data-end', 'defaite');
+  });
+
+  test('défaite : le stade passe en gris derrière l\'écran de fin', async ({ page, api, connecter }) => {
+    const cnx = await rejoindreParCode(page, api, connecter);
+    api.coupe.etat(cnx, { ph: 'live' });
+    cnx.envoyer({ ...FIN_VICTOIRE, winner: 0, sc: [3, 1], points: { ranked: true, reason: null, delta: [3, -1], total: 41, rank: 9, rank_before: 8 } });
+    await expect(page.getByRole('heading', { name: 'Défaite' })).toBeVisible();
+    await expect(jeu(page)).toHaveAttribute('data-end', 'defaite');
+    await expect(jeu(page)).toHaveAttribute('data-cam', 'full');
+  });
+
+  test('retour de l\'adversaire en plein match (compte à rebours de 3 s) : ni stade entier ni affiche, le jeu reste affiché', async ({ page, api, connecter }) => {
+    await noterCamera(page);
+    api.coupe.avantMatchCd = 4.5;
+    const cnx = await rejoindreParCode(page, api, connecter);
+    await expect(jeu(page)).toHaveAttribute('data-play', '1');
+    api.coupe.etat(cnx, { ph: 'live' });
+    await page.evaluate(() => { window.__camera = []; });
+    api.coupe.etat(cnx, { ph: 'pause' });
+    cnx.envoyer({ t: 'pause', away: 0, left: 8 });
+    await expect(page.getByText(/^Kevin s'est déconnecté : [5-8] s$/)).toBeVisible();
+    // Kevin revient : nouveau compte à rebours (3 s, temps qui avance), puis le jeu
+    api.coupe.etat(cnx, { ph: 'count' });
+    await page.waitForTimeout(1500);
+    api.coupe.etat(cnx, { ph: 'live' });
+    await expect(page.getByText(/s'est déconnecté/)).toHaveCount(0);
+    const trace = await page.evaluate(() => window.__camera);
+    expect(trace.filter((v) => v !== 'pitch+jeu'), JSON.stringify(trace)).toEqual([]);
+    await expect(jeu(page)).toHaveAttribute('data-cam', 'pitch');
+    await expect(jeu(page)).toHaveAttribute('data-play', '1');
+  });
+
+  test('match repris depuis l\'accueil : sur le terrain et la barre du haut à portée pendant que le serveur répond', async ({ page, api, connecter }) => {
+    await matchDepuisAccueil(page, api, connecter);
+    await page.goBack();
+    await expect(titreAccueil(page)).toBeVisible();
+    api.coupe.retenirReprise = true;
+    await page.getByRole('status').filter({ hasText: 'Match en pause' }).getByRole('button', { name: 'Reprendre' }).click();
+    await expect.poll(() => api.coupe.reprisesEnAttente.length).toBe(1);
+    await expect(jeu(page)).toHaveAttribute('data-cam', 'pitch');
+    await expect(jeu(page)).toHaveAttribute('data-play', '1');
+    await expect(jeu(page).locator('.cdg-hud')).toBeVisible();
+    api.coupe.libererReprise();
+    await expect(page.getByText('Connexion rétablie')).toBeVisible();
+    await expect(jeu(page)).toHaveAttribute('data-cam', 'pitch');
+    await expect(page.getByText('Score : Toi 1 – 0 Kevin')).toBeAttached();
+  });
+
+  test('sans durée annoncée (serveur d\'avant le thème stade) : pas d\'avant-match, le terrain tout de suite', async ({ page, api, connecter }) => {
+    await noterCamera(page);
+    await rejoindreParCode(page, api, connecter);
+    await expect(jeu(page)).toHaveAttribute('data-play', '1');
+    await expect(jeu(page)).toHaveAttribute('data-cam', 'pitch');
+    const trace = await page.evaluate(() => window.__camera);
+    expect(trace.some((v) => v.includes('+affiche')), JSON.stringify(trace)).toBe(false);
   });
 });

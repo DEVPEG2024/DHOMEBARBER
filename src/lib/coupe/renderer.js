@@ -1,12 +1,19 @@
 /*
  * Dessin canvas de La Coupe du Gang (docs/fonctions/coupe-du-gang.md), porté du prototype validé
  * par le propriétaire (docs/prototypes/coupe-du-gang.html) : terrain, panneaux lumineux, ballon et
- * sa traînée, joueurs, étincelles, bannière « BUT ! », tremblement, pluie de lames de rasoir.
+ * sa traînée, joueurs, étincelles, bannière « BUT ! », « GO ! », tremblement, pluie de lames de rasoir.
+ *
+ * Thème stade (planche validée le 29 oct. 2026, docs/fonctions/coupe-du-gang-stade.md) : rouge, noir
+ * et blanc, une touche d'or (`COUPE_COLORS`). Quand l'image du stade est sous le canvas
+ * (`setStadium(true)`), il ne dessine plus aucun terrain (ni fond, ni gazon, ni lignes, ni filets,
+ * ni panneaux, ni « DHB ») : l'image est LE terrain, le canvas y pose les joueurs, le ballon, les
+ * noms, le score et les effets. Sans l'image (`false`, par défaut, ou image qui ne charge pas), le
+ * terrain est dessiné comme avant, aux nouvelles couleurs.
  *
  * Indépendant de React et du réseau : on lui donne une « image » du match (`render(frame, dt)`).
- * Repère local : le joueur du bas est toujours l'indice 0 (en or), celui du haut l'indice 1 (en
- * bleu). À deux sur un téléphone (`setTwoPlayers(true)`), les textes du joueur du haut sont tournés
- * vers lui.
+ * Repère local : le joueur du bas est toujours l'indice 0 (anneau rouge : toi, ou le joueur du bas
+ * à deux), celui du haut l'indice 1 (anneau blanc). À deux sur un téléphone (`setTwoPlayers(true)`),
+ * les textes du joueur du haut sont tournés vers lui.
  *
  * Économie (relecture du 29 oct. 2026) : le terrain, le fond des panneaux, les noms, le texte des
  * panneaux et les deux joueurs sont pré-dessinés dans des calques au redimensionnement (et quand
@@ -20,6 +27,8 @@
 import {
   W, H, GW, GL, GR, GD, SBW, SBD, BBW, BBD, BR, PR, POST, POSTS, KEEP_LIMIT, FINGER_OFFSET, boxOf,
 } from './engine.js';
+// Chemin relatif (pas l'alias `@/`) : les vérifications de bout en bout chargent ce fichier dans Node
+import { COUPE_COLORS } from '../../components/coupe/palette.js';
 
 // Marges autour du terrain (unités du terrain) : panneaux sur les côtés, cages et noms en haut et en bas
 export const MS = 16;
@@ -33,24 +42,48 @@ const BOARD_LEN = H + 2 * MG - 8;
 const BOARD_Y0 = -MG + 4;
 // Demi-côté du calque d'un joueur (ombre, étoile, ciseaux compris)
 const SPRITE_HALF = PR + 10;
+// Pastille d'un nom dans la marge : largeur au plus (unités), pour ne jamais passer sur la cage
+const NAME_MAX = W - GR - 2;
+// Compte à rebours du coup d'envoi : 3 s. Au premier coup d'envoi d'un match (`countS` > 3,
+// avant-match du thème stade : le stade entier, puis le zoom sur le terrain), les chiffres 3, 2, 1
+// n'occupent que les 2,5 dernières secondes
+const COUNT_S = 3;
+const INTRO_DIGITS_S = 2.5;
+// « GO ! » au coup d'envoi (passage de `count` à `live`, jamais après un engagement `ready`)
+const GO_S = 0.5;
+// Bande rouge inclinée de la bannière « BUT ! » (skewX(-8deg) de la maquette StadeAnimation)
+const BANNER_SKEW = Math.tan((-8 * Math.PI) / 180);
 
-/** Couleurs du prototype (stade de nuit) : le jeu reste sombre quel que soit le thème de l'app. */
+/**
+ * Couleurs du jeu (thème stade, `COUPE_COLORS`) : le jeu reste sombre quel que soit le thème de
+ * l'app. Joueur 0 (toi, ou le joueur du bas à deux) en rouge, joueur 1 (l'adversaire) en blanc.
+ */
 export const COLORS = {
-  night: '#05080a',
-  stand: '#0c1512',
-  fg: '#eef3ef',
-  muted: '#9db0a6',
-  turf: '#33b574',
-  turfA: '#0f4a2b',
-  turfB: '#0c4125',
+  night: COUPE_COLORS.noir,
+  stand: COUPE_COLORS.noir2,
+  fg: COUPE_COLORS.blanc,
+  muted: COUPE_COLORS.gris,
+  // Terrain dessiné (sans l'image du stade) : mêmes bandes de gazon et mêmes lignes que l'image
+  // (docs/prototypes/stade-coupe/gazon_neuf.py)
+  turfA: '#24482b',
+  turfB: '#1b3a21',
   chalk: 'rgba(236, 248, 240, .86)',
-  gold: '#ebc15e',
-  goldDeep: '#b0802a',
-  rival: '#86adff',
-  rivalDeep: '#3d63c9',
-  warn: '#ff9d4d',
+  board: COUPE_COLORS.rougeVif, // texte des panneaux lumineux
+  // Joueur 0 : anneau rouge ; son nom et son score en rouge vif (rouge écrit sur fond noir)
+  me: COUPE_COLORS.rouge,
+  meDeep: COUPE_COLORS.rougeSombre,
+  meText: COUPE_COLORS.rougeVif,
+  // Joueur 1 : anneau blanc ; son nom et son score en blanc
+  rival: COUPE_COLORS.blancCasse,
+  rivalDeep: '#b9bcc2',
+  rivalText: COUPE_COLORS.blanc,
+  // Contour des grands chiffres et des textes posés sur le terrain ; pastilles des noms
+  ink: 'rgba(11, 11, 12, .88)',
+  pill: 'rgba(11, 11, 12, .8)',
+  gold: COUPE_COLORS.or, // étincelles
+  warn: COUPE_COLORS.or, // alertes : ballon gardé dans une moitié, petite surface interdite
   // Étoile du salon : même bleu que dans le fil (text-blue-500)
-  star: '#3b82f6',
+  star: COUPE_COLORS.etoile,
 };
 
 const BOARD_TEXT = "D'HOME BARBER  ·  DOUVAINE  ·  LA COUPE DU GANG  ·  ";
@@ -119,16 +152,16 @@ function star(c, x, y, r, color) {
   c.fillStyle = color;
   c.fill();
   c.lineWidth = 1;
-  c.strokeStyle = 'rgba(4,8,6,.85)';
+  c.strokeStyle = 'rgba(11,11,12,.85)';
   c.stroke();
   c.restore();
 }
 
-/** Petits ciseaux (barber) : deux anneaux et deux lames croisées, dans une pastille sombre. */
+/** Petits ciseaux (barber) : deux anneaux et deux lames croisées, dans une pastille noire. */
 function scissors(c, x, y, size, color) {
   c.save();
   c.translate(x, y);
-  c.fillStyle = 'rgba(4,8,6,.9)';
+  c.fillStyle = 'rgba(11,11,12,.9)';
   c.beginPath();
   c.arc(0, 0, size, 0, TAU);
   c.fill();
@@ -185,6 +218,43 @@ function blade(c) {
 const tagFont = (tag) => font(800, tag.length > 3 ? 12 : tag.length > 2 ? 14 : tag.length > 1 ? 16 : 19);
 
 /**
+ * Nom d'un joueur sur sa pastille noire (maquette StadeMatch), autour de y = 0 : bord droit de la
+ * pastille en x = 0 (`alignEnd`), sinon bord gauche en x = 0 ; étoile du salon devant le nom. Un nom
+ * trop long pour la marge est écrit plus petit, puis coupé (« … ») : la pastille ne passe jamais
+ * sur la cage.
+ */
+function namePill(c, badge, color, alignEnd) {
+  const pad = 7;
+  const lead = badge.star ? 15 : 0;
+  const room = NAME_MAX - lead - pad * 2;
+  let label = badge.name.toUpperCase();
+  let px = 14;
+  c.font = font(800, px);
+  let tw = c.measureText(label).width;
+  if (tw > room) {
+    px = Math.max(11, Math.floor((px * room) / tw));
+    c.font = font(800, px);
+    tw = c.measureText(label).width;
+    const chars = Array.from(label);
+    while (tw > room && chars.length > 1) {
+      chars.pop();
+      label = `${chars.join('').trimEnd()}…`;
+      tw = c.measureText(label).width;
+    }
+  }
+  const pw = tw + lead + pad * 2;
+  const x0 = alignEnd ? -pw : 0;
+  rrect(c, x0, -10.5, pw, 21, 6);
+  c.fillStyle = COLORS.pill;
+  c.fill();
+  if (badge.star) star(c, x0 + pad + 5.5, 0, 5.5, COLORS.star);
+  c.fillStyle = color;
+  c.textAlign = 'left';
+  c.textBaseline = 'middle';
+  c.fillText(label, x0 + pad + lead, 1);
+}
+
+/**
  * Crée le dessin sur `canvas`, dimensionné sur son parent (observé : rotation, clavier, fenêtre).
  * options : { reducedMotion } (animations réduites : ni tremblement, ni zoom, panneaux immobiles,
  * peu de lames).
@@ -200,6 +270,7 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
   let reduced = !!reducedMotion;
   let twoPlayers = false;
   let labels = false; // noms et cadre du score (pendant un match)
+  let stadium = false; // image du stade sous le canvas : aucun terrain dessiné
   let players = [playerBadge('Toi', 'user'), playerBadge('Adversaire', 'user')];
   let boardTw = 1;
   let particles = [];
@@ -210,6 +281,8 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
   let shakeY = 0;
   let clock = 0;
   let banner = null; // { t, scorer }
+  let go = null; // { t } : « GO ! » au coup d'envoi
+  let prevPhase = null; // phase de la frame précédente (« GO ! » au passage de `count` à `live`)
   let lastFrame = null;
   let painted = false;
   let destroyed = false;
@@ -248,51 +321,36 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
     c.stroke();
   }
 
-  // Noms dans les marges, à droite des cages ; à deux, celui du haut tourné vers son joueur
+  // Noms dans les marges, sur une pastille noire, au bord droit du terrain (le bas en rouge vif, le
+  // haut en blanc) ; à deux, celui du haut tourné vers son joueur
   function drawNames(c) {
     c.save();
-    c.font = font(700, 14);
-    c.textBaseline = 'middle';
-    // Bas
-    const p0 = players[0];
-    const l0 = p0.name.toUpperCase();
-    c.textAlign = 'right';
-    c.fillStyle = COLORS.gold;
-    c.fillText(l0, W, H + MG / 2 + 1);
-    if (p0.star) star(c, W - c.measureText(l0).width - 9, H + MG / 2, 5.5, COLORS.star);
-    // Haut
-    const p1 = players[1];
-    const l1 = p1.name.toUpperCase();
-    c.fillStyle = COLORS.rival;
+    c.translate(W, H + MG / 2);
+    namePill(c, players[0], COLORS.meText, true);
+    c.restore();
+    c.save();
+    c.translate(W, -MG / 2);
     if (twoPlayers) {
-      c.save();
-      c.translate(W, -MG / 2);
       c.rotate(Math.PI);
-      c.textAlign = 'left';
-      c.fillText(l1, 0, -1);
-      if (p1.star) star(c, c.measureText(l1).width + 9, -1, 5.5, COLORS.star);
-      c.restore();
-    } else {
-      c.fillText(l1, W, -MG / 2 + 1);
-      if (p1.star) star(c, W - c.measureText(l1).width - 9, -MG / 2, 5.5, COLORS.star);
-    }
-    // Cadre du score, au bord droit, à cheval sur la ligne médiane (chiffres à chaque frame)
+      namePill(c, players[1], COLORS.rivalText, false);
+    } else namePill(c, players[1], COLORS.rivalText, true);
+    c.restore();
+    // Cadre noir du score, au bord droit, à cheval sur la ligne médiane (chiffres à chaque frame)
+    c.save();
     rrect(c, W - 33, H / 2 - 46, 27, 92, 13.5);
-    c.fillStyle = 'rgba(4,8,6,.76)';
+    c.fillStyle = 'rgba(11,11,12,.86)';
     c.fill();
-    c.strokeStyle = 'rgba(255,255,255,.14)';
+    c.strokeStyle = 'rgba(255,255,255,.2)';
     c.lineWidth = 1;
     c.stroke();
-    c.fillStyle = 'rgba(255,255,255,.25)';
+    c.fillStyle = 'rgba(255,255,255,.3)';
     c.fillRect(W - 27, H / 2 - 0.5, 15, 1);
     c.restore();
   }
 
-  function buildPitch() {
-    layer.width = canvas.width;
-    layer.height = canvas.height;
-    const c = lctx;
-    c.setTransform(1, 0, 0, 1, 0, 0);
+  // Terrain dessiné (sans l'image du stade) : fond, filets, gazon, lignes, « DHB », poteaux, fond
+  // des panneaux
+  function drawField(c) {
     const cx = canvas.width / 2;
     const cy = canvas.height / 2;
     const bg = c.createRadialGradient(cx, cy, 10, cx, cy, Math.max(canvas.width, canvas.height) * 0.75);
@@ -379,10 +437,23 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
     for (const side of [-1, 1]) {
       const x0 = side < 0 ? -MS + 3 : W + 3;
       rrect(c, x0, BOARD_Y0, BOARD_W, BOARD_LEN, 4);
-      c.fillStyle = 'rgba(3,7,5,.92)';
+      c.fillStyle = 'rgba(11,11,12,.92)';
       c.fill();
     }
-    if (labels) drawNames(c);
+  }
+
+  // Calque fixe : le terrain dessiné (sauf sur l'image du stade), puis les noms et le cadre du
+  // score pendant un match
+  function buildPitch() {
+    layer.width = canvas.width;
+    layer.height = canvas.height;
+    const c = lctx;
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    if (!stadium) drawField(c);
+    if (labels) {
+      worldTransform(c);
+      drawNames(c);
+    }
   }
 
   // Texte des panneaux : une longue bande par côté, recopiée décalée à chaque frame
@@ -405,17 +476,18 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
       c.translate(BOARD_W / 2, tw - BOARD_Y0);
       c.rotate(side < 0 ? -Math.PI / 2 : Math.PI / 2);
       c.font = font(700, 9);
-      c.fillStyle = COLORS.turf;
+      c.fillStyle = COLORS.board;
       c.textBaseline = 'middle';
       c.textAlign = 'left';
       for (let u = -BOARD_LEN - MG - 3 * tw; u < BOARD_LEN + MG + 3 * tw; u += tw) c.fillText(BOARD_TEXT, u, 0.5);
     });
   }
 
-  // Un joueur dessiné autour de (0, 0) : ombre, anneau, pastille, texte, reflet, marque du rôle
+  // Un joueur dessiné autour de (0, 0) : ombre, anneau (rouge pour le joueur 0, blanc pour le
+  // joueur 1), pastille sombre, texte blanc, reflet, marque du rôle
   function paintPaddle(c, i) {
     const badge = players[i];
-    const ring = i === 0 ? [COLORS.gold, COLORS.goldDeep] : [COLORS.rival, COLORS.rivalDeep];
+    const ring = i === 0 ? [COLORS.me, COLORS.meDeep] : [COLORS.rival, COLORS.rivalDeep];
     c.fillStyle = 'rgba(0,0,0,.36)';
     c.beginPath();
     c.ellipse(3, 6, PR, PR * 0.9, 0, 0, TAU);
@@ -428,15 +500,15 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
     c.arc(0, 0, PR, 0, TAU);
     c.fill();
     const g2 = c.createRadialGradient(-6, -8, 2, 0, 0, PR - 4);
-    g2.addColorStop(0, '#26322c');
-    g2.addColorStop(1, '#0a0f0c');
+    g2.addColorStop(0, '#36373c');
+    g2.addColorStop(1, '#1c1d20');
     c.fillStyle = g2;
     c.beginPath();
     c.arc(0, 0, PR - 4.5, 0, TAU);
     c.fill();
     c.save();
     if (i === 1 && twoPlayers) c.rotate(Math.PI);
-    c.fillStyle = ring[0];
+    c.fillStyle = COLORS.fg;
     c.font = tagFont(badge.tag);
     c.textAlign = 'center';
     c.textBaseline = 'middle';
@@ -449,7 +521,8 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
     c.ellipse(-7, -10, 9, 4.5, -0.6, 0, TAU);
     c.fill();
     c.restore();
-    // Marques du rôle, posées sur l'anneau : étoile bleue (salon) ou ciseaux (barber)
+    // Marques du rôle, posées sur l'anneau : étoile bleue (salon) ou ciseaux de la couleur de
+    // l'anneau (barber)
     if (badge.star) star(c, PR * 0.72, -PR * 0.72, 7, COLORS.star);
     else if (badge.scissors) scissors(c, PR * 0.72, PR * 0.72, 7.5, ring[0]);
   }
@@ -471,13 +544,25 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
   function buildLayers() {
     if (destroyed) return;
     buildPitch();
-    buildStrips();
+    if (!stadium) buildStrips();
     buildSprites();
+  }
+
+  // Taille du parent dans la mise en page. Thème stade : le calque de la caméra qui porte le canvas
+  // est transformé pendant un zoom (stade entier), et sa taille à l'écran (getBoundingClientRect)
+  // n'est alors plus celle du dessin. offsetWidth / offsetHeight ignorent les transformations mais
+  // sont arrondis au pixel : pris seulement quand ils s'écartent de la taille à l'écran.
+  function hostSize() {
+    const r = host.getBoundingClientRect();
+    const lw = host.offsetWidth;
+    const lh = host.offsetHeight;
+    if (lw > 0 && lh > 0 && (Math.abs(lw - r.width) > 1 || Math.abs(lh - r.height) > 1)) return { width: lw, height: lh };
+    return { width: r.width, height: r.height };
   }
 
   function resize() {
     if (destroyed) return;
-    const r = host.getBoundingClientRect();
+    const r = hostSize();
     view.dpr = Math.min(2, window.devicePixelRatio || 1);
     view.cw = r.width;
     view.ch = r.height;
@@ -500,6 +585,14 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
       banner.t += dt;
       if (banner.t > 1.9) banner = null;
     }
+    if (go) {
+      go.t += dt;
+      if (go.t >= GO_S) go = null;
+    }
+    // Coup d'envoi : le compte à rebours s'achève (pas un engagement `ready`)
+    const phase = frame ? frame.phase : null;
+    if (prevPhase === 'count' && phase === 'live') go = { t: 0 };
+    prevPhase = phase;
     shakeX = 0;
     shakeY = 0;
     if (shake > 0) {
@@ -551,14 +644,15 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
     });
   }
 
+  // Chiffres du score dans le cadre noir : le bas en rouge vif, le haut en blanc
   function drawScore(score) {
     const c = ctx;
     c.font = font(800, 25);
     c.textAlign = 'center';
     c.textBaseline = 'middle';
-    c.fillStyle = COLORS.gold;
+    c.fillStyle = COLORS.meText;
     c.fillText(String(score[0]), W - 19.5, H / 2 + 22);
-    c.fillStyle = COLORS.rival;
+    c.fillStyle = COLORS.rivalText;
     if (twoPlayers) {
       c.save();
       c.translate(W - 19.5, H / 2 - 21);
@@ -568,6 +662,7 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
     } else c.fillText(String(score[1]), W - 19.5, H / 2 - 20);
   }
 
+  // Petite surface où le joueur vient d'entrer : clignote en or (alerte)
   function drawBoxFlash(flash) {
     const list = Array.isArray(flash) ? flash : [flash, 0];
     list.forEach((f, i) => {
@@ -585,11 +680,12 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
   function drawBall(b) {
     const c = ctx;
     if (trail.length) {
+      // Traînée blanche
       c.save();
       c.globalCompositeOperation = 'lighter';
       trail.forEach((t, k) => {
         const f = 1 - k / trail.length;
-        c.fillStyle = `rgba(255,226,160,${0.2 * f})`;
+        c.fillStyle = `rgba(255,255,255,${0.2 * f})`;
         c.beginPath();
         c.arc(t.x, t.y, BR * (0.45 + 0.55 * f), 0, TAU);
         c.fill();
@@ -632,6 +728,7 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
     ctx.drawImage(cv, p.x - wu / 2, p.y - wu / 2, wu, wu);
   }
 
+  // Étincelles or et blanches
   function drawParticles() {
     if (!particles.length) return;
     const c = ctx;
@@ -650,13 +747,14 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
     c.restore();
   }
 
-  // Anneau doré à l'engagement ; compte à rebours orange quand le ballon traîne dans une moitié
+  // Anneau blanc à l'engagement ; arc doré (alerte) qui se vide quand le ballon traîne dans une
+  // moitié : il doit changer de camp
   function drawBallRing(frame) {
     const c = ctx;
     const b = frame.ball;
     if (frame.phase === 'ready') {
       const k = Math.min(1, Math.max(0, frame.phaseT / 0.8));
-      c.strokeStyle = `rgba(235,193,94,${0.8 * (1 - k)})`;
+      c.strokeStyle = `rgba(255,255,255,${0.8 * (1 - k)})`;
       c.lineWidth = 2;
       c.beginPath();
       c.arc(b.x, b.y, BR + 4 + 14 * (1 - k), 0, TAU);
@@ -672,13 +770,25 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
     }
   }
 
-  // Compte à rebours du coup d'envoi (phase `count`, 3 s)
+  // Compte à rebours du coup d'envoi (phase `count`, durée `frame.countS`, 3 s sans elle), chiffres
+  // blancs au contour noir. Avant-match (`countS` > 3) : rien pendant le stade entier et le zoom,
+  // puis 3, 2, 1 sur les 2,5 dernières secondes
   function drawCountdown(frame) {
     if (frame.phase !== 'count') return;
-    const left = 3 - frame.phaseT;
+    const total = Number.isFinite(frame.countS) && frame.countS > 0 ? frame.countS : COUNT_S;
+    const left = total - frame.phaseT;
     if (left <= 0) return;
-    const n = Math.max(1, Math.ceil(left));
-    const frac = n - left; // 0 → 1 pendant chaque seconde
+    let n;
+    let frac; // 0 → 1 pendant chaque chiffre
+    if (total > COUNT_S) {
+      if (left > INTRO_DIGITS_S) return;
+      const unit = INTRO_DIGITS_S / 3;
+      n = Math.max(1, Math.ceil(left / unit));
+      frac = n - left / unit;
+    } else {
+      n = Math.max(1, Math.ceil(left));
+      frac = n - left;
+    }
     const k = reduced ? 1 : frac < 0.15 ? 0.6 + (frac / 0.15) * 0.5 : frac < 0.3 ? 1.1 - ((frac - 0.15) / 0.15) * 0.1 : 1;
     const c = ctx;
     c.save();
@@ -690,19 +800,47 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
     c.lineJoin = 'round';
     c.font = font(800, 120);
     c.lineWidth = 10;
-    c.strokeStyle = 'rgba(4,8,6,.88)';
+    c.strokeStyle = COLORS.ink;
     c.strokeText(String(n), 0, -6);
-    c.fillStyle = COLORS.gold;
+    c.fillStyle = COLORS.fg;
     c.fillText(String(n), 0, -6);
     c.restore();
   }
 
+  // « GO ! » au coup d'envoi, 0,5 s : blanc, ombre rouge (maquette StadeAnimation) ; sans
+  // animation si mouvement réduit
+  function drawGo() {
+    if (!go) return;
+    const t = go.t;
+    let a = 1;
+    let k = 1;
+    if (!reduced) {
+      a = t < 0.12 ? t / 0.12 : t > 0.32 ? Math.max(0, 1 - (t - 0.32) / 0.18) : 1;
+      k = t < 0.12 ? 0.7 + (t / 0.12) * 0.4 : t < 0.2 ? 1.1 - ((t - 0.12) / 0.08) * 0.1 : 1;
+    }
+    const c = ctx;
+    c.save();
+    c.globalAlpha = a;
+    c.translate(W / 2, H / 2);
+    c.scale(k, k);
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.font = font(800, 78);
+    c.fillStyle = COLORS.me;
+    c.fillText('GO !', 0, -1.5);
+    c.fillStyle = COLORS.fg;
+    c.fillText('GO !', 0, -6);
+    c.restore();
+  }
+
+  // Bannière de but : « BUT ! » en blanc sur une bande rouge inclinée, puis qui marque et le score,
+  // en blanc (contour noir : lisibles sur le terrain)
   function drawBanner(score) {
     if (!banner) return;
     const t = banner.t;
     const c = ctx;
-    const a = t < 1.5 ? 1 : Math.max(0, 1 - (t - 1.5) / 0.4);
-    const k = t < 0.18 ? 0.5 + (t / 0.18) * 0.7 : t < 0.3 ? 1.2 - ((t - 0.18) / 0.12) * 0.2 : 1;
+    const a = t < 0.1 ? t / 0.1 : t < 1.5 ? 1 : Math.max(0, 1 - (t - 1.5) / 0.4);
+    const k = t < 0.18 ? 0.6 + (t / 0.18) * 0.48 : t < 0.3 ? 1.08 - ((t - 0.18) / 0.12) * 0.08 : 1;
     const who = !twoPlayers && banner.scorer === 0 ? 'TU MARQUES' : `${players[banner.scorer].name.toUpperCase()} MARQUE`;
     const line = `${score[0]} – ${score[1]}`;
     c.save();
@@ -713,20 +851,33 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
     c.textAlign = 'center';
     c.textBaseline = 'middle';
     c.lineJoin = 'round';
-    c.font = font(800, 96);
-    c.lineWidth = 9;
-    c.strokeStyle = 'rgba(4,8,6,.88)';
-    c.strokeText('BUT !', 0, -8);
-    c.fillStyle = COLORS.gold;
-    c.fillText('BUT !', 0, -8);
+    // Bande ajustée aux lettres (mesurées ; valeurs de repli pour un vieux navigateur)
+    c.font = font(800, 90);
+    const m = c.measureText('BUT !');
+    const asc = m.actualBoundingBoxAscent > 0 ? m.actualBoundingBoxAscent : 34;
+    const desc = m.actualBoundingBoxDescent > 0 ? m.actualBoundingBoxDescent : 30;
+    const ty = -10;
+    const top = ty - asc - 14;
+    const bottom = ty + desc + 12;
+    const mid = (top + bottom) / 2;
+    const half = m.width / 2 + 26;
+    c.save();
+    c.translate(0, mid);
+    c.transform(1, 0, BANNER_SKEW, 1, 0, 0);
+    c.fillStyle = COLORS.me;
+    c.fillRect(-half, top - mid, half * 2, bottom - top);
+    c.fillStyle = COLORS.fg;
+    c.fillText('BUT !', 0, ty - mid);
+    c.restore();
+    c.strokeStyle = COLORS.ink;
+    c.fillStyle = COLORS.fg;
     c.font = font(700, 18);
     c.lineWidth = 5;
-    c.strokeText(who, 0, 46);
-    c.fillStyle = COLORS.fg;
-    c.fillText(who, 0, 46);
+    c.strokeText(who, 0, bottom + 18);
+    c.fillText(who, 0, bottom + 18);
     c.font = font(800, 26);
-    c.strokeText(line, 0, 74);
-    c.fillText(line, 0, 74);
+    c.strokeText(line, 0, bottom + 46);
+    c.fillText(line, 0, bottom + 46);
     c.restore();
   }
 
@@ -745,7 +896,10 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
 
   const IDLE_BALL = { x: W / 2, y: H / 2, vx: 0, vy: 0, roll: 0 };
 
-  /** Dessine `frame` sans faire avancer le temps (aussi : terrain seul si `frame` est null). */
+  /**
+   * Dessine `frame` sans faire avancer le temps. `frame` null (hors match) : le terrain seul avec
+   * un ballon au centre ; sur l'image du stade, rien (canvas transparent).
+   */
   function paint(frame) {
     if (destroyed) return;
     painted = true;
@@ -753,9 +907,14 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
     const c = ctx;
     c.setTransform(1, 0, 0, 1, 0, 0);
     c.clearRect(0, 0, canvas.width, canvas.height);
-    c.drawImage(layer, shakeX * scale(), shakeY * scale());
+    if (stadium && !frame) {
+      if (blades.length) drawBlades();
+      return;
+    }
+    // Sur l'image du stade, le calque ne porte que les noms et le cadre du score
+    if (!stadium || labels) c.drawImage(layer, shakeX * scale(), shakeY * scale());
     worldTransform(c, shakeX, shakeY);
-    drawBoardText();
+    if (!stadium) drawBoardText();
     if (!frame) {
       drawBall(IDLE_BALL);
     } else {
@@ -768,6 +927,7 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
       drawParticles();
       drawBanner(frame.score);
       drawCountdown(frame);
+      drawGo();
     }
     if (blades.length) drawBlades();
   }
@@ -835,19 +995,33 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
       twoPlayers = !!on;
       buildLayers();
     },
+    /**
+     * Thème stade : `true` quand l'image du stade est sous le canvas (chargée) : plus aucun terrain
+     * dessiné, et rien du tout hors match ; `false` (défaut, image en erreur) : le terrain dessiné
+     * revient. La dernière image est redessinée aussitôt (jamais deux terrains à l'écran).
+     */
+    setStadium(on) {
+      if (stadium === !!on) return;
+      stadium = !!on;
+      buildLayers();
+      if (painted) paint(lastFrame);
+    },
     setReducedMotion(on) { reduced = !!on; },
     burst,
     /** Frappe : étincelles au point de contact, d'autant plus nombreuses que la frappe est forte. */
     hit(v, x, y) {
       if (v > 250) burst(x, y, Math.min(14, 4 + ((v / 90) | 0)), false);
     },
-    /** But (scorer 0 = joueur du bas) : bannière, tremblement, gerbe d'étincelles au fond de la cage. */
+    /**
+     * But (scorer 0 = joueur du bas) : bannière, tremblement, gerbe d'étincelles au fond de la cage.
+     * Pas de tremblement sur l'image du stade : seuls les joueurs bougeraient sur un terrain immobile.
+     */
     goal(scorer) {
       banner = { t: 0, scorer: scorer === 1 ? 1 : 0 };
-      shake = reduced ? 0 : 1;
+      shake = reduced || stadium ? 0 : 1;
       burst(W / 2, scorer === 0 ? 0 : H, reduced ? 10 : 26, true);
     },
-    /** Victoire : pluie de lames de rasoir. */
+    /** Victoire : pluie de lames de rasoir (l'écran de jeu du thème stade la met dans l'écran de fin). */
     victory() {
       const n = reduced ? 18 : 64;
       for (let k = 0; k < n; k++) {
@@ -862,11 +1036,13 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
         });
       }
     },
-    /** Nouveau match ou engagement : on efface traînée, effets et bannière. */
+    /** Nouveau match ou engagement : on efface traînée, effets, bannière et « GO ! ». */
     reset({ keepBlades = false } = {}) {
       trail = [];
       particles = [];
       banner = null;
+      go = null;
+      prevPhase = null;
       shake = 0;
       shakeX = 0;
       shakeY = 0;
@@ -881,9 +1057,9 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
     },
     /** Dessin seul, sans animation (terrain d'attente, match en pause, après un redimensionnement). */
     paint,
-    /** Des effets sont encore en cours (étincelles, bannière, tremblement, lames). */
+    /** Des effets sont encore en cours (étincelles, bannière, « GO ! », tremblement, lames). */
     busy() {
-      return particles.length > 0 || blades.length > 0 || banner !== null || shake > 0;
+      return particles.length > 0 || blades.length > 0 || banner !== null || go !== null || shake > 0;
     },
     destroy() {
       destroyed = true;

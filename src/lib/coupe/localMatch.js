@@ -12,7 +12,8 @@
  *   // à chaque frame : match.update(dt); renderer.render(match.getFrame(), dt);
  *
  * Repère : joueur 0 en bas (toi, ou le joueur du bas à deux), joueur 1 en haut (le salon, ou le
- * joueur du haut). `getFrame()` a la même forme que celle du match en ligne.
+ * joueur du haut). `getFrame()` a la même forme que celle du match en ligne (`countS` compris :
+ * durée du compte à rebours en cours, 4,5 s au coup d'envoi de chaque match, revanche comprise).
  *
  * Événements (`onEvent`) : start, kickoff, hit {v, x, y, mine, side}, wall (vitesse), post,
  * goal {scorer, score}, end {winner, score}, toast (texte).
@@ -23,8 +24,11 @@ import {
   unpin, goalScorer, halfOf, botTarget,
 } from './engine.js';
 
-// Compte à rebours du coup d'envoi (comme en ligne), engagement, but (bannière puis réengagement)
+// Compte à rebours du coup d'envoi (comme en ligne) : 4,5 s au coup d'envoi d'un match (thème stade,
+// docs/fonctions/coupe-du-gang-stade.md : le stade entier, le zoom sur le terrain, puis 3, 2, 1),
+// 3 s pour tout autre compte à rebours ; engagement ; but (bannière puis réengagement)
 const COUNT_S = 3;
+const FIRST_COUNT_S = 4.5;
 const READY_S = 0.8;
 const GOAL_S = 1.9;
 // Ralenti après un but (comme le prototype)
@@ -67,7 +71,7 @@ export class LocalMatch {
     this.started = true;
     this.paused = false;
     const first = this.mode === 'bot' ? 0 : (this.rnd() < 0.5 ? 0 : 1);
-    this._kickoff(first, 'count');
+    this._kickoff(first, 'count', FIRST_COUNT_S);
     this.emit('start', { mode: this.mode, level: this.level });
   }
 
@@ -109,7 +113,7 @@ export class LocalMatch {
     this.cooldown = this.cooldown.map((v) => Math.max(0, v - dt));
     this.flash = this.flash.map((v) => Math.max(0, v - dt));
 
-    if ((this.phase === 'count' && this.phaseT >= COUNT_S) || (this.phase === 'ready' && this.phaseT >= READY_S)) {
+    if ((this.phase === 'count' && this.phaseT >= this.countS) || (this.phase === 'ready' && this.phaseT >= READY_S)) {
       this.phase = 'live';
       this.phaseT = 0;
       this.half = halfOf(this.ball);
@@ -128,6 +132,8 @@ export class LocalMatch {
     return {
       phase: this.phase,
       phaseT: this.phaseT,
+      // Durée du compte à rebours en cours (secondes), null hors `count`
+      countS: this.phase === 'count' ? this.countS : null,
       keepT: this.phase === 'live' ? this.halfT : 0,
       score: this.score,
       flashBox: this.flash,
@@ -141,6 +147,7 @@ export class LocalMatch {
   _reset() {
     this.phase = 'count';
     this.phaseT = 0;
+    this.countS = COUNT_S;
     this.score = [0, 0];
     this.scorer = -1;
     this.winner = -1;
@@ -155,7 +162,8 @@ export class LocalMatch {
     this.flash = [0, 0];
   }
 
-  _kickoff(toSide, phase) {
+  // `countS` : durée du compte à rebours quand `phase` vaut `count` (4,5 s au coup d'envoi de `start`)
+  _kickoff(toSide, phase, countS = COUNT_S) {
     placeKickoff(this.ball, toSide);
     this.pads.forEach((p, i) => {
       homePaddle(p, i);
@@ -165,6 +173,7 @@ export class LocalMatch {
     });
     this.phase = phase;
     this.phaseT = 0;
+    if (phase === 'count') this.countS = countS;
     this.half = toSide;
     this.halfT = 0;
     this.emit('kickoff', { toSide });

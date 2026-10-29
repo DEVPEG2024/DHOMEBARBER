@@ -15,9 +15,12 @@
  *    bandeau écrit sur la carte Gang) ;
  *  - petits outils d'affichage partagés (saison, rang, ligne « COUPE · pts · rang » de la carte FUT,
  *    marque du rôle de l'adversaire).
- * Identité des maquettes validées (or #ebc15e sur fond sombre, titres condensés `font-fut`) : fonds
- * sombres et textes clairs écrits en dur, lisibles avec les deux thèmes (comme la Carte Cadeau).
- * Textes au tutoiement, comme les écrans du jeu.
+ * Thème stade (planche validée le 29 oct. 2026, docs/fonctions/coupe-du-gang-stade.md, maquette
+ * « JeuxRouge ») : rouge, noir et blanc, une touche d'or (`COUPE_COLORS`), titres condensés
+ * `font-fut`. La carte « Jeux » de l'accueil et la carte de la Coupe de la page « Jeux » sont posées
+ * sur le haut du stade assombri (tribune au logo). Fonds sombres et textes clairs écrits en dur,
+ * lisibles avec les deux thèmes de l'app (comme la Carte Cadeau). Textes au tutoiement, comme les
+ * écrans du jeu.
  */
 import React from 'react';
 import { Link } from 'react-router-dom';
@@ -26,18 +29,30 @@ import { ArrowRight, Bot, ChevronRight, Gamepad2, Scissors, Smartphone, Star, Tr
 import { queryFailed } from '@/components/shared/LoadError';
 import CoupeLoadError from '@/components/coupe/CoupeLoadError';
 import { COUPE_PAUSED, isCoupeClosed } from '@/components/coupe/coupeErrors';
+import { COUPE_COLORS as C } from '@/components/coupe/palette';
 import { useAuth } from '@/lib/AuthContext';
 import { useCoupeEnabled, useCoupeMe } from '@/lib/coupe/coupeApi';
 import { useGames } from '@/lib/games';
 import { useHomeSectionHidden } from '@/lib/homeSections';
+// Image du stade par stadiumImage.js, sans le moteur du jeu : ce fichier est dans le paquet
+// principal (accueil, fil, profil d'un barber), stadium.js y tirerait engine.js et renderer.js
+import { STADIUM_URL as stadiumUrl } from '@/lib/coupe/stadiumImage';
 
-export const COUPE_GOLD = '#ebc15e';
-const GOLD_SOFT = '#c9b27a';
-const MUTED = '#9db0a6';
-const ON_GOLD = '#1a1205';
-const GOLD_BORDER = 'rgba(235, 193, 94, 0.3)';
-const CARD_BG = 'linear-gradient(135deg, #1d180a 0%, #12161a 70%)';
-const BLOCK_BG = 'linear-gradient(160deg, #1b170b 0%, #12161a 60%)';
+/** Or de la Coupe (`COUPE_COLORS.or`, #ebc15e) : aussi lu par le profil d'un barber et Mon espace. */
+export const COUPE_GOLD = C.or;
+// Rouge presque noir des maquettes du thème stade (fonds des cartes, voile de la carte de la Coupe)
+const ROUGE_NUIT = '#2a0b0d';
+// Rouge des boutons (`C.rouge`, #e01f26) en transparence : bords et fonds teintés
+const RED_BORDER = 'rgba(224, 31, 38, 0.5)';
+const RED_TINT = 'rgba(224, 31, 38, 0.18)';
+const LINE = 'rgba(255, 255, 255, 0.1)';
+const CARD_BG = `linear-gradient(135deg, ${ROUGE_NUIT} 0%, ${C.noir2} 65%)`;
+const BLOCK_BG = `linear-gradient(160deg, ${ROUGE_NUIT} 0%, ${C.noir2} 60%)`;
+// Voiles sur le stade (maquette « JeuxRouge ») : noir à gauche sous les textes, l'image à droite
+const HOME_VEIL = 'linear-gradient(90deg, rgba(11, 11, 12, 0.97) 0%, rgba(11, 11, 12, 0.85) 60%, rgba(11, 11, 12, 0.45) 100%)';
+const COUPE_VEIL = 'linear-gradient(100deg, rgba(11, 11, 12, 0.96) 0%, rgba(11, 11, 12, 0.82) 55%, rgba(42, 11, 13, 0.55) 100%)';
+// Textes clairs posés sur l'image : une ombre légère les détache des tribunes éclairées
+const ON_IMAGE = { textShadow: '0 1px 2px rgba(0, 0, 0, 0.6)' };
 
 const plural = (n, one, many) => (Math.abs(n) === 1 ? one : many);
 
@@ -97,7 +112,7 @@ export function CoupeRoleMark({ role, className = 'w-3 h-3' }) {
   if (role === 'barber') {
     return (
       <span className="inline-flex shrink-0 align-[-0.1em]" title="Barber">
-        <Scissors className={className} style={{ color: MUTED }} aria-hidden="true" />
+        <Scissors className={className} style={{ color: C.gris }} aria-hidden="true" />
         <span className="sr-only"> (barber)</span>
       </span>
     );
@@ -123,17 +138,27 @@ export function CoupeBallIcon({ className = 'w-5 h-5', style }) {
   );
 }
 
-/** Décor : un terrain vu du dessus en traits dorés très discrets (statique). */
-function PitchLines({ className = '', style }) {
+/**
+ * Décor : le haut du stade (tribune au logo D'Home Barber) derrière une carte, assombri par `veil`
+ * pour garder les textes lisibles. Image décorative (alt vide), statique ; `position` la cadre
+ * (`object-position`). Image absente (hors connexion sur le web) : cachée, le fond noir de la carte
+ * reste.
+ */
+function StadiumBackdrop({ position, veil, lazy = false }) {
   return (
-    <svg viewBox="0 0 120 160" className={className} style={style} aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2">
-      <rect x="4" y="4" width="112" height="152" rx="8" />
-      <line x1="4" y1="80" x2="116" y2="80" />
-      <circle cx="60" cy="80" r="19" />
-      <circle cx="60" cy="80" r="2.5" fill="currentColor" />
-      <rect x="32" y="4" width="56" height="24" />
-      <rect x="32" y="132" width="56" height="24" />
-    </svg>
+    <>
+      <img
+        src={stadiumUrl}
+        alt=""
+        loading={lazy ? 'lazy' : undefined}
+        decoding="async"
+        draggable={false}
+        onError={(e) => { e.currentTarget.style.visibility = 'hidden'; }}
+        className="absolute inset-0 w-full h-full object-cover pointer-events-none select-none"
+        style={{ objectPosition: position }}
+      />
+      <div className="absolute inset-0 pointer-events-none" style={{ background: veil }} aria-hidden="true" />
+    </>
   );
 }
 
@@ -145,7 +170,11 @@ export function GameIcon({ id, className = 'w-4 h-4', style }) {
 
 // ─── Accueil : section « Jeux » ─────────────────────────────────────
 
-/** Carte « Jeux » de l'accueil : le nom de chaque jeu ouvert, et tout mène à la page « Jeux ». */
+/**
+ * Carte « Jeux » de l'accueil (maquette « JeuxRouge ») : sur le haut du stade assombri, bord rouge,
+ * le nom de chaque jeu ouvert (ballon en or pour la Coupe), et tout mène à la page « Jeux ». Image en
+ * chargement différé : la carte est sous « Comme la dernière fois », rarement à l'écran à l'arrivée.
+ */
 export default function GamesSection() {
   const { games } = useGames();
   const reduceMotion = useReducedMotion();
@@ -155,30 +184,30 @@ export default function GamesSection() {
     <section aria-label="Jeux">
       <Link to="/jeux" className="block rounded-3xl" aria-label={`Jeux : ${games.map((g) => g.title).join(', ')}`}>
         <motion.div whileTap={reduceMotion ? undefined : { scale: 0.98 }} className="rounded-3xl">
-          <div className="shine-sweep relative overflow-hidden rounded-3xl border p-5" style={{ background: CARD_BG, borderColor: GOLD_BORDER }}>
-            <Gamepad2 className="absolute -right-5 -bottom-8 w-36 h-36 rotate-[-14deg] pointer-events-none" style={{ color: COUPE_GOLD, opacity: 0.09 }} aria-hidden="true" />
-            <div className="relative flex items-center gap-4">
+          <div className="shine-sweep relative overflow-hidden rounded-3xl border" style={{ background: C.noir, borderColor: RED_BORDER }}>
+            <StadiumBackdrop position="50% 12%" veil={HOME_VEIL} lazy />
+            <div className="relative flex items-center gap-4 p-5" style={ON_IMAGE}>
               <div className="flex-1 min-w-0">
-                <p className="text-[10px] tracking-[0.3em] uppercase font-medium" style={{ color: GOLD_SOFT }}>Le Gang joue</p>
+                <p className="text-[10px] tracking-[0.3em] uppercase font-semibold" style={{ color: C.rougeVif }}>Le Gang joue</p>
                 <h2 className="mt-1 font-fut text-[34px] font-extrabold uppercase leading-none tracking-wide text-white">Jeux</h2>
-                <p className="mt-1.5 text-xs leading-snug text-white/60">Choisis ton jeu et défie le Gang.</p>
+                <p className="mt-1.5 text-xs leading-snug" style={{ color: C.grisClair }}>Choisis ton jeu et défie le Gang.</p>
+                <ul className="mt-3 flex flex-wrap gap-2">
+                  {games.map((g) => (
+                    <li
+                      key={g.id}
+                      className="flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold text-white min-w-0 max-w-full"
+                      style={{ background: RED_TINT, borderColor: 'rgba(255, 255, 255, 0.25)' }}
+                    >
+                      <GameIcon id={g.id} className="w-3.5 h-3.5 shrink-0" style={{ color: C.or }} />
+                      <span className="truncate">{g.title}</span>
+                    </li>
+                  ))}
+                </ul>
               </div>
-              <span className="w-11 h-11 shrink-0 rounded-full grid place-items-center" style={{ background: COUPE_GOLD, color: ON_GOLD }}>
+              <span className="w-11 h-11 shrink-0 rounded-full grid place-items-center" style={{ background: C.rouge, color: C.blanc }}>
                 <ChevronRight className="w-5 h-5" aria-hidden="true" />
               </span>
             </div>
-            <ul className="relative mt-4 flex flex-wrap gap-2">
-              {games.map((g) => (
-                <li
-                  key={g.id}
-                  className="flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold text-white/90 min-w-0"
-                  style={{ background: 'rgba(235, 193, 94, 0.1)', borderColor: GOLD_BORDER }}
-                >
-                  <GameIcon id={g.id} className="w-3.5 h-3.5 shrink-0" style={{ color: COUPE_GOLD }} />
-                  <span className="truncate">{g.title}</span>
-                </li>
-              ))}
-            </ul>
           </div>
         </motion.div>
       </Link>
@@ -190,17 +219,22 @@ export default function GamesSection() {
 
 function ModeTile({ to, icon: Icon, iconColor, title, text }) {
   return (
-    <Link to={to} className="glass rounded-2xl p-3 flex flex-col gap-1.5 min-w-0 active:bg-white/10 transition-colors">
+    <Link
+      to={to}
+      className="rounded-2xl border p-3 flex flex-col gap-1.5 min-w-0 active:opacity-80 transition-opacity"
+      style={{ background: C.noir2, borderColor: LINE }}
+    >
       <Icon className="w-5 h-5" style={{ color: iconColor }} aria-hidden="true" />
-      <span className="font-fut text-base font-extrabold uppercase tracking-wide leading-tight text-foreground">{title}</span>
-      <span className="text-[11px] leading-snug text-muted-foreground">{text}</span>
+      <span className="font-fut text-base font-extrabold uppercase tracking-wide leading-tight text-white">{title}</span>
+      <span className="text-[11px] leading-snug" style={{ color: C.gris }}>{text}</span>
     </Link>
   );
 }
 
 /**
  * « La Coupe du Gang » sur la page « Jeux » (ouverte seulement quand le jeu l'est, `useGames`) :
- * tes Points de Coupe et ta place, « Jouer », contre le salon et à deux sur ce téléphone.
+ * tes Points de Coupe et ta place, « Jouer », contre le salon et à deux sur ce téléphone. Maquette
+ * « JeuxRouge » : sur le stade, bord or ; trophée, « Coupe » et points en or ; « Jouer » rouge.
  */
 export function CoupeGameCard() {
   const { user } = useAuth();
@@ -223,43 +257,47 @@ export function CoupeGameCard() {
 
   return (
     <article aria-labelledby="coupe-game-title">
-      <div className="shine-sweep relative overflow-hidden rounded-3xl border p-5" style={{ background: CARD_BG, borderColor: GOLD_BORDER }}>
-        <PitchLines className="absolute -right-5 -top-4 w-32 rotate-[-10deg] pointer-events-none" style={{ color: COUPE_GOLD, opacity: 0.13 }} />
-        <div className="relative">
+      <div className="shine-sweep relative overflow-hidden rounded-3xl border" style={{ background: C.noir, borderColor: C.orBord }}>
+        <StadiumBackdrop position="50% 14%" veil={COUPE_VEIL} />
+        <div className="relative min-h-[236px] flex flex-col p-5" style={ON_IMAGE}>
           <div className="flex items-center gap-2">
-            <Trophy className="w-4 h-4 shrink-0" style={{ color: COUPE_GOLD }} aria-hidden="true" />
-            <p className="text-[10px] tracking-[0.3em] uppercase text-white/50 font-medium">Mini-jeu de foot</p>
+            <Trophy className="w-3.5 h-3.5 shrink-0" style={{ color: C.or }} aria-hidden="true" />
+            <p className="text-[10px] tracking-[0.3em] uppercase font-semibold" style={{ color: C.grisClair }}>Mini-jeu de foot</p>
           </div>
-          <h2 id="coupe-game-title" className="mt-1.5 font-fut text-[28px] font-extrabold uppercase leading-none tracking-wide text-white">
-            La <span style={{ color: COUPE_GOLD }}>Coupe</span> du Gang
+          <h2 id="coupe-game-title" className="mt-1.5 font-fut text-[30px] font-extrabold uppercase leading-none tracking-wide text-white">
+            La <span style={{ color: C.or }}>Coupe</span> du Gang
           </h2>
-          <p className="mt-1.5 text-xs leading-snug text-white/60">Défie un barber, un pote ou le salon : premier à 3 buts.</p>
+          <p className="mt-1.5 text-[12.5px] leading-snug" style={{ color: C.grisClair }}>Défie un barber, un pote ou le salon : premier à 3 buts.</p>
 
-          <div className="mt-4 flex items-end justify-between gap-3">
+          <div className="mt-auto pt-4 flex items-end justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: GOLD_SOFT }}>Tes Points de Coupe</p>
-              <p className="mt-1 font-fut text-5xl font-extrabold leading-[0.85] tabular-nums" style={{ color: COUPE_GOLD }}>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: C.grisClair }}>Tes Points de Coupe</p>
+              <p
+                className="mt-1.5 font-fut text-[50px] font-extrabold leading-[0.85] tabular-nums"
+                style={{ color: C.or, textShadow: `0 3px 0 ${C.rougeSombre}` }}
+              >
                 {points ?? '–'}
               </p>
               {closed ? (
-                <p className="mt-1.5 text-xs leading-snug text-white/75 min-h-[1rem]">{COUPE_PAUSED}</p>
+                <p className="mt-1.5 text-xs leading-snug min-h-[1rem]" style={{ color: C.grisClair }}>{COUPE_PAUSED}</p>
               ) : failed ? (
                 <button
                   type="button"
                   onClick={() => meQuery.refetch()}
-                  className="mt-1.5 text-xs text-white/70 underline underline-offset-2"
+                  className="min-h-[44px] inline-flex items-center text-left text-xs underline underline-offset-2"
+                  style={{ color: C.grisClair }}
                 >
                   Points indisponibles · Réessayer
                 </button>
               ) : (
-                <p className="mt-1.5 text-xs leading-snug text-white/75 min-h-[1rem]">{standing}</p>
+                <p className="mt-1.5 text-xs leading-snug text-white min-h-[1rem]">{standing}</p>
               )}
             </div>
             <Link to="/coupe" className="shrink-0 rounded-xl">
               <motion.span
                 whileTap={reduceMotion ? undefined : { scale: 0.95 }}
-                className="flex items-center gap-1.5 h-11 px-5 rounded-xl font-fut text-lg font-extrabold uppercase tracking-[0.06em]"
-                style={{ background: COUPE_GOLD, color: ON_GOLD, boxShadow: '0 8px 24px rgba(235, 193, 94, 0.25)' }}
+                className="flex items-center gap-1.5 min-h-[46px] px-5 rounded-xl font-fut text-lg font-extrabold uppercase tracking-[0.06em]"
+                style={{ background: C.rouge, color: C.blanc, boxShadow: '0 8px 24px rgba(224, 31, 38, 0.3)' }}
               >
                 Jouer <ArrowRight className="w-4 h-4" aria-hidden="true" />
               </motion.span>
@@ -268,8 +306,8 @@ export function CoupeGameCard() {
         </div>
       </div>
       <div className="mt-2 grid grid-cols-2 gap-2">
-        <ModeTile to="/coupe?mode=bot&level=apprenti" icon={Bot} iconColor="#86adff" title="Contre le salon" text="3 niveaux · sans points" />
-        <ModeTile to="/coupe?mode=local" icon={Smartphone} iconColor={COUPE_GOLD} title="À deux" text="Sur ce téléphone · amical" />
+        <ModeTile to="/coupe?mode=bot&level=apprenti" icon={Bot} iconColor={C.blanc} title="Contre le salon" text="3 niveaux · sans points" />
+        <ModeTile to="/coupe?mode=local" icon={Smartphone} iconColor={C.rougeVif} title="À deux" text="Sur ce téléphone · amical" />
       </div>
     </article>
   );
@@ -280,6 +318,8 @@ export function CoupeGameCard() {
 /**
  * Entrée « Jeux » en tête du fil, vers la page « Jeux » : rien sans jeu ouvert, ni quand l'admin a
  * masqué la catégorie « Jeux » de l'accueil (rien non plus tant que les paramètres ne sont pas lus).
+ * Petite sœur de la carte de l'accueil, sans image (le fil est déjà lourd) : fond noir teinté de
+ * rouge, bord rouge, flèche dans un rond rouge, pictogramme de chaque jeu en or.
  */
 export function GamesFeedEntry({ className = '' }) {
   const { games } = useGames();
@@ -289,27 +329,43 @@ export function GamesFeedEntry({ className = '' }) {
     <Link
       to="/jeux"
       className={`flex items-center gap-3 rounded-2xl border p-3 active:opacity-90 transition-opacity ${className}`}
-      style={{ background: CARD_BG, borderColor: GOLD_BORDER }}
+      style={{ background: CARD_BG, borderColor: RED_BORDER }}
     >
-      <span className="w-10 h-10 shrink-0 rounded-xl flex items-center justify-center" style={{ background: 'rgba(235, 193, 94, 0.14)' }}>
-        <Gamepad2 className="w-5 h-5" style={{ color: COUPE_GOLD }} aria-hidden="true" />
+      <span className="w-10 h-10 shrink-0 rounded-xl flex items-center justify-center" style={{ background: RED_TINT }}>
+        <Gamepad2 className="w-5 h-5" style={{ color: C.rougeVif }} aria-hidden="true" />
       </span>
       <span className="flex-1 min-w-0">
         <span className="block font-fut text-lg font-extrabold uppercase tracking-wide leading-none text-white">Jeux</span>
-        <span className="block mt-1 text-xs truncate" style={{ color: MUTED }}>{games.map((g) => g.title).join(' · ')}</span>
+        <span className="block mt-1 text-xs truncate" style={{ color: C.grisClair }}>
+          {games.map((g, i) => (
+            <React.Fragment key={g.id}>
+              {i > 0 && ' · '}
+              <GameIcon id={g.id} className="inline-block w-3.5 h-3.5 mr-1 align-[-0.2em]" style={{ color: C.or }} />
+              {g.title}
+            </React.Fragment>
+          ))}
+        </span>
       </span>
-      <ChevronRight className="w-5 h-5 shrink-0" style={{ color: COUPE_GOLD }} aria-hidden="true" />
+      <span className="w-8 h-8 shrink-0 rounded-full grid place-items-center" style={{ background: C.rouge, color: C.blanc }}>
+        <ChevronRight className="w-4 h-4" aria-hidden="true" />
+      </span>
     </Link>
   );
 }
 
 // ─── Page de la carte Gang : bloc sous la carte ─────────────────────
 
+// Points de Coupe en or (ombre rouge sombre, comme l'accueil de la Coupe), le reste en blanc
 function StatTile({ value, label, gold = false }) {
   return (
-    <div className="rounded-xl px-1 py-2.5 text-center min-w-0" style={{ background: gold ? 'rgba(235, 193, 94, 0.1)' : 'rgba(255, 255, 255, 0.04)' }}>
-      <p className="font-fut text-[26px] font-extrabold leading-none tabular-nums" style={{ color: gold ? COUPE_GOLD : '#eef3ef' }}>{value}</p>
-      <p className="mt-1 text-[11px] truncate" style={{ color: gold ? GOLD_SOFT : MUTED }}>{label}</p>
+    <div className="rounded-xl px-1 py-2.5 text-center min-w-0" style={{ background: gold ? 'rgba(235, 193, 94, 0.1)' : 'rgba(255, 255, 255, 0.05)' }}>
+      <p
+        className="font-fut text-[26px] font-extrabold leading-none tabular-nums"
+        style={gold ? { color: C.or, textShadow: `0 2px 0 ${C.rougeSombre}` } : { color: C.blanc }}
+      >
+        {value}
+      </p>
+      <p className="mt-1 text-[11px] truncate" style={{ color: gold ? C.grisClair : C.gris }}>{label}</p>
     </div>
   );
 }
@@ -319,13 +375,15 @@ function StatTile({ value, label, gold = false }) {
 const matchCancelled = (m) => m.cancelled === true || m.reason === 'cancelled';
 const matchDraw = (m) => m.reason === 'time_limit_draw';
 
+// Victoire en or, défaite en blanc sur rouge (comme la bande soulignée de rouge de l'écran de fin),
+// nul en blanc, annulé en gris ; la lettre et le texte lu (sr-only) disent l'issue sans la couleur
 function ResultBadge({ match }) {
   const kind = matchCancelled(match) ? 'cancelled' : matchDraw(match) ? 'draw' : match.won ? 'won' : 'lost';
   const look = {
-    won: { text: 'V', label: 'Victoire', bg: 'rgba(51, 181, 116, 0.18)', color: '#6fd39f' },
-    lost: { text: 'D', label: 'Défaite', bg: 'rgba(255, 255, 255, 0.08)', color: '#c6d1cb' },
-    draw: { text: 'N', label: 'Match nul', bg: 'rgba(235, 193, 94, 0.12)', color: COUPE_GOLD },
-    cancelled: { text: '–', label: 'Match annulé', bg: 'rgba(255, 255, 255, 0.05)', color: '#8a9a92' },
+    won: { text: 'V', label: 'Victoire', bg: 'rgba(235, 193, 94, 0.16)', color: C.or },
+    lost: { text: 'D', label: 'Défaite', bg: 'rgba(224, 31, 38, 0.24)', color: C.blanc },
+    draw: { text: 'N', label: 'Match nul', bg: 'rgba(255, 255, 255, 0.1)', color: C.blanc },
+    cancelled: { text: '–', label: 'Match annulé', bg: 'rgba(255, 255, 255, 0.05)', color: C.gris },
   }[kind];
   return (
     <span className="w-[22px] h-[22px] shrink-0 rounded-md grid place-items-center font-fut text-[13px] font-extrabold leading-none" style={{ background: look.bg, color: look.color }}>
@@ -339,7 +397,7 @@ function MatchDelta({ match }) {
   const delta = Math.round(Number(match.delta) || 0);
   const counted = !matchCancelled(match) && match.ranked !== false;
   const text = delta > 0 ? `+${delta}` : delta < 0 ? `−${Math.abs(delta)}` : '0';
-  const color = !counted || delta === 0 ? '#8a9a92' : delta > 0 ? COUPE_GOLD : '#eef3ef';
+  const color = !counted || delta === 0 ? C.gris : delta > 0 ? C.or : C.blanc;
   return (
     <span className="shrink-0 font-fut text-base font-extrabold leading-none tabular-nums" style={{ color }}>
       <span aria-hidden="true">{text}</span>
@@ -355,13 +413,13 @@ function RecentMatch({ match }) {
       : match.reason === 'too_short' ? 'trop court'
         : match.ranked === false ? 'amical' : null;
   return (
-    <li className="flex items-center gap-2.5 py-2.5 border-b border-white/[0.06] last:border-b-0 text-[13.5px] text-[#eef3ef]">
+    <li className="flex items-center gap-2.5 py-2.5 border-b border-white/[0.07] last:border-b-0 text-[13.5px] text-white">
       <ResultBadge match={match} />
       <span className="flex-1 min-w-0 leading-snug">
         {score && <span className="tabular-nums">{score[0]} – {score[1]} </span>}
         contre <span className="font-semibold">{coupePlayerName(match.opponent)}</span>
         {' '}<CoupeRoleMark role={match.opponent?.role} />
-        {tag && <span style={{ color: '#8a9a92' }}> · {tag}</span>}
+        {tag && <span style={{ color: C.gris }}> · {tag}</span>}
       </span>
       <MatchDelta match={match} />
     </li>
@@ -369,9 +427,10 @@ function RecentMatch({ match }) {
 }
 
 /**
- * « La Coupe du Gang » sur la page de la carte Gang (maquette « Page de la carte Gang, client ») :
- * points, rang, victoires et défaites de la saison, les 3 derniers matchs et « Jouer à la Coupe ».
- * Aussi sans carte Gang : on joue quand même, en amical (les points arrivent avec la carte).
+ * « La Coupe du Gang » sur la page de la carte Gang (maquette « Page de la carte Gang, client », aux
+ * couleurs du thème stade) : points, rang, victoires et défaites de la saison, les 3 derniers matchs
+ * et « Jouer à la Coupe ». Aussi sans carte Gang : on joue quand même, en amical (les points
+ * arrivent avec la carte).
  */
 export function CoupeGangBlock({ className = '' }) {
   const enabled = useCoupeEnabled();
@@ -402,15 +461,16 @@ export function CoupeGangBlock({ className = '' }) {
     <section
       aria-labelledby="coupe-gang-title"
       className={`rounded-[20px] border p-4 flex flex-col gap-3.5 ${className}`}
-      style={{ background: BLOCK_BG, borderColor: GOLD_BORDER }}
+      style={{ background: BLOCK_BG, borderColor: C.orBord }}
     >
-      {/* Le titre ne se coupe jamais : sur un écran étroit, la saison passe en dessous */}
+      {/* Le titre ne se coupe jamais : sur un écran étroit, la saison passe en dessous. Texte dans un
+          seul élément (le flex de h2 espacerait « La », « Coupe » et « du Gang ») */}
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-        <h2 id="coupe-gang-title" className="flex items-center gap-2 font-fut text-xl font-extrabold uppercase tracking-wide leading-none whitespace-nowrap text-[#eef3ef]">
-          <Trophy className="w-5 h-5 shrink-0" style={{ color: COUPE_GOLD }} aria-hidden="true" />
-          La Coupe du Gang
+        <h2 id="coupe-gang-title" className="flex items-center gap-2 font-fut text-xl font-extrabold uppercase tracking-wide leading-none whitespace-nowrap text-white">
+          <Trophy className="w-5 h-5 shrink-0" style={{ color: C.or }} aria-hidden="true" />
+          <span>La <span style={{ color: C.or }}>Coupe</span> du Gang</span>
         </h2>
-        {me && <span className="text-[11px]" style={{ color: GOLD_SOFT }}>{coupeSeasonLabel(me.season)}</span>}
+        {me && <span className="text-[11px]" style={{ color: C.grisClair }}>{coupeSeasonLabel(me.season)}</span>}
       </div>
 
       {isPending && !failed && (
@@ -431,16 +491,16 @@ export function CoupeGangBlock({ className = '' }) {
             <StatTile value={wins} label={plural(wins, 'victoire', 'victoires')} />
             <StatTile value={losses} label={plural(losses, 'défaite', 'défaites')} />
           </div>
-          {note && <p className="-mt-1 text-[11px] leading-snug" style={{ color: MUTED }}>{note}</p>}
+          {note && <p className="-mt-1 text-[11px] leading-snug" style={{ color: C.gris }}>{note}</p>}
 
           <div>
-            <p className="mb-0.5 font-fut text-[13px] font-bold uppercase tracking-[0.12em]" style={{ color: MUTED }}>Derniers matchs</p>
+            <p className="mb-0.5 font-fut text-[13px] font-bold uppercase tracking-[0.12em]" style={{ color: C.gris }}>Derniers matchs</p>
             {recent.length > 0 ? (
               <ul>
                 {recent.map((m, i) => <RecentMatch key={`${m.ended_at || ''}-${i}`} match={m} />)}
               </ul>
             ) : (
-              <p className="py-2 text-xs leading-snug" style={{ color: MUTED }}>
+              <p className="py-2 text-xs leading-snug" style={{ color: C.gris }}>
                 Aucun match pour l’instant : défie un barber, un pote ou le salon.
               </p>
             )}
@@ -452,7 +512,7 @@ export function CoupeGangBlock({ className = '' }) {
         <Link
           to="/coupe"
           className="min-h-[50px] rounded-[14px] grid place-items-center font-fut text-lg font-extrabold uppercase tracking-[0.06em] active:opacity-90 transition-opacity"
-          style={{ background: COUPE_GOLD, color: ON_GOLD }}
+          style={{ background: C.rouge, color: C.blanc }}
         >
           Jouer à la Coupe
         </Link>

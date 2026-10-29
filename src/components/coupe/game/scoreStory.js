@@ -5,32 +5,41 @@
  * Même logique de partage que la carte Gang (src/lib/gangStory.js) : l'image est préparée dès
  * l'écran de fin (un partage lancé trop longtemps après le tap est refusé sur iPhone).
  *
- * `story` : { key, title, win, score: [toi, adversaire], names: [toi, adversaire], eyebrow,
+ * Thème stade (docs/fonctions/coupe-du-gang-stade.md) : en fond, le stade du jeu assombri (fond
+ * noir si l'image ne charge pas), son logo D'Home Barber visible dans la tribune du haut ;
+ * « VICTOIRE » en or ombré de rouge et quelques lames de rasoir, « DÉFAITE » en blanc sur une
+ * bande noire soulignée de rouge, match nul en blanc ; invitation sur un bouton rouge.
+ *
+ * `story` : { key, title, win, tone?, score: [toi, adversaire], names: [toi, adversaire], eyebrow,
  *             points: { delta, total, rank } | null, season, note }
- * Rien sur l'adversaire au-delà de son nom affiché (prénom + initiale, contrat section 0).
+ * `tone` (facultatif, celui d'`endTexts`) : 'victoire' | 'defaite' | 'neutre' ; sinon déduit de
+ * `win` et du titre. Rien sur l'adversaire au-delà de son nom affiché (prénom + initiale, contrat
+ * section 0).
  */
 import { isNative } from '@/lib/capacitor';
+import { STADIUM_URL } from '@/lib/coupe/stadiumImage';
+import { COUPE_COLORS as C } from '@/components/coupe/palette';
+import { coupePointsLabel } from './format';
 
 export const SCORE_STORY_WIDTH = 1080;
 export const SCORE_STORY_HEIGHT = 1920;
 
 const FUT = '"Barlow Condensed", "Arial Narrow", sans-serif';
 const BODY = 'Inter, system-ui, -apple-system, sans-serif';
-const LOGO_SRC = '/icons/icon-256.png';
 const SALON_ADDRESS = '3 Rue du Bois Arquet · Douvaine';
 const SHARE_TEXT = "Mon match à la Coupe du Gang · D'Home Barber, Douvaine";
 const IMAGE_TIMEOUT_MS = 8000;
 const FONT_TIMEOUT_MS = 3000;
-const GOLD = '#ebc15e';
-const GOLD_SOFT = '#c9b27a';
-const FG = '#eef3ef';
-const MUTED = '#9db0a6';
+/** Noir des fonds (`C.noir`) avec une opacité. */
+const NOIR = (alpha) => `rgba(11, 11, 12, ${alpha})`;
 
-// Lames de rasoir de la maquette (fin du match), posées une fois pour toutes : x, y, angle, taille, teinte
+// Lames de rasoir d'une victoire (maquette « Après-match : victoire »), posées une fois pour toutes
+// hors des textes, du logo de la tribune et des bannières « LA COUPE DU GANG » des côtés
+// (y 725 à 1090) : x, y, angle, taille, teinte
 const BLADES = [
-  [90, 520, -24, 1.5, '#d9dfe4'], [420, 400, 14, 1.2, '#b9c2c9'], [880, 560, 58, 1.6, '#eef2f5'],
-  [760, 860, -40, 1.1, '#c8d0d6'], [180, 930, 80, 1.3, '#e3e8ec'], [960, 1080, -12, 1.35, '#aab4bc'],
-  [60, 1240, 32, 1.2, '#d0d7dc'], [930, 1500, 22, 1.1, '#c8d0d6'],
+  [215, 300, -24, 1.45, C.blancCasse], [860, 265, 58, 1.55, C.or], [330, 800, 14, 1, C.rouge],
+  [760, 815, -40, 1.05, C.or], [75, 520, 80, 1.25, C.rouge], [1012, 450, -12, 1.3, C.blancCasse],
+  [80, 1222, 32, 1.15, C.or], [1010, 1215, 22, 1.1, C.rouge],
 ];
 
 const withTimeout = (promise, ms) => Promise.race([promise, new Promise((resolve) => setTimeout(resolve, ms))]);
@@ -56,6 +65,13 @@ async function loadFonts() {
   }
 }
 
+/** Ton de la story : celui d'`endTexts` s'il est fourni, sinon victoire, match nul / annulé, défaite. */
+function storyTone(story) {
+  if (story?.tone === 'victoire' || story?.tone === 'defaite' || story?.tone === 'neutre') return story.tone;
+  if (story?.win) return 'victoire';
+  return /^match\b/i.test(String(story?.title || '')) ? 'neutre' : 'defaite';
+}
+
 function spacedWidth(ctx, text, spacing) {
   if (!spacing) return ctx.measureText(text).width;
   return [...text].reduce((w, ch) => w + ctx.measureText(ch).width + spacing, 0);
@@ -76,6 +92,27 @@ function drawText(ctx, text, x, baseline, { spacing = 0, align = 'left' } = {}) 
     cx += ctx.measureText(ch).width + spacing;
   }
   return total;
+}
+
+/** Une ligne en plusieurs couleurs (« LA COUPE DU GANG », « COUPE » en or), même espacement. */
+function drawSegments(ctx, segments, x, baseline, { spacing = 0, align = 'center' } = {}) {
+  const total = segments.reduce((w, s) => w + spacedWidth(ctx, s.text, spacing), 0);
+  let cx = align === 'center' ? x - total / 2 : align === 'right' ? x - total : x;
+  for (const s of segments) {
+    ctx.fillStyle = s.color;
+    cx += drawText(ctx, s.text, cx, baseline, { spacing });
+  }
+}
+
+/** Ombre portée le temps d'un dessin (lisibilité des textes posés sur le terrain). */
+function withShadow(ctx, { color = 'rgba(0, 0, 0, .85)', blur = 14, x = 0, y = 2 }, draw) {
+  ctx.save();
+  ctx.shadowColor = color;
+  ctx.shadowBlur = blur;
+  ctx.shadowOffsetX = x;
+  ctx.shadowOffsetY = y;
+  draw();
+  ctx.restore();
 }
 
 /** Plus grande taille de police (≤ max) pour que le texte tienne dans `maxWidth`. */
@@ -106,174 +143,240 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
-function drawLogo(ctx, logo, cx, top, size) {
-  ctx.save();
-  ctx.beginPath();
-  ctx.arc(cx, top + size / 2, size / 2, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(0,0,0,.35)';
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(235,193,94,.35)';
-  ctx.lineWidth = 2;
-  ctx.stroke();
-  if (logo) {
-    const inner = size - 8;
-    ctx.beginPath();
-    ctx.arc(cx, top + size / 2, inner / 2, 0, Math.PI * 2);
-    ctx.clip();
-    ctx.drawImage(logo, cx - inner / 2, top + 4, inner, inner);
-  }
-  ctx.restore();
-}
-
+/** Lame à double tranchant (même dessin que la pluie de l'écran de fin et celle du terrain). */
 function drawBlade(ctx, x, y, angle, scale, color) {
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate((angle * Math.PI) / 180);
-  ctx.scale(scale * 1.6, scale * 1.6);
-  ctx.globalAlpha = 0.55;
+  ctx.scale(scale * 2.2, scale * 2.2);
+  ctx.globalAlpha = 0.95;
   roundRect(ctx, -15, -6.5, 30, 13, 2.5);
   ctx.fillStyle = color;
   ctx.fill();
-  ctx.fillStyle = '#0b0d0c';
-  roundRect(ctx, -9, -1.5, 18, 3.2, 1.6);
+  ctx.strokeStyle = 'rgba(255, 255, 255, .45)';
+  ctx.lineWidth = 0.9;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(-11.5, -5.1);
+  ctx.lineTo(11.5, -5.1);
+  ctx.stroke();
+  ctx.fillStyle = C.noir;
+  roundRect(ctx, -9, -1.6, 18, 3.2, 1.6);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(-9, 0, 2.2, 0, Math.PI * 2);
+  ctx.arc(9, 0, 2.2, 0, Math.PI * 2);
   ctx.fill();
   ctx.beginPath();
   ctx.arc(0, 0, 2.8, 0, Math.PI * 2);
   ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(-2.5, -6.5);
+  ctx.lineTo(0, -4);
+  ctx.lineTo(2.5, -6.5);
+  ctx.moveTo(-2.5, 6.5);
+  ctx.lineTo(0, 4);
+  ctx.lineTo(2.5, 6.5);
+  ctx.fill();
   ctx.restore();
 }
 
-/** Fond de la fin du match : stade de nuit, halo doré, lignes du terrain très discrètes. */
-function drawBackground(ctx) {
+/**
+ * Fond : le stade en entier (rogné de quelques pixels sur les côtés), voile plus léger sur la
+ * tribune du logo, noir en haut sous l'en-tête et en bas sous les points, l'adresse et l'invitation.
+ */
+function drawBackground(ctx, stadium, tone) {
   const w = SCORE_STORY_WIDTH;
   const h = SCORE_STORY_HEIGHT;
-  ctx.fillStyle = '#05080a';
+  ctx.fillStyle = C.noir;
   ctx.fillRect(0, 0, w, h);
-  ctx.save();
-  ctx.translate(w / 2, h * 0.38);
-  ctx.scale(1, 0.7);
-  const g = ctx.createRadialGradient(0, 0, 0, 0, 0, w);
-  g.addColorStop(0, '#2a2410');
-  g.addColorStop(0.72, '#07090b');
-  g.addColorStop(1, '#05080a');
-  ctx.fillStyle = g;
-  ctx.fillRect(-w, -h, w * 2, h * 2);
-  ctx.restore();
-  // Terrain
-  ctx.save();
-  ctx.strokeStyle = 'rgba(235,193,94,.08)';
-  ctx.lineWidth = 4;
-  roundRect(ctx, 70, 380, w - 140, 1150, 28);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(70, 955);
-  ctx.lineTo(w - 70, 955);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.arc(w / 2, 955, 150, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.strokeRect(w / 2 - 230, 380, 460, 170);
-  ctx.strokeRect(w / 2 - 230, 1360, 460, 170);
-  ctx.restore();
-  for (const b of BLADES) drawBlade(ctx, ...b);
+  if (stadium) {
+    const s = Math.max(w / stadium.naturalWidth, h / stadium.naturalHeight);
+    const dw = stadium.naturalWidth * s;
+    const dh = stadium.naturalHeight * s;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(stadium, (w - dw) / 2, (h - dh) / 2, dw, dh);
+  }
+  // Défaite : stade plus sombre, comme sur l'écran de fin
+  const k = tone === 'defaite' ? 0.1 : 0;
+  const veil = ctx.createLinearGradient(0, 0, 0, h);
+  veil.addColorStop(0, NOIR(0.3 + k));
+  veil.addColorStop(0.2, NOIR(0.3 + k));
+  veil.addColorStop(0.27, NOIR(0.52 + k));
+  veil.addColorStop(1, NOIR(0.52 + k));
+  ctx.fillStyle = veil;
+  ctx.fillRect(0, 0, w, h);
+  const top = ctx.createLinearGradient(0, 0, 0, 210);
+  top.addColorStop(0, NOIR(1));
+  top.addColorStop(0.45, NOIR(0.92));
+  top.addColorStop(1, NOIR(0));
+  ctx.fillStyle = top;
+  ctx.fillRect(0, 0, w, 210);
+  const bottom = ctx.createLinearGradient(0, 1140, 0, 1560);
+  bottom.addColorStop(0, NOIR(0));
+  bottom.addColorStop(1, NOIR(1));
+  ctx.fillStyle = bottom;
+  ctx.fillRect(0, 1140, w, h - 1140);
+  if (tone === 'victoire') for (const b of BLADES) drawBlade(ctx, ...b);
 }
 
-function drawStory(story, { logo }) {
+/** Résultat en très grand : or ombré de rouge (victoire), blanc sur bande noire (défaite), blanc (nul). */
+function drawTitle(ctx, story, tone, cx) {
+  const title = String(story.title || '').toUpperCase();
+  const band = tone === 'defaite';
+  const size = fitFont(ctx, title, { weight: 800, family: FUT, max: 250, min: 120, maxWidth: band ? 860 : 960, spacingEm: 0.01 });
+  const spacing = size * 0.01;
+  const baseline = 520 + size * 0.82;
+  if (band) {
+    const tw = spacedWidth(ctx, title, spacing);
+    const padX = size * 0.26;
+    const top = baseline - size * 0.86;
+    const height = size * 0.96;
+    ctx.fillStyle = C.noir;
+    ctx.fillRect(cx - tw / 2 - padX, top, tw + padX * 2, height);
+    ctx.fillStyle = C.rouge;
+    ctx.fillRect(cx - tw / 2 - padX, top + height, tw + padX * 2, Math.round(size * 0.05));
+    ctx.fillStyle = C.blanc;
+    drawText(ctx, title, cx, baseline, { align: 'center', spacing });
+    return;
+  }
+  const shade = Math.round(size * (tone === 'victoire' ? 0.07 : 0.06));
+  // Ombre décalée (rouge pour une victoire, noire sinon) avec un halo sombre, puis le titre
+  withShadow(ctx, { color: 'rgba(0, 0, 0, .55)', blur: 40, y: 0 }, () => {
+    ctx.fillStyle = tone === 'victoire' ? C.rouge : NOIR(0.85);
+    drawText(ctx, title, cx, baseline + shade, { align: 'center', spacing });
+  });
+  ctx.fillStyle = tone === 'victoire' ? C.or : C.blanc;
+  drawText(ctx, title, cx, baseline, { align: 'center', spacing });
+}
+
+/** Gain du match (en ligne, match qui compte) : carte bordée d'or quand il rapporte. */
+function drawPoints(ctx, story) {
+  const cw = SCORE_STORY_WIDTH;
+  const p = story.points;
+  const d = Math.round(Number(p.delta));
+  const gain = d > 0;
+  const top = 1250;
+  const x = 150;
+  const width = cw - 300;
+  const height = 200;
+  roundRect(ctx, x, top, width, height, 30);
+  ctx.fillStyle = 'rgba(20, 20, 22, .94)';
+  ctx.fill();
+  if (gain) {
+    ctx.save();
+    roundRect(ctx, x, top, width, height, 30);
+    ctx.clip();
+    const glow = ctx.createLinearGradient(x, 0, x + width, 0);
+    glow.addColorStop(0, 'rgba(235, 193, 94, .16)');
+    glow.addColorStop(1, 'rgba(235, 193, 94, 0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(x, top, width, height);
+    ctx.restore();
+  }
+  roundRect(ctx, x, top, width, height, 30);
+  ctx.strokeStyle = gain ? 'rgba(235, 193, 94, .55)' : 'rgba(255, 255, 255, .22)';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  const delta = d > 0 ? `+${d}` : d < 0 ? `−${Math.abs(d)}` : '0';
+  ctx.fillStyle = gain ? C.or : C.blanc;
+  ctx.font = `800 120px ${FUT}`;
+  drawText(ctx, delta, 210, top + 128);
+  ctx.fillStyle = C.grisClair;
+  ctx.font = `500 32px ${BODY}`;
+  drawText(ctx, coupePointsLabel(d), 212, top + 172);
+  ctx.fillStyle = C.gris;
+  ctx.font = `500 32px ${BODY}`;
+  drawText(ctx, String(story.season || 'Saison'), cw - 210, top + 78, { align: 'right' });
+  if (p.rank) {
+    ctx.fillStyle = C.blanc;
+    ctx.font = `800 64px ${FUT}`;
+    drawText(ctx, `${p.rank}${Number(p.rank) === 1 ? 're' : 'e'} place`, cw - 210, top + 150, { align: 'right' });
+  } else if (p.total != null) {
+    ctx.fillStyle = C.blanc;
+    ctx.font = `800 64px ${FUT}`;
+    drawText(ctx, `${p.total} pts`, cw - 210, top + 150, { align: 'right' });
+  }
+}
+
+function drawStory(story, { stadium }) {
   const canvas = document.createElement('canvas');
   canvas.width = SCORE_STORY_WIDTH;
   canvas.height = SCORE_STORY_HEIGHT;
   const ctx = canvas.getContext('2d');
   const cw = SCORE_STORY_WIDTH;
   const cx = cw / 2;
+  const tone = storyTone(story);
 
-  drawBackground(ctx);
+  drawBackground(ctx, stadium, tone);
 
-  // En-tête : logo et « D'HOME BARBER · LA COUPE DU GANG »
-  drawLogo(ctx, logo, cx, 120, 120);
-  ctx.fillStyle = GOLD_SOFT;
+  // En-tête : « D'HOME BARBER · LA COUPE DU GANG », « COUPE » en or (le logo est dans la tribune)
   ctx.font = `600 30px ${BODY}`;
-  drawText(ctx, "D'HOME BARBER · LA COUPE DU GANG", cx, 310, { align: 'center', spacing: 30 * 0.2 });
+  withShadow(ctx, { blur: 10, y: 1 }, () => {
+    drawSegments(ctx, [
+      { text: "D'HOME BARBER · LA ", color: C.blanc },
+      { text: 'COUPE', color: C.or },
+      { text: ' DU GANG', color: C.blanc },
+    ], cx, 130, { align: 'center', spacing: 30 * 0.2 });
+  });
 
   // Mode et adversaire
-  ctx.fillStyle = MUTED;
   ctx.font = `600 34px ${BODY}`;
   const eyebrow = ellipsize(ctx, String(story.eyebrow || '').toUpperCase(), 940);
-  drawText(ctx, eyebrow, cx, 470, { align: 'center', spacing: 34 * 0.12 });
+  withShadow(ctx, {}, () => {
+    ctx.fillStyle = C.grisClair;
+    drawText(ctx, eyebrow, cx, 478, { align: 'center', spacing: 34 * 0.12 });
+  });
 
   // Résultat en très grand
-  const title = String(story.title || '').toUpperCase();
-  ctx.fillStyle = story.win ? GOLD : FG;
-  const tSize = fitFont(ctx, title, { weight: 800, family: FUT, max: 250, min: 120, maxWidth: 960, spacingEm: 0.01 });
-  drawText(ctx, title, cx, 520 + tSize * 0.82, { align: 'center', spacing: tSize * 0.01 });
+  drawTitle(ctx, story, tone, cx);
 
-  // Score
+  // Score, posé sur le rond central
   const [a, b] = Array.isArray(story.score) ? story.score : [0, 0];
-  ctx.fillStyle = '#ffffff';
   ctx.font = `800 300px ${FUT}`;
-  drawText(ctx, `${a} – ${b}`, cx, 1080, { align: 'center' });
+  withShadow(ctx, { color: 'rgba(0, 0, 0, .6)', blur: 36, y: 4 }, () => {
+    ctx.fillStyle = C.blanc;
+    drawText(ctx, `${a} – ${b}`, cx, 1080, { align: 'center' });
+  });
 
   // Les deux joueurs
   const [me, opp] = Array.isArray(story.names) ? story.names : ['Toi', 'Adversaire'];
   ctx.font = `600 46px ${BODY}`;
   const left = ellipsize(ctx, String(me || 'Toi'), 400);
   const right = ellipsize(ctx, String(opp || 'Adversaire'), 400);
-  ctx.fillStyle = '#ffffff';
-  drawText(ctx, left, cx - 60, 1170, { align: 'right' });
-  drawText(ctx, right, cx + 60, 1170, { align: 'left' });
-  ctx.fillStyle = MUTED;
-  ctx.font = `500 34px ${BODY}`;
-  drawText(ctx, 'contre', cx, 1166, { align: 'center' });
+  withShadow(ctx, {}, () => {
+    ctx.fillStyle = C.blanc;
+    drawText(ctx, left, cx - 60, 1170, { align: 'right' });
+    drawText(ctx, right, cx + 60, 1170, { align: 'left' });
+    ctx.fillStyle = C.grisClair;
+    ctx.font = `500 34px ${BODY}`;
+    drawText(ctx, 'contre', cx, 1166, { align: 'center' });
+  });
 
   // Points de Coupe (match en ligne qui compte), sinon la note du match
-  const p = story.points;
-  if (p && Number.isFinite(Number(p.delta))) {
-    const top = 1250;
-    roundRect(ctx, 150, top, cw - 300, 200, 30);
-    ctx.fillStyle = 'rgba(18,22,26,.92)';
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(235,193,94,.35)';
-    ctx.lineWidth = 3;
-    ctx.stroke();
-    const d = Math.round(Number(p.delta));
-    const delta = d > 0 ? `+${d}` : d < 0 ? `−${Math.abs(d)}` : '0';
-    ctx.fillStyle = d > 0 ? GOLD : FG;
-    ctx.font = `800 120px ${FUT}`;
-    drawText(ctx, delta, 210, top + 128);
-    ctx.fillStyle = GOLD_SOFT;
-    ctx.font = `500 32px ${BODY}`;
-    drawText(ctx, 'Points de Coupe', 212, top + 172);
-    ctx.fillStyle = MUTED;
-    ctx.font = `500 32px ${BODY}`;
-    drawText(ctx, String(story.season || 'Saison'), cw - 210, top + 78, { align: 'right' });
-    if (p.rank) {
-      ctx.fillStyle = '#ffffff';
-      ctx.font = `800 64px ${FUT}`;
-      drawText(ctx, `${p.rank}${Number(p.rank) === 1 ? 're' : 'e'} place`, cw - 210, top + 150, { align: 'right' });
-    } else if (p.total != null) {
-      ctx.fillStyle = '#ffffff';
-      ctx.font = `800 64px ${FUT}`;
-      drawText(ctx, `${p.total} pts`, cw - 210, top + 150, { align: 'right' });
-    }
+  if (story.points && Number.isFinite(Number(story.points.delta))) {
+    drawPoints(ctx, story);
   } else if (story.note) {
-    ctx.fillStyle = MUTED;
     ctx.font = `500 36px ${BODY}`;
-    drawText(ctx, ellipsize(ctx, String(story.note), 900), cx, 1340, { align: 'center' });
+    const note = ellipsize(ctx, String(story.note), 900);
+    withShadow(ctx, {}, () => {
+      ctx.fillStyle = C.grisClair;
+      drawText(ctx, note, cx, 1340, { align: 'center' });
+    });
   }
 
-  // Adresse et invitation
-  ctx.fillStyle = '#aab4d8';
+  // Adresse et invitation (bouton rouge, comme « Jouer » et « Revanche »)
+  ctx.fillStyle = C.grisClair;
   ctx.font = `500 36px ${BODY}`;
   drawText(ctx, SALON_ADDRESS, cx, 1620, { align: 'center' });
   const cta = "Télécharge l'app D'Home Barber";
   ctx.font = `600 38px ${BODY}`;
   const pillW = ctx.measureText(cta).width + 96;
   roundRect(ctx, (cw - pillW) / 2, 1690, pillW, 96, 48);
-  ctx.fillStyle = 'rgba(255,255,255,.1)';
+  ctx.fillStyle = C.rouge;
   ctx.fill();
-  ctx.strokeStyle = 'rgba(255,255,255,.28)';
-  ctx.lineWidth = 2;
-  ctx.stroke();
-  ctx.fillStyle = '#ffffff';
+  ctx.fillStyle = C.blanc;
   drawText(ctx, cta, cx, 1752, { align: 'center' });
 
   return canvas;
@@ -282,17 +385,18 @@ function drawStory(story, { logo }) {
 function toBlob(canvas) {
   return new Promise((resolve, reject) => {
     try {
-      canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('Image impossible à générer'))), 'image/png');
+      // JPEG (fond toujours opaque) : environ 400 Ko au lieu de 2,5 Mo en PNG avec la photo du stade
+      canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('Image impossible à générer'))), 'image/jpeg', 0.9);
     } catch (err) {
       reject(err);
     }
   });
 }
 
-/** Image story du score : PNG 1080 × 1920. @returns {Promise<Blob>} */
+/** Image story du score : JPEG 1080 × 1920. @returns {Promise<Blob>} */
 export async function renderScoreStory(story) {
-  const [logo] = await Promise.all([loadImage(LOGO_SRC), loadFonts()]);
-  return toBlob(drawStory(story, { logo }));
+  const [stadium] = await Promise.all([loadImage(STADIUM_URL), loadFonts()]);
+  return toBlob(drawStory(story, { stadium }));
 }
 
 /** Contenu base64 d'un blob, sans le préfixe `data:…;base64,` (format attendu par Filesystem). */
@@ -318,14 +422,14 @@ export async function shareScoreStory(story, { blob } = {}) {
   const image = blob || (await renderScoreStory(story));
   const fallback = () => ({ fallback: true, url: URL.createObjectURL(image) });
 
-  // Apps iOS / Android : PNG écrit dans le cache, puis feuille de partage du système (la WebView
+  // Apps iOS / Android : image écrite dans le cache, puis feuille de partage du système (la WebView
   // Android n'a pas navigator.share)
   if (isNative) {
     try {
       const { Filesystem, Directory } = await import('@capacitor/filesystem');
       const { Share } = await import('@capacitor/share');
       const data = await blobToBase64(image);
-      const { uri } = await Filesystem.writeFile({ path: 'coupe-du-gang-dhomebarber.png', data, directory: Directory.Cache });
+      const { uri } = await Filesystem.writeFile({ path: 'coupe-du-gang-dhomebarber.jpg', data, directory: Directory.Cache });
       await Share.share({ title: 'La Coupe du Gang', text: SHARE_TEXT, files: [uri], dialogTitle: 'Partager le score' });
       return { shared: true };
     } catch (err) {
@@ -335,7 +439,7 @@ export async function shareScoreStory(story, { blob } = {}) {
   }
 
   if (typeof navigator === 'undefined' || typeof navigator.share !== 'function' || typeof File === 'undefined') return fallback();
-  const file = new File([image], 'coupe-du-gang.png', { type: 'image/png' });
+  const file = new File([image], 'coupe-du-gang.jpg', { type: 'image/jpeg' });
   const data = { files: [file], title: 'La Coupe du Gang', text: SHARE_TEXT };
   let accepted = false;
   try {

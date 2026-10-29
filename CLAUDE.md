@@ -28,7 +28,7 @@ Les documents de `docs/fonctions/` et `docs/historique/` sont des extraits mot p
 | `boutique-commandes-bons-plans.md` | Boutique, commandes et leur annulation, fiche produit, bons plans du Gang |
 | `cartes-cadeau-wallet.md` | cartes cadeau (débit, historique, suppression) et Apple / Google Wallet |
 | `carte-gang.md` | carte Gang des clients (niveaux, stats, écussons, saisons, effets, admin) |
-| `coupe-du-gang.md` | La Coupe du Gang (mini-jeu de foot façon air hockey en ligne, points, classement) : où est quoi, décisions, mesures ; `coupe-du-gang-contrat.md` (schéma, API, protocole v2) ; `coupe-du-gang-stores.md` (textes stores) |
+| `coupe-du-gang.md` | La Coupe du Gang (mini-jeu de foot façon air hockey en ligne, points, classement) : où est quoi, décisions, mesures ; `coupe-du-gang-contrat.md` (schéma, API, protocole v2) ; `coupe-du-gang-stade.md` (thème stade : image, caméra, palette) ; `coupe-du-gang-stores.md` (textes stores) |
 | `textile.md` | drops textile, Labo, précommandes |
 | `evenements-privatisation.md` | Privatiser le salon (devis, suivi) et événements du salon (invitations, RSVP) |
 | `snap-essayage.md` | filtres Snap (Camera Kit, Lens Studio, revue Snap) et essayage couleur « Nouvelle tête » |
@@ -324,6 +324,7 @@ Chaque ligne est un invariant : la casser réintroduit un bug déjà corrigé ou
 ### La Coupe du Gang (mini-jeu)
 
 - Moteur en **deux copies identiques** octet pour octet : `src/lib/coupe/engine.js` et `lib/coupeEngine.mjs` (`test/test-coupe-engine.js` compare) ; le serveur le charge par `import()`.
+- **Thème stade (29 oct. 2026)** : l'image `src/assets/coupe/stade.webp` **est** le terrain, tracé aux mesures du moteur (place dans `src/lib/coupe/stadium.js`) ; le canvas n'y pose que joueurs, ballon, score et effets (`renderer.setStadium(true)`), **jamais un second terrain** ; la caméra ne transforme que l'image (canvas caché pendant les zooms) ; terrain dessiné seulement si l'image ne charge pas. Aucune marque de club sur l'image (règle Apple 5.2.1) ; une nouvelle image garde les mesures (`docs/prototypes/stade-coupe/`). Couleurs : `COUPE_COLORS` (`src/components/coupe/palette.js`). Premier coup d'envoi 4,5 s (`FIRST_COUNT_MS`, `start.cd` et `state.cd`), 3 s après un but ou un retour ; **l'avant-match (stade entier, affiche) une fois par match**, jamais après un but ni au retour d'une coupure.
 - **Le serveur recalcule chaque choc** (`collidePaddle`) à partir de la position et de la vitesse du joueur ; jamais un ballon envoyé par le téléphone (triche démontrée en v1). `auth` porte `v` (2) : toute évolution incompatible du protocole passe par une nouvelle version, les téléphones gardent un build des mois.
 - **Un seul aiguillage `upgrade`** (`lib/wsRouter.js`) pour `/ws/live` et `/ws/coupe` ; jamais de quota par IP sur `/ws/live`.
 - Points : +3 / −1 jamais sous 0 ; **tous les matchs comptent** (décision du 29 oct.) ; ligne `salon` unique pour les admins ; abandon avant 20 s de jeu = annulé (rien d'écrit), match fini en moins de 10 s = amical, 5 min de jeu au plus. Droits aux points relus en base à la fin du match (carte Gang pour un client).
@@ -408,6 +409,7 @@ Chaque ligne est un invariant : la casser réintroduit un bug déjà corrigé ou
 - Réservation pour un proche : libellé « Un proche », visite comptée sur la carte Gang du parent, plafond de 6 RDV à venir gardé, pas de réservation groupée en un passage (24 oct. 2026).
 - L'admin s'adresse aux clients sous le nom « D'Home Barber », marqué d'une petite étoile bleue, sans badge écrit (26 oct. 2026).
 - Une section « Jeux » qui ouvre la page des jeux (La Coupe du Gang, puis les jeux à venir) ; l'admin rend visible ou invisible chaque catégorie de l'accueil (29 oct. 2026).
+- La Coupe du Gang, thème stade (29 oct. 2026) : stade rouge et noir style Milan **sans les marques du club** (logo D'Home Barber et « La Coupe du Gang » à leur place), rouge, noir et blanc avec une touche d'or, avant-match (stade entier puis zoom sur le terrain), terrain seul pendant le match, stade au débrief, ton pion rouge contre l'adversaire blanc, un seul terrain (jamais deux superposés), premier coup d'envoi en 4,5 s.
 - La Coupe du Gang (28 oct. 2026) : foot façon air hockey en temps réel, premier à 3 buts ; victoire +3, défaite −1 en Points de Coupe **séparés du niveau Gang** ; l'admin joue sous « D'Home Barber » (une seule ligne au classement pour tous les comptes admin) ; barbers « Dispo pour un match » ; aucun lot, seulement un classement ; **tous les matchs comptent** (ni limite par adversaire ni par jour, 29 oct.) ; interrupteur à part pour figurer au classement de la Coupe ; saison = un mois. Détail : `docs/fonctions/coupe-du-gang.md`.
 
 ## Restes à faire (les plus importants)

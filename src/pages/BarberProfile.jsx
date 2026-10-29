@@ -188,26 +188,26 @@ function CoupeChallenge({ employee }) {
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 0.2, duration: 0.35 }}
       className="mb-6 flex items-center gap-3 rounded-2xl border p-3"
-      style={{ background: 'linear-gradient(135deg, #1d180a 0%, #12161a 70%)', borderColor: 'rgba(235, 193, 94, 0.3)' }}
+      style={{ background: 'linear-gradient(135deg, #2a0b0d 0%, #141416 70%)', borderColor: 'rgba(224, 31, 38, 0.45)' }}
     >
-      <span className="relative w-10 h-10 shrink-0 rounded-xl flex items-center justify-center" style={{ background: 'rgba(51, 181, 116, 0.14)', color: '#33b574' }}>
+      <span className="relative w-10 h-10 shrink-0 rounded-xl flex items-center justify-center" style={{ background: 'rgba(235, 193, 94, 0.14)', color: COUPE_GOLD }}>
         <CoupeBallIcon className="w-5 h-5" />
         {/* Pastille « dispo » : animation CSS sur un simple span, coupée si mouvements réduits */}
         <span className="absolute -top-0.5 -right-0.5 flex w-2.5 h-2.5" aria-hidden="true">
-          <span className="absolute inline-flex w-full h-full rounded-full bg-emerald-400 opacity-75 motion-safe:animate-ping" />
-          <span className="relative inline-flex w-2.5 h-2.5 rounded-full bg-emerald-400" />
+          <span className="absolute inline-flex w-full h-full rounded-full bg-white opacity-75 motion-safe:animate-ping" />
+          <span className="relative inline-flex w-2.5 h-2.5 rounded-full bg-white" />
         </span>
       </span>
       <div className="flex-1 min-w-0">
         <p className="font-fut text-base font-extrabold uppercase tracking-wide leading-tight text-white">Dispo pour un match</p>
-        <p className="mt-1 text-xs leading-snug" style={{ color: '#9db0a6' }}>La Coupe du Gang · défi valable 2 min</p>
+        <p className="mt-1 text-xs leading-snug" style={{ color: '#a9abaf' }}>La Coupe du Gang · défi valable 2 min</p>
       </div>
       <Link
         to={`/coupe?challenge=${encodeURIComponent(employee.id)}`}
         onClick={() => hapticFeedback()}
         aria-label={`Défier ${employee.name}`}
         className="shrink-0 h-11 px-3.5 rounded-xl flex items-center font-fut text-base font-extrabold uppercase tracking-[0.06em] active:opacity-90 transition-opacity"
-        style={{ background: COUPE_GOLD, color: '#1a1205' }}
+        style={{ background: '#e01f26', color: '#ffffff' }}
       >
         Défier
       </Link>

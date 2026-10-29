@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
+import { COUPE_COLORS } from '@/components/coupe/palette';
 import Pawn from './Pawn';
 import { mmss, roleLabel } from './format';
 import { useSecondsLeft } from './hooks';
@@ -8,8 +9,9 @@ import { useSecondsLeft } from './hooks';
 const DEFI_S = 120;
 
 /**
- * « Défi reçu » (maquette du même nom) : qui te défie, compte à rebours de 2 min, ce que le match
- * rapporte, Accepter / Pas maintenant. La croix vaut « Pas maintenant » (le défiant est prévenu).
+ * « Défi reçu » (maquette du même nom, thème stade) : qui te défie (son pion en blanc, comme tout
+ * adversaire), compte à rebours de 2 min en rouge, ce que le match rapporte (gain en or),
+ * Accepter / Pas maintenant. La croix vaut « Pas maintenant » (le défiant est prévenu).
  */
 export default function ChallengeReceived({ invite, isBarber, onAccept, onDecline, onExpire }) {
   const left = useSecondsLeft(invite?.expiresAt || null);
@@ -36,14 +38,14 @@ export default function ChallengeReceived({ invite, isBarber, onAccept, onDeclin
         <button type="button" className="cdg-close" onClick={onDecline} aria-label="Fermer : pas maintenant">
           <X className="h-5 w-5" aria-hidden="true" />
         </button>
-        <p className="cdg-eyebrow">La Coupe du Gang · défi</p>
-        <Pawn name={from.name} role={from.role} tone="gold" size={104} />
+        <p className="cdg-eyebrow">La <span style={{ color: COUPE_COLORS.or }}>Coupe</span> du Gang · défi</p>
+        <Pawn name={from.name} role={from.role} tone="rival" size={104} />
         <span className="cdg-chip">{roleLabel(from.role)}</span>
         <h1 className="cdg-defi-title" id="cdg-defi-title">{name} <br />te défie</h1>
         <div className="cdg-countdown">
           <div
             className="cdg-ring"
-            style={{ background: `conic-gradient(#ebc15e 0 ${share * 100}%, rgba(255, 255, 255, .1) ${share * 100}% 100%)` }}
+            style={{ background: `conic-gradient(${COUPE_COLORS.rougeVif} 0 ${share * 100}%, rgba(255, 255, 255, .12) ${share * 100}% 100%)` }}
             role="timer"
             aria-label={`Temps restant : ${mmss(left)}`}
           >
@@ -52,7 +54,7 @@ export default function ChallengeReceived({ invite, isBarber, onAccept, onDeclin
           <span>pour accepter,<br />ensuite le défi expire</span>
         </div>
         <div className="cdg-stakes">
-          <div><span>Si tu gagnes</span><b style={{ color: '#ebc15e' }}>+3 points</b></div>
+          <div><span>Si tu gagnes</span><b style={{ color: COUPE_COLORS.or }}>+3 points</b></div>
           <div><span>Si tu perds</span><b>−1 point</b></div>
           <p>Les points comptent quand vous y avez droit tous les deux (une carte Gang pour un client). Jamais sous 0.</p>
         </div>

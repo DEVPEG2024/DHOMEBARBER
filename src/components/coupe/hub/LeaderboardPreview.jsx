@@ -7,8 +7,9 @@ import LeaderboardRow from './LeaderboardRow';
 import { ROLE_SALON, num } from './coupeFormat';
 
 /**
- * Haut du classement de la saison sur l'accueil de la Coupe (maquette « Accueil de la Coupe ») :
- * les trois premiers puis sa propre ligne, « Tout voir » vers /coupe/classement.
+ * Haut du classement de la saison sur l'accueil de la Coupe (maquettes « Accueil de la Coupe » et
+ * « CoupeAccueilRouge ») : les trois premiers puis sa propre ligne (en rouge), « Tout voir » vers
+ * /coupe/classement.
  * `me` (avatar et rôle du compte connecté) sert quand sa ligne n'est pas parmi les 50 renvoyées.
  */
 function MyStatusRow({ meInfo, me }) {
@@ -23,14 +24,15 @@ function MyStatusRow({ meInfo, me }) {
       />
     );
   }
+  // Pas (ou plus) au classement : sa ligne garde la teinte rouge, plus légère (ce n'est pas une erreur)
   return (
-    <li className="flex items-center gap-3 bg-[rgba(235,193,94,.05)] px-3.5 py-3">
-      <span className="w-[18px] shrink-0 font-fut text-lg font-extrabold leading-none text-[#9db0a6]" aria-hidden="true">–</span>
+    <li className="flex items-center gap-3 bg-[color:var(--coupe-rouge-fond)] px-3.5 py-3">
+      <span className="w-[18px] shrink-0 font-fut text-lg font-extrabold leading-none text-[color:var(--coupe-gris)]" aria-hidden="true">–</span>
       <PlayerAvatar role={me.role} name={me.name} url={me.avatarUrl} seed={me.seed} size="preview" className={me.role === 'barber' ? 'mx-1' : ''} />
-      <span className="min-w-0 flex-1 text-[13px] leading-snug text-[#9db0a6]">
+      <span className="min-w-0 flex-1 text-[13px] leading-snug text-[color:var(--coupe-gris-clair)]">
         {optedOut ? 'Tu n’apparais pas dans le classement' : 'Pas encore classé cette saison'}
       </span>
-      <span className="shrink-0 font-fut text-xl font-extrabold leading-none tabular-nums text-[#c9b27a]">
+      <span className="shrink-0 font-fut text-xl font-extrabold leading-none tabular-nums text-[color:var(--coupe-rouge-vif)]">
         {num(meInfo?.points)}<span className="sr-only"> points</span>
       </span>
     </li>
@@ -51,7 +53,11 @@ export default function LeaderboardPreview({ query, me }) {
         <h2 id="coupe-top-title" className="font-fut text-xl font-extrabold uppercase leading-none tracking-[0.04em]">
           Classement de la saison
         </h2>
-        <Link to="/coupe/classement" className="shrink-0 text-[13px] font-semibold text-[#ebc15e] hover:text-[#f5d68a]">
+        {/* Rouge vif sur le noir (5,6:1) ; cible de 44 px de haut sans changer la hauteur de la rangée */}
+        <Link
+          to="/coupe/classement"
+          className="-my-3 -mr-2 inline-flex min-h-[44px] shrink-0 items-center rounded-lg px-2 text-[13px] font-semibold text-[color:var(--coupe-rouge-vif)] underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"
+        >
           Tout voir
         </Link>
       </div>
@@ -59,18 +65,18 @@ export default function LeaderboardPreview({ query, me }) {
       {failed ? (
         <CoupeLoadError compact what="le classement" error={error} onRetry={refetch} retrying={isFetching} />
       ) : isPending ? (
-        <div className="overflow-hidden rounded-2xl border border-white/8 bg-[#12171a]" aria-busy="true">
+        <div className="overflow-hidden rounded-2xl border border-white/10 bg-[color:var(--coupe-noir2)]" aria-busy="true">
           {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="flex items-center gap-3 border-b border-white/6 px-3.5 py-3 last:border-0">
-              <span className="h-9 w-9 animate-pulse rounded-full bg-white/6" />
-              <span className="h-3.5 flex-1 animate-pulse rounded bg-white/6" />
+            <div key={i} className="flex items-center gap-3 border-b border-white/8 px-3.5 py-3 last:border-0">
+              <span className="h-9 w-9 rounded-full bg-white/6 motion-safe:animate-pulse" />
+              <span className="h-3.5 flex-1 rounded bg-white/6 motion-safe:animate-pulse" />
             </div>
           ))}
         </div>
       ) : (
-        <ul className="overflow-hidden rounded-2xl border border-white/8 bg-[#12171a]">
+        <ul className="overflow-hidden rounded-2xl border border-white/10 bg-[color:var(--coupe-noir2)]">
           {top.length === 0 && (
-            <li className="border-b border-white/6 px-3.5 py-3 text-[13px] text-[#9db0a6]">
+            <li className="border-b border-white/8 px-3.5 py-3 text-[13px] text-[color:var(--coupe-gris)]">
               Personne n’est encore classé cette saison.
             </li>
           )}

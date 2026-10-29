@@ -36,20 +36,20 @@ export default function BlockedPlayers() {
 
   return (
     <section aria-labelledby="coupe-blocked-title" className="flex flex-col gap-2.5">
-      <h2 id="coupe-blocked-title" className="font-fut text-lg font-extrabold uppercase leading-none tracking-[0.04em] text-[#9db0a6]">
+      <h2 id="coupe-blocked-title" className="font-fut text-lg font-extrabold uppercase leading-none tracking-[0.04em] text-[color:var(--coupe-gris)]">
         Joueurs bloqués
       </h2>
-      <ul className="overflow-hidden rounded-2xl border border-white/8 bg-[#12171a]">
+      <ul className="overflow-hidden rounded-2xl border border-white/10 bg-[color:var(--coupe-noir2)]">
         {list.map((entry, i) => (
-          <li key={entry.key_hash} className={`flex items-center gap-3 px-3.5 py-2.5 ${i < list.length - 1 ? 'border-b border-white/6' : ''}`}>
-            <Ban className="h-4 w-4 shrink-0 text-[#9db0a6]" aria-hidden="true" />
+          <li key={entry.key_hash} className={`flex items-center gap-3 px-3.5 py-2.5 ${i < list.length - 1 ? 'border-b border-white/8' : ''}`}>
+            <Ban className="h-4 w-4 shrink-0 text-[color:var(--coupe-gris)]" aria-hidden="true" />
             <span className="min-w-0 flex-1 truncate text-sm font-semibold">{entry.name || 'Joueur'}</span>
             <button
               type="button"
               onClick={() => unblock(entry)}
               disabled={!!busyKey}
               aria-label={`Débloquer ${entry.name || 'ce joueur'}`}
-              className="flex min-h-[44px] shrink-0 items-center gap-1.5 rounded-xl border border-white/15 px-3 text-[13px] font-semibold text-[#eef3ef] transition-colors hover:bg-white/6 disabled:opacity-50"
+              className="flex min-h-[44px] shrink-0 items-center gap-1.5 rounded-xl border border-white/15 px-3 text-[13px] font-semibold text-white hover:bg-white/6 disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"
             >
               {busyKey === String(entry.key_hash) && <Loader2 className="h-3.5 w-3.5 motion-safe:animate-spin" aria-hidden="true" />}
               Débloquer

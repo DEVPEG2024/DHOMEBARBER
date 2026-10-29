@@ -11,26 +11,30 @@ import {
   COUPE_BLOCKS_KEY, COUPE_REPORT_REASONS, blockCoupePlayer, fetchCoupePlayer, invalidateCoupe,
   reportCoupePlayer, unblockCoupePlayer, useCoupeBlocks,
 } from '@/lib/coupe/coupeApi';
+import { COUPE_COLORS } from '../palette';
 import PlayerAvatar, { RoleMark } from './PlayerAvatar';
 import { ROLE_BARBER, ROLE_SALON, num, rankSuffix } from './coupeFormat';
+import { COUPE_VARS } from './theme';
 
 /**
  * Fiche publique d'un joueur du classement (`GET /coupe/player/:keyHash`) : ses points de la
  * saison et du classement général, et pour un autre joueur que le salon **Signaler** et
  * **Bloquer** (App Store 1.2, Google Play : les noms du classement sont écrits par les joueurs).
  * Fenêtre du bas fermée par la croix uniquement (et Échap, et le retour d'Android).
+ * Thème stade : fenêtre noire, points en or, boutons d'envoi en rouge ; ouverte dans un portail,
+ * elle pose elle-même la palette (`COUPE_VARS`).
  */
 const MAX_DETAILS = 500;
 
 function StatBlock({ title, stats }) {
   const rank = num(stats?.rank) || null;
   return (
-    <div className="flex-1 rounded-2xl border border-white/8 bg-[#12171a] p-3">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#9db0a6]">{title}</p>
-      <p className="mt-1.5 font-fut text-[34px] font-extrabold leading-none text-[#ebc15e] tabular-nums">
-        {num(stats?.points)}<span className="ml-1 font-inter text-xs font-semibold text-[#c9b27a]">pts</span>
+    <div className="flex-1 rounded-2xl border border-white/10 bg-[color:var(--coupe-noir3)] p-3">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:var(--coupe-gris)]">{title}</p>
+      <p className="mt-1.5 font-fut text-[34px] font-extrabold leading-none text-[color:var(--coupe-or)] tabular-nums">
+        {num(stats?.points)}<span className="ml-1 font-inter text-xs font-semibold text-[color:var(--coupe-gris-clair)]">pts</span>
       </p>
-      <p className="mt-1.5 text-xs text-[#c9d3cd]">
+      <p className="mt-1.5 text-xs text-[color:var(--coupe-gris-clair)]">
         {rank ? <>{rank}<sup>{rankSuffix(rank)}</sup> · </> : null}
         {num(stats?.wins)} V · {num(stats?.losses)} D
       </p>
@@ -38,7 +42,10 @@ function StatBlock({ title, stats }) {
   );
 }
 
-const BUTTON = 'flex min-h-[48px] items-center justify-center gap-2 rounded-xl px-4 font-fut text-base font-extrabold uppercase leading-none tracking-[0.06em] transition-colors disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#ebc15e]';
+const BUTTON = 'flex min-h-[48px] items-center justify-center gap-2 rounded-xl px-4 font-fut text-base font-extrabold uppercase leading-none tracking-[0.06em] disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white';
+// Bouton bordé de blanc (Signaler, Débloquer, Retour, Annuler) et bouton rouge (Envoyer, Bloquer)
+const OUTLINE = 'border border-white/20 text-white hover:bg-white/6';
+const RED = 'bg-[color:var(--coupe-rouge)] text-white';
 
 export default function PlayerSheet({ player, onClose }) {
   const open = !!player;
@@ -116,11 +123,11 @@ export default function PlayerSheet({ player, onClose }) {
         <DialogPrimitive.Content
           onPointerDownOutside={(e) => e.preventDefault()}
           onInteractOutside={(e) => e.preventDefault()}
-          className="kb-sheet fixed inset-x-0 bottom-0 z-50 mx-auto flex w-full max-w-[560px] flex-col gap-4 overflow-y-auto rounded-t-[24px] border border-white/10 bg-[#0f1416] px-4 pt-5 font-inter text-[#eef3ef] shadow-2xl outline-none motion-safe:data-[state=open]:animate-in motion-safe:data-[state=open]:slide-in-from-bottom-6 motion-safe:data-[state=open]:fade-in-0"
-          style={{ colorScheme: 'dark', paddingBottom: 'calc(20px + env(safe-area-inset-bottom, 0px))' }}
+          className="kb-sheet fixed inset-x-0 bottom-0 z-50 mx-auto flex w-full max-w-[560px] flex-col gap-4 overflow-y-auto rounded-t-[24px] border border-white/10 px-4 pt-5 font-inter text-white shadow-2xl outline-none motion-safe:data-[state=open]:animate-in motion-safe:data-[state=open]:slide-in-from-bottom-6 motion-safe:data-[state=open]:fade-in-0"
+          style={{ ...COUPE_VARS, background: COUPE_COLORS.noir2, paddingBottom: 'calc(20px + env(safe-area-inset-bottom, 0px))' }}
         >
           <DialogPrimitive.Close
-            className="absolute right-3 top-3 grid h-11 w-11 place-items-center rounded-xl border border-white/12 bg-white/4 text-[#eef3ef] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#ebc15e]"
+            className="absolute right-3 top-3 grid h-11 w-11 place-items-center rounded-xl border border-white/12 bg-white/4 text-white hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"
             aria-label="Fermer"
           >
             <X className="h-5 w-5" aria-hidden="true" />
@@ -135,7 +142,7 @@ export default function PlayerSheet({ player, onClose }) {
                     <span className="truncate">{name}</span>
                     <RoleMark role={role} size={16} />
                   </DialogPrimitive.Title>
-                  <DialogPrimitive.Description className="mt-1.5 text-[13px] text-[#9db0a6]">
+                  <DialogPrimitive.Description className="mt-1.5 text-[13px] text-[color:var(--coupe-gris)]">
                     {role === ROLE_SALON ? 'Le salon, tous comptes réunis' : role === ROLE_BARBER ? 'Barber du salon' : 'Joueur de la Coupe du Gang'}
                   </DialogPrimitive.Description>
                 </div>
@@ -145,8 +152,8 @@ export default function PlayerSheet({ player, onClose }) {
                 <CoupeLoadError compact what="sa fiche" error={query.error} onRetry={query.refetch} retrying={query.isFetching} />
               ) : !data ? (
                 <div className="flex gap-2.5" aria-busy="true">
-                  <div className="h-[104px] flex-1 animate-pulse rounded-2xl bg-white/6" />
-                  <div className="h-[104px] flex-1 animate-pulse rounded-2xl bg-white/6" />
+                  <div className="h-[104px] flex-1 rounded-2xl bg-white/6 motion-safe:animate-pulse" />
+                  <div className="h-[104px] flex-1 rounded-2xl bg-white/6 motion-safe:animate-pulse" />
                 </div>
               ) : (
                 <div className="flex gap-2.5">
@@ -157,17 +164,18 @@ export default function PlayerSheet({ player, onClose }) {
 
               {canModerate && (
                 <div className="grid grid-cols-2 gap-2.5">
-                  <button type="button" className={`${BUTTON} border border-white/15 text-[#eef3ef] hover:bg-white/6`} onClick={() => setStep('report')}>
+                  <button type="button" className={`${BUTTON} ${OUTLINE}`} onClick={() => setStep('report')}>
                     <Flag className="h-4 w-4" aria-hidden="true" />
                     Signaler
                   </button>
                   {blocked ? (
-                    <button type="button" className={`${BUTTON} border border-white/15 text-[#eef3ef] hover:bg-white/6`} disabled={busy} onClick={() => setBlock(false)}>
+                    <button type="button" className={`${BUTTON} ${OUTLINE}`} disabled={busy} onClick={() => setBlock(false)}>
                       {busy ? <Loader2 className="h-4 w-4 motion-safe:animate-spin" aria-hidden="true" /> : <Ban className="h-4 w-4" aria-hidden="true" />}
                       Débloquer
                     </button>
                   ) : (
-                    <button type="button" className={`${BUTTON} border border-[#ff7a7a]/40 text-[#ff9a9a] hover:bg-[#ff7a7a]/10`} disabled={blocks.isPending && blocks.fetchStatus !== 'idle'} onClick={() => setStep('block')}>
+                    // Rouge vif sur la fenêtre noire : 5,3:1
+                    <button type="button" className={`${BUTTON} border border-[color:var(--coupe-rouge-trait)] text-[color:var(--coupe-rouge-vif)] hover:bg-[color:var(--coupe-rouge-fond)]`} disabled={blocks.isPending && blocks.fetchStatus !== 'idle'} onClick={() => setStep('block')}>
                       <Ban className="h-4 w-4" aria-hidden="true" />
                       Bloquer
                     </button>
@@ -183,16 +191,16 @@ export default function PlayerSheet({ player, onClose }) {
                 <DialogPrimitive.Title className="font-fut text-[26px] font-extrabold uppercase leading-none tracking-[0.03em]">
                   Signaler {name}
                 </DialogPrimitive.Title>
-                <DialogPrimitive.Description className="mt-1.5 text-[13px] leading-snug text-[#9db0a6]">
+                <DialogPrimitive.Description className="mt-1.5 text-[13px] leading-snug text-[color:var(--coupe-gris)]">
                   Le salon reçoit ton signalement et décide de la suite. Personne d’autre ne le voit.
                 </DialogPrimitive.Description>
               </div>
               <fieldset className="flex flex-col gap-2">
-                <legend className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#9db0a6]">Motif</legend>
+                <legend className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:var(--coupe-gris)]">Motif</legend>
                 {COUPE_REPORT_REASONS.map((r) => (
                   <label
                     key={r.value}
-                    className={`flex min-h-[48px] cursor-pointer items-center gap-3 rounded-xl border px-3.5 text-sm font-semibold transition-colors ${reason === r.value ? 'border-[#ebc15e] bg-[rgba(235,193,94,.08)]' : 'border-white/12 bg-[#12171a]'}`}
+                    className={`flex min-h-[48px] cursor-pointer items-center gap-3 rounded-xl border px-3.5 text-sm font-semibold ${reason === r.value ? 'border-[color:var(--coupe-rouge-vif)] bg-[color:var(--coupe-rouge-fond)]' : 'border-white/12 bg-[color:var(--coupe-noir3)]'}`}
                   >
                     <input
                       type="radio"
@@ -200,14 +208,14 @@ export default function PlayerSheet({ player, onClose }) {
                       value={r.value}
                       checked={reason === r.value}
                       onChange={() => setReason(r.value)}
-                      className="h-4 w-4 accent-[#ebc15e]"
+                      className="h-4 w-4 accent-[color:var(--coupe-rouge)]"
                     />
                     {r.label}
                   </label>
                 ))}
               </fieldset>
               <div>
-                <label htmlFor="coupe-report-details" className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#9db0a6]">
+                <label htmlFor="coupe-report-details" className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:var(--coupe-gris)]">
                   Précisions (facultatif)
                 </label>
                 <textarea
@@ -216,16 +224,16 @@ export default function PlayerSheet({ player, onClose }) {
                   onChange={(e) => setDetails(e.target.value.slice(0, MAX_DETAILS))}
                   maxLength={MAX_DETAILS}
                   rows={3}
-                  className="mt-2 w-full resize-none rounded-xl border border-white/12 bg-[#12171a] px-3 py-2.5 text-base text-[#eef3ef] placeholder:text-[#7d8d86] focus:border-[#ebc15e] focus:outline-none"
+                  className="mt-2 w-full resize-none rounded-xl border border-white/12 bg-[color:var(--coupe-noir3)] px-3 py-2.5 text-base text-white placeholder:text-[color:var(--coupe-gris)] focus:border-[color:var(--coupe-rouge-vif)] focus:outline-none"
                   placeholder="Ce qui s’est passé"
                 />
-                <p className="mt-1 text-right text-[11px] text-[#7d8d86]">{details.length} / {MAX_DETAILS}</p>
+                <p className="mt-1 text-right text-[11px] text-[color:var(--coupe-gris)]">{details.length} / {MAX_DETAILS}</p>
               </div>
               <div className="grid grid-cols-2 gap-2.5">
-                <button type="button" className={`${BUTTON} border border-white/15 text-[#eef3ef] hover:bg-white/6`} onClick={() => setStep('view')} disabled={busy}>
+                <button type="button" className={`${BUTTON} ${OUTLINE}`} onClick={() => setStep('view')} disabled={busy}>
                   Retour
                 </button>
-                <button type="submit" className={`${BUTTON} bg-[#ebc15e] text-[#1a1205]`} disabled={!reason || busy}>
+                <button type="submit" className={`${BUTTON} ${RED}`} disabled={!reason || busy}>
                   {busy && <Loader2 className="h-4 w-4 motion-safe:animate-spin" aria-hidden="true" />}
                   Envoyer
                 </button>
@@ -239,15 +247,15 @@ export default function PlayerSheet({ player, onClose }) {
                 <DialogPrimitive.Title className="font-fut text-[26px] font-extrabold uppercase leading-none tracking-[0.03em]">
                   Bloquer {name} ?
                 </DialogPrimitive.Title>
-                <DialogPrimitive.Description className="mt-1.5 text-[13px] leading-snug text-[#9db0a6]">
+                <DialogPrimitive.Description className="mt-1.5 text-[13px] leading-snug text-[color:var(--coupe-gris)]">
                   Vous ne pourrez plus vous défier ni rejoindre vos matchs. Tu pourras annuler le blocage depuis l’accueil de la Coupe.
                 </DialogPrimitive.Description>
               </div>
               <div className="grid grid-cols-2 gap-2.5">
-                <button type="button" className={`${BUTTON} border border-white/15 text-[#eef3ef] hover:bg-white/6`} onClick={() => setStep('view')} disabled={busy}>
+                <button type="button" className={`${BUTTON} ${OUTLINE}`} onClick={() => setStep('view')} disabled={busy}>
                   Annuler
                 </button>
-                <button type="button" className={`${BUTTON} bg-[#e5484d] text-white`} onClick={() => setBlock(true)} disabled={busy}>
+                <button type="button" className={`${BUTTON} ${RED}`} onClick={() => setBlock(true)} disabled={busy}>
                   {busy && <Loader2 className="h-4 w-4 motion-safe:animate-spin" aria-hidden="true" />}
                   Bloquer
                 </button>

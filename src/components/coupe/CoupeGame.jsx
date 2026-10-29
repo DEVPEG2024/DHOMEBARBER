@@ -20,6 +20,8 @@ import EndScreen, { endTexts } from './game/EndScreen';
 import ReportSheet from './game/ReportSheet';
 import BlockSheet from './game/BlockSheet';
 import { StoryFallback, useScoreStoryShare } from './game/StoryShare';
+import StadiumStage, { createStadiumDirector } from './game/StadiumStage';
+import MatchIntro from './game/MatchIntro';
 import { offlinePlayers, onlinePlayers, seasonLabel, shownName } from './game/format';
 import { useMediaQuery, useSalonMusicPaused, useSecondsLeft, useTyping, useWakeLock } from './game/hooks';
 
@@ -48,12 +50,26 @@ import { useMediaQuery, useSalonMusicPaused, useSecondsLeft, useTyping, useWakeL
  * dessine que pendant un match (aucune image quand rien ne bouge). La musique du salon est en pause
  * tant qu'il est affiché.
  *
+ * Thème stade (docs/fonctions/coupe-du-gang-stade.md) : l'image du stade est le terrain
+ * (StadiumStage), le canvas y pose joueurs, ballon et score. La caméra (stade entier ou terrain)
+ * est pilotée par les images du match (createStadiumDirector, attributs de la racine) : avant-match
+ * au premier coup d'envoi (stade entier et affiche VS, zoom, puis le terrain), fin du match en trois
+ * temps (« FIN DU MATCH », zoom arrière, écran de fin). Le canvas n'est jamais transformé.
+ *
  * `onFinished(result)` : { mode, won, winner (0 toi / joueur du bas, 1 l'autre), draw, score
  * [bas, haut], forfeit, cancelled, reason, points (en ligne : { ranked, reason, delta, total, rank,
  * rankBefore, oppDelta } ou null = pas encore confirmés), abandoned (tu as abandonné) }.
  */
 
 const LANDSCAPE_QUERY = '(orientation: landscape) and (max-height: 500px)';
+
+// Fin du match (thème stade) : « FIN DU MATCH » 0,8 s sur le terrain, zoom arrière 1,1 s, puis
+// l'écran de fin ; mouvement réduit : coupe nette, écran de fin à 450 ms (comme avant le thème)
+const FIN_MS = 800;
+const PULL_BACK_MS = 1100;
+const QUICK_END_MS = 450;
+// Sortie de l'affiche VS et de « FIN DU MATCH » (animations de GameStyles) avant de les démonter
+const FX_OUT_MS = 400;
 
 const later = (set, fn, ms) => {
   const id = setTimeout(() => { set.delete(id); fn(); }, ms);
@@ -105,6 +121,15 @@ export default function CoupeGame({
   const taughtRef = useRef(false);
   const propsRef = useRef({ onExit, onFinished, action });
   propsRef.current = { ...propsRef.current, onExit, onFinished };
+  // Caméra du stade (StadiumStage) : pilotée par la boucle, sans état React par image
+  const directorRef = useRef(null);
+  // Minuteries de la fin du match (« FIN DU MATCH », zoom arrière, écran de fin) : annulées par un
+  // nouveau match ou une sortie du match
+  const outroRef = useRef([]);
+  // Astuce du premier match, montrée quand le terrain apparaît (après l'avant-match)
+  const firstHintRef = useRef(null);
+  const reduceRef = useRef(!!reduceMotion);
+  reduceRef.current = !!reduceMotion;
 
   const [ui, setUi] = useState(() => ({ ...IDLE_UI, status: 'connecting' }));
   const [off, setOff] = useState({ status: 'match', result: null, paused: false });
@@ -120,6 +145,10 @@ export default function CoupeGame({
   const [sheet, setSheet] = useState(null); // 'report' | 'block'
   const [blocked, setBlocked] = useState(false);
   const [reported, setReported] = useState(false);
+  // Image du stade : 'loading', 'on' (chargée : le dessin ne pose plus son terrain), 'off' (en erreur)
+  const [stadium, setStadiumStatus] = useState('loading');
+  // Affiche VS ('vs', puis 'vs-out' le temps de sa sortie) ou « FIN DU MATCH » ('fin', 'fin-out')
+  const [fx, setFx] = useState(null);
 
   const status = online ? ui.status : off.status;
   const opponent = online ? (ui.names[1] || 'Adversaire') : offlinePlayers(mode, lvl)[1].name;
@@ -128,6 +157,15 @@ export default function CoupeGame({
     const id = Date.now() + Math.random();
     setHint({ id, msg });
     later(timersRef.current, () => setHint((h) => (h?.id === id ? null : h)), 2400);
+  }, []);
+
+  const clearOutro = useCallback(() => {
+    const timers = timersRef.current;
+    outroRef.current.forEach((id) => {
+      clearTimeout(id);
+      timers.delete(id);
+    });
+    outroRef.current = [];
   }, []);
 
   // ─── Montage : dessin, sons, match et boucle d'animation ──────────
@@ -141,6 +179,22 @@ export default function CoupeGame({
     rendererRef.current = renderer;
     renderer.setTwoPlayers(isLocal);
     const L = loopRef.current;
+    const director = createStadiumDirector(rootRef.current, {
+      reducedMotion: !!reduceMotion,
+      // Affiche VS : montée au début de l'avant-match, retirée (après sa sortie) au début du zoom
+      onIntro: (on) => {
+        if (on) { setFx('vs'); return; }
+        setFx((v) => (v === 'vs' ? 'vs-out' : v));
+        later(timers, () => setFx((v) => (v === 'vs-out' ? null : v)), reduceRef.current ? 0 : FX_OUT_MS);
+      },
+      // Le terrain apparaît : l'astuce du premier match (« Ton joueur suit ton doigt »)
+      onPlay: () => {
+        const msg = firstHintRef.current;
+        firstHintRef.current = null;
+        if (msg) showHint(msg);
+      },
+    });
+    directorRef.current = director;
 
     const shouldRun = () => {
       const m = matchRef.current;
@@ -162,6 +216,8 @@ export default function CoupeGame({
       r.render(f, dt);
       const root = rootRef.current;
       if (root && f && root.dataset.phase !== f.phase) root.dataset.phase = f.phase;
+      // Caméra et canvas : attributs de la racine, posés seulement quand ils changent
+      director.frame(f, now);
       if (online) {
         L.statT += dt;
         if (L.statT >= 0.25) {
@@ -206,18 +262,28 @@ export default function CoupeGame({
           setConfirmQuit(false);
           setSheet(null);
           if (!online) setOff({ status: 'match', result: null, paused: false });
+          // Nouveau match (revanche comprise) : plus rien de la fin du précédent ; l'avant-match se
+          // décide sur les premières images (`countS`)
+          clearOutro();
+          setFx(null);
+          director.newMatch();
+          // L'astuce attend le terrain (après l'avant-match), sinon personne ne la verrait
           if (!taughtRef.current) {
             taughtRef.current = true;
-            showHint(isLocal ? 'Chacun pose le doigt dans sa moitié' : 'Ton joueur suit ton doigt, juste au-dessus');
+            firstHintRef.current = isLocal ? 'Chacun pose le doigt dans sa moitié' : 'Ton joueur suit ton doigt, juste au-dessus';
           }
           kick();
           break;
         }
         case 'resumed':
-          // Reprise après une coupure, ou match repris en rouvrant l'écran : mêmes joueurs, score du serveur
+          // Reprise après une coupure, ou match repris en rouvrant l'écran : mêmes joueurs, score du
+          // serveur, caméra directement sur le terrain
           renderer.setPlayers(onlinePlayers(data.names, data.roles));
           resetPointers();
           if (Array.isArray(data.score)) setScore(data.score);
+          clearOutro();
+          setFx(null);
+          director.resume();
           showHint('Connexion rétablie');
           kick();
           break;
@@ -255,9 +321,9 @@ export default function CoupeGame({
           setScore(data.score);
           setHint(null);
           resetPointers();
+          // La pluie de lames est dans l'écran de fin (thème stade) : plus de renderer.victory()
           const won = online ? data.won && !data.cancelled : isLocal || data.winner === 0;
           if (won) {
-            renderer.victory();
             sound.win();
             buzz('win');
           } else sound.lose();
@@ -270,7 +336,21 @@ export default function CoupeGame({
             result = { mode, level: lvl, won: data.winner === 0, winner: data.winner, draw: false, score: data.score, forfeit: false, cancelled: false, reason: null, points: null, abandoned: false };
             setOff((o) => ({ ...o, status: 'over', result, paused: false }));
           }
-          later(timers, () => setEndShown(true), 450);
+          // « FIN DU MATCH » sur le terrain, puis la caméra recule jusqu'au stade entier (le canvas
+          // s'efface), puis l'écran de fin. Mouvement réduit : coupe nette à 450 ms
+          clearOutro();
+          setFx('fin');
+          director.finish();
+          const quick = reduceRef.current;
+          outroRef.current.push(
+            later(timers, () => {
+              director.pullBack();
+              if (quick) { setFx(null); return; }
+              setFx('fin-out');
+              outroRef.current.push(later(timers, () => setFx((v) => (v === 'fin-out' ? null : v)), FX_OUT_MS));
+            }, quick ? QUICK_END_MS : FIN_MS),
+            later(timers, () => setEndShown(true), quick ? QUICK_END_MS : FIN_MS + PULL_BACK_MS),
+          );
           try { propsRef.current.onFinished?.(result); } catch { /* écran parent démonté */ }
           break;
         }
@@ -298,6 +378,8 @@ export default function CoupeGame({
       if (pending) {
         renderer.setPlayers(onlinePlayers(pending.names, pending.roles));
         setScore(pending.score);
+        // Match repris : la caméra est déjà sur le terrain (pas d'avant-match)
+        director.resume();
         match.resumeFrom(pending);
         kick();
       } else if (a.t === 'resume') match.resumeFrom(null);
@@ -323,27 +405,44 @@ export default function CoupeGame({
       if (m && typeof m.destroy === 'function') m.destroy();
       renderer.destroy();
       rendererRef.current = null;
+      directorRef.current = null;
       sound.close();
       timers.forEach((id) => clearTimeout(id));
       timers.clear();
+      outroRef.current = [];
     };
     // Montage seulement : mode, niveau et action sont lus une fois (un nouvel écran pour une autre partie)
   }, []);
 
   useEffect(() => {
     rendererRef.current?.setReducedMotion(!!reduceMotion);
+    directorRef.current?.setReducedMotion(!!reduceMotion);
   }, [reduceMotion]);
 
-  // En ligne, hors match : terrain d'attente dessiné une fois, rien ne bouge
+  // Image du stade chargée : le dessin ne pose plus son terrain (un seul terrain, celui de l'image) ;
+  // en erreur, il le redessine. setStadium redessine la dernière image aussitôt
+  useEffect(() => {
+    const r = rendererRef.current;
+    if (r && typeof r.setStadium === 'function') r.setStadium(stadium === 'on');
+  }, [stadium]);
+
+  // En ligne, hors match : terrain d'attente dessiné une fois, rien ne bouge ; la caméra montre le
+  // stade entier, assombri derrière les panneaux
   useEffect(() => {
     if (!online) return;
     const r = rendererRef.current;
-    if (!r || ui.status === 'match' || ui.status === 'over') return;
+    // État du match lui-même, pas seulement celui du rendu : un match repris au montage
+    // (readPendingResume) est déjà en cours alors que `ui` dit encore « connecting »
+    const live = matchRef.current?.ui?.status;
+    if (!r || ui.status === 'match' || ui.status === 'over' || live === 'match' || live === 'over') return;
     r.clearPlayers();
     r.reset();
     r.paint(null);
     if (rootRef.current) delete rootRef.current.dataset.phase;
-  }, [online, ui.status]);
+    clearOutro();
+    setFx(null);
+    directorRef.current?.idle();
+  }, [online, ui.status, clearOutro]);
 
   // Nouveau match (revanche) : plus de compte à rebours de fin de temps
   useEffect(() => {
@@ -393,6 +492,12 @@ export default function CoupeGame({
   // ─── Story du score (fin du match) ─────────────────────────────────
 
   const result = online ? ui.result : off.result;
+  // Ton de la fin (`endTexts`) : 'victoire', 'defaite' ou 'neutre' (nul, annulé) ; une défaite met
+  // le stade en gris sous l'écran de fin
+  const endTone = useMemo(
+    () => (result ? endTexts({ mode: online ? 'online' : mode, level: lvl, opponent, result }).tone : null),
+    [result, online, mode, lvl, opponent],
+  );
   const story = useMemo(() => {
     // Rien à partager pour un match annulé ou abandonné
     if (!result || result.cancelled || result.abandoned) return null;
@@ -400,9 +505,10 @@ export default function CoupeGame({
     const me = online ? (ui.names[0] || shownName(user)) : isLocal ? 'Joueur du bas' : shownName(user);
     const p = online && result.points?.ranked ? result.points : null;
     return {
-      key: JSON.stringify([result.score, result.winner, result.draw, me, opponent, p?.delta ?? null, p?.rank ?? null]),
+      key: JSON.stringify([result.score, result.winner, result.draw, me, opponent, p?.delta ?? null, p?.rank ?? null, t.tone]),
       title: t.title,
       win: t.win,
+      tone: t.tone,
       score: result.score,
       names: [me, opponent],
       eyebrow: t.eyebrow,
@@ -682,6 +788,15 @@ export default function CoupeGame({
   const canRematch = online ? !ui.rematchAsked && !ui.oppGone && !ui.offline && !blocked : true;
   const reconnectTitle = ui.reconnecting === 'cut' ? 'Connexion perdue' : 'Retour au match';
 
+  // Affiche VS de l'avant-match : toi (ou le joueur du bas) en rouge, l'adversaire en blanc
+  const introPlayers = useMemo(() => {
+    if (!online) return offlinePlayers(mode, lvl).map((p) => ({ ...p, label: p.name }));
+    return [
+      { name: ui.names[0] || shownName(user), role: ui.roles[0], label: 'Toi' },
+      { name: opponent, role: ui.roles[1], label: opponent },
+    ];
+  }, [online, mode, lvl, ui.names, ui.roles, user, opponent]);
+
   return (
     <div
       ref={rootRef}
@@ -690,6 +805,11 @@ export default function CoupeGame({
       aria-modal="true"
       aria-label="La Coupe du Gang"
       data-app-overlay=""
+      // Thème stade : image chargée ou non, stade assombri hors match, stade en gris après une défaite
+      // (data-cam, data-play et data-outro sont posés par la boucle, voir StadiumStage)
+      data-stadium={stadium}
+      data-dim={inMatch ? undefined : ''}
+      data-end={endOpen && endTone === 'defaite' ? 'defaite' : undefined}
       style={{
         touchAction: 'none',
         overscrollBehavior: 'none',
@@ -716,6 +836,8 @@ export default function CoupeGame({
           />
         )}
         <div className="cdg-stage">
+          {/* Stade sous le canvas (caché tant que l'image n'est pas prête, ou si elle échoue) */}
+          <StadiumStage onReady={() => setStadiumStatus('on')} onFail={() => setStadiumStatus('off')} />
           <canvas
             ref={canvasRef}
             className="cdg-canvas"
@@ -815,6 +937,8 @@ export default function CoupeGame({
         </div>
         {online && ui.status === 'match' && <Reactions onReact={react} disabled={reactLocked || ui.abandoning || !!ui.reconnecting} />}
       </div>
+      {/* Affiche VS de l'avant-match, « FIN DU MATCH » : sur tout l'écran, au-dessus du terrain */}
+      <MatchIntro fx={fx} mode={online ? 'online' : mode} players={introPlayers} />
       {rotate && (
         <div className="cdg-rotate" role="alert">
           <Smartphone className="h-10 w-10 text-[#ebc15e]" aria-hidden="true" />

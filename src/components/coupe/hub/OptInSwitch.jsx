@@ -5,6 +5,7 @@ import { Star } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { hapticFeedback } from '@/lib/capacitor';
 import { COUPE_BANNED_TEXT, coupeErrorText } from '../coupeErrors';
+import { COUPE_COLORS } from '../palette';
 import { COUPE_ME_KEY, invalidateCoupe, setCoupeOptIn } from '@/lib/coupe/coupeApi';
 
 /**
@@ -15,7 +16,10 @@ import { COUPE_ME_KEY, invalidateCoupe, setCoupeOptIn } from '@/lib/coupe/coupeA
  * L'admin joue sous « D'Home Barber » : cette ligne est toujours au classement, pas d'interrupteur.
  * Compte exclu des classements par le salon (`banned` de `GET /coupe/me`) : interrupteur éteint et
  * bloqué, avec la raison (le serveur refuserait en 403 `banned`).
+ * Thème stade : allumé en rouge ; zone de toucher agrandie à 44 px autour de l'interrupteur.
  */
+const STAR_STYLE = { color: COUPE_COLORS.etoile, fill: COUPE_COLORS.etoile };
+
 export default function OptInSwitch({ value, isSalon = false, banned = false, id = 'coupe-optin' }) {
   const queryClient = useQueryClient();
   const [pending, setPending] = useState(null);
@@ -23,10 +27,10 @@ export default function OptInSwitch({ value, isSalon = false, banned = false, id
 
   if (isSalon) {
     return (
-      <div className="flex items-start gap-3 rounded-2xl border border-white/8 bg-[#12171a] p-3.5">
-        <Star className="mt-0.5 h-4 w-4 shrink-0 fill-[#3b82f6] text-[#3b82f6]" strokeWidth={1.5} aria-hidden="true" />
-        <p className="text-[12.5px] leading-snug text-[#9db0a6]">
-          <span className="font-semibold text-[#eef3ef]">La ligne « D&apos;Home Barber » est toujours au classement.</span>{' '}
+      <div className="flex items-start gap-3 rounded-2xl border border-white/10 bg-[color:var(--coupe-noir2)] p-3.5">
+        <Star className="mt-0.5 h-4 w-4 shrink-0" style={STAR_STYLE} strokeWidth={1.5} aria-hidden="true" />
+        <p className="text-[12.5px] leading-snug text-[color:var(--coupe-gris)]">
+          <span className="font-semibold text-white">La ligne « D&apos;Home Barber » est toujours au classement.</span>{' '}
           Les points de tous les comptes du salon y sont additionnés.
         </p>
       </div>
@@ -55,12 +59,12 @@ export default function OptInSwitch({ value, isSalon = false, banned = false, id
   };
 
   return (
-    <div className="flex items-center gap-3.5 rounded-2xl border border-white/8 bg-[#12171a] p-3.5">
+    <div className="flex items-center gap-3.5 rounded-2xl border border-white/10 bg-[color:var(--coupe-noir2)] p-3.5">
       <div className="min-w-0 flex-1">
-        <label htmlFor={id} className="block text-sm font-semibold text-[#eef3ef]">
+        <label htmlFor={id} className="block text-sm font-semibold text-white">
           Apparaître dans le classement
         </label>
-        <p className="mt-1 text-xs leading-snug text-[#9db0a6]">
+        <p className="mt-1 text-xs leading-snug text-[color:var(--coupe-gris)]">
           {banned ? COUPE_BANNED_TEXT : 'Sinon tu joues quand même, sans figurer ici.'}
         </p>
       </div>
@@ -69,7 +73,7 @@ export default function OptInSwitch({ value, isSalon = false, banned = false, id
         checked={checked}
         onCheckedChange={toggle}
         disabled={banned || pending !== null}
-        className="data-[state=checked]:bg-[#33b574] data-[state=unchecked]:bg-white/15 focus-visible:ring-[#ebc15e] focus-visible:ring-offset-[#12171a] [&>span]:bg-[#eef3ef]"
+        className="relative after:absolute after:-inset-3 after:content-[''] data-[state=checked]:bg-[color:var(--coupe-rouge)] data-[state=unchecked]:bg-white/15 focus-visible:ring-white focus-visible:ring-offset-[color:var(--coupe-noir2)] [&>span]:bg-white"
       />
     </div>
   );

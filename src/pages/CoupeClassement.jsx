@@ -4,6 +4,7 @@ import { useAuth } from '@/lib/AuthContext';
 import { queryFailed } from '@/components/shared/LoadError';
 import { useCoupeLeaderboard, useCoupeMe } from '@/lib/coupe/coupeApi';
 import CoupeLoadError from '@/components/coupe/CoupeLoadError';
+import { COUPE_COLORS } from '@/components/coupe/palette';
 import CoupeShell from '@/components/coupe/hub/CoupeShell';
 import PlayerAvatar, { RoleMark } from '@/components/coupe/hub/PlayerAvatar';
 import LeaderboardRow, { RankNumber, displayName } from '@/components/coupe/hub/LeaderboardRow';
@@ -13,6 +14,7 @@ import {
   ROLE_BARBER, ROLE_SALON, currentSeason, hasAppHistory, isCoupeClosed, num, roleOfUser,
   seasonDaysLeft, seasonEndText, seasonMonth,
 } from '@/components/coupe/hub/coupeFormat';
+import { alpha, mix } from '@/components/coupe/hub/theme';
 
 /*
  * Classement de La Coupe du Gang (/coupe/classement), d'après l'artboard « Classement » validé par
@@ -20,26 +22,35 @@ import {
  * `GET /coupe/leaderboard`), sa propre ligne, l'étoile bleue de « D'Home Barber » et les ciseaux
  * d'un barber, la fin de la saison et l'interrupteur « Apparaître dans le classement ».
  * Toucher un autre joueur ouvre sa fiche (Signaler, Bloquer).
+ *
+ * Thème stade (29 oct. 2026, docs/fonctions/coupe-du-gang-stade.md), dans l'esprit de l'accueil de
+ * la Coupe : en-tête sur le haut du stade (plus bas que l'accueil, le podium reste en vue), 1re
+ * place en or, 2e en blanc, 3e en gris clair, ta ligne en rouge.
  */
 const SCOPES = [
   { value: 'season', id: 'coupe-onglet-saison' },
   { value: 'total', id: 'coupe-onglet-general' },
 ];
 
-// Marches du podium : 1re au centre, 2e à gauche, 3e à droite
+const { or: OR, blanc: BLANC, grisClair: GRIS_CLAIR } = COUPE_COLORS;
+const step = (color, top, bottom) => `linear-gradient(180deg, ${alpha(color, top)}, ${alpha(color, bottom)})`;
+
+// Marches du podium : 1re au centre, 2e à gauche, 3e à droite (textes des marches ≥ 5,4:1)
 const PLACES = {
-  1: { height: 104, size: 34, color: '#ebc15e', background: 'linear-gradient(180deg, rgba(235, 193, 94, .3), rgba(235, 193, 94, .06))' },
-  2: { height: 74, size: 26, color: '#c9ced3', background: 'linear-gradient(180deg, rgba(201, 206, 211, .22), rgba(201, 206, 211, .06))' },
-  3: { height: 56, size: 24, color: '#d7a275', background: 'linear-gradient(180deg, rgba(192, 138, 90, .26), rgba(192, 138, 90, .06))' },
+  1: { height: 104, size: 34, color: OR, background: step(OR, 0.3, 0.06) },
+  2: { height: 74, size: 26, color: BLANC, background: step(BLANC, 0.18, 0.05) },
+  3: { height: 56, size: 24, color: GRIS_CLAIR, background: step(GRIS_CLAIR, 0.12, 0.04) },
 };
 const PODIUM_ORDER = [2, 1, 3];
+// Anneau doré de la 1re place : l'or éclairci vers l'or assombri
+const FIRST_RING = `linear-gradient(135deg, ${mix(OR, BLANC, 0.3)}, ${mix(OR, COUPE_COLORS.noir, 0.35)})`;
 
 function PodiumAvatar({ row, place }) {
   const first = place === 1;
   if (row.role !== ROLE_SALON && row.role !== ROLE_BARBER) {
     // Client : rond, la 1re place dans un anneau doré
     return first ? (
-      <span className="block rounded-full p-1" style={{ background: 'linear-gradient(135deg, #f3d27a, #a8781f)' }}>
+      <span className="block rounded-full p-1" style={{ background: FIRST_RING }}>
         <PlayerAvatar role={row.role} name={row.name} url={row.avatar_url} seed={row.key_hash} size="first" />
       </span>
     ) : (
@@ -58,8 +69,9 @@ function PodiumPlace({ row, place, onOpen }) {
   const head = (
     <>
       <PodiumAvatar row={row} place={place} />
-      {/* Deux lignes au plus : à 320 px, « D'Home Barber » ne tient pas sur une colonne */}
-      <span className={`line-clamp-2 max-w-full break-words text-center text-[13.5px] leading-tight ${place === 1 || mine ? 'font-bold' : 'font-semibold'} ${mine ? 'text-[#ebc15e]' : ''}`}>
+      {/* Deux lignes au plus : à 320 px, « D'Home Barber » ne tient pas sur une colonne. Ton nom
+          en rouge vif (ta ligne est rouge partout) */}
+      <span className={`line-clamp-2 max-w-full break-words text-center text-[13.5px] leading-tight ${place === 1 || mine ? 'font-bold' : 'font-semibold'} ${mine ? 'text-[color:var(--coupe-rouge-vif)]' : ''}`}>
         {displayName(row)}
         {row.role === ROLE_SALON || row.role === ROLE_BARBER ? (
           <span className="ml-1 inline-block align-[-1px]"><RoleMark role={row.role} size={12} /></span>
@@ -76,7 +88,7 @@ function PodiumPlace({ row, place, onOpen }) {
           type="button"
           onClick={() => onOpen(row)}
           aria-haspopup="dialog"
-          className="flex w-full flex-col items-center gap-2 rounded-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#ebc15e]"
+          className="flex w-full flex-col items-center gap-2 rounded-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
         >
           {head}
         </button>
@@ -98,17 +110,17 @@ function Skeleton() {
       <div className="grid grid-cols-3 items-end gap-2">
         {[74, 104, 56].map((h, i) => (
           <div key={i} className="flex flex-col items-center gap-2">
-            <span className="h-14 w-14 animate-pulse rounded-full bg-white/6" />
-            <span className="h-3 w-16 animate-pulse rounded bg-white/6" />
-            <span className="w-full animate-pulse rounded-b rounded-t-xl bg-white/6" style={{ height: h }} />
+            <span className="h-14 w-14 rounded-full bg-white/6 motion-safe:animate-pulse" />
+            <span className="h-3 w-16 rounded bg-white/6 motion-safe:animate-pulse" />
+            <span className="w-full rounded-b rounded-t-xl bg-white/6 motion-safe:animate-pulse" style={{ height: h }} />
           </div>
         ))}
       </div>
-      <div className="overflow-hidden rounded-2xl border border-white/8 bg-[#12171a]">
+      <div className="overflow-hidden rounded-2xl border border-white/10 bg-[color:var(--coupe-noir2)]">
         {[0, 1, 2, 3].map((i) => (
-          <div key={i} className="flex items-center gap-3 border-b border-white/6 px-3.5 py-3 last:border-0">
-            <span className="h-9 w-9 animate-pulse rounded-full bg-white/6" />
-            <span className="h-3.5 flex-1 animate-pulse rounded bg-white/6" />
+          <div key={i} className="flex items-center gap-3 border-b border-white/8 px-3.5 py-3 last:border-0">
+            <span className="h-9 w-9 rounded-full bg-white/6 motion-safe:animate-pulse" />
+            <span className="h-3.5 flex-1 rounded bg-white/6 motion-safe:animate-pulse" />
           </div>
         ))}
       </div>
@@ -169,9 +181,9 @@ export default function CoupeClassement() {
   const activeTab = SCOPES.find((s) => s.value === scope);
 
   return (
-    <CoupeShell title="Classement" titleId="coupe-classement-titre" onBack={goBack}>
+    <CoupeShell title="Classement" titleId="coupe-classement-titre" onBack={goBack} compact>
       <div className="flex flex-col gap-[18px]">
-        <div role="tablist" aria-label="Période du classement" className="grid grid-cols-2 gap-1 rounded-[14px] border border-white/8 bg-white/5 p-1">
+        <div role="tablist" aria-label="Période du classement" className="grid grid-cols-2 gap-1 rounded-[14px] border border-white/10 bg-white/5 p-1">
           {SCOPES.map((s, i) => {
             const active = s.value === scope;
             return (
@@ -187,18 +199,19 @@ export default function CoupeClassement() {
                 onClick={() => setScope(s.value)}
                 onKeyDown={(e) => onTabKey(e, i)}
                 // Sous 360 px, « Saison · septembre » rétrécit puis passe sur deux lignes (jamais coupé)
-                className={`min-h-[42px] rounded-[10px] px-2 py-1 font-fut text-[15px] font-bold uppercase leading-tight tracking-[0.03em] transition-colors min-[360px]:text-base min-[360px]:tracking-[0.06em] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#ebc15e] ${active ? 'bg-[#eef3ef] text-[#0b0e10]' : 'text-[#9db0a6] hover:text-[#eef3ef]'}`}
+                // Onglet choisi : blanc, texte noir ; l'autre en gris (8:1 sur le noir)
+                className={`min-h-[44px] rounded-[10px] px-2 py-1 font-fut text-[15px] font-bold uppercase leading-tight tracking-[0.03em] min-[360px]:text-base min-[360px]:tracking-[0.06em] focus-visible:outline focus-visible:outline-2 focus-visible:outline-white ${active ? 'bg-white text-[color:var(--coupe-noir)]' : 'text-[color:var(--coupe-gris)] hover:text-white'}`}
               >
                 {s.value === 'season' ? `Saison${month ? ` · ${month}` : ''}` : 'Général'}
               </button>
             );
           })}
         </div>
-        <p className="-mt-1.5 text-[12.5px] leading-snug text-[#9db0a6]">{subtitle}</p>
+        <p className="-mt-1.5 text-[12.5px] leading-snug text-[color:var(--coupe-gris)]">{subtitle}</p>
 
         <div role="tabpanel" id="coupe-classement-liste" aria-labelledby={activeTab.id} className="flex flex-col gap-[18px]">
           {closed ? (
-            <p role="alert" className="rounded-2xl border border-white/8 bg-[#12171a] px-4 py-6 text-center text-[13px] text-[#9db0a6]">
+            <p role="alert" className="rounded-2xl border border-white/10 bg-[color:var(--coupe-noir2)] px-4 py-6 text-center text-[13px] text-[color:var(--coupe-gris)]">
               La Coupe du Gang fait une pause : le classement revient bientôt.
             </p>
           ) : failed ? (
@@ -206,7 +219,7 @@ export default function CoupeClassement() {
           ) : isPending ? (
             <Skeleton />
           ) : rows.length === 0 ? (
-            <p className="rounded-2xl border border-white/8 bg-[#12171a] px-4 py-6 text-center text-[13px] leading-snug text-[#9db0a6]">
+            <p className="rounded-2xl border border-white/10 bg-[color:var(--coupe-noir2)] px-4 py-6 text-center text-[13px] leading-snug text-[color:var(--coupe-gris)]">
               Personne n’est encore classé{scope === 'season' ? ' cette saison' : ''}. Joue un match en ligne pour ouvrir le bal.
             </p>
           ) : (
@@ -220,7 +233,7 @@ export default function CoupeClassement() {
               )}
 
               {(rest.length > 0 || showMyExtraRow) && (
-                <ul aria-label="Suite du classement" className="overflow-hidden rounded-2xl border border-white/8 bg-[#12171a]">
+                <ul aria-label="Suite du classement" className="overflow-hidden rounded-2xl border border-white/10 bg-[color:var(--coupe-noir2)]">
                   {rest.map((row, i) => (
                     <LeaderboardRow
                       key={row.key_hash || `${row.rank}-${i}`}
@@ -232,7 +245,7 @@ export default function CoupeClassement() {
                   {showMyExtraRow && (
                     <>
                       {rest.length > 0 && (
-                        <li aria-hidden="true" className="border-b border-white/6 py-1 text-center text-xs leading-none tracking-[0.3em] text-[#5d6b64]">•••</li>
+                        <li aria-hidden="true" className="border-b border-white/8 py-1 text-center text-xs leading-none tracking-[0.3em] text-[color:var(--coupe-gris-sombre)]">•••</li>
                       )}
                       <LeaderboardRow
                         last

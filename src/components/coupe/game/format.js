@@ -24,6 +24,9 @@ export function formatDelta(d) {
 /** « 1 point », « 3 points », « −1 point ». */
 export const pointsWord = (d) => (Math.abs(Number(d) || 0) > 1 ? 'points' : 'point');
 
+/** Sous le gain du match : « Points de Coupe » (+3), « Point de Coupe » (−1, 0). */
+export const coupePointsLabel = (d) => (Math.abs(Number(d) || 0) > 1 ? 'Points de Coupe' : 'Point de Coupe');
+
 /** Mois de la saison en cours (heure de Paris) : « novembre ». */
 export function seasonMonth(date = new Date()) {
   try {

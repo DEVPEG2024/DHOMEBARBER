@@ -80,7 +80,11 @@ function nomDe(compte) {
   return nom ? `${prenom} ${nom.charAt(0)}.` : prenom;
 }
 
-/** État d'un match au coup d'envoi (repère du serveur) ; `k` : moitié du ballon. */
+/**
+ * État d'un match au coup d'envoi (repère du serveur) ; `k` : moitié du ballon. Sans `cd` (durée du
+ * compte à rebours) : l'app compte 3 s, sans avant-match ; `avantMatch()` joue le vrai premier coup
+ * d'envoi (4,5 s, temps écoulé qui avance).
+ */
 const ETAT_DEPART = () => ({ ph: 'count', pt: 0.4, b: [180, 320, 0, 0], p: [[180, 540], [180, 100]], sc: [0, 0], k: 0, kt: 0 });
 
 export class FauxCoupe {
@@ -103,6 +107,11 @@ export class FauxCoupe {
     this.refusJoin = null;
     /** Les frappes sont traitées (`ack`) mais refusées (`acc` ne bouge pas). */
     this.refuserFrappes = false;
+    /**
+     * Durée du premier compte à rebours annoncée au coup d'envoi (`state.cd`, 4,5 au vrai serveur
+     * depuis le thème stade) ; null : rien d'annoncé, l'app compte 3 s sans avant-match.
+     */
+    this.avantMatchCd = null;
     /**
      * Fin du match envoyée à celui qui abandonne (`leave` en plein match), sans `t` ni `sc` ;
      * null : rien (l'app fait sa fin elle-même au bout de 3,5 s). Par défaut : défaite classée.
@@ -148,11 +157,21 @@ export class FauxCoupe {
     const salle = cnx.salle;
     if (salle) {
       salle.etat = { ...salle.etat, ph: 'live', ...valeurs };
+      if (salle.etat.ph !== 'count') salle.compteDepuis = null;
+      else {
+        // Compte à rebours posé : 3 s sans durée donnée (comme le vrai serveur après un but ou un
+        // retour) ; sans `pt` donné, son temps avance depuis zéro
+        if (valeurs.cd === undefined) salle.etat.cd = 3;
+        if (valeurs.pt === undefined) salle.etat.pt = 0;
+        salle.compteDepuis = valeurs.pt === undefined ? Date.now() : null;
+      }
       if (salle.phase === 'wait') salle.phase = 'match';
       this.envoyerEtat(salle);
       return;
     }
-    cnx.envoyer({ t: 'state', s: this.heure(cnx), ...ETAT_DEPART(), ph: 'live', ack: [0, 0], ...valeurs });
+    const { cd, ...depart } = ETAT_DEPART();
+    const etat = { ...depart, ph: 'live', ...valeurs };
+    cnx.envoyer({ t: 'state', s: this.heure(cnx), ...etat, ...(etat.ph === 'count' ? { cd: valeurs.cd ?? cd } : {}), ack: [0, 0] });
   }
 
   /** Coupe la connexion de l'app comme une perte de réseau (1001 : rien de fatal). */
@@ -247,6 +266,7 @@ export class FauxCoupe {
       if (obj.t === 'start' && !obj.resume) {
         salle.phase = 'match';
         salle.etat = ETAT_DEPART();
+        salle.compteDepuis = null;
         // `ack` et `acc` repartent de zéro à chaque match (revanche comprise)
         salle.dernierHit = 0;
         salle.derniereAcceptee = 0;
@@ -267,7 +287,22 @@ export class FauxCoupe {
     const acc = [0, 0];
     ack[salle.you] = salle.dernierHit;
     acc[salle.you] = salle.derniereAcceptee;
-    cnx.envoyer({ t: 'state', s: this.heure(cnx), ...salle.etat, ack, acc });
+    // `cd` seulement pendant un compte à rebours, comme le vrai serveur ; avant-match : `pt` avance
+    const { cd, ...etat } = salle.etat;
+    if (etat.ph === 'count' && salle.compteDepuis) etat.pt = Math.round(Date.now() - salle.compteDepuis) / 1000;
+    cnx.envoyer({ t: 'state', s: this.heure(cnx), ...etat, ...(etat.ph === 'count' && cd ? { cd } : {}), ack, acc });
+  }
+
+  /**
+   * Premier coup d'envoi du vrai serveur (thème stade, 29 oct. 2026) : compte à rebours de `cd`
+   * secondes (4,5 : 2 s de stade et de zoom, puis 3, 2, 1), temps écoulé qui avance avec l'horloge.
+   */
+  avantMatch(cnx = this.derniere(), cd = 4.5) {
+    const salle = cnx.salle;
+    salle.etat = { ...salle.etat, ph: 'count', pt: 0, cd };
+    salle.compteDepuis = Date.now();
+    if (salle.phase === 'wait') salle.phase = 'match';
+    this.envoyerEtat(salle);
   }
 
   // Un `state` toutes les 100 ms tant que le match dure et que l'app est là
@@ -346,7 +381,9 @@ export class FauxCoupe {
       kick: 0,
       ranked_hint: null,
       sc: salle.etat.sc,
-      ...(reprise ? { resume: true } : {}),
+      // Durée du compte à rebours en cours, comme le vrai serveur : 4,5 au premier coup d'envoi
+      // (`avantMatchCd`), 3 après un retour
+      ...(reprise ? { cd: 3, resume: true } : this.avantMatchCd ? { cd: this.avantMatchCd } : {}),
     });
   }
 
@@ -354,6 +391,11 @@ export class FauxCoupe {
     const cnx = salle.cnx;
     if (!cnx) return;
     this.depart(cnx);
+    // Vrai premier coup d'envoi (`avantMatchCd`, 4,5 s) : `cd` dès le premier état, temps qui avance
+    if (this.avantMatchCd) {
+      salle.etat = { ...salle.etat, ph: 'count', pt: 0, cd: this.avantMatchCd };
+      salle.compteDepuis = Date.now();
+    }
     this.envoyerEtat(salle);
   }
 
@@ -366,8 +408,10 @@ export class FauxCoupe {
       if (salle.adversairePret) this.coupDEnvoi(salle);
       return;
     }
-    // Retour en plein match : nouveau compte à rebours, le match continue avec le même score
-    salle.etat = { ...salle.etat, ph: 'count', pt: 0.2 };
+    // Retour en plein match : nouveau compte à rebours (3 s, temps qui avance depuis zéro), le match
+    // continue avec le même score
+    salle.etat = { ...salle.etat, ph: 'count', pt: 0, cd: 3 };
+    salle.compteDepuis = Date.now();
     this.depart(cnx, { reprise: true });
     this.envoyerEtat(salle);
     this.demarrerEtats(salle);

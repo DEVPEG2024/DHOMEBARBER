@@ -1,15 +1,19 @@
 import React, { useState } from 'react';
 import { Scissors, Star } from 'lucide-react';
 import { BARBER_PHOTO_ASPECT, BARBER_PHOTO_BG } from '@/lib/barberPhoto';
+import { COUPE_COLORS } from '../palette';
 import { ROLE_BARBER, ROLE_SALON, avatarTone, initialsOf } from './coupeFormat';
 
 /**
  * Avatar d'un joueur de la Coupe (maquettes « Accueil de la Coupe » et « Classement ») :
  *  - barber : sa photo **en portrait** (1748 × 2480, jamais ronde ni carrée), initiale sinon ;
- *  - client : rond, sa photo ou ses initiales sur un fond tiré de sa clé ;
+ *  - client : rond, sa photo ou ses initiales (en blanc) sur un fond sombre tiré de sa clé ;
  *  - salon (« D'Home Barber ») : le logo du salon, en tuile carrée arrondie (comme dans le fil).
  * `size` : `row` (liste du classement), `preview` (accueil), `podium`, `first` (1re place), `sheet`.
+ * Couleurs prises directement dans la palette (pas dans les variables CSS) : l'avatar et la marque
+ * du rôle s'affichent bien partout.
  */
+const INITIALS_STYLE = { color: COUPE_COLORS.blanc };
 export const SALON_LOGO = '/icons/icon-192.png';
 
 const SIZES = {
@@ -63,7 +67,7 @@ export default function PlayerAvatar({ role, name, url, seed, size = 'row', ring
         <Photo
           src={url}
           fallback={(
-            <span className="flex h-full w-full items-center justify-center font-fut font-bold text-[#eef3ef]" style={{ fontSize: s.text }}>
+            <span className="flex h-full w-full items-center justify-center font-fut font-bold" style={{ ...INITIALS_STYLE, fontSize: s.text }}>
               {initial}
             </span>
           )}
@@ -81,7 +85,7 @@ export default function PlayerAvatar({ role, name, url, seed, size = 'row', ring
       <Photo
         src={url}
         fallback={(
-          <span className="flex h-full w-full items-center justify-center font-semibold text-[#eef3ef]" style={{ fontSize: s.text }}>
+          <span className="flex h-full w-full items-center justify-center font-semibold" style={{ ...INITIALS_STYLE, fontSize: s.text }}>
             {initialsOf(name)}
           </span>
         )}
@@ -90,13 +94,24 @@ export default function PlayerAvatar({ role, name, url, seed, size = 'row', ring
   );
 }
 
-/** Marque du rôle à côté du nom : étoile bleue du salon, ciseaux d'un barber, rien pour un client. */
+/**
+ * Marque du rôle à côté du nom : étoile bleue du salon (seul bleu de la Coupe, règle de l'app),
+ * ciseaux gris d'un barber, rien pour un client.
+ */
 export function RoleMark({ role, size = 14 }) {
   if (role === ROLE_SALON) {
-    return <Star role="img" aria-label="Le salon" className="shrink-0 fill-[#3b82f6] text-[#3b82f6]" style={{ width: size, height: size }} strokeWidth={1.5} />;
+    return (
+      <Star
+        role="img"
+        aria-label="Le salon"
+        className="shrink-0"
+        style={{ width: size, height: size, color: COUPE_COLORS.etoile, fill: COUPE_COLORS.etoile }}
+        strokeWidth={1.5}
+      />
+    );
   }
   if (role === ROLE_BARBER) {
-    return <Scissors role="img" aria-label="Barber" className="shrink-0 text-[#9db0a6]" style={{ width: size, height: size }} strokeWidth={2.2} />;
+    return <Scissors role="img" aria-label="Barber" className="shrink-0" style={{ width: size, height: size, color: COUPE_COLORS.gris }} strokeWidth={2.2} />;
   }
   return null;
 }

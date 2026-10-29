@@ -10,7 +10,10 @@ import CoupeLoadError from '../CoupeLoadError';
  * cours ou qui commence dans les 10 min ; `reachable` faux = le barber ne recevrait pas le défi
  * (notifications pas activées sur son téléphone) : « Pas dispo ». Un barber ne se voit pas dans la
  * liste (on ne se défie pas soi-même).
+ * Thème stade : « Dispo » en blanc (point blanc cerclé), « Défier » rouge ; pas dispo : photo grisée.
  */
+// Photo d'un barber pas dispo (maquette) : changement net, jamais de transition de filtre
+const PHOTO_OFF = { filter: 'grayscale(.8)', opacity: 0.55 };
 
 function statusOf(barber) {
   if (barber.available) return { label: 'Dispo', on: true };
@@ -35,11 +38,11 @@ function BarberTile({ barber, onChallenge }) {
             alt=""
             loading="lazy"
             decoding="async"
-            className="block h-full w-full object-cover transition-[filter,opacity] duration-300"
-            style={on ? undefined : { filter: 'grayscale(.7)', opacity: 0.6 }}
+            className="block h-full w-full object-cover"
+            style={on ? undefined : PHOTO_OFF}
           />
         ) : (
-          <span className={`flex h-full w-full items-center justify-center font-fut text-4xl font-bold ${on ? 'text-[#eef3ef]' : 'text-[#5d6b64]'}`}>
+          <span className={`flex h-full w-full items-center justify-center font-fut text-4xl font-bold ${on ? 'text-white' : 'text-[color:var(--coupe-gris-sombre)]'}`}>
             {name.charAt(0).toUpperCase()}
           </span>
         )}
@@ -48,8 +51,11 @@ function BarberTile({ barber, onChallenge }) {
           boutons restent alignés en bas de la rangée (`mt-auto`) */}
       <div className="flex flex-wrap items-center justify-between gap-x-1.5 gap-y-1">
         <span className="min-w-0 truncate font-fut text-lg font-bold leading-none">{name}</span>
-        <span className={`flex shrink-0 items-center gap-[5px] text-[11px] leading-none ${on ? 'text-[#6fd39f]' : 'text-[#9db0a6]'}`}>
-          <span className={`h-[7px] w-[7px] rounded-full ${on ? 'bg-[#33b574]' : 'bg-[#5d6b64]'}`} aria-hidden="true" />
+        <span className={`flex shrink-0 items-center gap-[5px] text-[11px] leading-none ${on ? 'text-white' : 'text-[color:var(--coupe-gris)]'}`}>
+          <span
+            className={`h-[7px] w-[7px] rounded-full ${on ? 'bg-white shadow-[0_0_0_3px_rgba(255,255,255,.2)]' : 'bg-[color:var(--coupe-gris-sombre)]'}`}
+            aria-hidden="true"
+          />
           {label}
         </span>
       </div>
@@ -58,7 +64,7 @@ function BarberTile({ barber, onChallenge }) {
           type="button"
           onClick={() => onChallenge(barber)}
           aria-label={`Défier ${name}`}
-          className="mt-auto min-h-[44px] rounded-xl bg-[#ebc15e] font-fut text-[15px] font-extrabold uppercase leading-none tracking-[0.06em] text-[#1a1205] transition-transform active:scale-[.97] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#ebc15e]"
+          className="mt-auto min-h-[44px] rounded-xl bg-[color:var(--coupe-rouge)] font-fut text-[15px] font-extrabold uppercase leading-none tracking-[0.06em] text-white transition-transform motion-safe:active:scale-[.97] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
         >
           Défier
         </button>
@@ -67,7 +73,7 @@ function BarberTile({ barber, onChallenge }) {
           type="button"
           disabled
           aria-label={`Défier ${name} : ${label.toLowerCase()}`}
-          className="mt-auto min-h-[44px] rounded-xl border border-white/12 bg-transparent font-fut text-sm font-bold uppercase leading-none tracking-[0.06em] text-[#9db0a6]"
+          className="mt-auto min-h-[44px] rounded-xl border border-white/15 bg-transparent font-fut text-sm font-bold uppercase leading-none tracking-[0.06em] text-[color:var(--coupe-gris)]"
         >
           Pas dispo
         </button>
@@ -88,7 +94,7 @@ export default function BarberChallenge({ query, excludeEmployeeId = null, eligi
         <h2 id="coupe-barbers-title" className="font-fut text-xl font-extrabold uppercase leading-none tracking-[0.04em]">
           Défier un barber
         </h2>
-        <span className="text-xs text-[#9db0a6]">{eligible ? 'En ligne · points en jeu' : 'En ligne · amical'}</span>
+        <span className="text-xs text-[color:var(--coupe-gris)]">{eligible ? 'En ligne · points en jeu' : 'En ligne · amical'}</span>
       </div>
 
       {failed ? (
@@ -97,14 +103,14 @@ export default function BarberChallenge({ query, excludeEmployeeId = null, eligi
         <div className="grid grid-cols-3 gap-2.5" aria-busy="true">
           {[0, 1, 2].map((i) => (
             <div key={i} className="flex flex-col gap-2">
-              <span className="block w-full animate-pulse rounded-[14px] bg-white/6" style={{ aspectRatio: BARBER_PHOTO_ASPECT }} />
-              <span className="h-4 w-2/3 animate-pulse rounded bg-white/6" />
-              <span className="h-11 animate-pulse rounded-xl bg-white/6" />
+              <span className="block w-full rounded-[14px] bg-white/6 motion-safe:animate-pulse" style={{ aspectRatio: BARBER_PHOTO_ASPECT }} />
+              <span className="h-4 w-2/3 rounded bg-white/6 motion-safe:animate-pulse" />
+              <span className="h-11 rounded-xl bg-white/6 motion-safe:animate-pulse" />
             </div>
           ))}
         </div>
       ) : list.length === 0 ? (
-        <p className="rounded-2xl border border-white/8 bg-[#12171a] px-4 py-4 text-center text-[13px] text-[#9db0a6]">
+        <p className="rounded-2xl border border-white/10 bg-[color:var(--coupe-noir2)] px-4 py-4 text-center text-[13px] text-[color:var(--coupe-gris)]">
           Aucun barber ne joue pour l’instant.
         </p>
       ) : (

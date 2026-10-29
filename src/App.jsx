@@ -208,10 +208,10 @@ function RequireCoupe() {
     if (flag.data === true) setAdmitted(true);
   }, [flag.data]);
 
-  // Fond du jeu (sombre) pendant l'attente du drapeau : pas d'éclair clair avant l'écran de la Coupe
+  // Fond du jeu (noir du thème stade) pendant l'attente du drapeau : pas d'éclair clair avant l'écran de la Coupe
   const spinner = (
-    <div className="fixed inset-0 flex items-center justify-center" style={{ background: '#0b0e10' }}>
-      <div className="w-6 h-6 border-2 border-[#ebc15e]/30 border-t-[#ebc15e] rounded-full animate-spin" />
+    <div className="fixed inset-0 flex items-center justify-center" style={{ background: '#0b0b0c' }}>
+      <div className="w-6 h-6 border-2 border-[#ff3d44]/30 border-t-[#ff3d44] rounded-full animate-spin" />
     </div>
   );
 
@@ -227,7 +227,7 @@ function RequireCoupe() {
   // Drapeau illisible (panne, réseau) ou requête en pause faute de réseau : on le dit, on garde l'adresse
   if (flag.isError || queryFailed(flag)) {
     return (
-      <div className="fixed inset-0 flex flex-col items-center justify-center gap-3 p-6" style={{ background: '#0b0e10', colorScheme: 'dark' }}>
+      <div className="fixed inset-0 flex flex-col items-center justify-center gap-3 p-6" style={{ background: '#0b0b0c', colorScheme: 'dark' }}>
         <CoupeLoadError
           what="la Coupe du Gang"
           error={flag.error}
@@ -235,7 +235,7 @@ function RequireCoupe() {
           retrying={flag.isFetching}
           className="w-full max-w-sm"
         />
-        <Link to="/" replace className="min-h-[44px] px-4 inline-flex items-center text-sm font-semibold text-[#9db0a6] underline underline-offset-2">
+        <Link to="/" replace className="min-h-[44px] px-4 inline-flex items-center text-sm font-semibold text-[#a9abaf] underline underline-offset-2">
           Retour à l’accueil
         </Link>
       </div>

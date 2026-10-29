@@ -9,8 +9,11 @@ import {
   COUPE_ENABLED_KEY, invalidateCoupe, useCoupeBarbers, useCoupeLeaderboard, useCoupeMe,
 } from '@/lib/coupe/coupeApi';
 import { RESUME_EVENT, readPendingResume } from '@/lib/coupe/onlineMatch';
+import { preloadStadium } from '@/lib/coupe/stadiumImage';
 import { useSecondsLeft } from '@/components/coupe/game/hooks';
-import CoupeShell from '@/components/coupe/hub/CoupeShell';
+import { COUPE_COLORS } from '@/components/coupe/palette';
+import CoupeShell, { HERO_BUTTON } from '@/components/coupe/hub/CoupeShell';
+import { COUPE_VARS } from '@/components/coupe/hub/theme';
 import PointsCard from '@/components/coupe/hub/PointsCard';
 import BarberChallenge from '@/components/coupe/hub/BarberChallenge';
 import FriendChallenge from '@/components/coupe/hub/FriendChallenge';
@@ -28,6 +31,11 @@ import {
  * propriétaire (contrat : docs/fonctions/coupe-du-gang-contrat.md, sections 2 et 5) : tes Points
  * de Coupe, défier un barber ou un ami, contre le salon, à deux sur ce téléphone, le haut du
  * classement et l'interrupteur « Apparaître dans le classement ».
+ *
+ * Thème stade (planche du 29 oct. 2026, maquette « CoupeAccueilRouge », docs/fonctions/
+ * coupe-du-gang-stade.md) : en-tête sur le haut du stade, rouge pour les boutons, or pour le
+ * trophée et les Points de Coupe. L'image du stade est chargée et décodée dès l'ouverture de la
+ * page (`preloadStadium`) : l'avant-match du jeu ne l'attend pas.
  *
  * Plein écran, hors des mises en page, tout compte connecté (garde `RequireCoupe` d'App.jsx, qui
  * renvoie vers l'accueil quand `features.coupe` est faux).
@@ -97,20 +105,20 @@ function ResumeBanner({ entry, onResume }) {
   if (left <= 0) return null;
   const opponent = entry.names?.[1] || 'ton adversaire';
   return (
-    <div role="status" className="flex items-center gap-3 rounded-2xl border border-[#ebc15e]/40 bg-[rgba(235,193,94,.08)] p-3.5">
-      <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[rgba(235,193,94,.14)] text-[#ebc15e]">
+    <div role="status" className="flex items-center gap-3 rounded-2xl border border-[color:var(--coupe-rouge-trait)] bg-[color:var(--coupe-rouge-fond)] p-3.5">
+      <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[color:var(--coupe-rouge-voile)] text-[color:var(--coupe-rouge-vif)]">
         <PauseCircle className="h-5 w-5" aria-hidden="true" />
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="font-fut text-lg font-bold uppercase leading-none tracking-[0.03em]">Match en pause</span>
-        <span className="text-[12.5px] leading-snug text-[#c9d3cd]">
+        <span className="text-[12.5px] leading-snug text-[color:var(--coupe-gris-clair)]">
           Contre {opponent} : reviens dans {left} s, sinon c’est une défaite par forfait.
         </span>
       </span>
       <button
         type="button"
         onClick={onResume}
-        className="flex min-h-[44px] shrink-0 items-center gap-1.5 rounded-xl bg-[#ebc15e] px-3.5 font-fut text-[15px] font-extrabold uppercase leading-none tracking-[0.06em] text-[#1a1205] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#ebc15e]"
+        className="flex min-h-[44px] shrink-0 items-center gap-1.5 rounded-xl bg-[color:var(--coupe-rouge)] px-3.5 font-fut text-[15px] font-extrabold uppercase leading-none tracking-[0.06em] text-white transition-transform motion-safe:active:scale-[.97] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
       >
         <Play className="h-4 w-4" aria-hidden="true" />
         Reprendre
@@ -119,11 +127,16 @@ function ResumeBanner({ entry, onResume }) {
   );
 }
 
-/** Pendant le chargement du jeu (morceau chargé à la demande) : même fond que l'écran de jeu. */
+/** Pendant le chargement du jeu (morceau chargé à la demande) : même fond noir que l'écran de jeu. */
 function GameLoading() {
   return (
-    <div className="fixed inset-0 z-[60] grid place-items-center" style={{ background: '#05080a' }} role="status" aria-label="Chargement du jeu">
-      <Loader2 className="h-7 w-7 text-[#ebc15e] motion-safe:animate-spin" aria-hidden="true" />
+    <div
+      className="fixed inset-0 z-[60] grid place-items-center"
+      style={{ ...COUPE_VARS, background: COUPE_COLORS.noir }}
+      role="status"
+      aria-label="Chargement du jeu"
+    >
+      <Loader2 className="h-7 w-7 text-[color:var(--coupe-rouge-vif)] motion-safe:animate-spin" aria-hidden="true" />
     </div>
   );
 }
@@ -131,14 +144,14 @@ function GameLoading() {
 /** `COUPE_WS=off` côté serveur pendant que la page est ouverte : les routes répondent `disabled`. */
 function ClosedNotice({ onBack }) {
   return (
-    <div role="alert" className="flex flex-col items-center gap-3 rounded-2xl border border-white/8 bg-[#12171a] px-5 py-8 text-center">
-      <PauseCircle className="h-8 w-8 text-[#ebc15e]" aria-hidden="true" />
+    <div role="alert" className="flex flex-col items-center gap-3 rounded-2xl border border-white/10 bg-[color:var(--coupe-noir2)] px-5 py-8 text-center">
+      <PauseCircle className="h-8 w-8 text-[color:var(--coupe-rouge-vif)]" aria-hidden="true" />
       <p className="font-fut text-2xl font-extrabold uppercase leading-none tracking-[0.03em]">La Coupe fait une pause</p>
-      <p className="max-w-xs text-[13px] leading-snug text-[#9db0a6]">Le salon a mis le jeu en pause pour le moment. Reviens un peu plus tard.</p>
+      <p className="max-w-xs text-[13px] leading-snug text-[color:var(--coupe-gris)]">Le salon a mis le jeu en pause pour le moment. Reviens un peu plus tard.</p>
       <button
         type="button"
         onClick={onBack}
-        className="mt-1 min-h-[44px] rounded-xl border border-white/20 px-5 font-fut text-base font-extrabold uppercase tracking-[0.06em] text-[#eef3ef] hover:bg-white/6"
+        className="mt-1 min-h-[44px] rounded-xl border border-white/40 px-5 font-fut text-base font-extrabold uppercase tracking-[0.06em] text-white hover:bg-white/6 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
       >
         Retour
       </button>
@@ -190,16 +203,11 @@ function CoupeHub({ openGame }) {
   return (
     <CoupeShell
       titleId="coupe-titre"
-      title={<>La <span className="text-[#ebc15e]">Coupe</span> du Gang</>}
-      titleSize="text-[16.5px] min-[360px]:text-[clamp(18px,5.9vw,23px)]"
-      centerTitle
+      title={<>La <span className="text-[color:var(--coupe-or)]">Coupe</span> du Gang</>}
       onBack={goBack}
       action={(
-        <Link
-          to="/coupe/classement"
-          aria-label="Classement"
-          className="grid h-11 w-11 shrink-0 place-items-center rounded-xl text-[#eef3ef] transition-colors hover:bg-white/6 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#ebc15e]"
-        >
+        // Trophée en or (palette : or pour le trophée), sur le bouton rond de l'en-tête
+        <Link to="/coupe/classement" aria-label="Classement" className={`${HERO_BUTTON} text-[color:var(--coupe-or)]`}>
           <TrophyIcon />
         </Link>
       )}
@@ -244,6 +252,10 @@ export default function Coupe() {
     () => gameFromLocation(searchParams, location.state),
     [searchParams, location.state],
   );
+
+  // Image du stade chargée et décodée dès l'ouverture (accueil, ou jeu ouvert par un lien) : le
+  // premier coup d'envoi zoome dessus sans attendre le réseau (une seule fois par session)
+  useEffect(() => { preloadStadium(); }, []);
 
   // Lien de défi illisible (copié à moitié…) : on le dit et on nettoie l'adresse
   const invalid = game?.invalid || null;

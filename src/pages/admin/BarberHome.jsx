@@ -20,7 +20,7 @@ import {
 } from '@/lib/coupe/coupeApi';
 import { Switch } from '@/components/ui/switch';
 import { coupeErrorText } from '@/components/coupe/coupeErrors';
-import { COUPE_GOLD, CoupeBallIcon, coupeCardLine, coupeSeasonLabel } from '@/components/home/GamesSection';
+import { CoupeBallIcon, coupeCardLine, coupeSeasonLabel } from '@/components/home/GamesSection';
 import BarberCard, { CARD_WIDTH, CARD_HEIGHT, buildCardStats, overallRating } from '@/components/shared/BarberCard';
 import StarRating from '@/components/shared/StarRating';
 import Reveal, { RevealGroup, RevealItem } from '@/components/motion/Reveal';
@@ -253,7 +253,7 @@ function CoupeDispoCard({ employee, stats, season }) {
       <Link
         to="/coupe"
         className="h-11 rounded-xl flex items-center justify-center font-fut text-base font-extrabold uppercase tracking-[0.06em] active:opacity-90 transition-opacity"
-        style={{ background: COUPE_GOLD, color: '#1a1205' }}
+        style={{ background: '#e01f26', color: '#ffffff' }}
       >
         Jouer à la Coupe
       </Link>

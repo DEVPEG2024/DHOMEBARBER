@@ -87,8 +87,9 @@ export function initialsOf(name) {
   return (letters.slice(0, 2).join('') || '?').toUpperCase();
 }
 
-// Fonds des avatars sans photo (tons de la maquette), choisis d'après la clé publique du joueur
-const AVATAR_TONES = ['#2b3a55', '#3f5b46', '#5a3d52', '#3d4a6b', '#5b4a2e', '#2f4f54'];
+// Fonds des avatars sans photo, choisis d'après la clé publique du joueur : gris et rouges très
+// sombres du thème stade (ni vert ni bleu), initiales blanches lisibles sur chacun (≥ 11:1)
+const AVATAR_TONES = ['#2a2b2f', '#3a1517', '#34363b', '#4a1c1f', '#232427', '#3e2022'];
 
 export function avatarTone(seed) {
   let h = 0;

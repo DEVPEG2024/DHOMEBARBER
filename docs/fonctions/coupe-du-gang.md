@@ -4,6 +4,7 @@
 >
 > - Planche des écrans (validée le 29 oct. 2026) : https://claude.ai/artifact/6sEgcJPvzCvPtBQsGPP3vU
 > - Prototype jouable du 28 oct. (contre le salon, à deux sur un téléphone) : https://claude.ai/artifact/TDdZxv5v9xYGQwW28zSrxf ; source dans `docs/prototypes/coupe-du-gang.html`.
+> - **Thème stade (29 oct. 2026)** : stade rouge et noir vu du ciel (image du propriétaire sans les marques du club), rouge, noir et blanc avec une touche d'or, avant-match (stade entier puis zoom sur le terrain), terrain seul pendant le match, stade au débrief. L'image **est** le terrain : le jeu n'y pose que joueurs, ballon, score et effets. Contrat et décisions : `coupe-du-gang-stade.md` ; fabrication de l'image : `docs/prototypes/stade-coupe/`.
 
 ## Jeu complet (29 oct. 2026) : où est quoi
 
@@ -95,6 +96,8 @@ But : juger sur deux téléphones la sensation d'un match en ligne avec le serve
 - Joueur adverse : affiché avec 100 ms de retard, interpolé entre deux états. Horloge : écart avec le serveur estimé par `ping` / `pong` (échantillon au plus court aller-retour).
 
 ### Protocole `wss://<API>/ws/coupe` (JSON, coordonnées dans le repère du serveur)
+
+> Protocole du prototype (v1), gardé pour l'histoire. En vigueur : protocole v2 de `coupe-du-gang-contrat.md`, avec la durée du compte à rebours dans `start.cd` et `state.cd` (4,5 s au premier coup d'envoi depuis le thème stade, 3 s après un but ou un retour).
 
 - Origine vérifiée comme `/ws/live` ; **un seul aiguillage `upgrade`** pour les deux chemins (deux `WebSocketServer` branchés sur le même serveur HTTP se rejettent mutuellement en 400 : `ws` 8, `shouldHandle`).
 - Jeton jamais dans l'adresse (journaux du routeur Heroku) : premier message `{t:'auth', v:1, token}` sous 3 s, sinon fermeture 4401. Accès refusé : `{t:'error', code:'not_allowed'}`, fermeture 4403.

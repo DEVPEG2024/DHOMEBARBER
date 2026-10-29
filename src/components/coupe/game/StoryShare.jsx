@@ -88,7 +88,7 @@ export function StoryFallback({ url, onClose }) {
         depuis Instagram, Snapchat ou WhatsApp.
       </p>
       {!isNative && (
-        <a href={url} download="coupe-du-gang-dhomebarber.png" className="cdg-btn cdg-ghost">
+        <a href={url} download="coupe-du-gang-dhomebarber.jpg" className="cdg-btn cdg-ghost">
           Télécharger l’image
         </a>
       )}
