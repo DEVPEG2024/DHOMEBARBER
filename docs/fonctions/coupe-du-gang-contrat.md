@@ -112,7 +112,8 @@ Changements par rapport à v1 (section « Prototype réseau » de `coupe-du-gang
 - `create` → `room {code, link, side: 0}` : `code` = 4 chiffres (à montrer en personne), `link` = 12 caractères `[a-z0-9]` aléatoires (lien `https://dhomebarber.fr/coupe?defi=<link>`, jamais `window.location.origin`). Une salle d'attente par compte, 2 min.
 - `join {code}` ou `join {link}` → `room {code, link, side: 1}` puis `start` ; erreurs `no_room`, `own_room`, `blocked` (l'un a bloqué l'autre), `rate_limited`.
 - `challenge {employee_id}` (défier un barber) : barber actif, visible, `coupe_available`, pas `busy`, pas bloqué, n'est pas soi-même → salle créée et réservée à son compte, `room {code, link, side: 0, invited: {name, role: 'barber'}}`, push au barber (4.4) ; sinon `error {code: 'barber_unavailable'}`. Le barber accepte en ouvrant `/coupe?defi=<link>` (`join {link}`), refuse par `decline {link}` → le défiant reçoit `declined`.
-- `start {you, names, roles, kick, ranked_hint}` : `ranked_hint` = les deux ont droit aux points (indicatif ; la fin du match fait foi).
+- `peek {link}` (avant de rejoindre un défi) → `invite {link, from: {name, role}, expires_in}` (secondes) ou `error {code: 'no_room'}` : l'écran « Défi reçu » s'affiche avant `join`.
+- `start {you, names, roles, keys, kick, ranked_hint}` : `keys` = clés publiques (`key_hash`, section 2) des deux joueurs, pour Signaler / Bloquer ; `ranked_hint` = les deux ont droit aux points (indicatif ; la fin du match fait foi).
 
 ### 4.3 Frappes vérifiées par le serveur (anti-triche)
 - `in {x, y, t}` : position de son joueur et `t` = heure du serveur estimée (ms) ; le serveur garde 600 ms d'historique par joueur.
@@ -126,13 +127,22 @@ Changements par rapport à v1 (section « Prototype réseau » de `coupe-du-gang
 - Socket fermée sans `leave` pendant un match → l'autre reçoit `pause {away: side, left: secondes}` et le ballon s'arrête (phase `pause`). Retour : nouvelle socket, `auth`, puis `resume {link}` → `start` (mêmes noms) puis `state` reprend. 10 s pour revenir, 20 s de pause cumulée et 2 retours par match au plus, sinon **forfait**.
 - `leave` en plein match = forfait immédiat (l'autre gagne).
 - Abandon (forfait) avant le premier but **et** avant 20 s de jeu → match **annulé**.
-- `end {winner, sc, forfeit, cancelled, points: { ranked, reason, delta: [d0, d1], total: [p0, p1] } | null}` envoyé **après** l'écriture de `recordMatch` (au plus 3 s d'attente, sinon `points: null`).
-- `coupeRooms` reçoit ses dépendances par injection : `onMatchEnd(result)` → `recordMatch` ; `canChallenge(employeeId, byUser)` → `{ ok, userId, name }` ; `isBlocked(keyA, keyB)` ; `notifyChallenge(...)`. Les tests les remplacent.
+- `end {winner, sc, forfeit, cancelled, points: { ranked, reason, delta: [d0, d1], total: [p0, p1], rank: [r0, r1] } | null}` envoyé **après** l'écriture de `recordMatch` (au plus 3 s d'attente, sinon `points: null`) ; `total` = points de la saison après le match, `rank` = place dans le classement de la saison (null si absent).
+- `createCoupeServer` reçoit ses dépendances par injection (branchées par S2 dans `server.js`, remplacées par des faux dans les tests ; valeurs par défaut inoffensives) :
+  - `playerKey({ userId, role })` → `'salon'` si `role === 'admin'`, sinon `String(userId)` (défaut fourni par S1, identique à `lib/coupeResults.js`) ;
+  - `keyHash(playerKey)` → clé publique (défaut : la clé elle-même ; S2 branche le HMAC) ;
+  - `onMatchEnd({ code, players: [{ userId, role, employeeId }, …], score, winner, forfeit, cancelled, startedAt, endedAt })` → promesse de `{ ranked, reason, delta, points, rank }` (`recordMatch`) ;
+  - `canChallenge({ employeeId, byUserId })` → promesse de `{ ok: true, userId, name } | { ok: false, code }` (barber dispo, pas occupé, a un compte) ;
+  - `isBlocked({ userId, key }, { userId, key })` → promesse de booléen (l'un a bloqué l'autre) ;
+  - `notifyChallenge({ toUserId, fromName, link })` → promesse (push web, 4.4).
 
 ## 5. App
 
 ### 5.1 Routes (`src/App.jsx`)
-- `/coupe` (accueil de la Coupe) et `/coupe/classement` : plein écran, hors des mises en page client / admin, garde « connecté » (tout rôle), redirection vers `/` si `features.coupe` est faux. `/coupe?defi=<link>` ouvre l'écran du défi (accepter / refuser). `/coupe-test` → `Navigate` vers `/coupe`.
+- `/coupe` (accueil de la Coupe) et `/coupe/classement` : plein écran, hors des mises en page client / admin, garde « connecté » (tout rôle), redirection vers `/` si `features.coupe` est faux. Paramètres de `/coupe` : `?defi=<link>` ouvre l'écran « Défi reçu » (accepter / refuser) ; `?challenge=<employee_id>` lance le défi de ce barber (bouton « Défier » du profil public) ; `?mode=bot&level=…` ou `?mode=local` ouvre directement ce mode (section « Jeux » de l'accueil).
+- `/coupe-test` reste l'écran d'essai (diagnostic réseau : code de salle, ping, recalages), réservé à l'équipe et aux testeurs, reconstruit sur `CoupeGame`.
+- **Composant de jeu** `src/components/coupe/CoupeGame.jsx` (F1 ; une version provisoire au bon format existe dès le départ pour que F2 l'importe) :
+  `<CoupeGame mode="online|bot|local" level="apprenti|barber|boss" action={…} onExit={() => …} onFinished={(result) => …} />` ; `action` pour `online` : `{ t: 'create' } | { t: 'join', code } | { t: 'defi', link } | { t: 'challenge', employeeId }`. Plein écran (fixed, au-dessus de tout), il gère seul la connexion, la salle d'attente (code à 4 chiffres + lien à partager), l'écran « Défi reçu » (`defi`), le match, la fin (points, revanche), Signaler / Bloquer. `onFinished` sert à relire les points (`invalidateCoupe`).
 - `/admin/coupe` : admin seul (catégorie Clients du menu admin), « La Coupe du Gang ».
 
 ### 5.2 Client REST : `src/lib/coupe/coupeApi.js` (écrit par le chef)
@@ -156,8 +166,8 @@ Fonctions et crochets React Query listés en tête du fichier ; clés sous le pr
 |---|---|
 | **S1 serveur de jeu** | `dhomebarber-api/lib/coupeRooms.js`, `test/test-coupe-rooms.js` |
 | **S2 données et API** | `dhomebarber-api/server.js` (migrations, montage, branchement des dépendances de `createCoupeServer`), `routes/public.js` (`features.coupe`), `routes/coupe.js`, `lib/coupeResults.js`, `lib/coupeNotify.js`, `lib/coupePoints.js`, `routes/auth.js` (suppression de compte), `routes/clients.js` ou le fichier de suppression par l'admin, tests `test/test-coupe-api.js`, `test/test-coupe-results.js`, `test/test-coupe-points.js` |
-| **F1 jeu** | `src/lib/coupe/onlineMatch.js`, `src/lib/coupe/localMatch.js` (nouveau), `src/lib/coupe/renderer.js`, `src/lib/coupe/sound.js`, `src/components/coupe/CoupeGame.jsx` (nouveau, depuis `CoupeTest.jsx`), `src/pages/CoupeTest.jsx` (supprimé ou réduit), `e2e/coupe.spec.js`, `e2e/support/fauxCoupe.js` |
-| **F2 accueil et classement** | `src/pages/Coupe.jsx`, `src/pages/CoupeClassement.jsx`, `src/components/coupe/` (sauf `CoupeGame.jsx`), `src/App.jsx`, `e2e/coupe-accueil.spec.js`, `e2e/support/mockApi.js` (routes REST de la Coupe) |
+| **F1 jeu** | `src/lib/coupe/onlineMatch.js`, `src/lib/coupe/localMatch.js` (nouveau), `src/lib/coupe/renderer.js`, `src/lib/coupe/sound.js`, `src/components/coupe/CoupeGame.jsx` (remplace la version provisoire), `src/components/coupe/game/` (ses sous-composants), `src/pages/CoupeTest.jsx` (écran d'essai reconstruit sur `CoupeGame`, route gardée), `e2e/coupe.spec.js`, `e2e/support/fauxCoupe.js` |
+| **F2 accueil et classement** | `src/pages/Coupe.jsx`, `src/pages/CoupeClassement.jsx`, `src/components/coupe/hub/` (ses sous-composants), `src/App.jsx`, `e2e/coupe-accueil.spec.js`, `e2e/support/mockApi.js` (routes REST de la Coupe) |
 | **F3 intégrations** | `src/pages/Home.jsx` + `src/components/home/GamesSection.jsx`, éditeur d'ordre de l'accueil (Admin → Paramètres), `src/pages/Feed.jsx`, `src/pages/GangCardPage.jsx`, `src/components/shared/BarberCard.jsx`, `src/pages/admin/BarberHome.jsx`, `src/pages/BarberProfile.jsx`, `src/pages/admin/AdminCoupe.jsx` + son entrée du menu admin, `public/privacy.html`, `e2e/coupe-integrations.spec.js` |
 | **Chef** | ce contrat, `src/lib/coupe/coupeApi.js`, `src/lib/coupe/engine.js` + `lib/coupeEngine.mjs` (copies identiques), `CLAUDE.md`, docs |
 
