@@ -12,11 +12,11 @@ export const ROLE_USER = 'user';
 export const ROLE_BARBER = 'barber';
 export const ROLE_SALON = 'salon';
 
-/** Niveaux du salon (mode « Contre le salon »), dans l'ordre de difficulté. */
+/** Niveaux du salon (mode « Contre le salon »), dans l'ordre de difficulté ; `bars` : jauge de 1 à 3. */
 export const BOT_LEVELS = [
-  { value: 'apprenti', label: 'Apprenti', hint: 'Pour s’échauffer' },
-  { value: 'barber', label: 'Barber', hint: 'Ça se corse' },
-  { value: 'boss', label: 'Boss', hint: 'Bonne chance' },
+  { value: 'apprenti', label: 'Apprenti', hint: 'Pour découvrir le jeu', bars: 1 },
+  { value: 'barber', label: 'Barber', hint: 'Le salon défend et contre-attaque', bars: 2 },
+  { value: 'boss', label: 'Boss', hint: 'Rapide et précis : bon courage', bars: 3 },
 ];
 
 /** Jour de Paris d'un instant, `AAAA-MM-JJ` (jamais `toISOString()`). */

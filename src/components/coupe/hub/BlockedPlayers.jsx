@@ -1,22 +1,24 @@
 import React, { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Ban, Loader2 } from 'lucide-react';
+import { Ban, ChevronDown, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { COUPE_BLOCKS_KEY, invalidateCoupe, unblockCoupePlayer, useCoupeBlocks } from '@/lib/coupe/coupeApi';
 import { coupeErrorText } from '../coupeErrors';
 
 /**
- * Joueurs bloqués à la Coupe (`GET /coupe/blocks`), sur l'accueil de la Coupe : seul endroit où
- * débloquer un joueur bloqué en fin de match qui n'est pas au classement. Rien n'est affiché tant
- * que la liste est vide (ou illisible : la section est secondaire, le reste de la page suffit).
+ * Ligne « Joueurs bloqués » de « Tes réglages » (accueil repensé, planche validée le 29 oct. 2026 au
+ * soir) : le nombre (« Aucun » sinon), et dépliée la liste avec « Débloquer ». Seul endroit où
+ * débloquer un joueur bloqué en fin de match qui n'est pas au classement (`GET /coupe/blocks`).
+ * Liste illisible : « Aucun » n'est pas affirmé, la ligne dit seulement de réessayer plus tard.
  */
 export default function BlockedPlayers() {
   const queryClient = useQueryClient();
   const query = useCoupeBlocks();
+  const [open, setOpen] = useState(false);
   const [busyKey, setBusyKey] = useState(null);
   const list = Array.isArray(query.data) ? query.data.filter((b) => b?.key_hash) : [];
-
-  if (list.length === 0) return null;
+  const count = list.length;
+  const summary = query.isError && !query.data ? 'Indisponible' : query.isPending ? '…' : count === 0 ? 'Aucun' : String(count);
 
   const unblock = async (entry) => {
     if (busyKey) return;
@@ -35,28 +37,39 @@ export default function BlockedPlayers() {
   };
 
   return (
-    <section aria-labelledby="coupe-blocked-title" className="flex flex-col gap-2.5">
-      <h2 id="coupe-blocked-title" className="font-fut text-lg font-extrabold uppercase leading-none tracking-[0.04em] text-[color:var(--coupe-gris)]">
-        Joueurs bloqués
-      </h2>
-      <ul className="overflow-hidden rounded-2xl border border-white/10 bg-[color:var(--coupe-noir2)]">
-        {list.map((entry, i) => (
-          <li key={entry.key_hash} className={`flex items-center gap-3 px-3.5 py-2.5 ${i < list.length - 1 ? 'border-b border-white/8' : ''}`}>
-            <Ban className="h-4 w-4 shrink-0 text-[color:var(--coupe-gris)]" aria-hidden="true" />
-            <span className="min-w-0 flex-1 truncate text-sm font-semibold">{entry.name || 'Joueur'}</span>
-            <button
-              type="button"
-              onClick={() => unblock(entry)}
-              disabled={!!busyKey}
-              aria-label={`Débloquer ${entry.name || 'ce joueur'}`}
-              className="flex min-h-[44px] shrink-0 items-center gap-1.5 rounded-xl border border-white/15 px-3 text-[13px] font-semibold text-white hover:bg-white/6 disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"
-            >
-              {busyKey === String(entry.key_hash) && <Loader2 className="h-3.5 w-3.5 motion-safe:animate-spin" aria-hidden="true" />}
-              Débloquer
-            </button>
-          </li>
-        ))}
-      </ul>
-    </section>
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        disabled={count === 0}
+        aria-expanded={count > 0 ? open : undefined}
+        aria-controls={count > 0 ? 'coupe-bloques' : undefined}
+        className="flex min-h-[52px] w-full items-center gap-3 px-3.5 py-3 text-left text-white enabled:hover:bg-white/4 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white"
+      >
+        <span className="min-w-0 flex-1 text-sm font-semibold">Joueurs bloqués</span>
+        <span className="text-[13px] text-[color:var(--coupe-gris)]">{summary}</span>
+        {count > 0 && <ChevronDown className={`h-4 w-4 shrink-0 text-[color:var(--coupe-gris)] ${open ? 'rotate-180' : ''}`} aria-hidden="true" />}
+      </button>
+      {open && count > 0 && (
+        <ul id="coupe-bloques" className="border-t border-white/8">
+          {list.map((entry) => (
+            <li key={entry.key_hash} className="flex items-center gap-3 border-b border-white/8 px-3.5 py-2 last:border-b-0">
+              <Ban className="h-4 w-4 shrink-0 text-[color:var(--coupe-gris)]" aria-hidden="true" />
+              <span className="min-w-0 flex-1 truncate text-sm">{entry.name || 'Joueur'}</span>
+              <button
+                type="button"
+                onClick={() => unblock(entry)}
+                disabled={!!busyKey}
+                aria-label={`Débloquer ${entry.name || 'ce joueur'}`}
+                className="flex min-h-[44px] shrink-0 items-center gap-1.5 rounded-xl border border-white/15 px-3 text-[13px] font-semibold text-white hover:bg-white/6 disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"
+              >
+                {busyKey === String(entry.key_hash) && <Loader2 className="h-3.5 w-3.5 motion-safe:animate-spin" aria-hidden="true" />}
+                Débloquer
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }

@@ -29,7 +29,7 @@ const KINDS = {
     field: 'opt_in',
     save: setCoupeOptIn,
     label: 'Apparaître dans le classement',
-    hint: 'Sinon tu joues quand même, sans figurer ici.',
+    hint: 'Sinon tu joues quand même, sans y figurer.',
     on: 'Tu apparais dans le classement de la Coupe',
     off: 'Tu n’apparais plus dans le classement de la Coupe',
   },
@@ -37,31 +37,23 @@ const KINDS = {
     field: 'challenge_opt_in',
     save: setCoupeChallengeOptIn,
     label: 'Me proposer aux défis',
-    hint: 'Les joueurs te voient dans cette liste et peuvent te défier. Tu reçois le défi si le jeu est ouvert ou si les notifications du site sont activées.',
+    hint: 'Les joueurs te voient dans l’onglet Joueurs et peuvent te défier. Tu reçois le défi si le jeu est ouvert ou si les notifications du site sont activées.',
     on: 'Tu es dans la liste des joueurs à défier',
     off: 'Tu n’es plus dans la liste des joueurs à défier',
   },
 };
 
-export default function OptInSwitch({ value, isSalon = false, banned = false, id = 'coupe-optin', kind = 'leaderboard' }) {
+/**
+ * Envoi d'un choix (`kind` : `leaderboard` | `challenge`) : `{ pending, save(next) }`. Les caches
+ * gardent la valeur du serveur, puis la Coupe est relue ; refus : message du serveur en toast.
+ * Sert à l'interrupteur et au bouton « Activer » de l'onglet Joueurs.
+ */
+export function useCoupeOptIn(kind = 'leaderboard') {
   const k = KINDS[kind] || KINDS.leaderboard;
   const queryClient = useQueryClient();
   const [pending, setPending] = useState(null);
-  const checked = banned ? false : pending ?? !!value;
 
-  if (isSalon && kind === 'leaderboard') {
-    return (
-      <div className="flex items-start gap-3 rounded-2xl border border-white/10 bg-[color:var(--coupe-noir2)] p-3.5">
-        <Star className="mt-0.5 h-4 w-4 shrink-0" style={STAR_STYLE} strokeWidth={1.5} aria-hidden="true" />
-        <p className="text-[12.5px] leading-snug text-[color:var(--coupe-gris)]">
-          <span className="font-semibold text-white">La ligne « D&apos;Home Barber » est toujours au classement.</span>{' '}
-          Les points de tous les comptes du salon y sont additionnés.
-        </p>
-      </div>
-    );
-  }
-
-  const toggle = async (next) => {
+  const save = async (next) => {
     if (pending !== null) return;
     setPending(next);
     hapticFeedback();
@@ -84,8 +76,33 @@ export default function OptInSwitch({ value, isSalon = false, banned = false, id
     }
   };
 
+  return { pending, save };
+}
+
+/**
+ * `row` : une ligne de la carte « Tes réglages » de l'accueil (sans cadre à elle) ; sinon une carte
+ * (classement).
+ */
+export default function OptInSwitch({ value, isSalon = false, banned = false, id = 'coupe-optin', kind = 'leaderboard', row = false }) {
+  const k = KINDS[kind] || KINDS.leaderboard;
+  const { pending, save } = useCoupeOptIn(kind);
+  const checked = banned ? false : pending ?? !!value;
+  const frame = row ? 'p-3.5' : 'rounded-2xl border border-white/10 bg-[color:var(--coupe-noir2)] p-3.5';
+
+  if (isSalon && kind === 'leaderboard') {
+    return (
+      <div className={`flex items-start gap-3 ${frame}`}>
+        <Star className="mt-0.5 h-4 w-4 shrink-0" style={STAR_STYLE} strokeWidth={1.5} aria-hidden="true" />
+        <p className="text-[12.5px] leading-snug text-[color:var(--coupe-gris)]">
+          <span className="font-semibold text-white">La ligne « D&apos;Home Barber » est toujours au classement.</span>{' '}
+          Les points de tous les comptes du salon y sont additionnés.
+        </p>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex items-center gap-3.5 rounded-2xl border border-white/10 bg-[color:var(--coupe-noir2)] p-3.5">
+    <div className={`flex items-center gap-3.5 ${frame}`}>
       <div className="min-w-0 flex-1">
         <label htmlFor={id} className="block text-sm font-semibold text-white">
           {k.label}
@@ -97,7 +114,7 @@ export default function OptInSwitch({ value, isSalon = false, banned = false, id
       <Switch
         id={id}
         checked={checked}
-        onCheckedChange={toggle}
+        onCheckedChange={save}
         disabled={banned || pending !== null}
         className="relative after:absolute after:-inset-3 after:content-[''] data-[state=checked]:bg-[color:var(--coupe-rouge)] data-[state=unchecked]:bg-white/15 focus-visible:ring-white focus-visible:ring-offset-[color:var(--coupe-noir2)] [&>span]:bg-white"
       />

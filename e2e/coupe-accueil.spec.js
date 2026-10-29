@@ -28,16 +28,21 @@ const KEVIN = {
 
 const titre = (page) => page.getByRole('heading', { level: 1, name: 'La Coupe du Gang' });
 const blocPoints = (page) => page.getByRole('region', { name: /Points de Coupe/ });
-const blocBarbers = (page) => page.getByRole('region', { name: 'Défier un barber' });
+// Accueil repensé (planche validée le 29 oct. 2026 au soir) : « 1. Comment tu joues ? » (boutons
+// radio) puis « 2. Contre qui ? » (onglets Barbers, Joueurs, Un ami) ; une seule liste à l'écran
+const mode = (page, nom) => page.getByRole('radiogroup', { name: 'Comment tu joues ?' }).getByRole('radio', { name: new RegExp(`^${nom}`) });
+const onglet = (page, nom) => page.getByRole('tab', { name: new RegExp(`^${nom}`) });
+const blocBarbers = (page) => page.getByRole('tabpanel', { name: /^Barbers/ });
 const tuileBarber = (page, nom) => blocBarbers(page).getByRole('listitem').filter({ hasText: nom });
 const apercuClassement = (page) => page.getByRole('region', { name: 'Classement de la saison' });
 const interrupteur = (page) => page.getByRole('switch', { name: 'Apparaître dans le classement' });
+const ligneBloques = (page) => page.getByRole('button', { name: /^Joueurs bloqués/ });
 const partie = (page) => page.locator('[data-coupe-partie]');
 
 /** Accueil chargé : points, barbers et haut du classement affichés. */
 async function accueilPret(page) {
   await expect(titre(page)).toBeVisible();
-  await expect(blocPoints(page)).toContainText('Victoire +3, défaite −1');
+  await expect(blocPoints(page)).toContainText('victoire +3, défaite −1');
   await expect(tuileBarber(page, 'Dom')).toBeVisible();
   await expect(apercuClassement(page).getByRole('listitem').first()).toContainText('Lucas M.');
 }
@@ -56,7 +61,7 @@ function elementsQuiDepassent(page) {
 }
 
 // Liste « Défier un joueur » (29 oct. 2026) : clients volontaires, seulement avec `features.coupePlayers`
-const blocJoueurs = (page) => page.getByRole('region', { name: 'Défier un joueur' });
+const blocJoueurs = (page) => page.getByRole('tabpanel', { name: /^Joueurs/ });
 const interrupteurDefis = (page) => page.getByRole('switch', { name: 'Me proposer aux défis' });
 const CLE_LUCAS_LISTE = 'a1'.repeat(16);
 
@@ -65,18 +70,23 @@ test.describe('La Coupe du Gang : défier un joueur', () => {
     await connecter(CLIENT);
     await page.goto('/coupe');
     await accueilPret(page);
-    await expect(blocJoueurs(page)).toHaveCount(0);
+    await expect(onglet(page, 'Joueurs')).toHaveCount(0);
+    await expect(onglet(page, 'Un ami')).toBeVisible();
     await expect(interrupteurDefis(page)).toHaveCount(0);
     expect(api.requetesVers('GET', '/coupe/players')).toEqual([]);
   });
 
-  test('liste : joignables « Défier », les autres « Pas dispo » ; « Me proposer aux défis » ; « Défier » ouvre le défi', async ({ page, api, connecter }) => {
+  test('liste : joignables « Défier », les autres « Pas dispo » ; « Activer » ; « Défier » ouvre le défi, l\'onglet est gardé', async ({ page, api, connecter }) => {
     api.donnees.parametresPublics.features.coupePlayers = true;
     await connecter(CLIENT);
     await page.goto('/coupe');
     await accueilPret(page);
+    // Deux joueurs dispo : le compteur de l'onglet
+    await expect(onglet(page, 'Joueurs')).toHaveAccessibleName('Joueurs 2 dispo');
+    await onglet(page, 'Joueurs').click();
+    await expect(onglet(page, 'Joueurs')).toHaveAttribute('aria-selected', 'true');
+    await expect(blocBarbers(page)).toHaveCount(0);
     const bloc = blocJoueurs(page);
-    await expect(bloc).toContainText('En ligne · points en jeu');
     const lignes = bloc.getByRole('listitem');
     await expect(lignes).toHaveCount(3);
     await expect(lignes.nth(0)).toContainText('Lucas M.');
@@ -87,11 +97,14 @@ test.describe('La Coupe du Gang : défier un joueur', () => {
     await expect(lignes.nth(2)).toContainText('Pas dispo');
     await expect(bloc.getByRole('button', { name: 'Défier Yanis B. : pas dispo' })).toBeDisabled();
 
-    // Se proposer aux défis : à part du classement (qui reste coché)
+    // Pas dans la liste : le bandeau le dit, « Activer » vaut l'interrupteur de « Tes réglages » (à
+    // part du classement, qui reste coché)
     await expect(interrupteurDefis(page)).not.toBeChecked();
-    await interrupteurDefis(page).click();
+    await expect(bloc).toContainText('Tu n’es pas dans cette liste.');
+    await bloc.getByRole('button', { name: 'Activer' }).click();
     await expect(toast(page, 'Tu es dans la liste des joueurs à défier')).toBeVisible();
     await expect(interrupteurDefis(page)).toBeChecked();
+    await expect(bloc).not.toContainText('Tu n’es pas dans cette liste.');
     await expect(interrupteur(page)).toBeChecked();
     expect(api.requetesVers('PATCH', '/coupe/settings').map((r) => r.corps)).toEqual([{ challenge_opt_in: true }]);
 
@@ -103,6 +116,13 @@ test.describe('La Coupe du Gang : défier un joueur', () => {
     await page.goBack();
     await expect(titre(page)).toBeVisible();
     await expect(interrupteurDefis(page)).toBeChecked();
+    // De retour de la partie : toujours sur l'onglet Joueurs
+    await expect(onglet(page, 'Joueurs')).toHaveAttribute('aria-selected', 'true');
+
+    // Sortir de la liste par « Tes réglages »
+    await interrupteurDefis(page).click();
+    await expect(toast(page, 'Tu n’es plus dans la liste des joueurs à défier')).toBeVisible();
+    await expect(bloc).toContainText('Tu n’es pas dans cette liste.');
   });
 
   test('fiche d\'un joueur de la liste : Bloquer le retire de la liste ; liste vide ; l\'équipe défie sans y figurer', async ({ page, api, connecter }) => {
@@ -110,6 +130,7 @@ test.describe('La Coupe du Gang : défier un joueur', () => {
     await connecter(CLIENT);
     await page.goto('/coupe');
     await accueilPret(page);
+    await onglet(page, 'Joueurs').click();
     const bloc = blocJoueurs(page);
     await bloc.getByRole('button', { name: 'Fiche de Sarah K.' }).click();
     const fiche = page.getByRole('dialog', { name: 'Sarah K.' });
@@ -125,9 +146,11 @@ test.describe('La Coupe du Gang : défier un joueur', () => {
     // Personne dans la liste : on le dit, et comment y figurer
     api.coupeRest.listeJoueurs = [];
     await page.reload();
-    await accueilPret(page);
+    await expect(titre(page)).toBeVisible();
+    // L'onglet choisi est gardé (onglet du navigateur) : toujours Joueurs
+    await expect(onglet(page, 'Joueurs')).toHaveAttribute('aria-selected', 'true');
     await expect(bloc).toContainText('Personne n’est dans la liste pour l’instant.');
-    await expect(bloc).toContainText('Active « Me proposer aux défis » pour y figurer.');
+    await expect(bloc).toContainText('Tu n’es pas dans cette liste.');
   });
 
   test('l\'équipe (admin, barber) voit la liste et peut défier, sans interrupteur', async ({ page, api, connecter }) => {
@@ -135,7 +158,9 @@ test.describe('La Coupe du Gang : défier un joueur', () => {
     await connecter(ADMIN);
     await page.goto('/coupe');
     await expect(titre(page)).toBeVisible();
+    await onglet(page, 'Joueurs').click();
     await expect(blocJoueurs(page).getByRole('button', { name: 'Défier Lucas M.' })).toBeEnabled();
+    await expect(blocJoueurs(page)).not.toContainText('Tu n’es pas dans cette liste.');
     await expect(interrupteurDefis(page)).toHaveCount(0);
   });
 
@@ -148,6 +173,7 @@ test.describe('La Coupe du Gang : défier un joueur', () => {
     await connecter(CLIENT);
     await page.goto('/coupe');
     await accueilPret(page);
+    await onglet(page, 'Joueurs').click();
     const bloc = blocJoueurs(page);
     await expect(bloc.getByRole('listitem')).toHaveCount(5);
     await bloc.getByRole('button', { name: 'Voir les 7 joueurs' }).click();
@@ -172,22 +198,27 @@ test.describe('La Coupe du Gang : accueil', () => {
     await expect(points).toContainText(`8e de la saison de ${MOIS}`);
     await expect(points).toContainText(/16\s*victoires/);
     await expect(points).toContainText(/6\s*défaites/);
-    await expect(points).toContainText('Victoire +3, défaite −1. Ces points ne changent pas ton niveau Gang.');
+    await expect(points).toContainText('victoire +3, défaite −1');
     await expect(points.getByRole('note')).toHaveCount(0);
+    await expect(points.getByRole('link')).toHaveAttribute('href', '/coupe/classement');
 
-    // Défier un barber : Dom et Kevin dispo, Romain en rendez-vous
-    await expect(blocBarbers(page)).toContainText('En ligne · points en jeu');
+    // 1. Comment tu joues ? En ligne par défaut (points en jeu), salon et à deux à côté
+    await expect(mode(page, 'En ligne')).toHaveAttribute('aria-checked', 'true');
+    await expect(mode(page, 'En ligne')).toContainText('points en jeu');
+    await expect(mode(page, 'Contre le salon')).toHaveAttribute('aria-checked', 'false');
+    await expect(mode(page, 'À deux')).toHaveAttribute('aria-checked', 'false');
+
+    // 2. Contre qui ? Onglet Barbers : Dom et Kevin dispo (compteur), Romain en rendez-vous
+    await expect(page.getByRole('heading', { name: 'Contre qui ?' })).toBeVisible();
+    await expect(onglet(page, 'Barbers')).toHaveAttribute('aria-selected', 'true');
+    await expect(onglet(page, 'Barbers')).toHaveAccessibleName('Barbers 2 dispo');
+    await expect(onglet(page, 'Un ami')).toBeVisible();
     await expect(tuileBarber(page, 'Dom')).toContainText('Dispo');
     await expect(page.getByRole('button', { name: 'Défier Dom' })).toBeEnabled();
     await expect(page.getByRole('button', { name: 'Défier Kevin' })).toBeEnabled();
-    await expect(tuileBarber(page, 'Romain')).toContainText('Occupé');
-    await expect(page.getByRole('button', { name: 'Défier Romain : occupé' })).toBeDisabled();
-
-    // Ami, code, salon, à deux
-    await expect(page.getByRole('button', { name: /^Défier un ami/ })).toBeVisible();
-    await expect(page.getByLabel('J\'ai un code')).toHaveAttribute('inputmode', 'numeric');
-    await expect(page.getByRole('button', { name: /^Contre le salon/ })).toHaveAttribute('aria-expanded', 'false');
-    await expect(page.getByRole('button', { name: /^À deux sur ce téléphone/ })).toBeVisible();
+    await expect(tuileBarber(page, 'Romain')).toContainText('En rendez-vous');
+    await expect(page.getByRole('button', { name: 'Défier Romain : en rendez-vous' })).toBeDisabled();
+    await expect(blocBarbers(page)).toContainText('Le barber reçoit une notification et a 2 minutes pour accepter.');
 
     // Haut du classement : trois premiers puis « Toi »
     const lignes = apercuClassement(page).getByRole('listitem');
@@ -203,11 +234,13 @@ test.describe('La Coupe du Gang : accueil', () => {
     await expect(lignes.nth(3)).toContainText('42 points');
     await expect(apercuClassement(page).getByRole('link', { name: 'Tout voir' })).toHaveAttribute('href', '/coupe/classement');
 
+    // Tes réglages : classement, joueurs bloqués (aucun : rien à déplier)
+    await expect(page.getByRole('heading', { name: 'Tes réglages' })).toBeVisible();
     await expect(interrupteur(page)).toBeChecked();
+    await expect(ligneBloques(page)).toContainText('Aucun');
+    await expect(ligneBloques(page)).toBeDisabled();
     expect(api.requetesVers('GET', '/coupe/me')).not.toHaveLength(0);
     expect(api.requetesVers('GET', '/coupe/leaderboard').map((r) => r.query.scope)).toContain('season');
-    // Personne n'est bloqué : pas de section « Joueurs bloqués »
-    await expect(page.getByRole('heading', { name: 'Joueurs bloqués' })).toHaveCount(0);
   });
 
   test('barbers dispo ou non, relus toutes les 30 s (seulement ici)', async ({ page, api, connecter }) => {
@@ -218,7 +251,8 @@ test.describe('La Coupe du Gang : accueil', () => {
 
     await expect(tuileBarber(page, 'Kevin')).toContainText('Pas dispo');
     await expect(page.getByRole('button', { name: 'Défier Kevin : pas dispo' })).toBeDisabled();
-    await expect(tuileBarber(page, 'Romain')).toContainText('Occupé');
+    await expect(onglet(page, 'Barbers')).toHaveAccessibleName('Barbers 1 dispo');
+    await expect(tuileBarber(page, 'Romain')).toContainText('En rendez-vous');
     const lectures = api.requetesVers('GET', '/coupe/barbers').length;
 
     // Kevin se met dispo, Romain a fini son rendez-vous : visible au plus 30 s après
@@ -241,20 +275,23 @@ test.describe('La Coupe du Gang : accueil', () => {
     await expect(partie(page)).toHaveCount(0);
   });
 
-  test('défier un ami, « J\'ai un code », contre le salon et à deux', async ({ page, connecter }) => {
+  test('un ami (créer, code), contre le salon (niveau), à deux ; le choix est gardé au retour', async ({ page, connecter }) => {
     await connecter(CLIENT);
     await page.goto('/coupe');
     await accueilPret(page);
 
-    // Défier un ami : salle en ligne créée par l'écran de jeu, l'adresse ne change pas
-    await page.getByRole('button', { name: /^Défier un ami/ }).click();
+    // Un ami : salle en ligne créée par l'écran de jeu, l'adresse ne change pas
+    await onglet(page, 'Un ami').click();
+    await page.getByRole('button', { name: 'Créer un match' }).click();
     await expect(partie(page)).toHaveAttribute('data-coupe-action', 'create');
     await expect(page).toHaveURL((url) => url.pathname === '/coupe' && url.search === '');
     await page.goBack();
     await expect(titre(page)).toBeVisible();
+    await expect(onglet(page, 'Un ami')).toHaveAttribute('aria-selected', 'true');
 
-    // J'ai un code : chiffres seulement, 4 pour rejoindre
-    const champ = page.getByLabel('J\'ai un code');
+    // Code d'un ami : chiffres seulement, 4 pour rejoindre
+    const champ = page.getByLabel('Ton ami t\'a donné un code');
+    await expect(champ).toHaveAttribute('inputmode', 'numeric');
     const rejoindre = page.getByRole('button', { name: 'Rejoindre', exact: true });
     await champ.fill('4a8');
     await expect(champ).toHaveValue('48');
@@ -267,23 +304,49 @@ test.describe('La Coupe du Gang : accueil', () => {
     await page.goBack();
     await expect(titre(page)).toBeVisible();
 
-    // Contre le salon : trois niveaux, puis la partie au niveau choisi
-    const contreSalon = page.getByRole('button', { name: /^Contre le salon/ });
-    await contreSalon.click();
-    await expect(contreSalon).toHaveAttribute('aria-expanded', 'true');
-    const niveaux = page.getByRole('group', { name: 'Niveau du salon' }).getByRole('button');
+    // Contre le salon : « Ton niveau », Apprenti par défaut, puis la partie au niveau choisi
+    await mode(page, 'Contre le salon').click();
+    await expect(page.getByRole('heading', { name: 'Ton niveau' })).toBeVisible();
+    await expect(page.getByRole('tablist')).toHaveCount(0);
+    const niveaux = page.getByRole('radiogroup', { name: 'Ton niveau' }).getByRole('radio');
     await expect(niveaux).toHaveText([/Apprenti/, /Barber/, /Boss/]);
+    await expect(niveaux.first()).toHaveAttribute('aria-checked', 'true');
     await niveaux.filter({ hasText: 'Boss' }).click();
+    await expect(niveaux.filter({ hasText: 'Boss' })).toHaveAttribute('aria-checked', 'true');
+    await page.getByRole('button', { name: 'Jouer contre le salon' }).click();
     await expect(page).toHaveURL((url) => url.searchParams.get('mode') === 'bot' && url.searchParams.get('level') === 'boss');
     await expect(partie(page)).toHaveAttribute('data-coupe-partie', 'bot');
     await expect(partie(page)).toHaveAttribute('data-coupe-niveau', 'boss');
     await page.goBack();
     await expect(titre(page)).toBeVisible();
+    await expect(mode(page, 'Contre le salon')).toHaveAttribute('aria-checked', 'true');
+    await expect(niveaux.filter({ hasText: 'Boss' })).toHaveAttribute('aria-checked', 'true');
 
-    // À deux sur ce téléphone
-    await page.getByRole('button', { name: /^À deux sur ce téléphone/ }).click();
+    // À deux : la règle, puis « Jouer à deux »
+    await mode(page, 'À deux').click();
+    await expect(page.getByRole('heading', { name: 'Installez-vous' })).toBeVisible();
+    await expect(page.getByText('Téléphone à plat')).toBeVisible();
+    await page.getByRole('button', { name: 'Jouer à deux' }).click();
     await expect(page).toHaveURL((url) => url.searchParams.get('mode') === 'local');
     await expect(partie(page)).toHaveAttribute('data-coupe-partie', 'local');
+  });
+
+  test('au clavier : flèches entre les modes et entre les onglets', async ({ page, connecter }) => {
+    await connecter(CLIENT);
+    await page.goto('/coupe');
+    await accueilPret(page);
+    await mode(page, 'En ligne').focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(mode(page, 'Contre le salon')).toHaveAttribute('aria-checked', 'true');
+    await expect(mode(page, 'Contre le salon')).toBeFocused();
+    await page.keyboard.press('ArrowLeft');
+    await expect(mode(page, 'En ligne')).toHaveAttribute('aria-checked', 'true');
+    await onglet(page, 'Barbers').focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(onglet(page, 'Un ami')).toHaveAttribute('aria-selected', 'true');
+    await expect(onglet(page, 'Un ami')).toBeFocused();
+    await page.keyboard.press('Home');
+    await expect(onglet(page, 'Barbers')).toHaveAttribute('aria-selected', 'true');
   });
 
   test('l\'adresse ouvre le jeu directement (défi reçu, défi d\'un barber, contre le salon, à deux)', async ({ page, connecter }) => {
@@ -430,7 +493,7 @@ test.describe('La Coupe du Gang : accueil', () => {
     await expect(mention).toContainText('Ta première visite au salon t’ouvre les Points de Coupe. En attendant, tous tes matchs sont amicaux.');
     await expect(points).toContainText('0');
     await expect(points).toContainText('Tu n’apparais pas dans le classement');
-    await expect(blocBarbers(page)).toContainText('En ligne · amical');
+    await expect(mode(page, 'En ligne')).toContainText('amical');
     // On peut quand même défier un barber (amical)
     await expect(page.getByRole('button', { name: 'Défier Dom' })).toBeEnabled();
     await expect(interrupteur(page)).not.toBeChecked();
@@ -488,8 +551,8 @@ test.describe('La Coupe du Gang : accueil', () => {
 
     const alerte = page.getByRole('alert').filter({ hasText: 'Pas de connexion internet' });
     await expect(alerte).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByRole('button', { name: /^Contre le salon/ })).toBeVisible();
-    await expect(page.getByRole('button', { name: /^À deux sur ce téléphone/ })).toBeVisible();
+    await expect(mode(page, 'Contre le salon')).toBeVisible();
+    await expect(mode(page, 'À deux')).toBeVisible();
 
     horsLigne = false;
     await alerte.getByRole('button', { name: 'Réessayer' }).click();
@@ -604,10 +667,12 @@ test.describe('La Coupe du Gang : classement', () => {
     // Accueil de la Coupe : « Joueurs bloqués », Débloquer
     await page.getByRole('button', { name: 'Retour' }).click();
     await expect(titre(page)).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Joueurs bloqués' })).toBeVisible();
+    await expect(ligneBloques(page)).toContainText('1');
+    await ligneBloques(page).click();
+    await expect(ligneBloques(page)).toHaveAttribute('aria-expanded', 'true');
     await page.getByRole('button', { name: 'Débloquer Yanis B.' }).click();
     await expect(toast(page, 'Yanis B. peut de nouveau te défier')).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Joueurs bloqués' })).toHaveCount(0);
+    await expect(ligneBloques(page)).toContainText('Aucun');
     expect(api.requetesVers('DELETE', '/coupe/block/joueur-yanis')).toHaveLength(1);
   });
 
@@ -669,10 +734,17 @@ for (const largeur of [320, 390, 1366]) {
       await connecter(CLIENT);
       await page.goto('/coupe');
       await accueilPret(page);
-      await page.getByRole('button', { name: /^Contre le salon/ }).click();
-      await page.getByLabel('J\'ai un code').fill('4821');
+      // Chaque mode et chaque onglet : rien ne dépasse à droite
       await attendreSansDebordement(page, 'l\'accueil de la Coupe');
       expect(await elementsQuiDepassent(page), 'Éléments coupés à droite sur l\'accueil de la Coupe').toEqual([]);
+      await onglet(page, 'Un ami').click();
+      await page.getByLabel('Ton ami t\'a donné un code').fill('4821');
+      expect(await elementsQuiDepassent(page), 'Éléments coupés à droite (onglet Un ami)').toEqual([]);
+      for (const nom of ['Contre le salon', 'À deux']) {
+        await mode(page, nom).click();
+        await attendreSansDebordement(page, `l'accueil de la Coupe (${nom})`);
+        expect(await elementsQuiDepassent(page), `Éléments coupés à droite (${nom})`).toEqual([]);
+      }
 
       await page.goto('/coupe/classement');
       await expect(page.getByRole('list', { name: 'Podium' })).toBeVisible();

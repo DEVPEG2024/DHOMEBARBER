@@ -16,24 +16,25 @@ import { COUPE_COLORS } from '@/components/coupe/palette';
 import CoupeShell, { HERO_BUTTON } from '@/components/coupe/hub/CoupeShell';
 import { COUPE_VARS } from '@/components/coupe/hub/theme';
 import PointsCard from '@/components/coupe/hub/PointsCard';
-import BarberChallenge from '@/components/coupe/hub/BarberChallenge';
-import PlayerChallenge from '@/components/coupe/hub/PlayerChallenge';
-import FriendChallenge from '@/components/coupe/hub/FriendChallenge';
-import PlayModes from '@/components/coupe/hub/PlayModes';
+import OpponentTabs from '@/components/coupe/hub/OpponentTabs';
+import { BotPanel, LocalPanel, MODES, ModePicker, StepTitle } from '@/components/coupe/hub/PlayModes';
 import LeaderboardPreview from '@/components/coupe/hub/LeaderboardPreview';
-import OptInSwitch from '@/components/coupe/hub/OptInSwitch';
-import BlockedPlayers from '@/components/coupe/hub/BlockedPlayers';
+import SettingsCard from '@/components/coupe/hub/SettingsCard';
 import { TrophyIcon } from '@/components/coupe/hub/icons';
 import {
   BOT_LEVELS, ROLE_BARBER, ROLE_SALON, ROLE_USER, hasAppHistory, homeFor, isCoupeClosed, roleOfUser,
 } from '@/components/coupe/hub/coupeFormat';
 
 /*
- * Accueil de La Coupe du Gang (/coupe), d'après l'artboard « Accueil de la Coupe » validé par le
- * propriétaire (contrat : docs/fonctions/coupe-du-gang-contrat.md, sections 2 et 5) : tes Points
- * de Coupe, défier un barber, un joueur de la liste des volontaires (29 oct. 2026, seulement avec
- * `features.coupePlayers`) ou un ami, contre le salon, à deux sur ce téléphone, le haut du
- * classement et l'interrupteur « Apparaître dans le classement ».
+ * Accueil de La Coupe du Gang (/coupe), repensé d'après la planche validée par le propriétaire le
+ * 29 oct. 2026 au soir (https://claude.ai/artifact/7SCyeV4pPNSeHtUzmZvW2m : « on ne comprend rien »
+ * avant) : une question à la fois. Tes Points de Coupe en une bande (vers le classement) ;
+ * « 1. Comment tu joues ? » (En ligne, Contre le salon, À deux) ; « 2. Contre qui ? » en ligne
+ * (onglets Barbers, Joueurs : la liste des volontaires, seulement avec `features.coupePlayers`, Un
+ * ami), « Ton niveau » contre le salon, « Installez-vous » à deux ; le haut du classement ; « Tes
+ * réglages » (classement, « Me proposer aux défis », joueurs bloqués). Le mode, l'onglet et le
+ * niveau choisis sont gardés le temps de l'onglet du navigateur (`useHubChoice`) : on les retrouve
+ * en revenant d'une partie. Contrat : docs/fonctions/coupe-du-gang-contrat.md, sections 2 et 5.
  *
  * Thème stade (planche du 29 oct. 2026, maquette « CoupeAccueilRouge », docs/fonctions/
  * coupe-du-gang-stade.md) : en-tête sur le haut du stade, rouge pour les boutons, or pour le
@@ -96,6 +97,37 @@ function gameFromLocation(params, state) {
     return { mode: 'online', action: { t: 'join', code: String(action.code) } };
   }
   return null;
+}
+
+// Choix de l'accueil (mode, onglet en ligne, niveau du salon) : onglet du navigateur seulement,
+// illisible ou refusé (navigation privée) = les valeurs par défaut
+const CHOICE_KEY = 'cdg-accueil';
+const CHOICE_DEFAULT = { mode: 'online', tab: 'barbers', level: LEVELS[0] };
+
+function readChoice() {
+  try {
+    const v = JSON.parse(sessionStorage.getItem(CHOICE_KEY) || 'null');
+    if (!v || typeof v !== 'object') return CHOICE_DEFAULT;
+    return {
+      mode: MODES.includes(v.mode) ? v.mode : CHOICE_DEFAULT.mode,
+      tab: ['barbers', 'players', 'friend'].includes(v.tab) ? v.tab : CHOICE_DEFAULT.tab,
+      level: LEVELS.includes(v.level) ? v.level : CHOICE_DEFAULT.level,
+    };
+  } catch {
+    return CHOICE_DEFAULT;
+  }
+}
+
+function useHubChoice() {
+  const [choice, setChoice] = useState(readChoice);
+  const update = useCallback((patch) => {
+    setChoice((prev) => {
+      const next = { ...prev, ...patch };
+      try { sessionStorage.setItem(CHOICE_KEY, JSON.stringify(next)); } catch { /* sans stockage : choix non gardé */ }
+      return next;
+    });
+  }, []);
+  return [choice, update];
 }
 
 /** Match quitté il y a moins de 10 s, à reprendre (relu quand il change, et après chaque départ du jeu). */
@@ -214,6 +246,10 @@ function CoupeHub({ openGame }) {
     seed: String(user?.public_key || user?.id || ''),
   };
   const meData = meQuery.data && typeof meQuery.data === 'object' ? meQuery.data : null;
+  const eligible = meData ? meData.eligible !== false : true;
+  const isClient = role === ROLE_USER;
+  const [choice, setChoice] = useHubChoice();
+  const step2 = { online: 'Contre qui ?', bot: 'Ton niveau', local: 'Installez-vous' }[choice.mode];
 
   return (
     <CoupeShell
@@ -230,37 +266,45 @@ function CoupeHub({ openGame }) {
       {closed ? (
         <ClosedNotice onBack={goBack} />
       ) : (
-        <div className="flex flex-col gap-[22px]">
+        <div className="flex flex-col gap-7">
           {pendingResume && (
             <ResumeBanner key={pendingResume.link} entry={pendingResume} onResume={() => openGame('', { coupeAction: { t: 'resume' } })} />
           )}
           <PointsCard query={meQuery} isSalon={isSalon} />
-          <BarberChallenge
-            query={barbersQuery}
-            excludeEmployeeId={ownEmployeeId}
-            eligible={meData ? meData.eligible !== false : true}
-            onChallenge={(b) => openGame(`?challenge=${encodeURIComponent(b.employee_id)}`)}
-          />
-          {playersOn && (
-            <PlayerChallenge
-              query={playersQuery}
-              me={meData}
-              isClient={role === ROLE_USER}
-              eligible={meData ? meData.eligible !== false : true}
-              onChallenge={(p) => openGame(`?player=${encodeURIComponent(p.key_hash)}`)}
-            />
-          )}
-          <FriendChallenge
-            onCreate={() => openGame('', { coupeAction: { t: 'create' } })}
-            onJoin={(code) => openGame('', { coupeAction: { t: 'join', code } })}
-          />
-          <PlayModes
-            onBot={(level) => openGame(`?mode=bot&level=${level}`)}
-            onLocal={() => openGame('?mode=local')}
-          />
+          <section aria-labelledby="coupe-etape1">
+            <StepTitle n={1} id="coupe-etape1">Comment tu joues ?</StepTitle>
+            <ModePicker value={choice.mode} onChange={(mode) => setChoice({ mode })} eligible={eligible} labelledBy="coupe-etape1" />
+          </section>
+          <section aria-labelledby="coupe-etape2">
+            <StepTitle n={2} id="coupe-etape2">{step2}</StepTitle>
+            {choice.mode === 'online' && (
+              <OpponentTabs
+                tab={choice.tab}
+                onTab={(tab) => setChoice({ tab })}
+                barbersQuery={barbersQuery}
+                playersQuery={playersQuery}
+                playersOn={playersOn}
+                excludeEmployeeId={ownEmployeeId}
+                me={meData}
+                isClient={isClient}
+                onChallengeBarber={(b) => openGame(`?challenge=${encodeURIComponent(b.employee_id)}`)}
+                onChallengePlayer={(p) => openGame(`?player=${encodeURIComponent(p.key_hash)}`)}
+                onCreate={() => openGame('', { coupeAction: { t: 'create' } })}
+                onJoin={(code) => openGame('', { coupeAction: { t: 'join', code } })}
+              />
+            )}
+            {choice.mode === 'bot' && (
+              <BotPanel
+                level={choice.level}
+                onLevel={(level) => setChoice({ level })}
+                onPlay={(level) => openGame(`?mode=bot&level=${level}`)}
+                labelledBy="coupe-etape2"
+              />
+            )}
+            {choice.mode === 'local' && <LocalPanel onPlay={() => openGame('?mode=local')} />}
+          </section>
           <LeaderboardPreview query={leaderboardQuery} me={me} />
-          {meData && <OptInSwitch value={meData.opt_in} isSalon={isSalon} banned={meData.banned === true} />}
-          <BlockedPlayers />
+          <SettingsCard me={meData} isSalon={isSalon} isClient={isClient} playersOn={playersOn} />
         </div>
       )}
     </CoupeShell>

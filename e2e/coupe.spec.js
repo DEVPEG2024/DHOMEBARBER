@@ -44,7 +44,8 @@ async function matchDepuisAccueil(page, api, connecter) {
   await connecter(CLIENT);
   await page.goto('/coupe');
   await expect(titreAccueil(page)).toBeVisible();
-  await page.getByLabel('J\'ai un code').fill(CODE_MATCH);
+  await page.getByRole('tab', { name: /^Un ami/ }).click();
+  await page.getByLabel('Ton ami t\'a donné un code').fill(CODE_MATCH);
   await page.getByRole('button', { name: 'Rejoindre', exact: true }).click();
   await expect(page.getByText('En ligne', { exact: true })).toBeVisible();
   const cnx = api.coupe.derniere();
@@ -53,6 +54,11 @@ async function matchDepuisAccueil(page, api, connecter) {
   return cnx;
 }
 const boutonCreer = (page) => page.getByRole('button', { name: /^Créer un match/ });
+/** Accueil de la Coupe : onglet « Un ami », puis « Créer un match » (salle en ligne). */
+async function creerDepuisAccueil(page) {
+  await page.getByRole('tab', { name: /^Un ami/ }).click();
+  await page.getByRole('button', { name: 'Créer un match' }).click();
+}
 const boutonRejoindre = (page) => page.getByRole('button', { name: 'Rejoindre', exact: true });
 const jeu = (page) => page.getByRole('dialog', { name: 'La Coupe du Gang' });
 const terrain = (page) => page.getByRole('img', { name: /Terrain de foot/ });
@@ -699,7 +705,7 @@ test.describe('La Coupe du Gang : départs, coupures et reprises', () => {
   test('salle d\'attente coupée : la même salle est reprise (même code), puis le match en bas du terrain', async ({ page, api, connecter }) => {
     await connecter(CLIENT);
     await page.goto('/coupe');
-    await page.getByRole('button', { name: /^Défier un ami/ }).click();
+    await creerDepuisAccueil(page);
     await expect(page.getByText(CODE_MATCH, { exact: true })).toBeVisible();
     api.coupe.couper(api.coupe.derniere());
 
@@ -720,7 +726,7 @@ test.describe('La Coupe du Gang : départs, coupures et reprises', () => {
   test('salle d\'attente : lien partagé depuis une autre app, l\'ami arrive pendant ce temps, le match commence au retour', async ({ page, api, connecter }) => {
     await connecter(CLIENT);
     await page.goto('/coupe');
-    await page.getByRole('button', { name: /^Défier un ami/ }).click();
+    await creerDepuisAccueil(page);
     await expect(page.getByText(CODE_MATCH, { exact: true })).toBeVisible();
     const cnx = api.coupe.derniere();
     await cacherPage(page, true);
@@ -769,7 +775,7 @@ test.describe('La Coupe du Gang : départs, coupures et reprises', () => {
     api.comptes.push({ ...KEVIN, motDePasse: MOT_DE_PASSE, birth_date: null, photo_url: null, created_date: '2026-01-15T10:00:00.000Z' });
     await connecter(KEVIN);
     await page.goto('/coupe');
-    await page.getByRole('button', { name: /^Défier un ami/ }).click();
+    await creerDepuisAccueil(page);
     await expect(page.getByText(CODE_MATCH, { exact: true })).toBeVisible();
     const cnx = api.coupe.derniere();
     const defi = { t: 'invite', link: LIEN_INVITE, from: { name: 'Lucas M.', role: 'user' }, expires_in: 120 };
@@ -822,7 +828,8 @@ test.describe('La Coupe du Gang : départs, coupures et reprises', () => {
     const musique = page.locator('[data-music-toggle]');
     await expect(musique).toHaveAttribute('aria-label', 'Couper la musique');
 
-    await page.getByRole('button', { name: /^À deux sur ce téléphone/ }).click();
+    await page.getByRole('radio', { name: /^À deux/ }).click();
+    await page.getByRole('button', { name: 'Jouer à deux' }).click();
     await expect(page.getByText('À deux sur ce téléphone', { exact: true })).toBeVisible();
     await expect(musique).toHaveAttribute('aria-label', 'Activer la musique');
 
@@ -841,7 +848,7 @@ test.describe('La Coupe du Gang à 1366 px', () => {
   test('écran de jeu : salle d\'attente, match et fin, sans défilement horizontal', async ({ page, api, connecter }) => {
     await connecter(CLIENT);
     await page.goto('/coupe');
-    await page.getByRole('button', { name: /^Défier un ami/ }).click();
+    await creerDepuisAccueil(page);
     await expect(page.getByText(CODE_MATCH, { exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Envoyer le défi' })).toBeVisible();
     await attendreSansDebordement(page, 'la salle d\'attente');
@@ -1130,7 +1137,7 @@ test.describe('La Coupe du Gang : défi à un ami en image', () => {
     });
     await connecter(CLIENT);
     await page.goto('/coupe');
-    await page.getByRole('button', { name: /^Défier un ami/ }).click();
+    await creerDepuisAccueil(page);
     await expect(page.getByText(CODE_MATCH, { exact: true })).toBeVisible();
     // Image préparée dès l'ouverture de la salle (300 ms, puis le dessin)
     await page.waitForTimeout(1500);
@@ -1168,7 +1175,7 @@ test.describe('La Coupe du Gang : défi à un ami en image', () => {
     });
     await connecter(CLIENT);
     await page.goto('/coupe');
-    await page.getByRole('button', { name: /^Défier un ami/ }).click();
+    await creerDepuisAccueil(page);
     await expect(page.getByText(CODE_MATCH, { exact: true })).toBeVisible();
     await page.waitForTimeout(1500);
     await page.getByRole('button', { name: 'Envoyer le défi' }).click();
