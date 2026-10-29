@@ -115,9 +115,6 @@ export default function CoupeGame({
   // Musique de tribune : à partir du premier coup d'envoi, jusqu'à la sortie de l'écran ; permise par
   // le serveur (COUPE_MUSIC=off la coupe partout sans nouveau build)
   const musicOk = useCoupeMusic();
-  const musicOkRef = useRef(musicOk);
-  musicOkRef.current = musicOk;
-  const musicStartedRef = useRef(false);
   const matchRef = useRef(null);
   const loopRef = useRef({ raf: 0, last: 0, statT: 0, timeLeft: null });
   const kickRef = useRef(() => {});
@@ -273,8 +270,7 @@ export default function CoupeGame({
           clearOutro();
           setFx(null);
           director.newMatch();
-          musicStartedRef.current = true;
-          sound.music(musicOkRef.current);
+          sound.music(true);
           // L'astuce attend le terrain (après l'avant-match), sinon personne ne la verrait
           if (!taughtRef.current) {
             taughtRef.current = true;
@@ -292,8 +288,7 @@ export default function CoupeGame({
           clearOutro();
           setFx(null);
           director.resume();
-          musicStartedRef.current = true;
-          sound.music(musicOkRef.current);
+          sound.music(true);
           showHint('Connexion rétablie');
           kick();
           break;
@@ -429,9 +424,9 @@ export default function CoupeGame({
     directorRef.current?.setReducedMotion(!!reduceMotion);
   }, [reduceMotion]);
 
-  // Réponse du serveur arrivée après le coup d'envoi, ou musique coupée en cours de route
+  // Musique permise ou non par le serveur (réponse arrivée avant ou après le coup d'envoi)
   useEffect(() => {
-    if (musicStartedRef.current) soundRef.current?.music(musicOk);
+    soundRef.current?.allowMusic(musicOk);
   }, [musicOk]);
 
   // Image du stade chargée : le dessin ne pose plus son terrain (un seul terrain, celui de l'image) ;

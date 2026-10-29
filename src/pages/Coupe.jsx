@@ -6,11 +6,11 @@ import { toast } from 'sonner';
 import { useAuth } from '@/lib/AuthContext';
 import { hapticFeedback } from '@/lib/capacitor';
 import {
-  COUPE_ENABLED_KEY, invalidateCoupe, useCoupeBarbers, useCoupeLeaderboard, useCoupeMe,
+  COUPE_ENABLED_KEY, invalidateCoupe, useCoupeBarbers, useCoupeLeaderboard, useCoupeMe, useCoupeMusic,
 } from '@/lib/coupe/coupeApi';
 import { RESUME_EVENT, readPendingResume } from '@/lib/coupe/onlineMatch';
 import { preloadStadium } from '@/lib/coupe/stadiumImage';
-import { useSecondsLeft } from '@/components/coupe/game/hooks';
+import { useAudioUnlockOnGesture, useSecondsLeft } from '@/components/coupe/game/hooks';
 import { COUPE_COLORS } from '@/components/coupe/palette';
 import CoupeShell, { HERO_BUTTON } from '@/components/coupe/hub/CoupeShell';
 import { COUPE_VARS } from '@/components/coupe/hub/theme';
@@ -256,6 +256,9 @@ export default function Coupe() {
   // Image du stade chargée et décodée dès l'ouverture (accueil, ou jeu ouvert par un lien) : le
   // premier coup d'envoi zoome dessus sans attendre le réseau (une seule fois par session)
   useEffect(() => { preloadStadium(); }, []);
+
+  // Son débloqué pendant le clic qui ouvre une partie : musique et bruitages au coup d'envoi
+  useAudioUnlockOnGesture(useCoupeMusic());
 
   // Lien de défi illisible (copié à moitié…) : on le dit et on nettoie l'adresse
   const invalid = game?.invalid || null;

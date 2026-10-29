@@ -3,6 +3,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { useMusic } from '@/lib/MusicContext';
+import { unlockAudio } from '@/lib/coupe/audioUnlock';
 
 // Choix « musique coupée » du MusicContext (dhb-music-off) : `toggle` l'écrit quand il met la
 // musique en pause, alors que ce n'est pas le client qui l'a coupée ici
@@ -50,6 +51,27 @@ function fieldFocused() {
  * Vrai pendant une saisie (champ actif ou clavier ouvert) : la fenêtre rétrécie par le clavier ne
  * doit pas passer pour un téléphone tourné.
  */
+/**
+ * Son du jeu débloqué pendant le clic qui ouvre une partie (« Jouer », « Créer un match »,
+ * « Rejoindre », « Défier »…) : au coup d'envoi, qui arrive du réseau sans geste, musique et
+ * bruitages partent ensemble (avant : il fallait couper puis remettre le son). `musicOk` : musique
+ * permise par le serveur (sinon son fichier n'est pas chargé).
+ */
+export function useAudioUnlockOnGesture(musicOk) {
+  useEffect(() => {
+    const prime = () => unlockAudio({ music: musicOk });
+    const opts = { capture: true, passive: true };
+    document.addEventListener('click', prime, opts);
+    document.addEventListener('touchend', prime, opts);
+    document.addEventListener('keydown', prime, opts);
+    return () => {
+      document.removeEventListener('click', prime, opts);
+      document.removeEventListener('touchend', prime, opts);
+      document.removeEventListener('keydown', prime, opts);
+    };
+  }, [musicOk]);
+}
+
 export function useTyping() {
   const [typing, setTyping] = useState(fieldFocused);
   useEffect(() => {

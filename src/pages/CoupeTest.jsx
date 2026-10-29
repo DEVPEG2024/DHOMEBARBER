@@ -7,6 +7,8 @@ import CoupeGame from '@/components/coupe/CoupeGame';
 import GameStyles from '@/components/coupe/game/GameStyles';
 import Panel from '@/components/coupe/game/Panel';
 import { formatDelta } from '@/components/coupe/game/format';
+import { useAudioUnlockOnGesture } from '@/components/coupe/game/hooks';
+import { useCoupeMusic } from '@/lib/coupe/coupeApi';
 
 /*
  * Écran d'essai de La Coupe du Gang (/coupe-test, docs/fonctions/coupe-du-gang.md) : réservé à
@@ -62,6 +64,8 @@ export default function CoupeTest() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [params, setParams] = useSearchParams();
+  // Son débloqué pendant le clic qui ouvre une partie : musique et bruitages au coup d'envoi
+  useAudioUnlockOnGesture(useCoupeMusic());
   const [game, setGame] = useState(() => {
     const g = gameFromParams(params);
     return g ? { ...g, key: 1 } : null;

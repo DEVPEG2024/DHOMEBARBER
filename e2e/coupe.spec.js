@@ -588,9 +588,11 @@ test.describe('La Coupe du Gang : fins de match et refus du serveur', () => {
   test('son du jeu débloqué au relâcher du doigt et au clic (WebKit), pas seulement au toucher', async ({ page, connecter }) => {
     await page.addInitScript(() => {
       window.__sons = { contextes: 0, reprises: 0 };
+      // Comme WebKit sans geste : la relance est demandée mais le contexte reste suspendu
       class FauxContexteAudio {
         constructor() { window.__sons.contextes += 1; this.state = 'suspended'; }
         resume() { window.__sons.reprises += 1; return Promise.resolve(); }
+        suspend() { return Promise.resolve(); }
         close() { return Promise.resolve(); }
       }
       window.AudioContext = FauxContexteAudio;
@@ -599,12 +601,16 @@ test.describe('La Coupe du Gang : fins de match et refus du serveur', () => {
     await connecter(ADMIN);
     await page.goto('/coupe-test?mode=local');
     await expect(page.getByText('À deux sur ce téléphone', { exact: true })).toBeVisible();
-    expect(await page.evaluate(() => window.__sons)).toEqual({ contextes: 0, reprises: 0 });
-
+    // Contexte partagé créé dès l'ouverture du jeu (relancé sans geste quand le navigateur le
+    // permet), puis relancé à chaque geste
+    await expect.poll(() => page.evaluate(() => window.__sons.contextes)).toBe(1);
+    const r0 = await page.evaluate(() => window.__sons.reprises);
     await jeu(page).dispatchEvent('click');
-    await expect.poll(() => page.evaluate(() => window.__sons)).toEqual({ contextes: 1, reprises: 1 });
+    await expect.poll(() => page.evaluate(() => window.__sons.reprises)).toBeGreaterThan(r0);
+    const r1 = await page.evaluate(() => window.__sons.reprises);
     await jeu(page).dispatchEvent('pointerup', { pointerType: 'touch', pointerId: 7 });
-    await expect.poll(() => page.evaluate(() => window.__sons.reprises)).toBe(2);
+    await expect.poll(() => page.evaluate(() => window.__sons.reprises)).toBeGreaterThan(r1);
+    expect(await page.evaluate(() => window.__sons.contextes)).toBe(1);
   });
 });
 
@@ -1008,6 +1014,26 @@ test.describe('La Coupe du Gang : musique de tribune', () => {
     await expect.poll(() => page.evaluate(() => window.__musique.paused)).toBe(true);
     await page.getByRole('button', { name: 'Activer le son' }).click();
     await expect.poll(() => page.evaluate(() => window.__musique.paused)).toBe(false);
+  });
+
+  test('bruitages et musique ensemble dès le coup d\'envoi, sans toucher l\'écran de jeu (un seul clic : « Rejoindre »)', async ({ page, api, connecter }) => {
+    await noterLectures(page);
+    // Contextes audio créés par la page (bruitages)
+    await page.addInitScript(() => {
+      window.__contextes = [];
+      const Ctx = window.AudioContext;
+      window.AudioContext = class extends Ctx {
+        constructor(...args) {
+          super(...args);
+          window.__contextes.push(this);
+        }
+      };
+    });
+    await rejoindreParCode(page, api, connecter);
+    await expect.poll(() => page.evaluate(() => window.__contextes.some((c) => c.state === 'running'))).toBe(true);
+    await expect.poll(() => page.evaluate(() => !!window.__musique && !window.__musique.paused)).toBe(true);
+    // Un seul contexte pour toute la session (partagé par les écrans de jeu)
+    expect(await page.evaluate(() => window.__contextes.length)).toBe(1);
   });
 
   test('coupée par le serveur (COUPE_MUSIC=off) : jamais lancée, le jeu marche', async ({ page, api, connecter }) => {

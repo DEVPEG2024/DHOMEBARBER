@@ -1,76 +1,39 @@
 /*
  * Sons et vibrations de La Coupe du Gang, repris du prototype (docs/prototypes/coupe-du-gang.html).
  *
- * Sons : WebAudio synthétisé (aucun fichier), contexte audio créé au premier geste (`unlock()`,
- * exigence des navigateurs et de WKWebView). Choix « Son : coupé » gardé sur l'appareil.
+ * Bruitages : WebAudio synthétisé, sur le contexte audio partagé de `audioUnlock.js`, débloqué
+ * pendant un geste (clic qui ouvre le jeu, toucher dans l'écran de jeu : `unlock()`), exigence des
+ * navigateurs et de WKWebView. Musique de tribune : lecteur partagé du même module, voulue à partir
+ * du coup d'envoi (`music(true)`) si le serveur la permet (`allowMusic`). Choix « Son : coupé »
+ * gardé sur l'appareil.
  * Vibrations : Haptics de Capacitor dans les apps, `navigator.vibrate` sur le web (toujours dans
  * un try : iOS Safari n'a pas de vibreur, un refus ne doit jamais casser le jeu).
  */
 import { Capacitor } from '@capacitor/core';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
-// Musique de tribune (choisie par le propriétaire le 29 oct. 2026) : 5 min en boucle, mono, niveau
-// abaissé dans le fichier (-26 LUFS) pour rester sous les bruitages, iOS ignorant `volume`
-import TRIBUNE_URL from '@/assets/coupe/tribune.mp3';
-
-const SOUND_KEY = 'cdg-sound';
-
-function readSoundOn() {
-  try { return localStorage.getItem(SOUND_KEY) !== 'off'; } catch { return true; }
-}
-
-function writeSoundOn(on) {
-  try { localStorage.setItem(SOUND_KEY, on ? 'on' : 'off'); } catch { /* stockage refusé : choix pour cette visite */ }
-}
+import {
+  audioContext, readSoundOn, setMusicWanted, stopMusic, suspendAudio, unlockAudio, writeSoundOn,
+} from './audioUnlock';
 
 export function createSound() {
-  let actx = null;
   let noiseBuf = null;
   let enabled = readSoundOn();
+  let musicAllowed = false; // permise par le serveur (features.coupeMusic)
+  let musicOn = false; // match lancé
   const timers = new Set();
-  // Musique : voulue par `music(true)` (match lancé) ; un navigateur qui refuse la lecture sans
-  // geste la lance au toucher suivant (`unlock()`, appelé à chaque toucher du jeu). Coupée avec le
-  // son du jeu, quand la page passe en arrière-plan et à la fermeture de l'écran.
-  let musicEl = null;
-  let musicWanted = false;
+  // Contexte déjà débloqué par le clic qui a ouvert le jeu (ou relancé sans geste quand le
+  // navigateur le permet, Chrome après un premier clic sur la page) : bruitages dès le coup d'envoi
+  let actx = enabled ? audioContext() : null;
 
-  function musicPlay() {
-    if (!musicWanted || !enabled || (typeof document !== 'undefined' && document.hidden)) return;
-    try {
-      if (!musicEl) {
-        musicEl = new Audio(TRIBUNE_URL);
-        musicEl.loop = true;
-        musicEl.preload = 'auto';
-      }
-      if (!musicEl.paused) return;
-      const p = musicEl.play();
-      if (p && typeof p.catch === 'function') p.catch(() => { /* refusée sans geste : au toucher suivant */ });
-    } catch { /* lecteur audio indisponible : pas de musique */ }
-  }
-
-  function musicPause() {
-    try { if (musicEl && !musicEl.paused) musicEl.pause(); } catch { /* déjà arrêtée */ }
-  }
-
-  const onVisibility = () => { if (document.hidden) musicPause(); else musicPlay(); };
-  if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisibility);
+  const applyMusic = () => setMusicWanted(enabled && musicAllowed && musicOn);
 
   function unlock() {
     if (!enabled) return;
-    try {
-      if (!actx) {
-        const Ctx = window.AudioContext || window.webkitAudioContext;
-        if (!Ctx) return;
-        actx = new Ctx();
-      }
-      // iOS : `interrupted` après un appel ou une alarme, pas seulement `suspended`
-      if (actx.state !== 'running') actx.resume().catch(() => {});
-    } catch {
-      actx = null;
-    }
-    musicPlay();
+    actx = unlockAudio({ music: musicAllowed }) || actx;
   }
 
-  const quiet = () => !enabled || !actx || actx.state === 'closed';
+  // Rien tant que le contexte ne tourne pas (sinon les sons attendraient et partiraient en retard)
+  const quiet = () => !enabled || !actx || actx.state !== 'running';
 
   function later(fn, ms) {
     const id = setTimeout(() => { timers.delete(id); fn(); }, ms);
@@ -126,13 +89,18 @@ export function createSound() {
       enabled = !!on;
       writeSoundOn(enabled);
       if (enabled) unlock();
-      else musicPause();
+      applyMusic();
     },
-    /** Musique de tribune voulue (match lancé, musique permise par le serveur) ou non. */
+    /** Musique permise par le serveur (`features.coupeMusic`, COUPE_MUSIC=off la coupe partout). */
+    allowMusic(ok) {
+      musicAllowed = !!ok;
+      applyMusic();
+    },
+    /** Match lancé (coup d'envoi, reprise) : la musique part avec les bruitages. */
     music(on) {
-      musicWanted = !!on;
-      if (musicWanted) musicPlay();
-      else musicPause();
+      musicOn = !!on;
+      if (musicOn && enabled) actx = audioContext() || actx;
+      applyMusic();
     },
     hit(v) {
       const k = Math.min(1, v / 900);
@@ -155,14 +123,10 @@ export function createSound() {
     close() {
       timers.forEach((id) => clearTimeout(id));
       timers.clear();
-      musicWanted = false;
-      musicPause();
-      if (musicEl) {
-        try { musicEl.removeAttribute('src'); musicEl.load(); } catch { /* déjà libérée */ }
-        musicEl = null;
-      }
-      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisibility);
-      try { actx?.close?.().catch?.(() => {}); } catch { /* déjà fermé */ }
+      musicOn = false;
+      // Contexte et lecteur partagés : gardés débloqués pour le prochain match, mais arrêtés
+      stopMusic();
+      suspendAudio();
       actx = null;
     },
   };
