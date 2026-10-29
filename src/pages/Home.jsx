@@ -1006,7 +1006,7 @@ export default function Home() {
               {ratingStats && (
                 <Link to="/reviews" aria-label={`Note moyenne ${ratingStats.avg} sur 5, ${ratingStats.count} avis`}
                   className="flex items-center gap-1.5 backdrop-blur-xl bg-white/10 border border-white/15 rounded-full px-3 py-1.5 active:scale-95 transition-transform">
-                  <Star className="w-3.5 h-3.5 text-primary fill-primary" />
+                  <Star className="w-3.5 h-3.5 text-yellow-400 fill-yellow-400" />
                   <span className="text-white font-bold text-sm">{ratingStats.avg}</span>
                   <span className="text-white/50 text-xs">({ratingStats.count})</span>
                 </Link>

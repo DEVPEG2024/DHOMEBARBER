@@ -11,9 +11,9 @@ export default function StarRating({ rating, size = 'sm', onRate, interactive })
           key={star}
           className={`${sizeClass} transition-colors ${
             star <= rating 
-              ? 'text-primary fill-primary' 
+              ? 'text-yellow-400 fill-yellow-400' 
               : 'text-muted-foreground/30'
-          } ${interactive ? 'cursor-pointer hover:text-primary' : ''}`}
+          } ${interactive ? 'cursor-pointer hover:text-yellow-400' : ''}`}
           onClick={() => interactive && onRate?.(star)}
         />
       ))}

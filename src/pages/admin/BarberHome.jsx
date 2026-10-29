@@ -449,7 +449,7 @@ export default function BarberHome() {
             <div>
               <p className="text-[10px] uppercase tracking-[0.25em] text-primary font-semibold">Ce qu'ils disent de toi</p>
               <h2 className="font-display text-lg font-bold text-foreground">
-                {avg != null && <>{avg.toFixed(1).replace('.', ',')} ★ </>}
+                {avg != null && <>{avg.toFixed(1).replace('.', ',')} <span className="text-yellow-400">★</span> </>}
                 <span className="text-sm font-normal text-muted-foreground">· {visibleReviews.length} avis</span>
               </h2>
             </div>

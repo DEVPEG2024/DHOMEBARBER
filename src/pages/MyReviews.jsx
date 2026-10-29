@@ -53,7 +53,7 @@ function GoogleReviewPrompt({ open, comment, userId, onClose }) {
       <DialogContent className="bg-card border-border max-w-sm rounded-2xl">
         <DialogHeader>
           <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-2">
-            <Star className="w-6 h-6 text-primary fill-primary" />
+            <Star className="w-6 h-6 text-yellow-400 fill-yellow-400" />
           </div>
           <DialogTitle className="font-display text-center">Merci pour votre avis !</DialogTitle>
           <DialogDescription className="text-center">
@@ -82,7 +82,7 @@ function StarSelect({ rating, onRate }) {
     <div className="flex gap-1">
       {[1, 2, 3, 4, 5].map(i => (
         <button key={i} onClick={() => onRate(i)}>
-          <Star className={`w-5 h-5 transition-colors ${i <= rating ? 'text-primary fill-primary' : 'text-muted-foreground/30'}`} />
+          <Star className={`w-5 h-5 transition-colors ${i <= rating ? 'text-yellow-400 fill-yellow-400' : 'text-muted-foreground/30'}`} />
         </button>
       ))}
     </div>
@@ -111,7 +111,7 @@ function ReviewCard({ review, index, showAuthor }) {
             {showAuthor && <p className="text-sm font-semibold text-foreground truncate">{review.client_name || 'Client'}</p>}
             <div className="flex gap-0.5">
               {[1, 2, 3, 4, 5].map(s => (
-                <Star key={s} className={`w-3.5 h-3.5 ${s <= review.rating ? 'text-primary fill-primary' : 'text-muted-foreground/20'}`} />
+                <Star key={s} className={`w-3.5 h-3.5 ${s <= review.rating ? 'text-yellow-400 fill-yellow-400' : 'text-muted-foreground/20'}`} />
               ))}
             </div>
           </div>
@@ -281,7 +281,7 @@ export default function MyReviews() {
             <div>
               <div className="flex gap-0.5">
                 {[1, 2, 3, 4, 5].map(s => (
-                  <Star key={s} className={`w-4 h-4 ${s <= Math.round(Number(stats.avg.replace(',', '.'))) ? 'text-primary fill-primary' : 'text-muted-foreground/20'}`} />
+                  <Star key={s} className={`w-4 h-4 ${s <= Math.round(Number(stats.avg.replace(',', '.'))) ? 'text-yellow-400 fill-yellow-400' : 'text-muted-foreground/20'}`} />
                 ))}
               </div>
               <p className="text-[11px] text-muted-foreground mt-0.5">{stats.count} avis</p>
