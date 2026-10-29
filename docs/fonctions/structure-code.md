@@ -36,6 +36,8 @@ src/
 │   ├── analytics.js           # Mesure d'audience interne (Admin → Trafic) : appareil aléatoire (dhb-vid), session, temps au premier plan, pages / temps par tranches, actions (track), publications du fil vues (trackPostView), provenance (noteSource), refus dans Paramètres (dhb-analytics-optout)
 │   ├── cancellation.js        # Annulations : drapeaux serveur orderCancel / appointmentCancelReason, POST /orders/:id/cancel, messages d'erreur, qui a annulé
 │   ├── partnersApi.js         # Bons plans du Gang : clé React Query, catégories, helpers (meilleure remise, expiration, liens sûrs)
+│   ├── games.js               # Jeux du salon (29 oct. 2026) : liste GAMES (La Coupe du Gang…) et useGames (jeux ouverts d'après leurs drapeaux) ; un nouveau jeu = une entrée + son drapeau
+│   ├── homeSections.js        # Catégories de l'accueil masquées par l'admin (salon_settings.homepage_hidden) : lecture, serveur à jour ou non, useHomeSectionHidden (entrée « Jeux » du fil)
 │   ├── salonEventsApi.js      # Événements du salon : client des routes /salon-events (mine, rsvp, invite, guests, remind), constantes et helpers
 │   ├── app-params.js          # Paramètres app (appId, token, etc.)
 │   ├── pushNotifications.js   # Service Worker push notifications (web)
@@ -53,7 +55,7 @@ src/
 │   ├── UserNotRegisteredError.jsx
 │   └── ui/                    # Composants shadcn/ui (dialog, button, etc.)
 ├── pages/
-│   ├── Home.jsx               # Page d'accueil (hero centré, logo, "Premium Barber Shop", pastille Ouvert / Fermé en direct, bouton Réserver à anneau orbital, section Last Minute en tête par défaut, bloc « Comme la dernière fois », carrousel barbers avec parallaxe, bloc Carte Cadeau pulsant). Ordre des sections lu depuis salon_settings.homepage_order, modifiable par l'admin (« Organiser l'accueil ») ; sections dans un conteneur `flex flex-col gap-8`
+│   ├── Home.jsx               # Page d'accueil (hero centré, logo, "Premium Barber Shop", pastille Ouvert / Fermé en direct, bouton Réserver à anneau orbital, section Last Minute en tête par défaut, bloc « Comme la dernière fois », carrousel barbers avec parallaxe, bloc Carte Cadeau pulsant). Ordre des sections lu depuis salon_settings.homepage_order et catégories masquées depuis salon_settings.homepage_hidden, modifiables par l'admin (« Organiser l'accueil » : glisser, « Visible » / « Masquée ») ; sections dans un conteneur `flex flex-col gap-8`
 │   ├── Booking.jsx            # Réservation en 3 étapes (refonte du 19 oct. 2026, voir « Prestations et réservation ») : Prestation → Créneau (barber, semaine avec places, heures Matin / Après-midi / Soir) → Confirmation, barre fixée en bas, écran de succès pluie de lames + boutons calendrier — composants dans components/booking/
 │   ├── Services.jsx           # Prestations (refonte du 19 oct. 2026) : « Les plus demandées » (classement serveur), rubriques automatiques, lignes compactes avec « Réserver » direct → /booking?services=<id> (ouvre l'écran Créneau), fiche d'une prestation, sélection multiple + barre de résumé — même catalogue que la réservation (`ServicePicker`), composants dans components/services/
 │   ├── Shop.jsx               # Boutique produits : tap sur une carte → fiche produit complète (components/shop/ProductSheet.jsx : galerie image_url + images, description entière, stock, quantité, ajout au panier)
@@ -68,6 +70,7 @@ src/
 │   ├── TryOn.jsx              # « Nouvelle tête » (/try-on, lazy) : essayage couleur cheveux / barbe, FAST sur l'appareil + AI ULTRA serveur
 │   ├── Favorites.jsx          # « Mes favoris » (/favorites, lazy) : prestations (Réserver) et produits (boutique filtrée)
 │   ├── Partners.jsx           # « Les bons plans du Gang » (/partners, lazy) : partenaires, remises, Carte Gang à présenter — composants dans components/partners/
+│   ├── Jeux.jsx               # « Jeux » (/jeux, lazy, 29 oct. 2026) : les jeux ouverts du salon, une carte chacun (La Coupe du Gang : CoupeGameCard de components/home/GamesSection.jsx) ; ouverte par la section « Jeux » de l'accueil et l'entrée du fil
 │   ├── SnapLenses.jsx         # « Filtres Snap » (/snap, lazy) : lentilles Snapchat du salon via Camera Kit
 │   ├── Profile.jsx            # Profil client en tableau de bord (18 oct. 2026) : salut + réglages, carte Gang, prochaine visite ou jauge de fraîcheur, chiffres, 9 raccourcis à pastilles, carrousel des favoris — composants dans components/profile/
 │   ├── Settings.jsx           # Paramètres client (bugs et suggestions — components/feedback/ —, date de naissance, utilisateurs bloqués, suppression de compte, liens CGU / confidentialité)

@@ -16,7 +16,7 @@ import { hapticFeedback } from '@/lib/capacitor';
 import { useAndroidBack } from '@/lib/useAndroidBack';
 import LoadError, { isNetworkError } from '@/components/shared/LoadError';
 import GangLeaderboard from '@/components/gang/GangLeaderboard';
-import { CoupeFeedEntry } from '@/components/home/GamesSection';
+import { GamesFeedEntry } from '@/components/home/GamesSection';
 import { LastMinuteCard } from '@/components/home/LastMinuteSection';
 import { lastMinutePostStillOpen, lastMinuteSlotOfPost, useOpenLastMinutes } from '@/lib/lastMinute';
 import { GANG_LEADERBOARD_QUERY_KEY } from '@/lib/gangCardApi';
@@ -1126,9 +1126,10 @@ export default function Feed() {
       {/* Team of the Season (côté client seulement) : rien tant que personne n'y figure */}
       {!inAdmin && <GangLeaderboard variant="feed" />}
 
-      {/* La Coupe du Gang (29 oct. 2026) : entrée compacte sous la Team of the Season, qui garde la
-          tête du fil ; rien tant que le jeu est coupé (`features.coupe`) */}
-      {!inAdmin && <CoupeFeedEntry className="mb-6" />}
+      {/* « Jeux » (29 oct. 2026) : entrée compacte vers la page des jeux, sous la Team of the Season
+          qui garde la tête du fil ; rien sans jeu ouvert ni quand l'admin a masqué la catégorie
+          « Jeux » de l'accueil */}
+      {!inAdmin && <GamesFeedEntry className="mb-6" />}
 
       {/* Floating publish button */}
       <motion.button

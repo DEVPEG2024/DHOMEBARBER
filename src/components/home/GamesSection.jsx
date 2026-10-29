@@ -1,13 +1,16 @@
 /**
- * La Coupe du Gang dans les écrans existants (contrat : docs/fonctions/coupe-du-gang-contrat.md,
- * section 5.3). Tout est caché sans `features.coupe` (`useCoupeEnabled`, faux tant que rien n'est
- * chargé : variable Heroku `COUPE_WS=off`, ou serveur d'avant la Coupe) :
+ * Les jeux dans les écrans existants (contrat de la Coupe : docs/fonctions/coupe-du-gang-contrat.md,
+ * section 5.3). Un jeu n'apparaît que s'il est ouvert (`useGames` de src/lib/games.js ; la Coupe :
+ * `features.coupe`, faux tant que rien n'est chargé, avec `COUPE_WS=off` ou un serveur d'avant) :
  *  - `GamesSection` (défaut) : section « Jeux » de l'accueil (`games` de homepage_order, après
- *    « Comme la dernière fois », déplaçable par l'admin dans « Organiser l'accueil ») : carte
- *    « La Coupe du Gang » (tes Points de Coupe de la saison, « Jouer » → /coupe) et deux accès
- *    directs, contre le salon et à deux sur ce téléphone (`/coupe?mode=…`, contrat 5.1). Rien sans
- *    le drapeau : le conteneur `.auto-section` vide est alors caché par l'accueil ;
- *  - `CoupeFeedEntry` : entrée compacte en tête du fil, sous la Team of the Season ;
+ *    « Comme la dernière fois », déplaçable et masquable par l'admin dans « Organiser l'accueil ») :
+ *    une carte « Jeux » avec le nom de chaque jeu, qui mène à la page « Jeux » (/jeux, demande du
+ *    29 oct. 2026). Aucun jeu ouvert : rien, le conteneur `.auto-section` vide est caché par l'accueil ;
+ *  - `CoupeGameCard` : carte « La Coupe du Gang » de la page « Jeux » (tes Points de Coupe de la
+ *    saison, « Jouer » → /coupe, et deux accès directs, contre le salon et à deux sur ce téléphone,
+ *    `/coupe?mode=…`, contrat 5.1) ;
+ *  - `GamesFeedEntry` : entrée « Jeux » en tête du fil, sous la Team of the Season, vers /jeux ;
+ *    absente quand l'admin a masqué la catégorie « Jeux » de l'accueil ;
  *  - `CoupeGangBlock` : bloc de la page de la carte Gang, SOUS la carte (jamais dessus : aucun
  *    bandeau écrit sur la carte Gang) ;
  *  - petits outils d'affichage partagés (saison, rang, ligne « COUPE · pts · rang » de la carte FUT,
@@ -19,13 +22,14 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { motion, useReducedMotion } from 'framer-motion';
-import { ArrowRight, Bot, ChevronRight, Scissors, Smartphone, Star, Trophy } from 'lucide-react';
-import SectionHeader from '@/components/shared/SectionHeader';
+import { ArrowRight, Bot, ChevronRight, Gamepad2, Scissors, Smartphone, Star, Trophy } from 'lucide-react';
 import { queryFailed } from '@/components/shared/LoadError';
 import CoupeLoadError from '@/components/coupe/CoupeLoadError';
 import { COUPE_PAUSED, isCoupeClosed } from '@/components/coupe/coupeErrors';
 import { useAuth } from '@/lib/AuthContext';
 import { useCoupeEnabled, useCoupeMe } from '@/lib/coupe/coupeApi';
+import { useGames } from '@/lib/games';
+import { useHomeSectionHidden } from '@/lib/homeSections';
 
 export const COUPE_GOLD = '#ebc15e';
 const GOLD_SOFT = '#c9b27a';
@@ -133,7 +137,56 @@ function PitchLines({ className = '', style }) {
   );
 }
 
+/** Pictogramme d'un jeu (`id` de GAMES) : le ballon pour la Coupe, une manette sinon. */
+export function GameIcon({ id, className = 'w-4 h-4', style }) {
+  if (id === 'coupe') return <CoupeBallIcon className={className} style={style} />;
+  return <Gamepad2 className={className} style={style} aria-hidden="true" />;
+}
+
 // ─── Accueil : section « Jeux » ─────────────────────────────────────
+
+/** Carte « Jeux » de l'accueil : le nom de chaque jeu ouvert, et tout mène à la page « Jeux ». */
+export default function GamesSection() {
+  const { games } = useGames();
+  const reduceMotion = useReducedMotion();
+  if (games.length === 0) return null;
+
+  return (
+    <section aria-label="Jeux">
+      <Link to="/jeux" className="block rounded-3xl" aria-label={`Jeux : ${games.map((g) => g.title).join(', ')}`}>
+        <motion.div whileTap={reduceMotion ? undefined : { scale: 0.98 }} className="rounded-3xl">
+          <div className="shine-sweep relative overflow-hidden rounded-3xl border p-5" style={{ background: CARD_BG, borderColor: GOLD_BORDER }}>
+            <Gamepad2 className="absolute -right-5 -bottom-8 w-36 h-36 rotate-[-14deg] pointer-events-none" style={{ color: COUPE_GOLD, opacity: 0.09 }} aria-hidden="true" />
+            <div className="relative flex items-center gap-4">
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] tracking-[0.3em] uppercase font-medium" style={{ color: GOLD_SOFT }}>Le Gang joue</p>
+                <h2 className="mt-1 font-fut text-[34px] font-extrabold uppercase leading-none tracking-wide text-white">Jeux</h2>
+                <p className="mt-1.5 text-xs leading-snug text-white/60">Choisis ton jeu et défie le Gang.</p>
+              </div>
+              <span className="w-11 h-11 shrink-0 rounded-full grid place-items-center" style={{ background: COUPE_GOLD, color: ON_GOLD }}>
+                <ChevronRight className="w-5 h-5" aria-hidden="true" />
+              </span>
+            </div>
+            <ul className="relative mt-4 flex flex-wrap gap-2">
+              {games.map((g) => (
+                <li
+                  key={g.id}
+                  className="flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold text-white/90 min-w-0"
+                  style={{ background: 'rgba(235, 193, 94, 0.1)', borderColor: GOLD_BORDER }}
+                >
+                  <GameIcon id={g.id} className="w-3.5 h-3.5 shrink-0" style={{ color: COUPE_GOLD }} />
+                  <span className="truncate">{g.title}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </motion.div>
+      </Link>
+    </section>
+  );
+}
+
+// ─── Page « Jeux » : carte de La Coupe du Gang ──────────────────────
 
 function ModeTile({ to, icon: Icon, iconColor, title, text }) {
   return (
@@ -145,12 +198,14 @@ function ModeTile({ to, icon: Icon, iconColor, title, text }) {
   );
 }
 
-export default function GamesSection() {
-  const enabled = useCoupeEnabled();
+/**
+ * « La Coupe du Gang » sur la page « Jeux » (ouverte seulement quand le jeu l'est, `useGames`) :
+ * tes Points de Coupe et ta place, « Jouer », contre le salon et à deux sur ce téléphone.
+ */
+export function CoupeGameCard() {
   const { user } = useAuth();
-  const meQuery = useCoupeMe({ enabled: enabled && !!user });
+  const meQuery = useCoupeMe({ enabled: !!user });
   const reduceMotion = useReducedMotion();
-  if (!enabled) return null;
 
   const me = meQuery.data || null;
   const failed = queryFailed(meQuery);
@@ -167,8 +222,7 @@ export default function GamesSection() {
   }
 
   return (
-    <section aria-label="Jeux">
-      <SectionHeader title="Jeux" subtitle="Le Gang joue" />
+    <article aria-labelledby="coupe-game-title">
       <div className="shine-sweep relative overflow-hidden rounded-3xl border p-5" style={{ background: CARD_BG, borderColor: GOLD_BORDER }}>
         <PitchLines className="absolute -right-5 -top-4 w-32 rotate-[-10deg] pointer-events-none" style={{ color: COUPE_GOLD, opacity: 0.13 }} />
         <div className="relative">
@@ -176,11 +230,9 @@ export default function GamesSection() {
             <Trophy className="w-4 h-4 shrink-0" style={{ color: COUPE_GOLD }} aria-hidden="true" />
             <p className="text-[10px] tracking-[0.3em] uppercase text-white/50 font-medium">Mini-jeu de foot</p>
           </div>
-          {/* Paragraphe et non titre : le titre de la section est « Jeux » (et l'écran du jeu garde
-              le seul titre « La Coupe du Gang », vérifié par e2e/coupe.spec.js) */}
-          <p className="mt-1.5 font-fut text-[28px] font-extrabold uppercase leading-none tracking-wide text-white">
+          <h2 id="coupe-game-title" className="mt-1.5 font-fut text-[28px] font-extrabold uppercase leading-none tracking-wide text-white">
             La <span style={{ color: COUPE_GOLD }}>Coupe</span> du Gang
-          </p>
+          </h2>
           <p className="mt-1.5 text-xs leading-snug text-white/60">Défie un barber, un pote ou le salon : premier à 3 buts.</p>
 
           <div className="mt-4 flex items-end justify-between gap-3">
@@ -219,28 +271,32 @@ export default function GamesSection() {
         <ModeTile to="/coupe?mode=bot&level=apprenti" icon={Bot} iconColor="#86adff" title="Contre le salon" text="3 niveaux · sans points" />
         <ModeTile to="/coupe?mode=local" icon={Smartphone} iconColor={COUPE_GOLD} title="À deux" text="Sur ce téléphone · amical" />
       </div>
-    </section>
+    </article>
   );
 }
 
 // ─── Fil : entrée compacte ──────────────────────────────────────────
 
-/** Entrée « La Coupe du Gang · Joue contre les barbers » en tête du fil (rien sans le drapeau). */
-export function CoupeFeedEntry({ className = '' }) {
-  const enabled = useCoupeEnabled();
-  if (!enabled) return null;
+/**
+ * Entrée « Jeux » en tête du fil, vers la page « Jeux » : rien sans jeu ouvert, ni quand l'admin a
+ * masqué la catégorie « Jeux » de l'accueil (rien non plus tant que les paramètres ne sont pas lus).
+ */
+export function GamesFeedEntry({ className = '' }) {
+  const { games } = useGames();
+  const { hidden, ready } = useHomeSectionHidden('games');
+  if (games.length === 0 || !ready || hidden) return null;
   return (
     <Link
-      to="/coupe"
+      to="/jeux"
       className={`flex items-center gap-3 rounded-2xl border p-3 active:opacity-90 transition-opacity ${className}`}
       style={{ background: CARD_BG, borderColor: GOLD_BORDER }}
     >
       <span className="w-10 h-10 shrink-0 rounded-xl flex items-center justify-center" style={{ background: 'rgba(235, 193, 94, 0.14)' }}>
-        <Trophy className="w-5 h-5" style={{ color: COUPE_GOLD }} aria-hidden="true" />
+        <Gamepad2 className="w-5 h-5" style={{ color: COUPE_GOLD }} aria-hidden="true" />
       </span>
       <span className="flex-1 min-w-0">
-        <span className="block font-fut text-lg font-extrabold uppercase tracking-wide leading-none text-white">La Coupe du Gang</span>
-        <span className="block mt-1 text-xs truncate" style={{ color: MUTED }}>Joue contre les barbers</span>
+        <span className="block font-fut text-lg font-extrabold uppercase tracking-wide leading-none text-white">Jeux</span>
+        <span className="block mt-1 text-xs truncate" style={{ color: MUTED }}>{games.map((g) => g.title).join(' · ')}</span>
       </span>
       <ChevronRight className="w-5 h-5 shrink-0" style={{ color: COUPE_GOLD }} aria-hidden="true" />
     </Link>

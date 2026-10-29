@@ -61,14 +61,17 @@ test.describe('Connexion', () => {
     await connecter(CLIENT);
     await page.goto('/');
     await expect(page.getByRole('link', { name: 'Réserver maintenant' })).toBeVisible();
-    // Chargements de l'accueil partis (la carte Gang du client arrive en dernier) : révoquée plus
+    // Chargements de l'accueil terminés (plus aucune requête nouvelle pendant 800 ms) : révoquée plus
     // tôt, une requête encore en route recevait le 401 avant le tap sur « Profil », la page partait
-    // seule vers la connexion et le tap ne trouvait plus le lien (vérification GitHub, 21 oct. 2026)
+    // seule vers la connexion et le tap ne trouvait plus le lien (vérification GitHub, 21 oct. 2026).
+    // Attendre une requête précise ne suffisait plus : les sections de l'accueil attendent les
+    // paramètres du salon (catégories masquées, 29 oct. 2026), leurs requêtes partent après.
     await expect.poll(() => api.requetesVers('GET', '/gang-card/me').length).toBeGreaterThan(0);
-    // Section « Jeux » (La Coupe du Gang, drapeau allumé par défaut dans l'API simulée) : ses points
-    // partent juste après la carte Gang ; révoquée avant, cette requête recevait le 401 et la page
-    // partait seule vers la connexion (vérification GitHub, 29 oct. 2026)
-    await expect.poll(() => api.requetesVers('GET', '/coupe/me').length).toBeGreaterThan(0);
+    await expect.poll(async () => {
+      const avant = api.requetes.length;
+      await page.waitForTimeout(800);
+      return api.requetes.length === avant;
+    }, { timeout: 20000 }).toBe(true);
 
     // Le jeton n'est plus accepté par le serveur : la prochaine requête répond 401
     api.revoquerSessions();

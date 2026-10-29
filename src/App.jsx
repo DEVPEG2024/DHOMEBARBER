@@ -44,6 +44,8 @@ const Textile = React.lazy(() => import('@/pages/Textile'));
 // Bons plans du Gang (partenaires du salon, lazy)
 const Partners = React.lazy(() => import('@/pages/Partners'));
 const Favorites = React.lazy(() => import('@/pages/Favorites'));
+// Jeux du salon : liste des jeux ouverts (La Coupe du Gang…), lazy
+const Jeux = React.lazy(() => import('@/pages/Jeux'));
 // Carte Gang du client (lazy)
 const GangCardPage = React.lazy(() => import('@/pages/GangCardPage'));
 // Prototype réseau de La Coupe du Gang (lazy, plein écran, hors des mises en page)
@@ -342,6 +344,7 @@ const AppRoutes = () => {
           <Route path="/snap" element={<Suspense fallback={<LazyFallback />}><SnapLenses /></Suspense>} />
           <Route path="/textile" element={<Suspense fallback={<LazyFallback />}><Textile /></Suspense>} />
           <Route path="/partners" element={<Suspense fallback={<LazyFallback />}><Partners /></Suspense>} />
+          <Route path="/jeux" element={<Suspense fallback={<LazyFallback />}><Jeux /></Suspense>} />
           <Route path="/favorites" element={<Suspense fallback={<LazyFallback />}><Favorites /></Suspense>} />
           <Route path="/gang-card" element={<Suspense fallback={<LazyFallback />}><GangCardPage /></Suspense>} />
         </Route>

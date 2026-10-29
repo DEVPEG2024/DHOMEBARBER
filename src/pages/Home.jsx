@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { api } from '@/api/apiClient';
 import { fetchPublicBarbers } from '@/lib/publicBarbers';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { MapPin, Clock, Phone, Star, ArrowRight, Scissors, ShoppingBag, Newspaper, Gift, GripVertical, Pencil, Check, X, Volume2, VolumeX, Shirt, Handshake } from 'lucide-react';
+import { MapPin, Clock, Phone, Star, ArrowRight, Scissors, ShoppingBag, Newspaper, Gift, GripVertical, Pencil, Check, X, Volume2, VolumeX, Shirt, Handshake, Eye, EyeOff } from 'lucide-react';
 import { motion, useMotionValue, useSpring, useTransform, Reorder, useReducedMotion } from 'framer-motion';
 import { toast } from 'sonner';
 import LoadError, { isNetworkError, queryFailed } from '@/components/shared/LoadError';
@@ -28,6 +28,7 @@ import Reveal from '@/components/motion/Reveal';
 import SnapCarousel from '@/components/motion/SnapCarousel';
 import TiltCard from '@/components/motion/TiltCard';
 import { PARTNERS_QUERY_KEY, fetchPartners, visiblePartners } from '@/lib/partnersApi';
+import { hiddenHomeSections, homeHiddenSupported } from '@/lib/homeSections';
 
 const IS_MOBILE = typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
@@ -343,6 +344,8 @@ function BarberMarquee({ employees }) {
 // `.auto-section` vide est caché par le wrapper (`[&:has(>.auto-section:empty)]:hidden`).
 // `last-minute` est en tête par défaut : la fusion avec un ordre sauvegardé l'insère donc en haut de
 // l'accueil tant que l'admin ne l'a pas déplacée ; `games` (29 oct. 2026) arrive après `rebook`.
+// L'admin masque aussi des catégories (`salon_settings.homepage_hidden`, src/lib/homeSections.js) :
+// une catégorie masquée n'est jamais rendue hors du mode édition (qui la montre grisée).
 const DEFAULT_SECTION_ORDER = ['last-minute', 'quick-info', 'rebook', 'games', 'barbers', 'try-on', 'news', 'services', 'shop', 'textile', 'salon-event', 'partners', 'reviews', 'gift-card', 'cta'];
 
 const SECTION_LABELS = {
@@ -395,7 +398,9 @@ const LATEST_POSTS_LIMIT = 40;
 export default function Home() {
   const [showHours, setShowHours] = useState(false);
   const [editMode, setEditMode] = useState(false);
+  // Mode édition : copies de l'ordre et des catégories masquées, enregistrées par « Sauvegarder »
   const [sectionOrder, setSectionOrder] = useState(DEFAULT_SECTION_ORDER);
+  const [hiddenDraft, setHiddenDraft] = useState([]);
   // Filtres Snap : allumés par l'admin dans Paramètres du salon (et seulement si Camera Kit est
   // configuré côté serveur). Tant qu'on ne sait pas, on n'affiche pas la carte : mieux vaut
   // qu'elle apparaisse une seconde plus tard que de mener à « bientôt disponibles ».
@@ -454,11 +459,12 @@ export default function Home() {
     queryFn: () => api.entities.Post.list('-created_at', LATEST_POSTS_LIMIT),
   });
 
-  const { data: settingsData = [] } = useQuery({
+  const settingsQuery = useQuery({
     queryKey: ['salonSettings'],
     staleTime: 5 * 60 * 1000, // catalogue : change rarement
     queryFn: () => api.entities.SalonSettings.list(),
   });
+  const settingsData = settingsQuery.data ?? [];
 
   // Textile & drops : la section n'apparaît que s'il y a un drop annoncé / ouvert ou des
   // pièces du Labo à faire voter (même requête que la page /textile, dédupliquée par React Query)
@@ -487,12 +493,24 @@ export default function Home() {
   const latestPost = posts.find(p => p && p.kind !== 'last_minute') || null;
   const settings = settingsData[0] || null;
 
-  // Load saved section order from settings
-  useEffect(() => {
-    if (Array.isArray(settings?.homepage_order) && settings.homepage_order.length > 0) {
-      setSectionOrder(mergeSectionOrder(settings.homepage_order));
-    }
-  }, [settings]);
+  // Ordre et catégories masquées enregistrés (ce que voient les clients). Les sections attendent les
+  // paramètres (sauf échec) : sinon l'ordre par défaut s'affichait avant l'ordre enregistré, et une
+  // catégorie masquée apparaissait puis disparaissait. Données gardées après une relecture ratée.
+  const savedOrder = useMemo(() => mergeSectionOrder(settings?.homepage_order), [settings]);
+  const savedHidden = useMemo(() => hiddenHomeSections(settings), [settings]);
+  const hiddenSupported = homeHiddenSupported(settings);
+  const layoutReady = settingsQuery.data !== undefined || queryFailed(settingsQuery);
+  const visibleOrder = useMemo(() => savedOrder.filter(id => !savedHidden.includes(id)), [savedOrder, savedHidden]);
+  const hiddenCount = savedOrder.filter(id => savedHidden.includes(id)).length;
+
+  const startEdit = () => {
+    setSectionOrder(savedOrder);
+    setHiddenDraft(savedHidden);
+    setEditMode(true);
+  };
+  const toggleHidden = (id) => {
+    setHiddenDraft(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]));
+  };
 
   // Note du hero : moyenne réelle des avis notés, ou rien du tout sans avis. Jamais de note par
   // défaut : un « 5.0 » sans avis est une déclaration trompeuse (motif du refus Google Play).
@@ -536,16 +554,23 @@ export default function Home() {
     return txt.charAt(0).toUpperCase() + txt.slice(1);
   }, [openingHours]);
 
-  // Save section order to salon_settings : vrai si c'est enregistré (sinon le mode édition reste
-  // ouvert avec l'ordre choisi, l'admin peut réessayer)
-  const saveOrder = useCallback(async (newOrder) => {
+  // Ordre et catégories masquées dans salon_settings : vrai si c'est enregistré (sinon le mode
+  // édition reste ouvert avec les choix faits, l'admin peut réessayer). Serveur d'avant la colonne
+  // `homepage_hidden` : l'ordre seul (l'interrupteur n'est alors pas proposé)
+  const saveLayout = useCallback(async (newOrder, newHidden) => {
     if (!settings?.id) {
       toast.error("Paramètres du salon introuvables : impossible d'enregistrer l'accueil.");
       return false;
     }
     setSaving(true);
     try {
-      await api.entities.SalonSettings.update(settings.id, { homepage_order: newOrder });
+      const changes = { homepage_order: newOrder };
+      if (homeHiddenSupported(settings)) changes.homepage_hidden = newHidden;
+      await api.entities.SalonSettings.update(settings.id, changes);
+      // Accueil tout de suite à jour (il se lit dans le cache), puis relu
+      queryClient.setQueryData(['salonSettings'], (old) => (Array.isArray(old)
+        ? old.map(row => (row?.id === settings.id ? { ...row, ...changes } : row))
+        : old));
       queryClient.invalidateQueries({ queryKey: ['salonSettings'] });
       toast.success('Accueil enregistré');
       return true;
@@ -791,13 +816,14 @@ export default function Home() {
         );
 
       case 'games':
-        // « Jeux » : La Coupe du Gang (29 oct. 2026). GamesSection rend null tant que le jeu est
-        // coupé (`features.coupe` faux) ; en mode édition, un repère pour la positionner.
+        // « Jeux » (29 oct. 2026) : carte vers la page des jeux (/jeux). GamesSection rend null sans
+        // jeu ouvert (La Coupe coupée : `features.coupe` faux) ; en mode édition, un repère pour la
+        // positionner. Masquée par l'admin, l'entrée « Jeux » du fil disparaît aussi.
         if (editMode) {
           return (
             <div className="rounded-3xl p-5 text-center border border-[#ebc15e]/40 bg-[#ebc15e]/10">
               <p className="text-xs font-semibold text-foreground">Jeux</p>
-              <p className="text-[11px] text-muted-foreground mt-1">La Coupe du Gang : Points de Coupe du client et « Jouer » (cachée tant que le jeu est coupé).</p>
+              <p className="text-[11px] text-muted-foreground mt-1">Carte vers la page des jeux (La Coupe du Gang), aussi en tête du fil. Cachée tant qu'aucun jeu n'est ouvert.</p>
             </div>
           );
         }
@@ -1038,8 +1064,7 @@ export default function Home() {
                   animate={{ opacity: 1, scale: 1 }}
                   whileTap={{ scale: 0.95 }}
                   onClick={() => {
-                    // Retour à l'ordre enregistré (fusionné avec les sections ajoutées depuis)
-                    setSectionOrder(mergeSectionOrder(settings?.homepage_order));
+                    // Retour à l'accueil enregistré : les copies du mode édition sont abandonnées
                     setEditMode(false);
                   }}
                   className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl glass text-xs font-semibold text-muted-foreground shadow-lg"
@@ -1052,7 +1077,7 @@ export default function Home() {
                   whileTap={{ scale: 0.95 }}
                   onClick={async () => {
                     if (saving) return;
-                    const ok = await saveOrder(sectionOrder);
+                    const ok = await saveLayout(sectionOrder, hiddenDraft);
                     if (ok) setEditMode(false);
                   }}
                   disabled={saving}
@@ -1063,42 +1088,74 @@ export default function Home() {
                 </motion.button>
               </>
             ) : (
-              <motion.button
-                whileTap={{ scale: 0.95 }}
-                onClick={() => setEditMode(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full glass text-[11px] font-semibold text-muted-foreground hover:text-foreground transition-colors"
-              >
-                <Pencil className="w-3 h-3" /> Organiser l'accueil
-              </motion.button>
+              <>
+                {/* Rappel : des catégories sont masquées aux clients (l'admin voit l'accueil comme eux) */}
+                {hiddenCount > 0 && (
+                  <span className="text-[11px] text-muted-foreground">
+                    {hiddenCount} {hiddenCount === 1 ? 'catégorie masquée' : 'catégories masquées'}
+                  </span>
+                )}
+                <motion.button
+                  whileTap={{ scale: 0.95 }}
+                  onClick={startEdit}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full glass text-[11px] font-semibold text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <Pencil className="w-3 h-3" /> Organiser l'accueil
+                </motion.button>
+              </>
             )}
           </div>
+        )}
+        {editMode && hiddenSupported && (
+          <p className="text-[11px] leading-snug text-muted-foreground mb-5">
+            Faites glisser une catégorie pour la déplacer. « Visible » / « Masquée » : ce que voient les clients.
+          </p>
         )}
         {editMode ? (
           /* Admin edit mode - drag to reorder */
           <Reorder.Group axis="y" values={sectionOrder} onReorder={setSectionOrder} className="space-y-4">
-            {sectionOrder.map((id) => (
-              <Reorder.Item key={id} value={id} className="cursor-grab active:cursor-grabbing">
-                <div className="relative">
-                  {/* Drag handle overlay */}
-                  <div className="absolute -left-2 -right-2 -top-1 -bottom-1 rounded-2xl border-2 border-dashed border-primary/30 pointer-events-none z-10" />
-                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5 bg-primary px-3 py-1 rounded-full shadow-lg">
-                    <GripVertical className="w-3 h-3 text-primary-foreground" />
-                    <span className="text-[10px] font-bold text-primary-foreground uppercase tracking-wider">{SECTION_LABELS[id]}</span>
+            {sectionOrder.map((id) => {
+              const hidden = hiddenDraft.includes(id);
+              return (
+                <Reorder.Item key={id} value={id} className="cursor-grab active:cursor-grabbing">
+                  <div className="relative">
+                    {/* Drag handle overlay */}
+                    <div className={`absolute -left-2 -right-2 -top-1 -bottom-1 rounded-2xl border-2 border-dashed pointer-events-none z-10 ${hidden ? 'border-muted-foreground/25' : 'border-primary/30'}`} />
+                    <div className={`absolute -top-3 left-1 z-20 flex items-center gap-1.5 max-w-[60%] px-3 py-1 rounded-full shadow-lg ${hidden ? 'bg-muted text-muted-foreground' : 'bg-primary text-primary-foreground'}`}>
+                      <GripVertical className="w-3 h-3 shrink-0" />
+                      <span className="text-[10px] font-bold uppercase tracking-wider truncate">{SECTION_LABELS[id]}</span>
+                    </div>
+                    {/* Visible / Masquée : la capture arrête le pointeur avant le glisser de la
+                        catégorie (qui l'écoute sur l'élément du Reorder.Item) */}
+                    {hiddenSupported && (
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={!hidden}
+                        aria-label={`${SECTION_LABELS[id]} visible pour les clients`}
+                        onPointerDownCapture={(e) => e.stopPropagation()}
+                        onClick={() => toggleHidden(id)}
+                        className={`absolute -top-3 right-1 z-20 flex items-center gap-1 px-2.5 py-1 rounded-full shadow-lg text-[10px] font-bold uppercase tracking-wider transition-colors ${hidden ? 'bg-muted text-muted-foreground border border-border' : 'bg-green-500 text-white'}`}
+                      >
+                        {hidden ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                        {hidden ? 'Masquée' : 'Visible'}
+                      </button>
+                    )}
+                    <div className={`pointer-events-none pt-2 ${hidden ? 'opacity-25 grayscale' : 'opacity-60'}`}>
+                      {renderSection(id)}
+                    </div>
                   </div>
-                  <div className="opacity-60 pointer-events-none pt-2">
-                    {renderSection(id)}
-                  </div>
-                </div>
-              </Reorder.Item>
-            ))}
+                </Reorder.Item>
+              );
+            })}
           </Reorder.Group>
-        ) : (
+        ) : !layoutReady ? null : (
           /* Normal mode */
           /* Chaque section se dévoile quand elle arrive à l'écran (et non toutes au chargement).
              Écart en `gap` et non `space-y` : une section auto-masquée (display:none) ne laisse
              aucun trou, même en tête (Last Minute sans créneau ouvert : 32 px de vide avant) */
           <div className="flex flex-col gap-8">
-            {sectionOrder.map((id) => {
+            {visibleOrder.map((id) => {
               const content = renderSection(id);
               if (!content) return null;
               return (

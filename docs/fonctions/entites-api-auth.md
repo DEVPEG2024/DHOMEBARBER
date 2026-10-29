@@ -39,7 +39,7 @@ Mapping entité → table dans `routes/entities.js`.
 | — (routes dédiées) | textile_votes | concept_id, user_email, size, UNIQUE(concept_id, user_email) |
 | — (routes dédiées) | textile_alerts | drop_id, user_email, UNIQUE(drop_id, user_email) |
 | TextileReservation | textile_reservations | drop_id, concept_id, concept_name, client_* (forcés serveur), size, quantity, unit_price, status (reserved = à payer / paid / ready = prête / picked_up / cancelled / expired), expires_at (échéance de paiement), expiry_reminder_sent, notes |
-| SalonSettings | salon_settings | salon_name, tagline, description, phone, email, address, city, opening_hours (JSONB), social_*, cancellation_hours, require_deposit, deposit_percentage, homepage_order (JSONB), comeback_weeks (défaut 5) |
+| SalonSettings | salon_settings | salon_name, tagline, description, phone, email, address, city, opening_hours (JSONB), social_*, cancellation_hours, require_deposit, deposit_percentage, homepage_order (JSONB), homepage_hidden (JSONB : catégories de l'accueil masquées par l'admin, [] = tout visible, liste d'identifiants bornée par le serveur, 29 oct. 2026), comeback_weeks (défaut 5) |
 | PushSubscription | push_subscriptions | user_id, user_email, endpoint, keys_p256dh, keys_auth (+ tokens natifs via subscribe-native) |
 | TimeOff | time_offs | employee_id, employee_name, start_date, end_date, reason, type, status (pending/approved/declined), requested_at |
 | CleaningTask | cleaning_tasks | name, description, frequency, is_active, sort_order |
@@ -74,7 +74,7 @@ Mapping entité → table dans `routes/entities.js`.
 ### Types de données
 - Les colonnes `decimal` de PostgreSQL sont converties en nombres dans `normalizeRow()`
 - Les colonnes `date` sont converties en format `YYYY-MM-DD` (pas ISO timestamp)
-- Les colonnes JSONB (services, working_hours, opening_hours, items, permissions, skills, employees, homepage_order) sont auto-parsées
+- Les colonnes JSONB (services, working_hours, opening_hours, items, permissions, skills, employees, homepage_order, homepage_hidden) sont auto-parsées
 
 ### Auth
 - **Personne n'est jamais déconnecté** (clients le 15 oct. 2026, backend v104 / 4db8cc4 ; barbers et admin le même jour, commit 3c4a382) : jeton d'**un an** pour tous les rôles, renouvelé à chaque ouverture — `GET /me` renvoie `access_token` quand le jeton a plus de 12 h (ou date d'avant ce changement), `api.auth.me()` le range et le retire de l'utilisateur, `AuthContext` rappelle `/me` au retour au premier plan après 6 h d'arrière-plan. Seul un compte inutilisé plus d'un an doit se reconnecter. Sécurité : le jeton porte `sv` (`users.session_version`), son rôle et sa fiche barber, contrôlés par `requireAuth` / `requireStaff` / `requireAdmin` / `optionalAuth` (cache 30 s) : session coupée si le mot de passe est réinitialisé (ou changé par l'admin dans Comptes barbers), si le compte est supprimé, ou si son rôle / sa fiche barber changent (barber retiré ou rétrogradé) ; une panne de base ne déconnecte personne. Les jetons sans `sv` (24 h, d'avant) restent acceptés jusqu'à leur échéance et sont remplacés au premier `/me`. Les apps déjà publiées reçoivent un jeton d'un an à la connexion mais ne le renouvellent qu'avec la version 10. Limite : sur le **site ouvert dans Safari** (pas l'app ni l'écran d'accueil), iOS efface les données d'un site non visité depuis 7 jours. Tests : `test/test-session.js` (11)

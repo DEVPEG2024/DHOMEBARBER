@@ -1,6 +1,6 @@
 // La Coupe du Gang dans les écrans existants (29 oct. 2026, contrat :
-// docs/fonctions/coupe-du-gang-contrat.md, sections 2 et 5.3) : section « Jeux » de l'accueil,
-// entrée du fil, bloc de la carte Gang (sous la carte), « Dispo pour un match » et ligne Coupe de la
+// docs/fonctions/coupe-du-gang-contrat.md, sections 2 et 5.3) : section « Jeux » de l'accueil et
+// page des jeux (/jeux), entrée « Jeux » du fil, catégories masquées par l'admin, bloc de la carte Gang (sous la carte), « Dispo pour un match » et ligne Coupe de la
 // carte FUT dans Mon espace, « Défier » sur le profil d'un barber, Admin → La Coupe du Gang.
 // Tout est caché sans `features.coupe` (variable Heroku COUPE_WS=off) : aucune route /coupe appelée.
 // Les routes REST de la Coupe sont servies par des surcharges propres à ce fichier, au format de
@@ -157,8 +157,8 @@ async function attendreParametres(api, page) {
 
 const appelsCoupe = (api) => api.requetes.filter((r) => /^\/coupe(\/|$)/.test(r.chemin));
 
-test.describe('La Coupe du Gang : accueil', () => {
-  test('section « Jeux » après « Comme la dernière fois » : tes points, « Jouer » et les deux accès directs', async ({ page, api, connecter }) => {
+test.describe('La Coupe du Gang : accueil et page « Jeux »', () => {
+  test('section « Jeux » après « Comme la dernière fois » : une carte vers la page des jeux, où sont tes points et « Jouer »', async ({ page, api, connecter }) => {
     drapeauCoupe(api, true);
     installerCoupe(api);
     await connecter(CLIENT);
@@ -166,14 +166,11 @@ test.describe('La Coupe du Gang : accueil', () => {
 
     const section = page.getByRole('region', { name: 'Jeux' });
     await expect(section.getByRole('heading', { name: 'Jeux', exact: true })).toBeVisible();
-    await expect(section.getByText('La Coupe du Gang')).toBeVisible();
-    // Le seul titre « La Coupe du Gang » reste celui de l'écran du jeu (e2e/coupe.spec.js)
+    const carte = section.getByRole('link', { name: 'Jeux : La Coupe du Gang' });
+    await expect(carte).toHaveAttribute('href', '/jeux');
+    await expect(carte).toContainText('La Coupe du Gang');
+    // Le seul titre « La Coupe du Gang » de l'accueil reste absent (il est sur la page des jeux)
     await expect(page.getByRole('heading', { name: 'La Coupe du Gang' })).toHaveCount(0);
-    await expect(section.getByText('42', { exact: true })).toBeVisible();
-    await expect(section.getByText(`8e de la ${LIBELLE_SAISON.toLowerCase()}`)).toBeVisible();
-    await expect(section.getByRole('link', { name: 'Jouer', exact: true })).toHaveAttribute('href', '/coupe');
-    await expect(section.getByRole('link', { name: /Contre le salon/ })).toHaveAttribute('href', '/coupe?mode=bot&level=apprenti');
-    await expect(section.getByRole('link', { name: /À deux/ })).toHaveAttribute('href', '/coupe?mode=local');
 
     // Ordre par défaut : après « Comme la dernière fois » (ici le prochain rendez-vous), avant « Le Gang »
     const y = async (loc) => (await loc.boundingBox()).y;
@@ -182,9 +179,25 @@ test.describe('La Coupe du Gang : accueil', () => {
     const yJeux = await y(section);
     expect(yJeux).toBeGreaterThan(await y(rebook));
     expect(yJeux).toBeLessThan(await y(page.getByRole('heading', { name: 'Le Gang', exact: true })));
+    // L'accueil ne lit rien de la Coupe : les points sont sur la page des jeux
+    expect(appelsCoupe(api)).toEqual([]);
+
+    await carte.click();
+    await expect(page).toHaveURL(/\/jeux$/);
+    await expect(page.getByRole('heading', { level: 1, name: 'Jeux' })).toBeVisible();
+    const coupe = page.getByRole('article', { name: 'La Coupe du Gang' });
+    await expect(coupe.getByText('42', { exact: true })).toBeVisible();
+    await expect(coupe.getByText(`8e de la ${LIBELLE_SAISON.toLowerCase()}`)).toBeVisible();
+    await expect(coupe.getByRole('link', { name: /Contre le salon/ })).toHaveAttribute('href', '/coupe?mode=bot&level=apprenti');
+    await expect(coupe.getByRole('link', { name: /À deux/ })).toHaveAttribute('href', '/coupe?mode=local');
+    const jouer = coupe.getByRole('link', { name: 'Jouer', exact: true });
+    await expect(jouer).toHaveAttribute('href', '/coupe');
+    await jouer.click();
+    await expect(page).toHaveURL(/\/coupe$/);
+    await expect(page.getByRole('heading', { name: 'La Coupe du Gang' })).toBeVisible();
   });
 
-  test('sans le drapeau : ni section « Jeux » ni appel aux routes de la Coupe', async ({ page, api, connecter }) => {
+  test('sans le drapeau : ni section « Jeux » ni appel aux routes de la Coupe ; la page des jeux le dit', async ({ page, api, connecter }) => {
     drapeauCoupe(api, false);
     installerCoupe(api);
     await connecter(CLIENT);
@@ -193,7 +206,26 @@ test.describe('La Coupe du Gang : accueil', () => {
     await expect(page.getByRole('heading', { name: 'Le Gang', exact: true })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Jeux', exact: true })).toHaveCount(0);
     await expect(page.getByText('La Coupe du Gang')).toHaveCount(0);
+
+    await page.goto('/jeux');
+    await expect(page.getByText('Aucun jeu ouvert pour l’instant')).toBeVisible();
+    await expect(page.getByRole('article')).toHaveCount(0);
     expect(appelsCoupe(api)).toEqual([]);
+  });
+
+  test('drapeau illisible (panne du serveur) : la page des jeux propose « Réessayer », jamais « aucun jeu »', async ({ page, api, connecter }) => {
+    installerCoupe(api);
+    let panne = true;
+    // Fabrique sans réponse (`undefined`) : la réponse habituelle du faux serveur
+    api.surcharger('GET', CHEMIN_PARAMETRES, () => (panne ? { status: 503, json: { error: 'Indisponible' } } : undefined));
+    await connecter(CLIENT);
+    await page.goto('/jeux');
+    // Trois lectures (deux nouvelles tentatives) avant l'erreur
+    await expect(page.getByText('Impossible de charger les jeux')).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText('Aucun jeu ouvert pour l’instant')).toHaveCount(0);
+    panne = false;
+    await page.getByRole('button', { name: 'Réessayer' }).click();
+    await expect(page.getByRole('article', { name: 'La Coupe du Gang' })).toBeVisible();
   });
 
   test('l\'admin place « Jeux » dans « Organiser l\'accueil », même quand le jeu est coupé', async ({ page, api, connecter }) => {
@@ -202,19 +234,107 @@ test.describe('La Coupe du Gang : accueil', () => {
     await page.goto('/');
     await page.getByRole('button', { name: 'Organiser l\'accueil' }).click();
     await expect(page.getByText('Jeux', { exact: true }).first()).toBeVisible();
-    await expect(page.getByText(/Points de Coupe du client et « Jouer »/)).toBeVisible();
+    await expect(page.getByText(/Carte vers la page des jeux/)).toBeVisible();
     await page.getByRole('button', { name: 'Sauvegarder' }).click();
     await expect(toast(page, 'Accueil enregistré')).toBeVisible();
     const envoi = api.requetesVers('PUT', '/entities/SalonSettings/settings-1').at(-1);
     const ordre = envoi.corps.homepage_order;
     expect(ordre).toContain('games');
     expect(ordre.indexOf('games')).toBe(ordre.indexOf('rebook') + 1);
+    expect(envoi.corps.homepage_hidden).toEqual([]);
     expect(appelsCoupe(api)).toEqual([]);
   });
 });
 
+test.describe('Accueil : catégories masquées par l\'admin', () => {
+  test('« Masquée » dans « Organiser l\'accueil » : enregistrée, la catégorie disparaît, un rappel le dit, « Annuler » ne change rien', async ({ page, api, connecter }) => {
+    drapeauCoupe(api, true);
+    installerCoupe(api);
+    await connecter(ADMIN);
+    await page.goto('/');
+    await expect(page.getByRole('region', { name: 'Jeux' })).toBeVisible();
+
+    // « Annuler » : rien n'est envoyé, rien ne change
+    await page.getByRole('button', { name: 'Organiser l\'accueil' }).click();
+    await page.getByRole('switch', { name: 'Jeux visible pour les clients' }).click();
+    await page.getByRole('button', { name: 'Annuler' }).click();
+    await expect(page.getByRole('region', { name: 'Jeux' })).toBeVisible();
+    expect(api.requetesVers('PUT', '/entities/SalonSettings/settings-1')).toEqual([]);
+
+    await page.getByRole('button', { name: 'Organiser l\'accueil' }).click();
+    const jeux = page.getByRole('switch', { name: 'Jeux visible pour les clients' });
+    await expect(jeux).toHaveAttribute('aria-checked', 'true');
+    await expect(jeux).toHaveText('Visible');
+    await jeux.click();
+    await expect(jeux).toHaveAttribute('aria-checked', 'false');
+    await expect(jeux).toHaveText('Masquée');
+    // Un aller-retour sur une autre catégorie ne la masque pas
+    const gang = page.getByRole('switch', { name: 'Le Gang visible pour les clients' });
+    await gang.click();
+    await expect(gang).toHaveAttribute('aria-checked', 'false');
+    await gang.click();
+    await expect(gang).toHaveAttribute('aria-checked', 'true');
+
+    await page.getByRole('button', { name: 'Sauvegarder' }).click();
+    await expect(toast(page, 'Accueil enregistré')).toBeVisible();
+    const envoi = api.requetesVers('PUT', '/entities/SalonSettings/settings-1').at(-1);
+    expect(envoi.corps.homepage_hidden).toEqual(['games']);
+    // La catégorie garde sa place dans l'ordre (la rendre visible la remet au même endroit)
+    expect(envoi.corps.homepage_order.indexOf('games')).toBe(envoi.corps.homepage_order.indexOf('rebook') + 1);
+
+    // L'admin voit l'accueil comme les clients, avec un rappel
+    await expect(page.getByRole('region', { name: 'Jeux' })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Le Gang', exact: true })).toBeVisible();
+    await expect(page.getByText('1 catégorie masquée')).toBeVisible();
+
+    // Rouvrir « Organiser l'accueil » : la catégorie y est, masquée ; la rendre visible
+    await page.getByRole('button', { name: 'Organiser l\'accueil' }).click();
+    await expect(page.getByRole('switch', { name: 'Jeux visible pour les clients' })).toHaveAttribute('aria-checked', 'false');
+    await page.getByRole('switch', { name: 'Jeux visible pour les clients' }).click();
+    await page.getByRole('button', { name: 'Sauvegarder' }).click();
+    await expect.poll(() => api.requetesVers('PUT', '/entities/SalonSettings/settings-1').at(-1).corps.homepage_hidden).toEqual([]);
+    await expect(page.getByRole('region', { name: 'Jeux' })).toBeVisible();
+    await expect(page.getByText(/catégorie masquée/)).toHaveCount(0);
+  });
+
+  test('client : catégories masquées absentes de l\'accueil, entrée « Jeux » absente du fil, la page des jeux reste ouverte', async ({ page, api, connecter }) => {
+    drapeauCoupe(api, true);
+    installerCoupe(api);
+    installerCarteGang(api);
+    api.tables.SalonSettings[0].homepage_hidden = ['games', 'quick-info'];
+    api.tables.Post.push({ id: 'p-1', author_name: 'Yanis K.', author_role: 'user', author_photo_url: null, content: 'Merci Kevin pour la coupe !', image_url: null, created_at: ilYa(30) });
+    await connecter(CLIENT);
+    await page.goto('/');
+    await expect(page.getByRole('heading', { name: 'Le Gang', exact: true })).toBeVisible();
+    await attendreParametres(api, page);
+    await expect(page.getByRole('region', { name: 'Jeux' })).toHaveCount(0);
+    await expect(page.getByText('Itinéraire')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Organiser l\'accueil' })).toHaveCount(0);
+
+    await page.goto('/feed');
+    await expect(page.getByText('Merci Kevin pour la coupe !')).toBeVisible();
+    await expect(page.getByRole('link', { name: /^Jeux/ })).toHaveCount(0);
+
+    await page.goto('/jeux');
+    await expect(page.getByRole('article', { name: 'La Coupe du Gang' })).toBeVisible();
+  });
+
+  test('serveur d\'avant la colonne : pas d\'interrupteur, l\'ordre seul est envoyé', async ({ page, api, connecter }) => {
+    delete api.tables.SalonSettings[0].homepage_hidden;
+    await connecter(ADMIN);
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Organiser l\'accueil' }).click();
+    await expect(page.getByText('Le Gang', { exact: true }).first()).toBeVisible();
+    await expect(page.getByRole('switch')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Sauvegarder' }).click();
+    await expect(toast(page, 'Accueil enregistré')).toBeVisible();
+    const envoi = api.requetesVers('PUT', '/entities/SalonSettings/settings-1').at(-1);
+    expect(Object.keys(envoi.corps)).toEqual(['homepage_order']);
+  });
+});
+
 test.describe('La Coupe du Gang : fil', () => {
-  test('entrée compacte en tête du fil, avant les publications', async ({ page, api, connecter }) => {
+  test('entrée « Jeux » en tête du fil, avant les publications, vers la page des jeux', async ({ page, api, connecter }) => {
     drapeauCoupe(api, true);
     installerCoupe(api);
     installerCarteGang(api);
@@ -222,15 +342,17 @@ test.describe('La Coupe du Gang : fil', () => {
     await connecter(CLIENT);
     await page.goto('/feed');
 
-    const entree = page.getByRole('link', { name: /La Coupe du Gang/ });
+    const entree = page.getByRole('link', { name: /^Jeux/ });
     await expect(entree).toBeVisible();
-    await expect(entree).toContainText('Joue contre les barbers');
-    await expect(entree).toHaveAttribute('href', '/coupe');
+    await expect(entree).toContainText('La Coupe du Gang');
+    await expect(entree).toHaveAttribute('href', '/jeux');
     const publication = page.getByText('Merci Kevin pour la coupe !');
     await expect(publication).toBeVisible();
     expect((await entree.boundingBox()).y).toBeLessThan((await publication.boundingBox()).y);
     // L'entrée ne lit rien de plus (pas de points)
     expect(appelsCoupe(api)).toEqual([]);
+    await entree.click();
+    await expect(page.getByRole('heading', { level: 1, name: 'Jeux' })).toBeVisible();
   });
 
   test('sans le drapeau : pas d\'entrée dans le fil', async ({ page, api, connecter }) => {
@@ -241,7 +363,7 @@ test.describe('La Coupe du Gang : fil', () => {
     await page.goto('/feed');
     await expect(page.getByText('Merci Kevin pour la coupe !')).toBeVisible();
     await attendreParametres(api, page);
-    await expect(page.getByRole('link', { name: /La Coupe du Gang/ })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: /^Jeux/ })).toHaveCount(0);
   });
 });
 
@@ -607,8 +729,11 @@ for (const largeur of [320, 390]) {
       await page.goto('/');
       await expect(page.getByRole('region', { name: 'Jeux' })).toBeVisible();
       await attendreSansDebordement(page, 'l\'accueil');
+      await page.goto('/jeux');
+      await expect(page.getByRole('article', { name: 'La Coupe du Gang' }).getByText('42', { exact: true })).toBeVisible();
+      await attendreSansDebordement(page, 'la page des jeux');
       await page.goto('/feed');
-      await expect(page.getByRole('link', { name: /La Coupe du Gang/ })).toBeVisible();
+      await expect(page.getByRole('link', { name: /^Jeux/ })).toBeVisible();
       await attendreSansDebordement(page, 'le fil');
       await page.goto('/gang-card');
       await expect(page.getByRole('region', { name: 'La Coupe du Gang' }).getByRole('listitem')).toHaveCount(3);

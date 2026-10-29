@@ -197,6 +197,8 @@ export function creerDonnees() {
         require_deposit: false,
         deposit_percentage: 0,
         homepage_order: null,
+        // Catégories masquées par l'admin (« Organiser l'accueil ») : serveur à jour, rien de masqué
+        homepage_hidden: [],
         comeback_weeks: 5,
       }],
       Employee: employes,
