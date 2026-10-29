@@ -25,6 +25,7 @@ export const coupeLeaderboardKey = (scope) => ['coupe', 'leaderboard', scope ===
 export const COUPE_BARBERS_KEY = ['coupe', 'barbers'];
 export const COUPE_BLOCKS_KEY = ['coupe', 'blocks'];
 export const COUPE_ADMIN_KEY = ['coupe', 'admin'];
+export const COUPE_MUSIC_KEY = ['coupe', 'music'];
 
 /** Adresse publique d'un défi à partager (jamais `window.location.origin` : capacitor://localhost dans les apps). */
 export const coupeChallengeUrl = (link) => `https://dhomebarber.fr/coupe?defi=${encodeURIComponent(String(link || ''))}`;
@@ -57,6 +58,24 @@ export function useCoupeFlagQuery() {
     staleTime: 5 * 60 * 1000,
     retry: 2,
   });
+}
+
+/**
+ * Musique de tribune pendant le jeu (`features.coupeMusic`) : coupée côté serveur par
+ * COUPE_MUSIC=off, sans nouveau build des apps. Vraie sauf si le serveur dit faux (un serveur plus
+ * ancien ne la connaît pas). Rejette sur une panne.
+ */
+export async function fetchCoupeMusic() {
+  const res = await fetch(`${API_SERVER_URL}/api/apps/public/prod/public-settings/by-id/${resolvedAppId}`);
+  if (!res.ok) throw new Error(`Paramètres publics : ${res.status}`);
+  const data = await res.json();
+  return data?.features?.coupeMusic !== false;
+}
+
+/** Musique permise ? Faux tant que rien n'est chargé ou si la lecture a échoué. */
+export function useCoupeMusic() {
+  const { data } = useQuery({ queryKey: COUPE_MUSIC_KEY, queryFn: fetchCoupeMusic, staleTime: 5 * 60 * 1000, retry: 1 });
+  return data === true;
 }
 
 /** Le jeu est-il ouvert ? Faux tant que rien n'est chargé ou si la lecture a échoué (entrées cachées). */

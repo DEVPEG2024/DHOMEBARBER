@@ -100,4 +100,15 @@ Décisions prises pendant l'assemblage (chef) :
   - « Défi reçu » sans défiler sur un écran de 568 px ;
   - caméra verrouillée sur le terrain une fois partie (une heure du serveur corrigée ne la ramène plus au stade).
 
+## Musique de tribune (29 oct. 2026)
+
+- **Choix du propriétaire** : « Best of AC Milan Ultras! La Curva Sud Milano » (chants de supporters, MP3 de 5 min téléchargé depuis une vidéo YouTube). **Droits non acquis** : enregistrement d'un tiers, chants qui nomment le club (le propriétaire avait choisi une image « sans les marques du club », règle Apple 5.2.1). Mis en garde avant (« une musique libre de droits, ou faite pour le salon »), il a confirmé. À trancher avant le build 18 : la garder (risque de refus de l'App Store ou de demande de retrait) ou la remplacer par une ambiance de stade libre de droits.
+- Fichier : `src/assets/coupe/tribune.mp3` (2,4 Mo : mono, 32 kHz, 64 kbit/s ; -26 LUFS, crête -5,6 dBTP, fondu de 2 s au début et de 4 s à la fin pour la boucle). Le niveau est dans le fichier : iOS ignore `volume` d'un lecteur audio. Fabrication (ffmpeg, mesure puis normalisation linéaire) :
+  ```bash
+  ffmpeg -i source.mp3 -af "loudnorm=I=-25:TP=-4:LRA=11:print_format=json" -f null -   # mesure
+  ffmpeg -i source.mp3 -af "loudnorm=I=-25:TP=-4:LRA=11:measured_I=…:measured_TP=…:measured_LRA=…:measured_thresh=…:offset=…:linear=true,afade=t=in:st=0:d=2,afade=t=out:st=<durée-4>:d=4" -ac 1 -ar 32000 -codec:a libmp3lame -b:a 64k -map_metadata -1 tribune.mp3
+  ```
+- Lecture (`src/lib/coupe/sound.js`, `music(on)`) : en boucle à partir du premier coup d'envoi (aussi à deux et contre le salon) et après une reprise, jusqu'à la sortie de l'écran de jeu ; arrêtée avec « Couper le son » du jeu, quand la page passe en arrière-plan et à la fermeture. Un navigateur qui refuse la lecture sans geste (iPhone) la lance au toucher suivant : chaque toucher du jeu appelle `unlock()`. La musique d'ambiance de l'app est déjà en pause pendant le jeu (`useSalonMusicPaused`).
+- **Coupure d'urgence `COUPE_MUSIC=off`** (Heroku, sans nouveau build des apps) : `features.coupeMusic` faux, l'app ne la lance plus (`useCoupeMusic`, `coupeApi.js` ; absente d'un serveur plus ancien = jouée ; faux aussi avec `COUPE_WS=off`). Test serveur : `test-coupe-api.js` ; de bout en bout : « La Coupe du Gang : musique de tribune » (`e2e/coupe.spec.js`).
+
 Tests : `e2e/coupe.spec.js`, section « thème stade » (avant-match complet, défaite en gris, retour de l'adversaire sans avant-match, match repris depuis l'accueil sur le terrain, terrain immobile jusqu'à l'écran de fin, serveur sans durée) ; le faux serveur annonce le vrai premier coup d'envoi avec `api.coupe.avantMatchCd = 4.5` (temps écoulé qui avance) ; « contre le salon » attend 282 images de compte à rebours. Serveur : `test-coupe-rooms.js` (`cd` dans `start` et `state`, 4,5 s au coup d'envoi et à la revanche, 3 s après un retour, même pendant l'avant-match, absent en jeu).

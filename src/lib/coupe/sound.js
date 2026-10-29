@@ -8,6 +8,9 @@
  */
 import { Capacitor } from '@capacitor/core';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
+// Musique de tribune (choisie par le propriétaire le 29 oct. 2026) : 5 min en boucle, mono, niveau
+// abaissé dans le fichier (-26 LUFS) pour rester sous les bruitages, iOS ignorant `volume`
+import TRIBUNE_URL from '@/assets/coupe/tribune.mp3';
 
 const SOUND_KEY = 'cdg-sound';
 
@@ -24,6 +27,32 @@ export function createSound() {
   let noiseBuf = null;
   let enabled = readSoundOn();
   const timers = new Set();
+  // Musique : voulue par `music(true)` (match lancé) ; un navigateur qui refuse la lecture sans
+  // geste la lance au toucher suivant (`unlock()`, appelé à chaque toucher du jeu). Coupée avec le
+  // son du jeu, quand la page passe en arrière-plan et à la fermeture de l'écran.
+  let musicEl = null;
+  let musicWanted = false;
+
+  function musicPlay() {
+    if (!musicWanted || !enabled || (typeof document !== 'undefined' && document.hidden)) return;
+    try {
+      if (!musicEl) {
+        musicEl = new Audio(TRIBUNE_URL);
+        musicEl.loop = true;
+        musicEl.preload = 'auto';
+      }
+      if (!musicEl.paused) return;
+      const p = musicEl.play();
+      if (p && typeof p.catch === 'function') p.catch(() => { /* refusée sans geste : au toucher suivant */ });
+    } catch { /* lecteur audio indisponible : pas de musique */ }
+  }
+
+  function musicPause() {
+    try { if (musicEl && !musicEl.paused) musicEl.pause(); } catch { /* déjà arrêtée */ }
+  }
+
+  const onVisibility = () => { if (document.hidden) musicPause(); else musicPlay(); };
+  if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisibility);
 
   function unlock() {
     if (!enabled) return;
@@ -38,6 +67,7 @@ export function createSound() {
     } catch {
       actx = null;
     }
+    musicPlay();
   }
 
   const quiet = () => !enabled || !actx || actx.state === 'closed';
@@ -96,6 +126,13 @@ export function createSound() {
       enabled = !!on;
       writeSoundOn(enabled);
       if (enabled) unlock();
+      else musicPause();
+    },
+    /** Musique de tribune voulue (match lancé, musique permise par le serveur) ou non. */
+    music(on) {
+      musicWanted = !!on;
+      if (musicWanted) musicPlay();
+      else musicPause();
     },
     hit(v) {
       const k = Math.min(1, v / 900);
@@ -118,6 +155,13 @@ export function createSound() {
     close() {
       timers.forEach((id) => clearTimeout(id));
       timers.clear();
+      musicWanted = false;
+      musicPause();
+      if (musicEl) {
+        try { musicEl.removeAttribute('src'); musicEl.load(); } catch { /* déjà libérée */ }
+        musicEl = null;
+      }
+      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisibility);
       try { actx?.close?.().catch?.(() => {}); } catch { /* déjà fermé */ }
       actx = null;
     },

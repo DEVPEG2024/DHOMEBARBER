@@ -982,6 +982,46 @@ async function noterCamera(page) {
   });
 }
 
+// Musique de tribune : lectures demandées par l'app (`HTMLMediaElement.play`), notées dans la page ;
+// `window.__musique` = le lecteur de la musique du jeu
+async function noterLectures(page) {
+  await page.addInitScript(() => {
+    window.__lectures = [];
+    const play = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function lecture() {
+      const src = this.currentSrc || this.src || '';
+      window.__lectures.push(src);
+      if (/tribune/.test(src)) window.__musique = this;
+      return play.call(this);
+    };
+  });
+}
+
+test.describe('La Coupe du Gang : musique de tribune', () => {
+  test('lancée au coup d\'envoi, arrêtée avec le son du jeu, relancée avec lui', async ({ page, api, connecter }) => {
+    await noterLectures(page);
+    const cnx = await rejoindreParCode(page, api, connecter);
+    api.coupe.etat(cnx, { ph: 'live' });
+    await expect.poll(() => page.evaluate(() => !!window.__musique && !window.__musique.paused)).toBe(true);
+    expect(await page.evaluate(() => window.__musique.loop)).toBe(true);
+    await page.getByRole('button', { name: 'Couper le son' }).click();
+    await expect.poll(() => page.evaluate(() => window.__musique.paused)).toBe(true);
+    await page.getByRole('button', { name: 'Activer le son' }).click();
+    await expect.poll(() => page.evaluate(() => window.__musique.paused)).toBe(false);
+  });
+
+  test('coupée par le serveur (COUPE_MUSIC=off) : jamais lancée, le jeu marche', async ({ page, api, connecter }) => {
+    api.donnees.parametresPublics.features.coupeMusic = false;
+    await noterLectures(page);
+    const cnx = await rejoindreParCode(page, api, connecter);
+    api.coupe.etat(cnx, { ph: 'live' });
+    await expect(jeu(page)).toHaveAttribute('data-play', '1');
+    await page.getByRole('button', { name: 'Réagir : En feu' }).click();
+    await expect.poll(() => api.coupe.messages('react')).toEqual([{ t: 'react', r: 1 }]);
+    expect(await page.evaluate(() => window.__lectures.filter((s) => /tribune/.test(s)))).toEqual([]);
+  });
+});
+
 test.describe('La Coupe du Gang : thème stade', () => {
   test('avant-match (premier coup d\'envoi en 4,5 s) : stade entier et affiche, puis le terrain avec la barre du haut et les réactions ; le stade revient à la fin', async ({ page, api, connecter }) => {
     await noterCamera(page);

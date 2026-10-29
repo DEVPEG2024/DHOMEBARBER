@@ -9,7 +9,7 @@ import { createRenderer, isSalonRole } from '@/lib/coupe/renderer';
 import { createSound, buzz } from '@/lib/coupe/sound';
 import { OnlineMatch, IDLE_UI, readPendingResume } from '@/lib/coupe/onlineMatch';
 import { LocalMatch } from '@/lib/coupe/localMatch';
-import { COUPE_ENABLED_KEY, fetchCoupeEnabled, invalidateCoupe } from '@/lib/coupe/coupeApi';
+import { COUPE_ENABLED_KEY, fetchCoupeEnabled, invalidateCoupe, useCoupeMusic } from '@/lib/coupe/coupeApi';
 import { COUPE_PAUSED_TEXT } from './coupeErrors';
 import GameStyles from './game/GameStyles';
 import Panel from './game/Panel';
@@ -112,6 +112,12 @@ export default function CoupeGame({
   const canvasRef = useRef(null);
   const rendererRef = useRef(null);
   const soundRef = useRef(null);
+  // Musique de tribune : à partir du premier coup d'envoi, jusqu'à la sortie de l'écran ; permise par
+  // le serveur (COUPE_MUSIC=off la coupe partout sans nouveau build)
+  const musicOk = useCoupeMusic();
+  const musicOkRef = useRef(musicOk);
+  musicOkRef.current = musicOk;
+  const musicStartedRef = useRef(false);
   const matchRef = useRef(null);
   const loopRef = useRef({ raf: 0, last: 0, statT: 0, timeLeft: null });
   const kickRef = useRef(() => {});
@@ -267,6 +273,8 @@ export default function CoupeGame({
           clearOutro();
           setFx(null);
           director.newMatch();
+          musicStartedRef.current = true;
+          sound.music(musicOkRef.current);
           // L'astuce attend le terrain (après l'avant-match), sinon personne ne la verrait
           if (!taughtRef.current) {
             taughtRef.current = true;
@@ -284,6 +292,8 @@ export default function CoupeGame({
           clearOutro();
           setFx(null);
           director.resume();
+          musicStartedRef.current = true;
+          sound.music(musicOkRef.current);
           showHint('Connexion rétablie');
           kick();
           break;
@@ -418,6 +428,11 @@ export default function CoupeGame({
     rendererRef.current?.setReducedMotion(!!reduceMotion);
     directorRef.current?.setReducedMotion(!!reduceMotion);
   }, [reduceMotion]);
+
+  // Réponse du serveur arrivée après le coup d'envoi, ou musique coupée en cours de route
+  useEffect(() => {
+    if (musicStartedRef.current) soundRef.current?.music(musicOk);
+  }, [musicOk]);
 
   // Image du stade chargée : le dessin ne pose plus son terrain (un seul terrain, celui de l'image) ;
   // en erreur, il le redessine. setStadium redessine la dernière image aussitôt
