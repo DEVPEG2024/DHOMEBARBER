@@ -8,14 +8,16 @@
  *    échouer le test (on voit tout de suite qu'une route manque au faux serveur) ;
  *  - les autres domaines (polices Google, CDN, storage.googleapis…) reçoivent une réponse vide ;
  *  - le WebSocket `/ws/live` est neutralisé (`routeWebSocket`), il envoie un compteur fictif ;
- *    `/ws/coupe` (La Coupe du Gang) est servi par un faux serveur de jeu (`support/fauxCoupe.js`).
+ *    `/ws/coupe` (La Coupe du Gang) est servi par un faux serveur de jeu (`support/fauxCoupe.js`) ;
+ *    les routes REST de la Coupe (`/coupe/…`) par `FauxCoupeRest`, plus bas (`api.coupeRest`).
  *
  * Un test peut remplacer la réponse d'une route avec `surcharger(méthode, chemin, fabrique)` :
  * la fabrique reçoit la requête décodée et rend `{ status, json }`, `RESEAU_COUPE` (échec réseau)
  * ou `undefined` (comportement par défaut).
  */
-import { creerDonnees } from './donnees.js';
+import { creerDonnees, CLIENT, media } from './donnees.js';
 import { FauxCoupe } from './fauxCoupe.js';
+import { MAINTENANT, cleDuJourParis, instantParis } from './temps.js';
 
 export const API_HOTE = 'dhomebarber-api-3aabb8313cb6.herokuapp.com';
 export const API_ORIGINE = `https://${API_HOTE}`;
@@ -113,6 +115,11 @@ export class FauxServeur {
     this.jetons = new Map();
     /** Faux serveur de jeu de La Coupe du Gang (`/ws/coupe`) : connexions et messages reçus. */
     this.coupe = new FauxCoupe(this);
+    /** Routes REST de La Coupe du Gang (points, classement, barbers, blocages, signalements). */
+    this.coupeRest = new FauxCoupeRest(this);
+    // Jeu ouvert, comme en production sans COUPE_WS=off ; un test le ferme avec
+    // `api.donnees.parametresPublics.features.coupe = false` (les routes /coupe répondent alors 404 `disabled`)
+    this.donnees.parametresPublics.features.coupe ??= true;
     this.compteurId = 0;
     this.compteurJeton = 0;
   }
@@ -152,6 +159,8 @@ export class FauxServeur {
   /** Intercepte tout ce qui ne vient pas du build local, pour ce contexte de navigation. */
   async installer(context, origineApp) {
     const local = new URL(origineApp);
+    // Fin du test : le faux serveur de jeu arrête ses envois (états du match, minuteries)
+    context.on('close', () => this.coupe.arreter());
     await context.route((url) => url.host !== local.host, (route) => this.repondre(route, origineApp));
     // WebSockets : aucun n'est jamais ouvert vers un vrai serveur. Le compteur de connectés
     // (`/ws/live`, tableau de bord) reçoit un nombre fictif ; le jeu (`/ws/coupe`) a son faux
@@ -309,6 +318,9 @@ export class FauxServeur {
       };
     }
 
+    // La Coupe du Gang : routes REST (routes/coupe.js du serveur)
+    if (chemin.startsWith('/coupe/')) return this.coupeRest.traiter(req);
+
     // Entités
     const m = /^\/entities\/([A-Za-z]+)(?:\/([^/]+))?$/.exec(chemin);
     if (m) return this.entite(req, m[1], m[2] ? decodeURIComponent(m[2]) : null);
@@ -393,6 +405,385 @@ export class FauxServeur {
       return { json: visibles.map(compteSansSecret) };
     }
     return null;
+  }
+}
+
+// ─── La Coupe du Gang : routes REST ────────────────────────────────────
+
+/** Saison de la Coupe à l'instant figé des tests : mois de Paris et fin (1er du mois suivant, 0 h, Paris). */
+export function saisonCoupe(instant = MAINTENANT) {
+  const cle = cleDuJourParis(instant);
+  const [a, m] = cle.split('-').map(Number);
+  const suivant = m === 12 ? `${a + 1}-01-01` : `${a}-${String(m + 1).padStart(2, '0')}-01`;
+  return { season: cle.slice(0, 7), season_ends_at: instantParis(suivant, '00:00').toISOString() };
+}
+
+/**
+ * Joueurs du classement simulé, mêmes noms et mêmes points que les maquettes validées :
+ * [points, victoires, défaites] de la saison et du classement général (points = 3 × V − D).
+ * Les barbers sont rattachés à leur fiche (`employee_id`) ; `salon` est la ligne commune des
+ * comptes admin (« D'Home Barber »). Tous ont accepté d'y figurer (`opt_in`).
+ */
+const JOUEURS_COUPE = [
+  { cle: 'joueur-lucas', nom: 'Lucas M.', role: 'user', saison: [87, 31, 6], total: [214, 79, 23] },
+  { cle: 'joueur-kevin', nom: 'Kevin', role: 'barber', employee_id: 'emp-kevin', saison: [81, 29, 6], total: [190, 70, 20] },
+  { cle: 'salon', nom: "D'Home Barber", role: 'salon', saison: [74, 27, 7], total: [240, 88, 24] },
+  { cle: 'joueur-sarah', nom: 'Sarah K.', role: 'user', avatar: 31, saison: [69, 24, 3], total: [120, 45, 15] },
+  { cle: 'joueur-dom', nom: 'Dom', role: 'barber', employee_id: 'emp-dom', saison: [63, 22, 3], total: [150, 55, 15] },
+  { cle: 'joueur-yanis', nom: 'Yanis B.', role: 'user', saison: [58, 21, 5], total: [88, 33, 11] },
+  { cle: 'joueur-romain', nom: 'Romain', role: 'barber', employee_id: 'emp-romain', saison: [51, 18, 3], total: [130, 48, 14] },
+  { cle: 'joueur-mehdi', nom: 'Mehdi A.', role: 'user', saison: [40, 14, 2], total: [60, 22, 6] },
+  { cle: 'joueur-hugo', nom: 'Hugo L.', role: 'user', saison: [36, 13, 3], total: [41, 15, 4] },
+];
+
+const MOTIFS_SIGNALEMENT = new Set(['name', 'behavior', 'cheating', 'other']);
+const STATUTS_SIGNALEMENT = new Set(['pending', 'handled', 'dismissed']);
+
+const statsDe = ([points, wins, losses]) => ({ points, wins, losses, matches: wins + losses });
+/** Instant ISO `minutes` avant l'heure figée des tests. */
+const ilYA = (minutes) => new Date(MAINTENANT.getTime() - minutes * 60_000).toISOString();
+
+/**
+ * Faux `routes/coupe.js` (contrat docs/fonctions/coupe-du-gang-contrat.md, section 2), état modifiable
+ * par les tests :
+ *  - `joueurs` : lignes du classement hors comptes de connexion (`opt_in: false` pour en retirer une) ;
+ *  - `etats[idCompte]` : droits, choix du classement et points d'un compte simulé ; par défaut le
+ *    client de test a 42 points (8e, 16 V, 6 D), un autre client n'a pas de carte (`no_card`) ;
+ *  - `dispo[idFiche]` (« Dispo pour un match »), `occupes` (rendez-vous en cours) et `injoignables`
+ *    (aucune notification activée : `reachable` faux) des barbers ; `fichesAvecCompte` : seules ces
+ *    fiches (et celles d'un compte de connexion) sont listées, comme le serveur ;
+ *  - `blocages`, `signalements`, `rapports` (signalements vus par l'admin, avec le compte signalé) ;
+ *  - `exclus` (clés exclues des classements par l'admin : opt-in refusé en 403 `banned`) et
+ *    `remisAZero` (clés dont l'admin a remis les points à zéro).
+ * Jeu fermé (`features.coupe` faux) : 404 `{ code: 'disabled' }`, comme avec COUPE_WS=off.
+ */
+export class FauxCoupeRest {
+  constructor(serveur) {
+    this.serveur = serveur;
+    Object.assign(this, saisonCoupe());
+    this.joueurs = JOUEURS_COUPE.map((j) => ({ ...j, saison: [...j.saison], total: [...j.total], opt_in: true }));
+    this.etats = {
+      [CLIENT.id]: {
+        eligible: true,
+        eligible_reason: null,
+        opt_in: true,
+        saison: [42, 16, 6],
+        total: [97, 37, 14],
+        recent: [
+          { ended_at: ilYA(40), won: true, cancelled: false, score: [3, 1], opponent: { name: 'Kevin', role: 'barber' }, delta: 3, ranked: true },
+          { ended_at: ilYA(65), won: false, cancelled: false, score: [2, 3], opponent: { name: 'Lucas M.', role: 'user' }, delta: -1, ranked: true },
+        ],
+      },
+    };
+    this.dispo = { 'emp-dom': true, 'emp-kevin': true, 'emp-romain': true };
+    /** Fiches en rendez-vous (`busy`) : Romain, comme sur la maquette (« Occupé »). */
+    this.occupes = new Set(['emp-romain']);
+    /** Fiches dont le barber n'a activé les notifications sur aucun appareil (`reachable` faux). */
+    this.injoignables = new Set();
+    /** Fiches reliées à un compte barber (le serveur ne liste que celles-là). */
+    this.fichesAvecCompte = new Set(['emp-dom', 'emp-kevin', 'emp-romain']);
+    this.blocages = new Map();
+    this.signalements = [];
+    this.exclus = new Set();
+    this.remisAZero = [];
+    this.rapports = [
+      {
+        id: 'rapport-1', reported_name: 'Yanis B.', reason: 'behavior', details: 'Réactions en boucle pendant le match.',
+        created_at: ilYA(150), status: 'pending',
+        reported_user_id: 'user-yanis', reported_email: 'yanis.b@exemple.fr', reported_key_hash: 'joueur-yanis',
+      },
+    ];
+  }
+
+  /** Remplace l'état d'un compte simulé (droits, choix, points), ex. un client sans carte. */
+  definirEtat(idCompte, etat) {
+    this.etats[idCompte] = { ...this.etatParDefaut(null), ...etat };
+  }
+
+  // ─── Règles ──────────────────────────────────────────────────────────
+
+  fiche(id) {
+    return (this.serveur.tables.Employee || []).find((e) => String(e.id) === String(id)) || null;
+  }
+
+  ficheVisible(id, compte) {
+    const e = this.fiche(id);
+    if (!e || e.is_active === false) return false;
+    return !e.is_hidden || compte?.is_tester === true;
+  }
+
+  /** Clé de classement : `salon` pour un admin, la ligne de sa fiche pour un barber connu, sinon le compte. */
+  cleDe(compte) {
+    if (!compte) return null;
+    if (compte.role === 'admin') return 'salon';
+    if (compte.role === 'barber' && compte.employee_id) {
+      const j = this.joueurs.find((x) => x.employee_id && String(x.employee_id) === String(compte.employee_id));
+      if (j) return j.cle;
+    }
+    return `compte-${compte.id}`;
+  }
+
+  /** Nom affiché (contrat, section 0) : prénom + initiale, prénom de la fiche, « D'Home Barber ». */
+  nomDe(compte) {
+    if (compte.role === 'admin') return "D'Home Barber";
+    if (compte.role === 'barber') return this.fiche(compte.employee_id)?.name || String(compte.full_name || 'Barber').split(' ')[0];
+    const [prenom = 'Membre', nom = ''] = String(compte.full_name || '').trim().split(/\s+/);
+    return nom ? `${prenom} ${nom.charAt(0).toUpperCase()}.` : prenom;
+  }
+
+  etatParDefaut(compte) {
+    const client = !compte || compte.role === 'user';
+    return {
+      eligible: !client,
+      eligible_reason: client ? 'no_card' : null,
+      opt_in: false,
+      saison: [0, 0, 0],
+      total: [0, 0, 0],
+      recent: [],
+    };
+  }
+
+  /** État d'un compte : sa ligne du classement simulé (admin, barber connu) ou son état propre. */
+  etatDe(compte) {
+    const j = this.joueurs.find((x) => x.cle === this.cleDe(compte));
+    if (j) return { eligible: true, eligible_reason: null, opt_in: j.cle === 'salon' ? true : j.opt_in !== false, saison: j.saison, total: j.total, recent: [] };
+    return this.etats[compte.id] || this.etatParDefaut(compte);
+  }
+
+  /** Classement complet d'une période (`saison` ou `total`), trié comme le serveur. */
+  classement(periode, lecteur) {
+    const lignes = [];
+    for (const j of this.joueurs) {
+      if (j.cle !== 'salon' && j.opt_in === false) continue;
+      if (j.role === 'barber' && !this.ficheVisible(j.employee_id, lecteur)) continue;
+      const s = statsDe(j[periode]);
+      // Personne sans match de la période n'est classé (le salon non plus : « toujours » = sans interrupteur)
+      if (s.matches === 0) continue;
+      const avatar = j.role === 'barber' ? this.fiche(j.employee_id)?.photo_url ?? null : (j.avatar ? media(j.avatar) : null);
+      lignes.push({ cle: j.cle, name: j.nom, role: j.role, avatar_url: avatar, employee_id: j.employee_id ?? null, ...s });
+    }
+    for (const compte of this.serveur.comptes) {
+      const cle = this.cleDe(compte);
+      if (this.joueurs.some((j) => j.cle === cle) || compte.is_tester === true) continue;
+      const etat = this.etatDe(compte);
+      const s = statsDe(etat[periode]);
+      if (!etat.opt_in || s.matches === 0) continue;
+      lignes.push({
+        cle, name: this.nomDe(compte), role: compte.role === 'barber' ? 'barber' : 'user',
+        avatar_url: compte.photo_url ?? null, employee_id: compte.employee_id ?? null, ...s,
+      });
+    }
+    lignes.sort((a, b) => b.points - a.points || b.wins - a.wins || a.matches - b.matches || a.name.localeCompare(b.name));
+    return lignes.map((l, i) => ({ ...l, rank: i + 1 }));
+  }
+
+  // ─── Routes ──────────────────────────────────────────────────────────
+
+  traiter(req) {
+    const { methode, chemin, compte } = req;
+    const sous = chemin.slice('/coupe'.length);
+    if (!compte) return nonAuthentifie();
+    if (this.serveur.donnees.parametresPublics.features?.coupe === false) {
+      return { status: 404, json: { error: 'La Coupe du Gang est fermée pour le moment', code: 'disabled' } };
+    }
+    const corps = req.corps && typeof req.corps === 'object' ? req.corps : {};
+
+    if (methode === 'GET' && sous === '/me') return { json: this.moi(compte) };
+
+    if (methode === 'GET' && sous === '/leaderboard') {
+      const periode = req.query.scope === 'total' ? 'total' : 'saison';
+      const lignes = this.classement(periode, compte);
+      const cle = this.cleDe(compte);
+      const etat = this.etatDe(compte);
+      const mienne = lignes.find((l) => l.cle === cle);
+      // Comme le serveur : les joueurs bloqués par le lecteur sont retirés, sans renuméroter
+      const bloques = new Set((this.blocages.get(compte.id) || []).map((b) => b.key_hash));
+      bloques.delete(cle);
+      const visibles = lignes.filter((l) => l.rank <= 50 + bloques.size && !bloques.has(l.cle)).slice(0, 50);
+      return {
+        json: {
+          scope: periode === 'total' ? 'total' : 'season',
+          season: this.season,
+          season_ends_at: this.season_ends_at,
+          rows: visibles.map((l) => ({
+            rank: l.rank, key_hash: l.cle, name: l.name, role: l.role, avatar_url: l.avatar_url,
+            employee_id: l.employee_id, points: l.points, wins: l.wins, losses: l.losses, matches: l.matches,
+            me: l.cle === cle,
+          })),
+          me: { rank: mienne?.rank ?? null, ...statsDe(etat[periode]), opt_in: !!etat.opt_in },
+        },
+      };
+    }
+
+    if (methode === 'PATCH' && sous === '/settings') {
+      if (typeof corps.opt_in !== 'boolean') return { status: 400, json: { error: 'Choix invalide', code: 'invalid' } };
+      // Compte exclu des classements par le salon : il ne peut pas s'y remettre (contrat, section 7) ;
+      // s'en retirer reste permis
+      if (corps.opt_in && this.exclus.has(this.cleDe(compte))) {
+        return { status: 403, json: { error: 'Le salon t\'a retiré du classement. Contacte-le si tu penses que c\'est une erreur.', code: 'banned' } };
+      }
+      const j = this.joueurs.find((x) => x.cle === this.cleDe(compte));
+      if (j) j.opt_in = j.cle === 'salon' ? true : corps.opt_in;
+      else this.etats[compte.id] = { ...this.etatDe(compte), opt_in: corps.opt_in };
+      return { json: { opt_in: this.etatDe(compte).opt_in } };
+    }
+
+    if (methode === 'GET' && sous === '/barbers') {
+      // Comme le serveur : barbers actifs et visibles qui ont un compte ; `available` = dispo, pas en
+      // rendez-vous, joignable (au moins un appareil qui reçoit les notifications)
+      const avecCompte = new Set([
+        ...this.fichesAvecCompte,
+        ...this.serveur.comptes.filter((c) => c.role === 'barber' && c.employee_id).map((c) => String(c.employee_id)),
+      ]);
+      const fiches = (this.serveur.tables.Employee || [])
+        .filter((e) => this.ficheVisible(e.id, compte) && avecCompte.has(String(e.id)))
+        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+      return {
+        json: fiches.map((e) => {
+          const busy = this.occupes.has(e.id);
+          const reachable = !this.injoignables.has(e.id);
+          return {
+            employee_id: e.id, name: e.name, photo_url: e.photo_url ?? null,
+            available: !!this.dispo[e.id] && !busy && reachable, busy, reachable,
+          };
+        }),
+      };
+    }
+
+    if (methode === 'PATCH' && sous === '/availability') {
+      if (compte.role !== 'barber' || !compte.employee_id) {
+        return { status: 403, json: { error: 'Réservé aux barbers', code: 'not_barber' } };
+      }
+      if (typeof corps.available !== 'boolean') return { status: 400, json: { error: 'Choix invalide', code: 'invalid' } };
+      this.dispo[compte.employee_id] = corps.available;
+      return { json: { available: corps.available } };
+    }
+
+    const fiche = /^\/player\/([^/]+)$/.exec(sous);
+    if (methode === 'GET' && fiche) return this.joueur(decodeURIComponent(fiche[1]), compte);
+
+    if (methode === 'GET' && sous === '/blocks') return { json: this.blocages.get(compte.id) || [] };
+
+    if (methode === 'POST' && sous === '/block') {
+      const cle = typeof corps.key_hash === 'string' ? corps.key_hash : '';
+      if (!cle || cle.length > 64) return { status: 400, json: { error: 'Joueur inconnu', code: 'invalid' } };
+      if (cle === this.cleDe(compte)) return { status: 400, json: { error: 'Tu ne peux pas te bloquer toi-même', code: 'self' } };
+      const liste = this.blocages.get(compte.id) || [];
+      if (!liste.some((b) => b.key_hash === cle)) {
+        if (liste.length >= 50) return { status: 400, json: { error: 'Tu as déjà bloqué 50 joueurs', code: 'too_many' } };
+        const nom = this.classement('total', compte).find((l) => l.cle === cle)?.name
+          || this.joueurs.find((j) => j.cle === cle)?.nom || 'Ancien joueur';
+        liste.push({ key_hash: cle, name: nom });
+      }
+      this.blocages.set(compte.id, liste);
+      return { json: { blocked: true } };
+    }
+
+    const deblocage = /^\/block\/([^/]+)$/.exec(sous);
+    if (methode === 'DELETE' && deblocage) {
+      const cle = decodeURIComponent(deblocage[1]);
+      this.blocages.set(compte.id, (this.blocages.get(compte.id) || []).filter((b) => b.key_hash !== cle));
+      return { json: { blocked: false } };
+    }
+
+    if (methode === 'POST' && sous === '/report') {
+      const cle = typeof corps.key_hash === 'string' ? corps.key_hash : '';
+      if (!cle || !MOTIFS_SIGNALEMENT.has(corps.reason)) {
+        return { status: 400, json: { error: 'Signalement incomplet', code: 'invalid' } };
+      }
+      if (corps.details != null && (typeof corps.details !== 'string' || corps.details.length > 500)) {
+        return { status: 400, json: { error: 'Précisions trop longues (500 caractères au plus)', code: 'invalid' } };
+      }
+      this.signalements.push({ compte: compte.id, key_hash: cle, room_code: corps.room_code ?? null, reason: corps.reason, details: corps.details ?? null });
+      return { json: { ok: true } };
+    }
+
+    if (methode === 'GET' && sous === '/admin/overview') {
+      if (compte.role !== 'admin') return { status: 403, json: { error: 'Accès refusé', code: 'forbidden' } };
+      return {
+        json: {
+          today: { matches: 3, players: 5 },
+          season: { matches: 42, players: 12, ranked: 37 },
+          // `a_key_hash` / `b_key_hash` : clés publiques (null pour le salon)
+          top_pairs: [
+            { a: 'Lucas M.', b: 'Kevin', a_key_hash: 'joueur-lucas', b_key_hash: 'joueur-kevin', matches: 9, ranked: 9 },
+            { a: 'Sarah K.', b: 'Dom', a_key_hash: 'joueur-sarah', b_key_hash: 'joueur-dom', matches: 6, ranked: 6 },
+          ],
+          // `reported_banned` : null pour le salon ou un compte supprimé
+          reports: [...this.rapports]
+            .sort((a, b) => (a.status === 'pending' ? 0 : 1) - (b.status === 'pending' ? 0 : 1))
+            .map((r) => ({ ...r, reported_banned: r.reported_key_hash ? this.exclus.has(r.reported_key_hash) : null })),
+        },
+      };
+    }
+
+    // Admin : exclure des classements / réintégrer (POST / DELETE …/ban : 400 `salon`, 404 `not_found`),
+    // remettre les points à zéro (POST …/reset, salon permis)
+    const actionJoueur = /^\/admin\/players\/([^/]+)\/(ban|reset)$/.exec(sous);
+    if (actionJoueur && (methode === 'POST' || (methode === 'DELETE' && actionJoueur[2] === 'ban'))) {
+      if (compte.role !== 'admin') return { status: 403, json: { error: 'Accès refusé', code: 'forbidden' } };
+      const cle = decodeURIComponent(actionJoueur[1]);
+      if (cle === 'salon' && actionJoueur[2] === 'ban') {
+        return { status: 400, json: { error: 'La ligne du salon ne peut pas être exclue', code: 'salon' } };
+      }
+      const connue = cle === 'salon' || cle.startsWith('compte-') || this.joueurs.some((j) => j.cle === cle)
+        || this.rapports.some((r) => r.reported_key_hash === cle);
+      if (!connue) return { status: 404, json: { error: 'Joueur introuvable', code: 'not_found' } };
+      if (actionJoueur[2] === 'reset') {
+        this.remisAZero.push(cle);
+        const j = this.joueurs.find((x) => x.cle === cle);
+        if (j) { j.saison = [0, 0, 0]; j.total = [0, 0, 0]; }
+      } else if (methode === 'POST') {
+        this.exclus.add(cle);
+        const j = this.joueurs.find((x) => x.cle === cle);
+        if (j) j.opt_in = false;
+        const idCompte = cle.startsWith('compte-') ? cle.slice('compte-'.length) : null;
+        if (idCompte && this.etats[idCompte]) this.etats[idCompte] = { ...this.etats[idCompte], opt_in: false };
+      } else {
+        this.exclus.delete(cle);
+      }
+      return { json: { ok: true } };
+    }
+
+    const rapport = /^\/admin\/reports\/([^/]+)$/.exec(sous);
+    if (methode === 'PATCH' && rapport) {
+      if (compte.role !== 'admin') return { status: 403, json: { error: 'Accès refusé', code: 'forbidden' } };
+      const ligne = this.rapports.find((r) => r.id === decodeURIComponent(rapport[1]));
+      if (!ligne) return { status: 404, json: { error: 'Signalement introuvable', code: 'not_found' } };
+      if (!STATUTS_SIGNALEMENT.has(corps.status)) return { status: 400, json: { error: 'Statut invalide', code: 'invalid' } };
+      ligne.status = corps.status;
+      return { json: { status: ligne.status } };
+    }
+
+    return null; // route de la Coupe inconnue : 501 + test en échec
+  }
+
+  /** `GET /coupe/me` (`banned` : exclu des classements par le salon ; `recent[].reason`) */
+  moi(compte) {
+    const etat = this.etatDe(compte);
+    const cle = this.cleDe(compte);
+    const rang = (periode) => (etat.opt_in ? this.classement(periode, compte).find((l) => l.cle === cle)?.rank ?? null : null);
+    return {
+      season: this.season,
+      season_ends_at: this.season_ends_at,
+      eligible: !!etat.eligible,
+      eligible_reason: etat.eligible ? null : etat.eligible_reason || 'not_eligible',
+      opt_in: !!etat.opt_in,
+      banned: this.exclus.has(cle),
+      season_stats: { ...statsDe(etat.saison), rank: rang('saison') },
+      total_stats: { ...statsDe(etat.total), rank: rang('total') },
+      recent: (etat.recent || []).map((r) => ({ reason: r.cancelled ? 'cancelled' : null, ...r })),
+    };
+  }
+
+  /** `GET /coupe/player/:keyHash` : fiche publique d'un joueur du classement. */
+  joueur(cle, lecteur) {
+    const saison = this.classement('saison', lecteur).find((l) => l.cle === cle);
+    const total = this.classement('total', lecteur).find((l) => l.cle === cle);
+    const ligne = saison || total;
+    if (!ligne) return { status: 404, json: { error: 'Joueur introuvable', code: 'not_found' } };
+    const stats = (l) => (l ? { points: l.points, rank: l.rank, wins: l.wins, losses: l.losses, matches: l.matches } : { points: 0, rank: null, wins: 0, losses: 0, matches: 0 });
+    return { json: { name: ligne.name, role: ligne.role, season_stats: stats(saison), total_stats: stats(total) } };
   }
 }
 

@@ -37,7 +37,7 @@ App Store Connect limite le champ Notes à **4 000 octets**, pas 4 000 caractèr
 2. No hidden or dormant features (2.5.19). Everything is reachable from the visible navigation. The staff area (/admin) is for salon staff only (agenda, sales, clients, gift cards, notifications with an AI writing assistant whose drafts the admin reviews, moderation). Snap camera filters (Camera Kit) are in the binary but OFF for everyone: the page says "bientôt disponibles", the camera is never requested; we will describe them in a submitted version before switching them on. "Nouvelle tête" colour try-on runs on-device; its "AI ULTRA" mode appears only when enabled by the server; photos are not stored. No obfuscation.
 3. Payments (3.1). No digital content is sold. Appointments, shop orders, gift cards and clothing pre-orders are paid in person at the salon (3.1.3(e)). No in-app payment, no external purchase link.
 4. Apple Wallet. Home → "Carte Cadeau" → an active card → "Ajouter à Apple Wallet". The server checks the card belongs to the account and returns a 10-minute link to a signed .pkpass (standard Wallet sheet). The pass shows recipient, validity, balance, code and the QR scanned at the counter, kept up to date by a PassKit web service. No payment inside. No Wallet button on Android.
-5. "La Coupe du Gang" mini-game. Top-down football played like air hockey: drag your player in your half, first to 3 goals (1-2 min). Open it from <Accueil → "La Coupe du Gang">. Modes: (a) "Contre le salon": vs the computer, 3 levels, fully on-device, works offline, no points: the quickest test with the demo account. (b) "À deux": two people on one phone, no points. (c) "En ligne": each on their own phone, vs a barber marked "Dispo pour un match" or a friend invited by link or QR code; the server referees. Only online wins earn "Points de Coupe" (+3 win, -1 loss, never below 0), and only for clients with a real salon visit, so the demo account plays friendly matches. Leaderboards (season, all-time) show first name, initial and photo, opt-in only. The admin plays as "D'Home Barber" (blue star). No prize, reward or real-world value; points can't be bought or exchanged: not a contest under 5.3. No chat: only 3 preset reactions (👏 🔥 😂). "Signaler" and "Bloquer" on the end screen and the leaderboard; a blocked user can't challenge you. Challenge pushes are optional, never 21:00-08:00. To test online: 2nd device signed in as <email / mot de passe>, "Défier un ami" on one, open the link on the other.
+5. "La Coupe du Gang" mini-game. Top-down football played like air hockey: drag your player in your half, first to 3 goals (1-2 min). Open it from <Accueil → "La Coupe du Gang">. Modes: (a) "Contre le salon": vs the computer, 3 levels, fully on-device, works offline, no points: the quickest test with the demo account. (b) "À deux": two people on one phone, no points. (c) "En ligne": each on their own phone, vs a barber marked "Dispo pour un match" or a friend invited by link or by a 4-digit code; the server referees. Only online wins earn "Points de Coupe" (+3 win, -1 loss, never below 0), and only for clients with a real salon visit, so the demo account plays friendly matches. Leaderboards (season, all-time) show first name, initial and photo, opt-in only. The admin plays as "D'Home Barber" (blue star). No prize, reward or real-world value; points can't be bought or exchanged: not a contest under 5.3. No chat: only 3 preset reactions (👏 🔥 😂). "Signaler" and "Bloquer" on the end screen and the leaderboard; a blocked user can't challenge you. Challenge pushes are optional, never 21:00-08:00. To test online: 2nd device signed in as <email / mot de passe>, "Défier un ami" on one, open the link on the other.
 ```
 
 Le point 5 reste dans le bloc de conformité **tant que le jeu existe** : la règle 2.5.19 vaut pour chaque version, pas seulement pour la première. Une fois la version approuvée, recopier ce bloc dans `docs/app-review-notes.md` comme nouveau « Bloc à coller ».
@@ -53,7 +53,7 @@ Le point 5 reste dans le bloc de conformité **tant que le jeu existe** : la rè
 | Réaction toute faite (`react`) | Pendant un match en ligne | **Non** : relayée à l'adversaire |
 | Résultat (date, adversaire, score, vainqueur, forfait), Points de Coupe, totaux de saison et généraux | Fin d'un match en ligne | **Oui**, liés au compte |
 | Accord pour figurer au classement, interrupteur « Dispo pour un match » d'un barber | Réglage | **Oui** |
-| Prénom + initiale, photo, rôle montrés à l'adversaire et au classement | Match en ligne, classement | Données déjà collectées pour le compte |
+| Prénom + initiale et rôle montrés à l'adversaire ; photo seulement au classement, avec accord | Match en ligne, classement | Données déjà collectées pour le compte |
 
 Apple ne compte comme « collectée » qu'une donnée gardée plus longtemps que le traitement de la requête en temps réel : les positions et les réactions n'entrent pas dans l'étiquette. Google compte toute donnée qui quitte l'appareil, même traitée en mémoire. Mais les résultats sont enregistrés, donc la réponse « traitement éphémère » est **non** pour ce type de donnée.
 
@@ -87,7 +87,7 @@ Apple ne compte comme « collectée » qu'une donnée gardée plus longtemps que
 | Collectée / partagée | **Collectée** oui, **partagée** non. Un « tiers » est une organisation autre que le développeur ou ses sous-traitants. L'adversaire et le classement passent par une action de l'utilisateur ou par son accord, deux exceptions prévues par Google. Même réponse que pour le fil, déjà déclaré sans partage. |
 | Traitement éphémère | **Non** (résultats et points enregistrés) |
 | Obligatoire ou facultative | **Facultative** : on peut ne jamais jouer en ligne |
-| Finalités | **Fonctionnement de l'application** et **Prévention des fraudes, sécurité et conformité** (carte Gang exigée, un match à points par jour contre le même adversaire, 5 par jour, frappes vérifiées) |
+| Finalités | **Fonctionnement de l'application** et **Prévention des fraudes, sécurité et conformité** (carte Gang exigée pour les points, frappes vérifiées par le serveur ; décision du 29 oct. : tous les matchs comptent, sans limite par adversaire ni par jour) |
 | Liée à l'identité, suivi | Google ne pose pas ces deux questions. Ce qui s'en approche : « partagée » = non, et aucune finalité « Publicité ou marketing ». |
 
 **À vérifier dans l'export avant l'import :**
@@ -100,34 +100,9 @@ Apple ne compte comme « collectée » qu'une donnée gardée plus longtemps que
 
 **Comment :** comme le 21 oct. 2026 : export CSV de la console (il arrive dans `~/Downloads/data_safety_export.csv`), ligne « Autres actions » renseignée, envoi par l'API `applications.dataSafety`, puis réexport pour contrôle. La déclaration part en examen **avec la release du code 19**.
 
-## 3. Paragraphe pour `public/privacy.html` (au lancement)
+## 3. `public/privacy.html` : appliqué le 29 oct. 2026
 
-Nouvelle section à placer **après la section 7** (« Ce qui est visible par les autres utilisateurs »), prête à coller :
-
-```html
-    <h2>7 bis. La Coupe du Gang (mini-jeu)</h2>
-    <p>La Coupe du Gang est un mini-jeu de foot facultatif. Les parties <strong>contre le salon</strong> (l'ordinateur) et <strong>à deux sur un téléphone</strong> se jouent entièrement sur votre appareil : aucune donnée de jeu n'est envoyée au salon.</p>
-    <p>Quand vous jouez <strong>en ligne</strong>, contre un barber ou un ami :</p>
-    <ul>
-        <li><strong>Pendant le match</strong>, votre téléphone envoie à notre serveur la position de votre joueur, vos frappes et les réactions toutes faites que vous choisissez, pour arbitrer le match en temps réel. Ces informations ne sont pas enregistrées : elles disparaissent à la fin du match.</li>
-        <li><strong>À la fin du match</strong>, nous enregistrons sa date, votre adversaire, le score, le vainqueur (un abandon compte comme une défaite) et les Points de Coupe gagnés ou perdus, ainsi que vos totaux de la saison et depuis le début.</li>
-        <li><strong>Pourquoi</strong> : compter les points, établir les classements et empêcher la triche (points réservés aux clients venus au moins une fois au salon, un seul match à points par jour contre le même adversaire, cinq par jour au plus). Ces données ne servent à aucune publicité. Les Points de Coupe ne donnent droit à aucun lot, prix ni réduction.</li>
-        <li><strong>Ce que voit votre adversaire</strong> : votre prénom, l'initiale de votre nom et votre photo de profil, jamais votre adresse email ni votre téléphone. Le jeu ne permet pas d'écrire de message.</li>
-        <li><strong>Classements</strong> : vous n'y apparaissez (prénom, initiale, photo, Points de Coupe) qu'avec votre accord, que vous pouvez retirer à tout moment depuis la page Carte Gang.</li>
-        <li><strong>Invitations</strong> : un défi peut vous arriver par notification (jamais entre 21 h et 8 h) ou par un lien ; ce lien ne contient qu'un code de match, aucune information sur vous.</li>
-    </ul>
-    <p><strong>Durée de conservation</strong> : vos résultats et vos Points de Coupe sont conservés tant que votre compte existe. Si vous supprimez votre compte, vos matchs et vos Points de Coupe sont effacés et vous disparaissez des classements.</p>
-```
-
-Retouches du même jour, pour que la page reste cohérente :
-
-- En-tête : `Dernière mise à jour : <date du lancement>`.
-- Section 1, nouvelle puce : `<li><strong>La Coupe du Gang</strong> (matchs en ligne seulement) : résultats des matchs et Points de Coupe. Voir la section 7 bis</li>`.
-- Section 2, nouvelle puce : `<li>Faire fonctionner le mini-jeu La Coupe du Gang : arbitrer les matchs en ligne, compter les points, établir les classements</li>`.
-- Section 3 : ajouter « apparition dans les classements de la Coupe du Gang » au consentement, à côté du classement Team of the Season. Le match en ligne lui-même relève de l'exécution du service demandé.
-- Section 4 : ajouter « vos matchs et Points de Coupe » à la liste de ce qui est effacé avec le compte.
-
-Si le classement de la Coupe a son propre interrupteur ailleurs que sur la page Carte Gang, corriger la puce « Classements ». Rien n'est confié à un nouveau sous-traitant : la section 5 ne change pas (Heroku héberge déjà le serveur).
+La section « 7 bis. La Coupe du Gang (mini-jeu) » et les retouches des sections 1 à 4 sont **en ligne dans `public/privacy.html`** depuis le 29 oct. 2026 (le jeu ouvre sur le site ce jour-là). Le texte de référence est celui du fichier, plus ce brouillon. Différences avec le brouillon, imposées par les décisions du 29 oct. et le contrat : plus de limite de matchs à points (tous les matchs comptent), interrupteur du classement sur la page La Coupe du Gang, matchs détachés du compte supprimé (« un ancien joueur ») au lieu d'être effacés, l'adversaire voit le prénom et l'initiale **sans la photo** (la photo n'apparaît qu'au classement, avec accord), abandon tout au début du match annulé, paragraphe « Signaler et bloquer » ajouté.
 
 ## 4. Questionnaires et fiches
 

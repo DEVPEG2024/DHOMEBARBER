@@ -3,13 +3,16 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api } from '@/api/apiClient';
 import { fetchPublicBarbers } from '@/lib/publicBarbers';
 import { useQuery } from '@tanstack/react-query';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { ChevronLeft, ChevronRight, Scissors, Calendar, Clock } from 'lucide-react';
 import { hapticFeedback } from '@/lib/capacitor';
+import { useAuth } from '@/lib/AuthContext';
+import { useCoupeEnabled, useCoupeBarbers, useCoupeLeaderboard } from '@/lib/coupe/coupeApi';
 import { Button } from '@/components/ui/button';
 import LoadError, { queryFailed } from '@/components/shared/LoadError';
 import BarberCard, { buildCardStats, overallRating } from '@/components/shared/BarberCard';
 import BarberGallery from '@/components/barber-gallery/BarberGallery';
+import { COUPE_GOLD, CoupeBallIcon, coupeCardLine } from '@/components/home/GamesSection';
 
 function SkillBar({ category, level, delay }) {
   const labels = ['Non évalué', 'Débutant', 'Intermédiaire', 'Avancé', 'Expert', 'Maître'];
@@ -172,9 +175,51 @@ const WEEK_DAYS = [
   ['friday', 'Vendredi'], ['saturday', 'Samedi'], ['sunday', 'Dimanche'],
 ];
 
+/**
+ * La Coupe du Gang (29 oct. 2026) : le barber est « Dispo pour un match » (`available` de
+ * `GET /coupe/barbers` : dispo, pas en rendez-vous, joignable par notification) → « Défier » ouvre
+ * le défi (`/coupe?challenge=<id>`, invitation de 2 min). Rien sinon.
+ */
+function CoupeChallenge({ employee }) {
+  const reduceMotion = useReducedMotion();
+  return (
+    <motion.div
+      initial={reduceMotion ? false : { opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.2, duration: 0.35 }}
+      className="mb-6 flex items-center gap-3 rounded-2xl border p-3"
+      style={{ background: 'linear-gradient(135deg, #1d180a 0%, #12161a 70%)', borderColor: 'rgba(235, 193, 94, 0.3)' }}
+    >
+      <span className="relative w-10 h-10 shrink-0 rounded-xl flex items-center justify-center" style={{ background: 'rgba(51, 181, 116, 0.14)', color: '#33b574' }}>
+        <CoupeBallIcon className="w-5 h-5" />
+        {/* Pastille « dispo » : animation CSS sur un simple span, coupée si mouvements réduits */}
+        <span className="absolute -top-0.5 -right-0.5 flex w-2.5 h-2.5" aria-hidden="true">
+          <span className="absolute inline-flex w-full h-full rounded-full bg-emerald-400 opacity-75 motion-safe:animate-ping" />
+          <span className="relative inline-flex w-2.5 h-2.5 rounded-full bg-emerald-400" />
+        </span>
+      </span>
+      <div className="flex-1 min-w-0">
+        <p className="font-fut text-base font-extrabold uppercase tracking-wide leading-tight text-white">Dispo pour un match</p>
+        <p className="mt-1 text-xs leading-snug" style={{ color: '#9db0a6' }}>La Coupe du Gang · défi valable 2 min</p>
+      </div>
+      <Link
+        to={`/coupe?challenge=${encodeURIComponent(employee.id)}`}
+        onClick={() => hapticFeedback()}
+        aria-label={`Défier ${employee.name}`}
+        className="shrink-0 h-11 px-3.5 rounded-xl flex items-center font-fut text-base font-extrabold uppercase tracking-[0.06em] active:opacity-90 transition-opacity"
+        style={{ background: COUPE_GOLD, color: '#1a1205' }}
+      >
+        Défier
+      </Link>
+    </motion.div>
+  );
+}
+
 // Contenu du profil d'un barber (carte, vidéo, à propos, horaires, CTA).
 // Rendu dans un bloc glissable : un swipe gauche / droite passe au barber suivant / précédent.
-function BarberProfileContent({ employee, skillCategories, catsQuery = null }) {
+// `coupeLine` : points et rang de la saison à la Coupe (barber présent au classement), sinon null ;
+// `canChallenge` : barber « Dispo pour un match » en ce moment.
+function BarberProfileContent({ employee, skillCategories, catsQuery = null, coupeLine = null, canChallenge = false }) {
   // Catégories de compétences en échec : jamais une carte « sans stats » sans explication
   // queryFailed couvre aussi la requête en pause hors connexion (sans erreur)
   const catsFailed = !!catsQuery && queryFailed(catsQuery) && skillCategories.length === 0;
@@ -207,7 +252,7 @@ function BarberProfileContent({ employee, skillCategories, catsQuery = null }) {
     <>
       {/* Carte du barber (style FUT) : note, titre, photo, nom, stats */}
       <div className="flex justify-center mb-3" style={{ perspective: 1000 }}>
-        <BarberCard employee={employee} stats={cardStats} overall={overall} bio={displayBio} />
+        <BarberCard employee={employee} stats={cardStats} overall={overall} bio={displayBio} coupe={coupeLine} />
       </div>
       <motion.p
         initial={{ opacity: 0 }}
@@ -217,6 +262,7 @@ function BarberProfileContent({ employee, skillCategories, catsQuery = null }) {
       >
         Double tap sur la carte pour lire la description
       </motion.p>
+      {canChallenge && <CoupeChallenge employee={employee} />}
       {catsFailed && (
         <LoadError compact className="mb-6" what="ses statistiques" error={catsQuery.error} onRetry={catsQuery.refetch} retrying={catsQuery.isFetching} />
       )}
@@ -338,6 +384,15 @@ export default function BarberProfile() {
   });
   const skillCategories = skillCategoriesQuery.data ?? [];
 
+  // La Coupe du Gang (29 oct. 2026), rien tant que le jeu est coupé : barbers dispo (lus une fois,
+  // sans relecture périodique : seul l'accueil de la Coupe relit toutes les 30 s ; `available` du
+  // serveur compte déjà les rendez-vous et les notifications du barber) et classement de la saison
+  // (ligne « COUPE · pts · rang » d'un barber qui y figure)
+  const { user } = useAuth();
+  const coupeOn = useCoupeEnabled();
+  const coupeBarbersQuery = useCoupeBarbers({ enabled: coupeOn && !!user });
+  const coupeBoardQuery = useCoupeLeaderboard('season', { enabled: coupeOn && !!user });
+
   const count = employees.length;
   const index = employees.findIndex(e => String(e.id) === String(id));
   const employee = index >= 0 ? employees[index] : null;
@@ -404,6 +459,16 @@ export default function BarberProfile() {
     );
   }
 
+  // Jamais se défier soi-même (compte de l'équipe relié à cette fiche) ; ids comparés en chaîne
+  const coupeEntry = coupeOn && Array.isArray(coupeBarbersQuery.data)
+    ? coupeBarbersQuery.data.find((b) => String(b?.employee_id) === String(employee.id)) || null
+    : null;
+  const canChallenge = coupeEntry?.available === true && String(user?.employee_id ?? '') !== String(employee.id);
+  const boardRow = coupeOn && Array.isArray(coupeBoardQuery.data?.rows)
+    ? coupeBoardQuery.data.rows.find((r) => r?.role === 'barber' && String(r.employee_id) === String(employee.id)) || null
+    : null;
+  const coupeLine = boardRow ? coupeCardLine(boardRow) : null;
+
   return (
     <div className="min-h-screen relative overflow-hidden">
       {/* Subtle ambient glow */}
@@ -468,7 +533,13 @@ export default function BarberProfile() {
               dragMomentum={false}
               onDragEnd={handleDragEnd}
             >
-              <BarberProfileContent employee={employee} skillCategories={skillCategories} catsQuery={skillCategoriesQuery} />
+              <BarberProfileContent
+                employee={employee}
+                skillCategories={skillCategories}
+                catsQuery={skillCategoriesQuery}
+                coupeLine={coupeLine}
+                canChallenge={canChallenge}
+              />
             </motion.div>
           </AnimatePresence>
         </div>

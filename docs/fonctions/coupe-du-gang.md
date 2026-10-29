@@ -1,9 +1,25 @@
 # La Coupe du Gang : mini-jeu de foot façon air hockey
 
-> Cahier des charges validé par le propriétaire le 28 oct. 2026. **Rien n'est encore codé dans l'app** : maquettes et prototype jouable d'abord, code ensuite. Ce fichier sert de référence aux sessions qui coderont le jeu ; il sera complété par le détail des fichiers quand ils existeront.
+> Cahier des charges validé par le propriétaire le 28 oct. 2026 ; jeu complet construit le 29 oct. 2026 (serveur Heroku v158 et suivants, app sur dhomebarber.fr). **Pas encore dans les apps natives** : il arrive avec le build 18, que le propriétaire enverra lui-même. Le fonctionnement actuel est résumé dans « Jeu complet » plus bas ; le **contrat détaillé** (schéma, API, protocole v2, décisions du chef) est `coupe-du-gang-contrat.md` (sections 7 et 8 = dernières décisions) ; textes stores et confidentialité : `coupe-du-gang-stores.md`.
 >
-> - Planche des écrans (28 oct. 2026, en attente de validation) : https://claude.ai/artifact/6sEgcJPvzCvPtBQsGPP3vU
-> - Prototype jouable (contre le salon, à deux sur un téléphone) : https://claude.ai/artifact/TDdZxv5v9xYGQwW28zSrxf ; source dans `docs/prototypes/coupe-du-gang.html` (moteur physique, ordinateur à 3 niveaux, effets : à reprendre pour l'app).
+> - Planche des écrans (validée le 29 oct. 2026) : https://claude.ai/artifact/6sEgcJPvzCvPtBQsGPP3vU
+> - Prototype jouable du 28 oct. (contre le salon, à deux sur un téléphone) : https://claude.ai/artifact/TDdZxv5v9xYGQwW28zSrxf ; source dans `docs/prototypes/coupe-du-gang.html`.
+
+## Jeu complet (29 oct. 2026) : où est quoi
+
+**Serveur** (`dhomebarber-api`)
+- `lib/coupeEngine.mjs` : moteur physique, **copie octet pour octet** de `src/lib/coupe/engine.js` (`test/test-coupe-engine.js` compare) ; chargé par `import()`.
+- `lib/coupeRooms.js` : salles et matchs (`/ws/coupe`, protocole v2) ; le serveur **recalcule chaque choc** (`collidePaddle`) à partir de la position et de la vitesse envoyées par le téléphone, jamais d'un ballon envoyé par lui ; reprise après coupure, pauses, forfaits, limite de 5 min de jeu, durées minimales (abandon < 20 s = annulé, match < 10 s = amical), garde-fous (quotas, seau de messages, places). Dépendances injectées par `server.js` (contrat 4.5).
+- `lib/wsRouter.js` : **un seul** écouteur `upgrade` pour `/ws/live` et `/ws/coupe` (deux `WebSocketServer` sur le même serveur HTTP se rejettent en 400) ; quota par IP sur `/ws/coupe` seulement, **jamais sur `/ws/live`**.
+- `lib/coupeResults.js` : `recordMatch` (transaction, verrous, droits relus en base, `+3 / −1` jamais sous 0, saison du mois de Paris + total, ligne `salon` pour tous les admins), clés publiques HMAC, barbers occupés (RDV, congé approuvé) et joignables (push web ou socket ouverte), purge du compte (`purgeAccount`), purge quotidienne 04:15 (amicaux > 30 j, tout > 13 mois). `lib/coupePoints.js` : règles pures. `lib/coupeNotify.js` : push de défi **web seulement** (apps publiées sans le jeu), jamais 21:00–08:00.
+- `routes/coupe.js` : `/coupe/me`, classement (volontaires + salon, ni testeur, ni fiche cachée, ni compte exclu), barbers, blocages, signalements, vue admin, exclusion et remise à zéro.
+- Coupure d'urgence : `heroku config:set COUPE_WS=off --app dhomebarber-api` → `features.coupe` faux, `/ws/coupe` 503, routes 404 `disabled` ; `heroku config:unset COUPE_WS` pour rouvrir.
+
+**App** (`puzzling-sharp-edge-book`)
+- `src/lib/coupe/` : `engine.js` (copie du serveur), `onlineMatch.js` (connexion et code réseau : ballon prédit au présent dans sa moitié, au même instant que l'adversaire dans la sienne, fondu à la ligne médiane, frappes au moment du choc en pleine précision, reprise automatique), `localMatch.js` (contre le salon, à deux), `renderer.js`, `sound.js`, `coupeApi.js` (REST, drapeau qui **rejette** sur une panne).
+- `src/components/coupe/CoupeGame.jsx` (+ `game/`) : écran de jeu des trois modes ; `src/pages/Coupe.jsx` (+ `components/coupe/hub/`) : accueil `/coupe` ; `CoupeClassement.jsx` ; `CoupeTest.jsx` : écran d'essai réseau (équipe et testeurs).
+- Intégrations : section « Jeux » de l'accueil (clé `games`), entrée en tête du fil, bloc sous la carte Gang, « Dispo pour un match » et ligne Coupe de la carte FUT dans Mon espace, « Défier » sur le profil d'un barber, Admin → « La Coupe du Gang » (`/admin/coupe`), `public/privacy.html` section 7 bis.
+- Tests e2e : `e2e/coupe.spec.js` (jeu, faux serveur `e2e/support/fauxCoupe.js`), `coupe-accueil.spec.js`, `coupe-integrations.spec.js` (réponses REST simulées dans `mockApi.js`).
 
 ## Décisions du propriétaire (28 oct. 2026)
 

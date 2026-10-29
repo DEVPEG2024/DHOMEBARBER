@@ -2,7 +2,7 @@ import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { Outlet, Link, useLocation, Navigate } from 'react-router-dom';
 import {
   LayoutDashboard, Calendar, Users, Scissors, UserCircle,
-  BarChart3, Settings, Menu, X, ChevronLeft, ChevronDown, ShoppingBag, Star, Bell, Brain, Sun, Moon, ClipboardList, ShieldCheck, Sparkles, CalendarDays, Newspaper, Warehouse, PartyPopper, LogOut, Gift, GripVertical, Shirt, Camera, Handshake, Volume2, VolumeX, Bug, Activity, IdCard, Home, TrendingUp } from 'lucide-react';
+  BarChart3, Settings, Menu, X, ChevronLeft, ChevronDown, ShoppingBag, Star, Bell, Brain, Sun, Moon, ClipboardList, ShieldCheck, Sparkles, CalendarDays, Newspaper, Warehouse, PartyPopper, LogOut, Gift, GripVertical, Shirt, Camera, Handshake, Volume2, VolumeX, Bug, Activity, IdCard, Home, TrendingUp, Trophy } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { useTheme } from '@/lib/ThemeContext';
 import { useAuth } from '@/lib/AuthContext';
@@ -12,6 +12,7 @@ import ActivityBell from '@/components/admin-activity/ActivityBell';
 import { useUnreadActivity, useActivityToasts } from '@/lib/adminActivity';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/api/apiClient';
+import { useCoupeEnabled } from '@/lib/coupe/coupeApi';
 
 // All nav items with their default category
 const allNavItems = [
@@ -30,6 +31,9 @@ const allNavItems = [
   { path: '/admin/clients', icon: UserCircle, label: 'Clients', perm: 'clients', category: 'Clients' },
   // Cartes Gang : niveaux, habitués à relancer, top de la saison, écussons (admin seulement)
   { path: '/admin/gang-cards', icon: IdCard, label: 'Cartes Gang', adminOnly: true, category: 'Clients' },
+  // La Coupe du Gang (29 oct. 2026) : chiffres, paires qui jouent le plus ensemble, signalements ;
+  // admin seulement, cachée tant que le jeu est coupé (`features.coupe`, variable COUPE_WS=off)
+  { path: '/admin/coupe', icon: Trophy, label: 'La Coupe du Gang', adminOnly: true, category: 'Clients', coupe: true },
   { path: '/admin/reviews', icon: Star, label: 'Avis', perm: 'reviews', category: 'Clients' },
   { path: '/admin/notifications', icon: Bell, label: 'Notifications', adminOnly: true, category: 'Clients' },
   { path: '/admin/feedback', icon: Bug, label: 'Bugs et suggestions', adminOnly: true, category: 'Clients' },
@@ -151,19 +155,22 @@ export default function AdminLayout() {
     staleTime: 60000,
   });
   const pendingLeaveCount = isAdmin && Array.isArray(pendingLeaves) ? pendingLeaves.length : 0;
+  // La Coupe du Gang : entrée de menu seulement quand le jeu est ouvert (drapeau du serveur)
+  const coupeOn = useCoupeEnabled();
 
   // Filter items by role/permissions
   const filteredItems = useMemo(() => {
+    const items = allNavItems.filter(item => !item.coupe || coupeOn);
     if (!user || user.role === 'admin') {
-      return allNavItems.filter(item => !item.barberOnly);
+      return items.filter(item => !item.barberOnly);
     }
     const perms = user.permissions || [];
-    return allNavItems.filter(item => {
+    return items.filter(item => {
       if (item.adminOnly) return false;
       if (item.alwaysShow || item.barberOnly) return true;
       return perms.includes(item.perm);
     });
-  }, [user]);
+  }, [user, coupeOn]);
 
   // Build default flat list
   const defaultFlatList = useMemo(() => buildDefaultFlatList(filteredItems), [filteredItems]);

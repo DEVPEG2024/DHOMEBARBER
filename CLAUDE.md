@@ -28,7 +28,7 @@ Les documents de `docs/fonctions/` et `docs/historique/` sont des extraits mot p
 | `boutique-commandes-bons-plans.md` | Boutique, commandes et leur annulation, fiche produit, bons plans du Gang |
 | `cartes-cadeau-wallet.md` | cartes cadeau (débit, historique, suppression) et Apple / Google Wallet |
 | `carte-gang.md` | carte Gang des clients (niveaux, stats, écussons, saisons, effets, admin) |
-| `coupe-du-gang.md` | La Coupe du Gang, mini-jeu de foot façon air hockey : cahier des charges validé le 28 oct. 2026, **pas encore codé** |
+| `coupe-du-gang.md` | La Coupe du Gang (mini-jeu de foot façon air hockey en ligne, points, classement) : où est quoi, décisions, mesures ; `coupe-du-gang-contrat.md` (schéma, API, protocole v2) ; `coupe-du-gang-stores.md` (textes stores) |
 | `textile.md` | drops textile, Labo, précommandes |
 | `evenements-privatisation.md` | Privatiser le salon (devis, suivi) et événements du salon (invitations, RSVP) |
 | `snap-essayage.md` | filtres Snap (Camera Kit, Lens Studio, revue Snap) et essayage couleur « Nouvelle tête » |
@@ -321,6 +321,16 @@ Chaque ligne est un invariant : la casser réintroduit un bug déjà corrigé ou
 - Fil : 3 publications / min et 20 / jour, 10 commentaires / min et 100 / jour ; doublon rendu tel quel 10 min (30 s pour un commentaire) ; 5000 / 1000 caractères ; réactions ❤️ 🔥 💪 😂 👏 💈 ; auteur sans nom = « Membre du Gang », jamais l'email.
 - **L'admin parle au nom du salon** (26 oct. 2026) : ses publications et commentaires = « D'Home Barber » + logo (`lib/salonAuthor.js`, appliqué par le serveur dans `authorFields`), jamais son nom ni sa photo ; petite étoile bleue à côté du nom (jamais de badge écrit), d'après `author_role` (écrit par le serveur seulement) ; nom « D'Home Barber » et variantes refusés à un client (inscription, profil). Toute nouvelle façon pour l'admin d'écrire à un client parle aussi au nom du salon. Détail : `docs/fonctions/securite-moderation-nettoyage.md`.
 
+### La Coupe du Gang (mini-jeu)
+
+- Moteur en **deux copies identiques** octet pour octet : `src/lib/coupe/engine.js` et `lib/coupeEngine.mjs` (`test/test-coupe-engine.js` compare) ; le serveur le charge par `import()`.
+- **Le serveur recalcule chaque choc** (`collidePaddle`) à partir de la position et de la vitesse du joueur ; jamais un ballon envoyé par le téléphone (triche démontrée en v1). `auth` porte `v` (2) : toute évolution incompatible du protocole passe par une nouvelle version, les téléphones gardent un build des mois.
+- **Un seul aiguillage `upgrade`** (`lib/wsRouter.js`) pour `/ws/live` et `/ws/coupe` ; jamais de quota par IP sur `/ws/live`.
+- Points : +3 / −1 jamais sous 0 ; **tous les matchs comptent** (décision du 29 oct.) ; ligne `salon` unique pour les admins ; abandon avant 20 s de jeu = annulé (rien d'écrit), match fini en moins de 10 s = amical, 5 min de jeu au plus. Droits aux points relus en base à la fin du match (carte Gang pour un client).
+- Coupure d'urgence `COUPE_WS=off` (drapeau `features.coupe`, `/ws/coupe` 503, routes 404) ; tout l'affichage du jeu dans l'app dépend du drapeau, qui **rejette** sur une panne (jamais « jeu fermé » sur un 503).
+- Tant que les apps publiées n'ont pas le jeu (build 18) : push de défi **web seulement**, alerte admin d'un signalement vers `/admin`, `/coupe-test` jamais dans un build store sans description (règle 2.5.19). Signaler / Bloquer obligatoires (App Store 1.2).
+- Données de jeu purgées avec le compte (client, admin, compte barber : `purgeAccount`) ; purge quotidienne 04:15 ; un compte exclu du classement Gang l'est aussi de la Coupe. Détail : `docs/fonctions/coupe-du-gang.md`.
+
 ### Médias et ramasse-miettes
 
 - Toujours `UploadFile` ; compression sur l'appareil (`src/lib/imageCompress.js`) ; type lu dans les octets, SVG refusé ; HEIC refusé avec la consigne iPhone. Images en table `media`, servies par `GET /api/media/:id` : jamais de base64 en colonne.
@@ -402,7 +412,7 @@ Chaque ligne est un invariant : la casser réintroduit un bug déjà corrigé ou
 
 Liste complète, dédoublonnée et datée : `docs/historique/restes-a-faire.md`.
 
-1. La Coupe du Gang : prototype réseau validé sur deux téléphones le 29 oct. 2026 ; reste le jeu complet (points, classement, défis, anti-triche serveur, Signaler / Bloquer, build 18). Voir `docs/fonctions/coupe-du-gang.md`.
+1. La Coupe du Gang (ouverte sur le site le 29 oct. 2026) : essai réel à deux téléphones du jeu complet, barbers à rendre joignables (notifications web), liste du build 18 et choix du chef à faire valider (5 min, 10 s / 20 s). Voir `docs/historique/restes-a-faire.md`.
 2. Snap : *Push to Production* et jeton de production ; la lentille « DHB Couleur » est vide, à refaire.
 3. Activité clients : retirer la seconde requête des annulations sans auteur vers le 27 oct. 2026.
 4. Dom et Romain sans notifications sur leur téléphone, Kevin sur le web seulement : leur faire activer l'app.

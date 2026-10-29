@@ -25,6 +25,11 @@ import { motionPermissionState, onMotionPermission } from '@/lib/motion';
  * Double tap : la carte se retourne (rotation 3D à ressort) et montre au dos la
  * description du barber (`bio`). Détection maison sur pointerup (deux taps en
  * moins de 320 ms sans déplacement), fiable sur iOS / Android et à la souris.
+ *
+ * La Coupe du Gang (29 oct. 2026) : `coupe = { points, rank }` ajoute en bas de la carte la ligne
+ * « COUPE · 81 PTS · 2e » (points et rang de la saison, `rank` null = hors classement). Seulement
+ * quand l'écran fournit ces données (Mon espace, profil d'un barber présent au classement) : sans
+ * `coupe`, la carte est inchangée.
  */
 
 export const CARD_WIDTH = 300;
@@ -53,6 +58,8 @@ const ABBR_OVERRIDES = {
 const GOLD = '#f6e7ad';
 const GOLD_LINE = 'rgba(246, 231, 173, 0.55)';
 const NEON = '#86f7e6';
+/** Or de La Coupe du Gang (maquettes validées), pour la ligne « COUPE · pts · rang ». */
+const COUPE_GOLD = '#ebc15e';
 
 /** Polygone de la carte (chanfreins en haut, pointe en bas). */
 const CARD_SHAPE = 'polygon(0% 4.5%, 7% 0%, 93% 0%, 100% 4.5%, 100% 89%, 50% 100%, 0% 89%)';
@@ -254,7 +261,30 @@ function CardBack({ employee, bio, logoUrl }) {
   );
 }
 
-export default function BarberCard({ employee, stats = [], overall = null, logoUrl = '/logo.png', className = '', bio = '' }) {
+/** Ligne « COUPE · 81 PTS · 2e » sous les stats (points et rang de la saison de La Coupe du Gang). */
+function CoupeLine({ coupe }) {
+  const points = Math.max(0, Math.round(Number(coupe.points) || 0));
+  const rank = Number.isInteger(Number(coupe.rank)) && Number(coupe.rank) >= 1 ? Number(coupe.rank) : null;
+  const suffix = rank === 1 ? 'er' : 'e';
+  return (
+    <p className="absolute left-0 right-0 text-center font-fut leading-none whitespace-nowrap" style={{ top: 401 }}>
+      <span aria-hidden="true" style={{ fontSize: 17, fontWeight: 800, letterSpacing: 1.7, color: COUPE_GOLD, textShadow: '0 2px 8px rgba(0,0,0,0.4)' }}>
+        COUPE · {points} PTS
+        {rank && (
+          <>
+            {' · '}{rank}
+            <sup style={{ fontSize: '0.6em', verticalAlign: 'baseline', position: 'relative', top: '-0.55em', marginLeft: 1 }}>{suffix}</sup>
+          </>
+        )}
+      </span>
+      <span className="sr-only">
+        {`La Coupe du Gang : ${points} point${points === 1 ? '' : 's'}${rank ? `, ${rank}${suffix} du classement de la saison` : ''}`}
+      </span>
+    </p>
+  );
+}
+
+export default function BarberCard({ employee, stats = [], overall = null, logoUrl = '/logo.png', className = '', bio = '', coupe = null }) {
   const left = stats.slice(0, Math.ceil(stats.length / 2));
   const right = stats.slice(Math.ceil(stats.length / 2));
   const title = (employee?.title || 'Barber').trim();
@@ -470,6 +500,7 @@ export default function BarberCard({ employee, stats = [], overall = null, logoU
                 </p>
               )}
               <span className="absolute block" style={{ left: '19%', width: '62%', height: 1, top: 392, background: GOLD_LINE }} />
+              {coupe && <CoupeLine coupe={coupe} />}
 
               {/* Reflet holographique : balayage à l'arrivée */}
               {!reduceMotion && (

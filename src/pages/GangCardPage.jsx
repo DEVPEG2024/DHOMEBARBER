@@ -11,6 +11,7 @@ import { gangFxHint } from '@/components/gang/GangFx';
 import GangLeaderboard from '@/components/gang/GangLeaderboard';
 import { useGangStoryShare } from '@/components/gang/GangLevelUp';
 import { GangBadgeGrid } from '@/components/gang/GangBadges';
+import { CoupeGangBlock } from '@/components/home/GamesSection';
 import {
   useGangCard, setGangLeaderboardOptIn, useInvalidateGang, GANG_TIER_ORDER, GANG_SEASONS, gangSeasonUntil,
 } from '@/lib/gangCardApi';
@@ -180,6 +181,13 @@ export default function GangCardPage() {
           </motion.div>
         )}
 
+        {/* La Coupe du Gang sans carte : on joue quand même, en amical (rien si le jeu est coupé) */}
+        {!isPending && data && !card && (
+          <motion.div {...fade(0.08)} className="mt-8 empty:hidden">
+            <CoupeGangBlock />
+          </motion.div>
+        )}
+
         {card && (
           <>
             {/* La carte */}
@@ -245,6 +253,12 @@ export default function GangCardPage() {
                 <Link to="/appointments" className="font-semibold text-primary shrink-0">Voir</Link>
               </motion.div>
             )}
+
+            {/* La Coupe du Gang (29 oct. 2026) : bloc SOUS la carte, jamais dessus (aucun bandeau
+                écrit sur la carte Gang) ; les Points de Coupe ne changent ni le niveau ni les stats */}
+            <motion.div {...fade(0.11)} className="mt-8 empty:hidden">
+              <CoupeGangBlock />
+            </motion.div>
 
             {/* Progression */}
             <motion.section {...fade(0.12)} aria-labelledby="gang-next" className="mt-8">

@@ -17,6 +17,7 @@ import { BARBER_PHOTO_ASPECT, BARBER_PHOTO_BG } from '@/lib/barberPhoto';
 import { barberPhotoLayoutId } from '@/components/shared/BarberCard';
 import RebookCard from '@/components/home/RebookCard';
 import LastMinuteSection from '@/components/home/LastMinuteSection';
+import GamesSection from '@/components/home/GamesSection';
 import OpenStatusBadge from '@/components/home/OpenStatusBadge';
 import { snapFeatureEnabled } from '@/lib/snapLenses';
 import TextileHomeCard from '@/components/textile/TextileHomeCard';
@@ -336,12 +337,13 @@ function BarberMarquee({ employees }) {
   );
 }
 
-// `last-minute`, `rebook` (« Comme la dernière fois ») et `salon-event` sont des sections
-// auto-masquées : leur composant rend `null` sans contenu (aucun créneau Last Minute libre, pas de
-// RDV passé, pas d'événement à venir) et le conteneur `.auto-section` vide est caché par le wrapper
-// (`[&:has(>.auto-section:empty)]:hidden`). `last-minute` est en tête par défaut : la fusion avec un
-// ordre sauvegardé l'insère donc en haut de l'accueil tant que l'admin ne l'a pas déplacée.
-const DEFAULT_SECTION_ORDER = ['last-minute', 'quick-info', 'rebook', 'barbers', 'try-on', 'news', 'services', 'shop', 'textile', 'salon-event', 'partners', 'reviews', 'gift-card', 'cta'];
+// `last-minute`, `rebook` (« Comme la dernière fois »), `games` (« Jeux ») et `salon-event` sont des
+// sections auto-masquées : leur composant rend `null` sans contenu (aucun créneau Last Minute libre,
+// pas de RDV passé, La Coupe du Gang coupée, pas d'événement à venir) et le conteneur
+// `.auto-section` vide est caché par le wrapper (`[&:has(>.auto-section:empty)]:hidden`).
+// `last-minute` est en tête par défaut : la fusion avec un ordre sauvegardé l'insère donc en haut de
+// l'accueil tant que l'admin ne l'a pas déplacée ; `games` (29 oct. 2026) arrive après `rebook`.
+const DEFAULT_SECTION_ORDER = ['last-minute', 'quick-info', 'rebook', 'games', 'barbers', 'try-on', 'news', 'services', 'shop', 'textile', 'salon-event', 'partners', 'reviews', 'gift-card', 'cta'];
 
 const SECTION_LABELS = {
   'last-minute': 'Last Minute',
@@ -354,6 +356,7 @@ const SECTION_LABELS = {
   'reviews': 'Avis Clients',
   'gift-card': 'Carte Cadeau',
   'rebook': 'Comme la dernière fois',
+  'games': 'Jeux',
   'salon-event': 'Événement du salon',
   'partners': 'Bons plans du Gang',
   'try-on': 'Filtres Snap',
@@ -784,6 +787,23 @@ export default function Home() {
         return (
           <div className="auto-section">
             <RebookCard user={user} employees={employees} services={services} />
+          </div>
+        );
+
+      case 'games':
+        // « Jeux » : La Coupe du Gang (29 oct. 2026). GamesSection rend null tant que le jeu est
+        // coupé (`features.coupe` faux) ; en mode édition, un repère pour la positionner.
+        if (editMode) {
+          return (
+            <div className="rounded-3xl p-5 text-center border border-[#ebc15e]/40 bg-[#ebc15e]/10">
+              <p className="text-xs font-semibold text-foreground">Jeux</p>
+              <p className="text-[11px] text-muted-foreground mt-1">La Coupe du Gang : Points de Coupe du client et « Jouer » (cachée tant que le jeu est coupé).</p>
+            </div>
+          );
+        }
+        return (
+          <div className="auto-section">
+            <GamesSection />
           </div>
         );
 

@@ -7,11 +7,13 @@
  *   useCoupeEnabled()              → true | false (drapeau du serveur, faux tant que rien n'est chargé)
  *   useCoupeMe()                   → `GET /coupe/me`
  *   useCoupeLeaderboard(scope)     → `GET /coupe/leaderboard?scope=season|total`
- *   useCoupeBarbers()              → `GET /coupe/barbers` (relu toutes les 30 s)
+ *   useCoupeFlagQuery()            → requête du drapeau (chargement, erreur) pour la garde de `/coupe`
+ *   useCoupeBarbers({ poll })      → `GET /coupe/barbers` (relu toutes les 30 s avec `poll`)
  *   useCoupeBlocks()               → `GET /coupe/blocks`
  *   useCoupeAdminOverview()        → `GET /coupe/admin/overview` (admin)
  * Envois (promesses) : setCoupeOptIn, setCoupeAvailability, blockCoupePlayer, unblockCoupePlayer,
- * reportCoupePlayer, setCoupeReportStatus. Après un envoi, `invalidateCoupe(queryClient)`.
+ * reportCoupePlayer, setCoupeReportStatus, setCoupePlayerBanned, resetCoupePlayer (admin). Après
+ * un envoi, `invalidateCoupe(queryClient)`.
  */
 import { useQuery } from '@tanstack/react-query';
 import { API_SERVER_URL, resolvedAppId, apiRequest, apiUrl } from '@/api/apiClient';
@@ -35,25 +37,31 @@ export const COUPE_REPORT_REASONS = [
   { value: 'other', label: 'Autre' },
 ];
 
-/** Drapeau du serveur. Ne rejette jamais : en cas d'échec, faux (jeu caché). */
+/**
+ * Drapeau du serveur. **Rejette** sur une panne (réseau, réponse non 2xx) : seule une réponse qui dit
+ * faux vaut « jeu fermé ». Avant, une panne valait faux et restait 5 min en cache : un lien de défi
+ * ouvert pendant un 503 renvoyait à l'accueil sans un mot et le jeu disparaissait partout.
+ */
 export async function fetchCoupeEnabled() {
-  try {
-    const res = await fetch(`${API_SERVER_URL}/api/apps/public/prod/public-settings/by-id/${resolvedAppId}`);
-    if (!res.ok) return false;
-    const data = await res.json().catch(() => null);
-    return data?.features?.coupe === true;
-  } catch {
-    return false;
-  }
+  const res = await fetch(`${API_SERVER_URL}/api/apps/public/prod/public-settings/by-id/${resolvedAppId}`);
+  if (!res.ok) throw new Error(`Paramètres publics : ${res.status}`);
+  const data = await res.json();
+  return data?.features?.coupe === true;
 }
 
-/** Le jeu est-il ouvert ? (cache 5 min ; faux tant que rien n'est chargé) */
-export function useCoupeEnabled() {
-  const { data } = useQuery({
+/** Requête du drapeau (cache 5 min) : `{ data, isLoading, isError, refetch }` pour la garde de `/coupe`. */
+export function useCoupeFlagQuery() {
+  return useQuery({
     queryKey: COUPE_ENABLED_KEY,
     queryFn: fetchCoupeEnabled,
     staleTime: 5 * 60 * 1000,
+    retry: 2,
   });
+}
+
+/** Le jeu est-il ouvert ? Faux tant que rien n'est chargé ou si la lecture a échoué (entrées cachées). */
+export function useCoupeEnabled() {
+  const { data } = useCoupeFlagQuery();
   return data === true;
 }
 
@@ -86,7 +94,11 @@ export const fetchCoupeBlocks = () => apiRequest('GET', apiUrl('/coupe/blocks'))
 
 /**
  * Admin : `{ today: { matches, players }, season: { matches, players, ranked },
- *            top_pairs: [{ a, b, matches, ranked }], reports: [{ id, reported_name, reason, details, created_at, status }] }`
+ *            top_pairs: [{ a, b, matches, ranked }],
+ *            reports: [{ id, reported_name, reason, details, created_at, status,
+ *                        reported_user_id, reported_email, reported_key_hash, reported_banned? }] }`
+ * (`reported_*` : compte signalé, null pour un compte supprimé ; `reported_key_hash` sert aux
+ * actions Exclure / Réintégrer / Remettre à zéro)
  */
 export const fetchCoupeAdminOverview = () => apiRequest('GET', apiUrl('/coupe/admin/overview'));
 
@@ -103,13 +115,14 @@ export function useCoupeLeaderboard(scope = 'season', { enabled = true } = {}) {
   });
 }
 
-export function useCoupeBarbers({ enabled = true } = {}) {
+/** `poll` : relire toutes les 30 s (accueil de la Coupe seulement ; ailleurs une lecture suffit). */
+export function useCoupeBarbers({ enabled = true, poll = false } = {}) {
   return useQuery({
     queryKey: COUPE_BARBERS_KEY,
     queryFn: fetchCoupeBarbers,
     enabled,
     staleTime: 15 * 1000,
-    refetchInterval: enabled ? 30 * 1000 : false,
+    refetchInterval: enabled && poll ? 30 * 1000 : false,
   });
 }
 
@@ -147,5 +160,20 @@ export const reportCoupePlayer = ({ keyHash, roomCode, reason, details }) =>
 export const setCoupeReportStatus = (id, status) =>
   apiRequest('PATCH', apiUrl(`/coupe/admin/reports/${encodeURIComponent(id)}`), { status });
 
-/** Relit tout ce qui touche à la Coupe (points, classement, barbers, blocages). */
-export const invalidateCoupe = (queryClient) => queryClient.invalidateQueries({ queryKey: COUPE_KEY });
+/**
+ * Admin : exclure un joueur de tous les classements de la Coupe (`banned` vrai) ou l'y réintégrer
+ * (contrat, section 7 : `POST` / `DELETE /coupe/admin/players/:keyHash/ban`) → `{ ok: true }`.
+ */
+export const setCoupePlayerBanned = (keyHash, banned) =>
+  apiRequest(banned ? 'POST' : 'DELETE', apiUrl(`/coupe/admin/players/${encodeURIComponent(keyHash)}/ban`), banned ? {} : undefined);
+
+/** Admin : points de la saison et du classement général remis à zéro → `{ ok: true }`. */
+export const resetCoupePlayer = (keyHash) =>
+  apiRequest('POST', apiUrl(`/coupe/admin/players/${encodeURIComponent(keyHash)}/reset`), {});
+
+/**
+ * Relit tout ce qui touche à la Coupe (points, classement, barbers, blocages), **sauf le drapeau** :
+ * une relecture ratée en fin de match cachait le jeu partout.
+ */
+export const invalidateCoupe = (queryClient) =>
+  queryClient.invalidateQueries({ queryKey: COUPE_KEY, predicate: (q) => q.queryKey[1] !== 'enabled' });

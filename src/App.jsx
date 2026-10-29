@@ -1,14 +1,17 @@
-import React, { Suspense, useEffect, useLayoutEffect } from 'react';
+import React, { Suspense, useEffect, useLayoutEffect, useState } from 'react';
 import { Toaster as SonnerToaster } from "@/components/ui/sonner"
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClientInstance } from '@/lib/query-client'
-import { BrowserRouter as Router, Route, Routes, Navigate, Outlet, useLocation, useSearchParams } from 'react-router-dom';
+import { BrowserRouter as Router, Route, Routes, Navigate, Outlet, Link, useLocation, useSearchParams } from 'react-router-dom';
 import PageNotFound from './lib/PageNotFound';
 import { AuthProvider, useAuth } from '@/lib/AuthContext';
 import { ThemeProvider } from '@/lib/ThemeContext';
 import { MusicProvider } from '@/lib/MusicContext';
 import MusicToggle from '@/components/shared/MusicToggle';
 import ErrorBoundary from '@/components/ErrorBoundary';
+import { queryFailed } from '@/components/shared/LoadError';
+import CoupeLoadError from '@/components/coupe/CoupeLoadError';
+import { useCoupeFlagQuery } from '@/lib/coupe/coupeApi';
 
 // Layouts
 import ClientLayout from '@/components/layout/ClientLayout';
@@ -45,6 +48,9 @@ const Favorites = React.lazy(() => import('@/pages/Favorites'));
 const GangCardPage = React.lazy(() => import('@/pages/GangCardPage'));
 // Prototype réseau de La Coupe du Gang (lazy, plein écran, hors des mises en page)
 const CoupeTest = React.lazy(() => import('@/pages/CoupeTest'));
+// La Coupe du Gang : accueil du jeu et classement (lazy, plein écran, hors des mises en page)
+const Coupe = React.lazy(() => import('@/pages/Coupe'));
+const CoupeClassement = React.lazy(() => import('@/pages/CoupeClassement'));
 
 // Admin pages (lazy-loaded - only for admin/barber users)
 const AdminDashboard = React.lazy(() => import('@/pages/admin/Dashboard'));
@@ -78,6 +84,7 @@ const AdminFeedback = React.lazy(() => import('@/pages/admin/AdminFeedback'));
 const AdminActivity = React.lazy(() => import('@/pages/admin/AdminActivity'));
 const AdminTraffic = React.lazy(() => import('@/pages/admin/AdminTraffic'));
 const AdminGangCards = React.lazy(() => import('@/pages/admin/AdminGangCards'));
+const AdminCoupe = React.lazy(() => import('@/pages/admin/AdminCoupe'));
 
 const LazyFallback = () => (
   <div className="fixed inset-0 flex items-center justify-center bg-background">
@@ -179,6 +186,61 @@ function RequireCoupeTester() {
   }
 
   return <Outlet />;
+}
+
+// Garde de La Coupe du Gang (/coupe, /coupe/classement ; contrat docs/fonctions/coupe-du-gang-contrat.md,
+// 5.1) : tout compte connecté, barbers compris (RequireAuth les renverrait vers Mon espace), et
+// seulement quand le serveur a ouvert le jeu (`features.coupe`, faux avec COUPE_WS=off).
+// Renvoi vers l'accueil SEULEMENT si le drapeau a été lu à faux. Lecture ratée (réseau, 503) :
+// « Réessayer » sur place, sans quitter l'adresse (un lien de défi `?defi=` reste valable).
+// Même requête que `useCoupeEnabled` (`useCoupeFlagQuery` : même clé, rejette sur une panne).
+function RequireCoupe() {
+  const { isAuthenticated, isLoadingAuth, sessionExpired } = useAuth();
+  const location = useLocation();
+  const flag = useCoupeFlagQuery();
+  // Page ouverte : un drapeau relu plus tard à faux (réseau qui flanche pendant la relecture d'après
+  // match) ne renvoie plus à l'accueil en pleine partie. Si le serveur a vraiment coupé le jeu, ses
+  // routes répondent `disabled` et la page le dit.
+  const [admitted, setAdmitted] = useState(false);
+  useEffect(() => {
+    if (flag.data === true) setAdmitted(true);
+  }, [flag.data]);
+
+  // Fond du jeu (sombre) pendant l'attente du drapeau : pas d'éclair clair avant l'écran de la Coupe
+  const spinner = (
+    <div className="fixed inset-0 flex items-center justify-center" style={{ background: '#0b0e10' }}>
+      <div className="w-6 h-6 border-2 border-[#ebc15e]/30 border-t-[#ebc15e] rounded-full animate-spin" />
+    </div>
+  );
+
+  if (isLoadingAuth) return spinner;
+
+  if (!isAuthenticated) {
+    return <Navigate to={loginPathFor(location, sessionExpired)} replace />;
+  }
+
+  if (flag.data === true || admitted) return <Outlet />;
+  if (flag.data === false) return <Navigate to="/" replace />;
+
+  // Drapeau illisible (panne, réseau) ou requête en pause faute de réseau : on le dit, on garde l'adresse
+  if (flag.isError || queryFailed(flag)) {
+    return (
+      <div className="fixed inset-0 flex flex-col items-center justify-center gap-3 p-6" style={{ background: '#0b0e10', colorScheme: 'dark' }}>
+        <CoupeLoadError
+          what="la Coupe du Gang"
+          error={flag.error}
+          onRetry={() => flag.refetch()}
+          retrying={flag.isFetching}
+          className="w-full max-w-sm"
+        />
+        <Link to="/" replace className="min-h-[44px] px-4 inline-flex items-center text-sm font-semibold text-[#9db0a6] underline underline-offset-2">
+          Retour à l’accueil
+        </Link>
+      </div>
+    );
+  }
+
+  return spinner;
 }
 
 // Redirect to home if already authenticated
@@ -318,6 +380,8 @@ const AppRoutes = () => {
           <Route path="/admin/activity" element={<Suspense fallback={<LazyFallback />}><AdminActivity /></Suspense>} />
           <Route path="/admin/traffic" element={<Suspense fallback={<LazyFallback />}><AdminTraffic /></Suspense>} />
           <Route path="/admin/gang-cards" element={<Suspense fallback={<LazyFallback />}><AdminGangCards /></Suspense>} />
+          {/* La Coupe du Gang : chiffres, paires, signalements (admin seul, garde dans la page) */}
+          <Route path="/admin/coupe" element={<Suspense fallback={<LazyFallback />}><AdminCoupe /></Suspense>} />
           <Route path="/admin/my-settings" element={<Suspense fallback={<LazyFallback />}><BarberSettings /></Suspense>} />
           {/* Historique des notifications reçues par un barber (/notifications est une page client) */}
           <Route path="/admin/my-notifications" element={<ClientNotifications />} />
@@ -327,6 +391,12 @@ const AppRoutes = () => {
       {/* La Coupe du Gang, prototype réseau : plein écran, hors des mises en page client / admin */}
       <Route element={<RequireCoupeTester />}>
         <Route path="/coupe-test" element={<Suspense fallback={<LazyFallback />}><CoupeTest /></Suspense>} />
+      </Route>
+
+      {/* La Coupe du Gang : plein écran, hors des mises en page, tout compte connecté, drapeau features.coupe */}
+      <Route element={<RequireCoupe />}>
+        <Route path="/coupe" element={<Suspense fallback={<LazyFallback />}><Coupe /></Suspense>} />
+        <Route path="/coupe/classement" element={<Suspense fallback={<LazyFallback />}><CoupeClassement /></Suspense>} />
       </Route>
 
       <Route path="*" element={<PageNotFound />} />

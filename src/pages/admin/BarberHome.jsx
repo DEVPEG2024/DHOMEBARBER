@@ -1,16 +1,26 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { motion } from 'framer-motion';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { motion, useReducedMotion } from 'framer-motion';
+import { toast } from 'sonner';
 import {
-  BarChart3, Bell, CalendarDays, CalendarRange, ClipboardList, Eye, LayoutDashboard, Newspaper,
+  BarChart3, Bell, BellOff, CalendarDays, CalendarRange, ClipboardList, Eye, LayoutDashboard, Loader2, Newspaper,
   Settings, Shirt, Sparkles, Star, UserCircle, CalendarCheck, CalendarClock, Users,
 } from 'lucide-react';
 import { api } from '@/api/apiClient';
 import { useAuth } from '@/lib/AuthContext';
 import { fetchPublicBarbers } from '@/lib/publicBarbers';
 import { parisDay } from '@/lib/slots';
-import { NOTIFICATIONS_EVENT, readNotifications } from '@/lib/pushNotifications';
+import { hapticFeedback, isNative, platform } from '@/lib/capacitor';
+import {
+  NOTIFICATIONS_EVENT, readNotifications, getPushPermission, isPushSupported, subscribeToPush, syncPushSubscription,
+} from '@/lib/pushNotifications';
+import {
+  useCoupeEnabled, useCoupeMe, useCoupeBarbers, setCoupeAvailability, invalidateCoupe, COUPE_BARBERS_KEY,
+} from '@/lib/coupe/coupeApi';
+import { Switch } from '@/components/ui/switch';
+import { coupeErrorText } from '@/components/coupe/coupeErrors';
+import { COUPE_GOLD, CoupeBallIcon, coupeCardLine, coupeSeasonLabel } from '@/components/home/GamesSection';
 import BarberCard, { CARD_WIDTH, CARD_HEIGHT, buildCardStats, overallRating } from '@/components/shared/BarberCard';
 import StarRating from '@/components/shared/StarRating';
 import Reveal, { RevealGroup, RevealItem } from '@/components/motion/Reveal';
@@ -58,6 +68,199 @@ const todayLong = () => {
   return s.charAt(0).toUpperCase() + s.slice(1);
 };
 
+/** Erreur d'activation des notifications (API du navigateur, ou envoi au serveur), au tutoiement. */
+function pushErrorText(err) {
+  if (err?.status || err?.timeout || (typeof navigator !== 'undefined' && navigator.onLine === false)) {
+    return coupeErrorText(err, 'Impossible d’activer les notifications sur ce téléphone. Réessaie.');
+  }
+  return 'Impossible d’activer les notifications sur ce téléphone. Réessaie.';
+}
+
+/**
+ * « Dispo » allumé mais le barber ne recevrait pas les défis (`reachable` faux dans
+ * `GET /coupe/barbers` : aucun abonnement aux notifications sur un appareil) : on le dit, avec un
+ * bouton qui les active sur ce téléphone (même parcours que Mes paramètres → Notifications).
+ */
+function CoupeReachNote({ onEnabled }) {
+  const supported = isPushSupported();
+  const [permission, setPermission] = useState(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!supported) return undefined;
+    let cancelled = false;
+    getPushPermission().then((p) => { if (!cancelled) setPermission(p); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [supported]);
+  const denied = permission === 'denied';
+
+  const enable = async () => {
+    if (busy) return;
+    setBusy(true);
+    hapticFeedback();
+    try {
+      await subscribeToPush();
+      setPermission('granted');
+      syncPushSubscription();
+      toast.success('Notifications activées : les défis arrivent sur ce téléphone');
+      onEnabled?.();
+    } catch (err) {
+      const perm = await getPushPermission().catch(() => null);
+      if (perm) setPermission(perm);
+      toast.error(perm === 'denied' ? 'Notifications refusées sur ce téléphone' : pushErrorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  let help = null;
+  if (!supported) {
+    help = 'Ce navigateur ne reçoit pas les notifications : ajoute le site à l’écran d’accueil, puis active-les.';
+  } else if (denied) {
+    help = isNative
+      ? (platform === 'android'
+        ? 'Elles sont refusées : Paramètres du téléphone → Applications → D’Home Barber → Notifications.'
+        : 'Elles sont refusées : Réglages → D’Home Barber → Notifications.')
+      : 'Elles sont refusées : autorise-les pour dhomebarber.fr dans les réglages du navigateur.';
+  }
+
+  return (
+    <div role="note" className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3">
+      <p className="flex items-start gap-2 text-xs font-semibold leading-snug text-foreground">
+        <BellOff className="mt-px h-4 w-4 shrink-0 text-amber-500" aria-hidden="true" />
+        Active les notifications sur ce téléphone pour recevoir les défis
+      </p>
+      {help ? (
+        <p className="mt-1.5 pl-6 text-[11px] leading-snug text-muted-foreground">{help}</p>
+      ) : (
+        <button
+          type="button"
+          onClick={enable}
+          disabled={busy}
+          className="mt-2.5 ml-6 inline-flex h-10 items-center gap-2 rounded-xl bg-amber-500 px-3.5 text-xs font-semibold text-[#1a1205] disabled:opacity-60"
+        >
+          {busy ? <Loader2 className="h-3.5 w-3.5 motion-safe:animate-spin" aria-hidden="true" /> : <Bell className="h-3.5 w-3.5" aria-hidden="true" />}
+          Activer les notifications
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * La Coupe du Gang dans « Mon espace » (maquette « Mon espace, barber », 29 oct. 2026) :
+ * interrupteur « Dispo pour un match » (les clients peuvent défier le barber depuis sa page ; le
+ * serveur le coupe tout seul pendant ses rendez-vous, `busy` de `GET /coupe/barbers`), chiffres de
+ * la saison et accès au jeu. `stats` : `season_stats` de `GET /coupe/me` (null tant que non lu).
+ * `GET /coupe/barbers` est lu une fois ici (pas de relecture périodique hors de l'accueil de la
+ * Coupe) ; `reachable` faux : le barber ne recevrait pas les défis, on propose les notifications.
+ */
+function CoupeDispoCard({ employee, stats, season }) {
+  const queryClient = useQueryClient();
+  const barbersQuery = useCoupeBarbers();
+  const entry = (Array.isArray(barbersQuery.data) ? barbersQuery.data : [])
+    .find((b) => String(b?.employee_id) === String(employee.id)) || null;
+  const busy = entry?.busy === true;
+  const unreachable = entry?.reachable === false;
+  // Valeur de l'interrupteur : la colonne de la fiche quand le serveur la renvoie, sinon `available`
+  // de /coupe/barbers hors rendez-vous (pendant un rendez-vous, `available` est faux d'office)
+  const serverValue = typeof employee.coupe_available === 'boolean'
+    ? employee.coupe_available
+    : (entry && !busy ? entry.available === true : null);
+  // Choix affiché tout de suite, gardé jusqu'à ce que le serveur dise la même chose
+  const [pending, setPending] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const checked = pending ?? serverValue ?? false;
+  useEffect(() => {
+    if (pending !== null && !saving && serverValue === pending) setPending(null);
+  }, [pending, saving, serverValue]);
+
+  const toggle = async (next) => {
+    setPending(next);
+    setSaving(true);
+    hapticFeedback();
+    try {
+      const res = await setCoupeAvailability(next);
+      const value = typeof res?.available === 'boolean' ? res.available : next;
+      setPending(value);
+      // La fiche en cache (`['employees']`, partagée) suit le choix enregistré
+      queryClient.setQueryData(['employees'], (rows) => (Array.isArray(rows)
+        ? rows.map((r) => (String(r?.id) === String(employee.id) ? { ...r, coupe_available: value } : r))
+        : rows));
+      invalidateCoupe(queryClient);
+      toast.success(value ? 'Tu es dispo : les clients peuvent te défier' : 'Tu n’es plus dispo pour un match');
+    } catch (err) {
+      setPending(null);
+      toast.error(coupeErrorText(err, 'Impossible d’enregistrer ton choix. Réessaie.'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Notifications activées : `reachable` relu tout de suite
+  const onPushEnabled = () => queryClient.invalidateQueries({ queryKey: COUPE_BARBERS_KEY });
+
+  const matches = stats ? Math.max(0, Math.round(Number(stats.matches) || 0)) : null;
+  const wins = stats ? Math.max(0, Math.round(Number(stats.wins) || 0)) : null;
+  const losses = stats ? Math.max(0, Math.round(Number(stats.losses) || 0)) : null;
+  const loadingValue = serverValue === null && pending === null && barbersQuery.isPending;
+
+  return (
+    <section aria-label="La Coupe du Gang" className="space-y-2.5">
+      <div className="flex items-center gap-3.5 rounded-[18px] border border-emerald-500/40 bg-emerald-500/[0.08] p-4">
+        <span className="w-11 h-11 shrink-0 rounded-xl bg-emerald-500/15 text-emerald-500 flex items-center justify-center">
+          <CoupeBallIcon className="w-[22px] h-[22px]" />
+        </span>
+        <div className="flex-1 min-w-0">
+          <label htmlFor="coupe-dispo" className="block font-fut text-lg font-extrabold uppercase tracking-wide leading-none text-foreground">
+            Dispo pour un match
+          </label>
+          <p className="mt-1 text-xs leading-snug text-muted-foreground">
+            Les clients peuvent te défier depuis ta page. Coupé tout seul pendant tes rendez-vous.
+          </p>
+          {checked && busy && (
+            <p className="mt-1.5 inline-flex items-center gap-1.5 text-xs font-semibold text-amber-500" role="status">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-500" aria-hidden="true" />
+              En rendez-vous : les défis reprennent après.
+            </p>
+          )}
+        </div>
+        <Switch
+          id="coupe-dispo"
+          checked={checked}
+          onCheckedChange={toggle}
+          disabled={saving || loadingValue}
+          className="shrink-0 data-[state=checked]:bg-emerald-500"
+        />
+      </div>
+
+      {checked && unreachable && !saving && <CoupeReachNote onEnabled={onPushEnabled} />}
+
+      <div className="grid grid-cols-2 gap-2.5">
+        <div className="rounded-2xl bg-white/[0.04] border border-white/8 p-3.5">
+          <p className="font-fut text-[28px] font-extrabold leading-none tabular-nums text-foreground">{matches ?? '–'}</p>
+          <p className="mt-1.5 text-xs text-muted-foreground">
+            {matches === 1 ? 'match' : 'matchs'} · {coupeSeasonLabel(season).toLowerCase()}
+          </p>
+        </div>
+        <div className="rounded-2xl bg-white/[0.04] border border-white/8 p-3.5">
+          <p className="font-fut text-[28px] font-extrabold leading-none tabular-nums text-foreground">
+            {wins == null ? '–' : `${wins} – ${losses}`}
+          </p>
+          <p className="mt-1.5 text-xs text-muted-foreground">victoires, défaites</p>
+        </div>
+      </div>
+
+      <Link
+        to="/coupe"
+        className="h-11 rounded-xl flex items-center justify-center font-fut text-base font-extrabold uppercase tracking-[0.06em] active:opacity-90 transition-opacity"
+        style={{ background: COUPE_GOLD, color: '#1a1205' }}
+      >
+        Jouer à la Coupe
+      </Link>
+    </section>
+  );
+}
+
 /**
  * « Mon espace » d'un barber (/admin/me, page d'arrivée des barbers, 18 oct. 2026) : même
  * tableau de bord que le profil client — carte FUT du barber, prochain client et journée,
@@ -79,6 +282,14 @@ export default function BarberHome() {
     queryKey: ['employees'], staleTime: 5 * 60 * 1000, queryFn: fetchPublicBarbers,
   });
   const me = employees.find((e) => String(e.id) === String(user?.employee_id)) || null;
+
+  // La Coupe du Gang (29 oct. 2026) : rien tant que le jeu est coupé (`features.coupe`) ; points lus
+  // seulement pour un compte relié à une fiche (la carte FUT et l'interrupteur n'existent pas sinon)
+  const coupeOn = useCoupeEnabled();
+  const coupeMeQuery = useCoupeMe({ enabled: coupeOn && !!user?.employee_id });
+  const reduceMotion = useReducedMotion();
+  const coupeStats = coupeOn ? coupeMeQuery.data?.season_stats || null : null;
+  const coupeLine = coupeOn && coupeMeQuery.data ? coupeCardLine(coupeMeQuery.data.season_stats || {}) : null;
 
   const { data: skillCategories = [] } = useQuery({
     queryKey: ['skillCategories'],
@@ -186,7 +397,7 @@ export default function BarberHome() {
           className="flex flex-col items-center">
           <div className="glow-breathe" style={{ width: CARD_WIDTH * cardScale, height: CARD_HEIGHT * cardScale }}>
             <div style={{ width: CARD_WIDTH, transform: `scale(${cardScale})`, transformOrigin: 'top left', perspective: 1000 }}>
-              <BarberCard employee={me} stats={cardStats} overall={overallRating(cardStats)} bio={bio} />
+              <BarberCard employee={me} stats={cardStats} overall={overallRating(cardStats)} bio={bio} coupe={coupeLine} />
             </div>
           </div>
           <p className="text-center text-[10px] uppercase tracking-[0.25em] text-muted-foreground/45 mt-3 select-none">
@@ -197,6 +408,13 @@ export default function BarberHome() {
         <div className="rounded-2xl border border-amber-500/25 bg-amber-500/[0.06] p-4 text-xs text-amber-200/90">
           Ton compte n'est pas encore relié à une fiche barber : demande à l'admin de le faire dans Comptes barbers.
         </div>
+      )}
+
+      {/* La Coupe du Gang : « Dispo pour un match » (barber avec fiche, `PATCH /coupe/availability`) */}
+      {coupeOn && me && user?.role === 'barber' && (
+        <motion.div initial={reduceMotion ? false : { opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
+          <CoupeDispoCard employee={me} stats={coupeStats} season={coupeMeQuery.data?.season} />
+        </motion.div>
       )}
 
       {/* Ma journée */}

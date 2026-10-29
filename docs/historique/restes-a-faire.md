@@ -25,6 +25,17 @@
   - tests sous WebKit instables avec l'horloge simulée (`page.clock.install` gèle les animations de sortie des étapes) : nos tests restent en Chromium ;
   - les créneaux proposés par « Déplacer » (Mes rendez-vous) partent d'aujourd'hui : pour reculer un RDV lointain, passer par « Choisir une autre date » ; l'événement de calendrier ne dit pas « Pour Léo ».
 
+## La Coupe du Gang (29 oct. 2026, jeu ouvert sur le site)
+
+Source : `docs/fonctions/coupe-du-gang.md`, `coupe-du-gang-contrat.md` (sections 7 et 8), `coupe-du-gang-stores.md`.
+
+- **Essai réel à deux téléphones du jeu complet** (points écrits en base, classement, défi d'un barber par notification web, reprise après coupure, partage du lien par WhatsApp sur iPhone) : jamais fait sur de vrais appareils, seulement sur bancs locaux (Node, deux navigateurs, relais de latence) et par le prototype v1 du 29 oct. à 02:50.
+- **Barbers joignables** : un barber n'est « Dispo » que s'il a un abonnement push **web** ou la Coupe ouverte ; Dom et Romain n'ont aucune notification (Kevin sur le web) : leur faire activer les notifications de dhomebarber.fr, sinon on ne peut pas les défier.
+- **Avec le build 18** (le jeu arrive dans les apps) : notes de revue Apple (paragraphe prêt, 4 000 octets au plus) ; « Contenu de jeu » sur l'étiquette App Store et « Autres actions » dans Sécurité des données (Play) ; push de défi aussi vers les abonnements natifs et `reachable` qui les compte (`lib/coupeNotify.js`, `lib/coupeResults.js`) ; alerte admin d'un signalement vers `/admin/coupe` au lieu de `/admin` (`routes/coupe.js`) ; `/coupe-test` exclu du build ou décrit (règle 2.5.19) ; contrôle clavier iPad du champ « J'ai un code » et de la fiche « Signaler » ; iPad tourné en paysage (l'écran « Tourne ton téléphone » s'affiche).
+- **À faire valider par le propriétaire** (choix du chef du 29 oct., réversibles) : 5 min de jeu au plus (le meneur gagne, égalité = nul) ; abandon avant 20 s de jeu = match annulé ; match fini en moins de 10 s de jeu = amical. But : bloquer la combine « but contre son camp puis abandon » (1 800 points / heure démontrés) sans limiter le nombre de matchs.
+- **Non fait** : QR code du défi (un code à 4 chiffres le remplace, rien n'est promis) ; actions admin directement sur une paire suspecte (les clés sont dans `top_pairs`, l'écran ne les propose pas) ; niveau de carte Gang du défiant sur l'écran « Défi reçu ».
+- **Limite connue de l'anti-triche** : un téléphone modifié peut encore inventer, dans les 400 ms, une parade physiquement possible (« robot défenseur ») ; le compteur « buts en attente annulés » des lignes `[Coupe] fin de match` sert à le repérer.
+
 ## Échéances
 
 - **Certificat Pass Type ID** `pass.fr.dhomebarber.giftcard` valable jusqu'au **16 nov. 2027** : le renouveler avant (passé cette date, le serveur éteint seul `features.appleWallet`). Source : `docs/fonctions/cartes-cadeau-wallet.md`.
