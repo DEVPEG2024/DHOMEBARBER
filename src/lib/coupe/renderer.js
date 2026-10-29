@@ -25,7 +25,7 @@
  * initiales.
  */
 import {
-  W, H, GW, GL, GR, GD, SBW, SBD, BBW, BBD, BR, PR, POST, POSTS, KEEP_LIMIT, FINGER_OFFSET, boxOf,
+  W, H, GW, GL, GR, GD, SBW, SBD, BBW, BBD, BR, PR, POST, POSTS, KEEP_LIMIT, boxOf,
 } from './engine.js';
 // Chemin relatif (pas l'alias `@/`) : les vérifications de bout en bout chargent ce fichier dans Node
 import { COUPE_COLORS } from '../../components/coupe/palette.js';
@@ -51,6 +51,10 @@ const COUNT_S = 3;
 const INTRO_DIGITS_S = 2.5;
 // « GO ! » au coup d'envoi (passage de `count` à `live`, jamais après un engagement `ready`)
 const GO_S = 0.5;
+// Fin du match pendant la bannière de but ou « GO ! » : effacés en 0,15 s
+const END_FADE_S = 0.15;
+/** Opacité restante d'un effet coupé par la fin du match (`cut` : son âge à la fin), 1 sinon. */
+const endFade = (fx) => (fx.cut == null ? 1 : Math.max(0, 1 - (fx.t - fx.cut) / END_FADE_S));
 // Bande rouge inclinée de la bannière « BUT ! » (skewX(-8deg) de la maquette StadeAnimation)
 const BANNER_SKEW = Math.tan((-8 * Math.PI) / 180);
 
@@ -637,6 +641,15 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
     const phase = frame ? frame.phase : null;
     if (prevPhase === 'count' && phase === 'live') go = { t: 0 };
     prevPhase = phase;
+    // Fin du match : « FIN DU MATCH » (écran de jeu) prend la place. Une bannière de but encore là
+    // (adversaire parti pendant la célébration du but décisif, fin arrivée un peu tôt) ou « GO ! »
+    // s'effacent en 0,15 s (d'un coup en mouvement réduit) au lieu de rester sous « FIN DU MATCH »
+    if (phase === 'over') {
+      if (banner && banner.cut == null) banner.cut = reduced ? banner.t - END_FADE_S : banner.t;
+      if (go && go.cut == null) go.cut = reduced ? go.t - END_FADE_S : go.t;
+    }
+    if (banner && banner.cut != null && banner.t - banner.cut >= END_FADE_S) banner = null;
+    if (go && go.cut != null && go.t - go.cut >= END_FADE_S) go = null;
     shakeX = 0;
     shakeY = 0;
     if (shake > 0) {
@@ -864,7 +877,7 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
     }
     const c = ctx;
     c.save();
-    c.globalAlpha = a;
+    c.globalAlpha = a * endFade(go);
     c.translate(W / 2, H / 2);
     c.scale(k, k);
     c.textAlign = 'center';
@@ -888,7 +901,7 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
     const who = !twoPlayers && banner.scorer === 0 ? 'TU MARQUES' : `${players[banner.scorer].name.toUpperCase()} MARQUE`;
     const line = `${score[0]} – ${score[1]}`;
     c.save();
-    c.globalAlpha = a;
+    c.globalAlpha = a * endFade(banner);
     c.translate(W / 2, H / 2);
     if (twoPlayers && banner.scorer === 1) c.rotate(Math.PI);
     c.scale(reduced ? 1 : k, reduced ? 1 : k);
@@ -982,14 +995,6 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
     return screenToWorld(view, r.left, r.top, clientX, clientY);
   }
 
-  // Cible d'un joueur : un peu au-dessus du doigt pour que le pouce ne le cache pas (rien à la
-  // souris) ; pour le joueur du haut à deux, « au-dessus » est vers le bas de l'écran
-  function fingerTarget(clientX, clientY, pointerType, side = 0) {
-    const w = toWorld(clientX, clientY);
-    const off = pointerType === 'mouse' ? 0 : FINGER_OFFSET;
-    return { x: w.x, y: side === 1 ? w.y + off : w.y - off };
-  }
-
   function burst(x, y, n, big) {
     for (let k = 0; k < n; k++) {
       const a = Math.random() * TAU;
@@ -1017,7 +1022,6 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
   return {
     resize,
     toWorld,
-    fingerTarget,
     /**
      * Joueurs en repère local : [bas, haut], chacun { name, role, tag?, photo? }. Affiche leurs noms et le
      * cadre du score (pendant un match).

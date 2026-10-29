@@ -43,6 +43,8 @@ export const GAME_CSS = `
 .cdg-hud { position: relative; z-index: 18; display: flex; align-items: center; gap: 8px; height: 56px; flex: none; }
 .cdg-hud-label { flex: 1; min-width: 0; margin: 0; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   font: 700 15px/1.1 var(--cdg-display); letter-spacing: .12em; text-transform: uppercase; color: var(--cdg-gris-clair); text-shadow: ${TEXT_SHADOW}; }
+/* Petit écran (320 px) : « À deux sur ce téléphone », « Contre le salon · Apprenti » en entier */
+@media (max-width: 359px) { .cdg-hud-label { font-size: 13px; letter-spacing: .05em; } }
 .cdg-icon { width: 44px; height: 44px; flex: none; border-radius: 12px; border: 1px solid ${blanc(0.2)};
   background: ${noir(0.72)}; color: var(--cdg-blanc); display: grid; place-items: center; cursor: pointer; padding: 0; }
 .cdg-ping { display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-width: 58px; flex: none;
@@ -72,8 +74,11 @@ export const GAME_CSS = `
 .cdg-dim { position: fixed; inset: 0; z-index: 1; pointer-events: none; background: var(--cdg-noir); opacity: 0; }
 .cdg-root[data-stadium="on"][data-dim] .cdg-dim { opacity: .5; }
 /* Caméra en voyage (stade entier, zoom) : terrain dessiné, barre du haut et réactions effacés, et
-   hors d'atteinte du clavier et des lecteurs d'écran (visibility, après le fondu) */
-.cdg-root[data-stadium="on"]:not([data-play]) .cdg-canvas { opacity: 0; }
+   hors d'atteinte du clavier et des lecteurs d'écran (visibility, après le fondu). Image du stade
+   encore en chargement : canvas caché aussi (sinon l'ancien terrain dessiné, en gros plan, puis le
+   stade entier d'un coup) ; il revient avec son terrain dessiné si l'image n'est pas là au coup
+   d'envoi, et reste seulement quand l'image a échoué */
+.cdg-root:not([data-stadium="off"]):not([data-play]) .cdg-canvas { opacity: 0; }
 .cdg-root:not([data-play]) .cdg-hud,
 .cdg-root:not([data-play]) .cdg-reacts { opacity: 0; visibility: hidden; pointer-events: none; }
 
@@ -276,7 +281,10 @@ export const GAME_CSS = `
   .cdg-root[data-cam="pitch"] .cdg-camera { transition-duration: 1s; }
   .cdg-veil { transition: opacity .9s ease-in-out; }
   .cdg-dim { transition: opacity .4s ease; }
-  .cdg-canvas { transition: opacity .2s ease; }
+  /* Canvas : fondu seulement quand il apparaît (fin du zoom). Caché d'un coup (image du stade prête,
+     début du zoom arrière) : en fondu, joueurs, ballon et score restaient 0,2 s posés sur le stade
+     entier, deux terrains à l'écran */
+  .cdg-root[data-play] .cdg-canvas { transition: opacity .2s ease; }
   .cdg-hud, .cdg-reacts { transition: opacity .2s ease, visibility 0s; }
   .cdg-root:not([data-play]) .cdg-hud,
   .cdg-root:not([data-play]) .cdg-reacts { transition: opacity .2s ease, visibility 0s .2s; }
