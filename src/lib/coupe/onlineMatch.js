@@ -256,6 +256,7 @@ export const IDLE_UI = Object.freeze({
   roles: [],
   keys: [], // clés publiques (Signaler, Bloquer)
   photos: [], // [moi, adversaire] : photo d'un client (`start.photos`), null sinon
+  myName: null, // mon nom tel que le serveur le montre à l'adversaire (`hello.name`, jamais d'email)
   rankedHint: null, // les deux ont droit aux points : true / false, null inconnu (indicatif, la fin du match fait foi)
   result: null, // { won, winner (0 moi, 1 l'adversaire, null nul ou annulé), draw, score, forfeit, cancelled, reason, points }
   rematchAsked: false,
@@ -982,7 +983,7 @@ export class OnlineMatch {
 
   _onMessage(m) {
     switch (m.t) {
-      case 'hello': this._onHello(); break;
+      case 'hello': this._onHello(m); break;
       case 'pong': this._onPong(m); break;
       case 'room': this._onRoom(m); break;
       case 'invite': this._onInvite(m); break;
@@ -1784,9 +1785,12 @@ export class OnlineMatch {
   }
 
   // `hello` : compte accepté. La demande part alors (ou la reprise), puis les ping de l'horloge
-  _onHello() {
+  _onHello(m) {
     if (this.helloSeen) return;
     this.helloSeen = true;
+    // Nom montré à l'adversaire (image du défi de la salle d'attente) : celui du serveur
+    const myName = typeof m?.name === 'string' ? m.name.trim().slice(0, 60) : '';
+    if (myName && myName !== this.ui.myName) this._set({ myName });
     clearTimeout(this.timers.reply);
     this.lastPongAt = performance.now();
     this.lastStateAt = performance.now();

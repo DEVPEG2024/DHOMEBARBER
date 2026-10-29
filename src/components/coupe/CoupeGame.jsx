@@ -741,6 +741,7 @@ export default function CoupeGame({
           invited={ui.invited}
           roomAt={ui.roomAt}
           reconnecting={!!ui.reconnecting}
+          me={{ name: ui.myName || '', role: user?.role || 'user', photo: myPhoto }}
           onCancel={exit}
         />
       );

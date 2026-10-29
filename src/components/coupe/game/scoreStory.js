@@ -24,14 +24,14 @@ import { coupePointsLabel } from './format';
 export const SCORE_STORY_WIDTH = 1080;
 export const SCORE_STORY_HEIGHT = 1920;
 
-const FUT = '"Barlow Condensed", "Arial Narrow", sans-serif';
-const BODY = 'Inter, system-ui, -apple-system, sans-serif';
+export const FUT = '"Barlow Condensed", "Arial Narrow", sans-serif';
+export const BODY = 'Inter, system-ui, -apple-system, sans-serif';
 const SALON_ADDRESS = '3 Rue du Bois Arquet · Douvaine';
 const SHARE_TEXT = "Mon match à la Coupe du Gang · D'Home Barber, Douvaine";
 const IMAGE_TIMEOUT_MS = 8000;
 const FONT_TIMEOUT_MS = 3000;
 /** Noir des fonds (`C.noir`) avec une opacité. */
-const NOIR = (alpha) => `rgba(11, 11, 12, ${alpha})`;
+export const NOIR = (alpha) => `rgba(11, 11, 12, ${alpha})`;
 
 // Lames de rasoir d'une victoire (maquette « Après-match : victoire »), posées une fois pour toutes
 // hors des textes, du logo de la tribune et des bannières « LA COUPE DU GANG » des côtés
@@ -44,7 +44,7 @@ const BLADES = [
 
 const withTimeout = (promise, ms) => Promise.race([promise, new Promise((resolve) => setTimeout(resolve, ms))]);
 
-function loadImage(src) {
+export function loadImage(src) {
   return new Promise((resolve) => {
     if (!src || typeof Image === 'undefined') return resolve(null);
     const img = new Image();
@@ -55,7 +55,7 @@ function loadImage(src) {
   });
 }
 
-async function loadFonts() {
+export async function loadFonts() {
   if (typeof document === 'undefined' || !document.fonts?.load) return;
   const faces = [`800 40px ${FUT}`, `700 40px ${FUT}`, `500 36px ${BODY}`, `600 36px ${BODY}`];
   try {
@@ -78,7 +78,7 @@ function spacedWidth(ctx, text, spacing) {
 }
 
 /** Texte (espacement des lettres possible) aligné à gauche / au centre / à droite de `x`. */
-function drawText(ctx, text, x, baseline, { spacing = 0, align = 'left' } = {}) {
+export function drawText(ctx, text, x, baseline, { spacing = 0, align = 'left' } = {}) {
   const total = spacedWidth(ctx, text, spacing);
   let cx = align === 'center' ? x - total / 2 : align === 'right' ? x - total : x;
   ctx.textAlign = 'left';
@@ -95,7 +95,7 @@ function drawText(ctx, text, x, baseline, { spacing = 0, align = 'left' } = {}) 
 }
 
 /** Une ligne en plusieurs couleurs (« LA COUPE DU GANG », « COUPE » en or), même espacement. */
-function drawSegments(ctx, segments, x, baseline, { spacing = 0, align = 'center' } = {}) {
+export function drawSegments(ctx, segments, x, baseline, { spacing = 0, align = 'center' } = {}) {
   const total = segments.reduce((w, s) => w + spacedWidth(ctx, s.text, spacing), 0);
   let cx = align === 'center' ? x - total / 2 : align === 'right' ? x - total : x;
   for (const s of segments) {
@@ -105,7 +105,7 @@ function drawSegments(ctx, segments, x, baseline, { spacing = 0, align = 'center
 }
 
 /** Ombre portée le temps d'un dessin (lisibilité des textes posés sur le terrain). */
-function withShadow(ctx, { color = 'rgba(0, 0, 0, .85)', blur = 14, x = 0, y = 2 }, draw) {
+export function withShadow(ctx, { color = 'rgba(0, 0, 0, .85)', blur = 14, x = 0, y = 2 }, draw) {
   ctx.save();
   ctx.shadowColor = color;
   ctx.shadowBlur = blur;
@@ -116,7 +116,7 @@ function withShadow(ctx, { color = 'rgba(0, 0, 0, .85)', blur = 14, x = 0, y = 2
 }
 
 /** Plus grande taille de police (≤ max) pour que le texte tienne dans `maxWidth`. */
-function fitFont(ctx, text, { weight, family, max, min, maxWidth, spacingEm = 0 }) {
+export function fitFont(ctx, text, { weight, family, max, min, maxWidth, spacingEm = 0 }) {
   let size = max;
   for (; size > min; size -= 2) {
     ctx.font = `${weight} ${size}px ${family}`;
@@ -126,14 +126,14 @@ function fitFont(ctx, text, { weight, family, max, min, maxWidth, spacingEm = 0 
   return size;
 }
 
-function ellipsize(ctx, text, maxWidth) {
+export function ellipsize(ctx, text, maxWidth) {
   if (ctx.measureText(text).width <= maxWidth) return text;
   let t = text;
   while (t.length > 1 && ctx.measureText(`${t}…`).width > maxWidth) t = t.slice(0, -1);
   return `${t.trimEnd()}…`;
 }
 
-function roundRect(ctx, x, y, w, h, r) {
+export function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath();
   ctx.moveTo(x + r, y);
   ctx.arcTo(x + w, y, x + w, y + h, r);
@@ -382,7 +382,7 @@ function drawStory(story, { stadium }) {
   return canvas;
 }
 
-function toBlob(canvas) {
+export function toBlob(canvas) {
   return new Promise((resolve, reject) => {
     try {
       // JPEG (fond toujours opaque) : environ 400 Ko au lieu de 2,5 Mo en PNG avec la photo du stade
@@ -400,7 +400,7 @@ export async function renderScoreStory(story) {
 }
 
 /** Contenu base64 d'un blob, sans le préfixe `data:…;base64,` (format attendu par Filesystem). */
-function blobToBase64(blob) {
+export function blobToBase64(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {

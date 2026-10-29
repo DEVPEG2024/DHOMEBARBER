@@ -7,6 +7,7 @@
  */
 import { isNative } from '@/lib/capacitor';
 import { coupeChallengeUrl } from '@/lib/coupe/coupeApi';
+import { shareChallengeImage } from './challengeImage';
 
 /** Contenu du partage : titre, texte (avec le code à 4 chiffres) et lien du défi. */
 export function challengeShareContent({ link, code }) {
@@ -19,9 +20,17 @@ export function challengeShareContent({ link, code }) {
   };
 }
 
-/** Rend 'shared' | 'cancelled' | 'copied' | 'failed'. */
-export async function shareChallenge({ link, code }) {
+/**
+ * Rend 'shared' | 'cancelled' | 'copied' | 'failed'. `image` : image du défi déjà prête
+ * (challengeImage.js), partagée avec le lien dans le texte ; sans elle, ou sur un appareil qui ne
+ * partage pas de fichier, le lien part seul.
+ */
+export async function shareChallenge({ link, code, image = null }) {
   const { title, text, url } = challengeShareContent({ link, code });
+  if (image) {
+    const r = await shareChallengeImage({ blob: image, title, message: `${text}\n${url}` });
+    if (r) return r;
+  }
   if (isNative) {
     try {
       const { Share } = await import('@capacitor/share');

@@ -142,7 +142,7 @@ test.describe('La Coupe du Gang : en ligne (protocole v2)', () => {
 
     // Salle d'attente : le terrain est dessiné une fois, aucune image demandée ensuite
     const images = await page.evaluate(() => window.__images);
-    await page.getByRole('button', { name: 'Partager le lien' }).click();
+    await page.getByRole('button', { name: 'Envoyer le défi' }).click();
     await expect.poll(() => page.evaluate(() => window.__partages)).toEqual([{
       title: 'La Coupe du Gang',
       text: `Je te défie à la Coupe du Gang ! Code du match : ${CODE_MATCH}`,
@@ -819,7 +819,7 @@ test.describe('La Coupe du Gang à 1366 px', () => {
     await page.goto('/coupe');
     await page.getByRole('button', { name: /^Défier un ami/ }).click();
     await expect(page.getByText(CODE_MATCH, { exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Partager le lien' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Envoyer le défi' })).toBeVisible();
     await attendreSansDebordement(page, 'la salle d\'attente');
 
     api.coupe.rejoint();
@@ -1072,6 +1072,68 @@ async function noterLectures(page) {
     };
   });
 }
+
+test.describe('La Coupe du Gang : défi à un ami en image', () => {
+  test('« Envoyer le défi » : image 1080 × 1350 (nom, code) partagée avec le lien dans le texte', async ({ page, connecter }) => {
+    await page.addInitScript(() => {
+      window.__partages = [];
+      Object.defineProperty(navigator, 'canShare', { configurable: true, value: (d) => !!d && Array.isArray(d.files) });
+      Object.defineProperty(navigator, 'share', {
+        configurable: true,
+        value: (donnees) => { window.__partages.push(donnees); return Promise.resolve(); },
+      });
+    });
+    await connecter(CLIENT);
+    await page.goto('/coupe');
+    await page.getByRole('button', { name: /^Défier un ami/ }).click();
+    await expect(page.getByText(CODE_MATCH, { exact: true })).toBeVisible();
+    // Image préparée dès l'ouverture de la salle (300 ms, puis le dessin)
+    await page.waitForTimeout(1500);
+    await page.getByRole('button', { name: 'Envoyer le défi' }).click();
+    await expect.poll(() => page.evaluate(() => window.__partages.length)).toBe(1);
+    const partage = await page.evaluate(async () => {
+      const d = window.__partages[0];
+      const f = d.files[0];
+      const bmp = await createImageBitmap(f);
+      return { titre: d.title, texte: d.text, url: d.url ?? null, nom: f.name, type: f.type, largeur: bmp.width, hauteur: bmp.height };
+    });
+    expect(partage).toEqual({
+      titre: 'La Coupe du Gang',
+      texte: `Je te défie à la Coupe du Gang ! Code du match : ${CODE_MATCH}\nhttps://dhomebarber.fr/coupe?defi=${LIEN_MATCH}`,
+      url: null,
+      nom: 'defi-coupe-du-gang.jpg',
+      type: 'image/jpeg',
+      largeur: 1080,
+      hauteur: 1350,
+    });
+    if (process.env.CAPTURE_DEFI) {
+      const octets = await page.evaluate(async () => Array.from(new Uint8Array(await window.__partages[0].files[0].arrayBuffer())));
+      (await import('node:fs')).writeFileSync(process.env.CAPTURE_DEFI, Buffer.from(octets));
+    }
+  });
+
+  test('appareil qui ne partage pas d\'image : le lien part seul, comme avant', async ({ page, connecter }) => {
+    await page.addInitScript(() => {
+      window.__partages = [];
+      Object.defineProperty(navigator, 'canShare', { configurable: true, value: () => false });
+      Object.defineProperty(navigator, 'share', {
+        configurable: true,
+        value: (donnees) => { window.__partages.push(donnees); return Promise.resolve(); },
+      });
+    });
+    await connecter(CLIENT);
+    await page.goto('/coupe');
+    await page.getByRole('button', { name: /^Défier un ami/ }).click();
+    await expect(page.getByText(CODE_MATCH, { exact: true })).toBeVisible();
+    await page.waitForTimeout(1500);
+    await page.getByRole('button', { name: 'Envoyer le défi' }).click();
+    await expect.poll(() => page.evaluate(() => window.__partages)).toEqual([{
+      title: 'La Coupe du Gang',
+      text: `Je te défie à la Coupe du Gang ! Code du match : ${CODE_MATCH}`,
+      url: `https://dhomebarber.fr/coupe?defi=${LIEN_MATCH}`,
+    }]);
+  });
+});
 
 test.describe('La Coupe du Gang : musique de tribune', () => {
   test('lancée au coup d\'envoi, arrêtée avec le son du jeu, relancée avec lui', async ({ page, api, connecter }) => {
