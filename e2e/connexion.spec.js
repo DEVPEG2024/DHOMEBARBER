@@ -65,6 +65,10 @@ test.describe('Connexion', () => {
     // tôt, une requête encore en route recevait le 401 avant le tap sur « Profil », la page partait
     // seule vers la connexion et le tap ne trouvait plus le lien (vérification GitHub, 21 oct. 2026)
     await expect.poll(() => api.requetesVers('GET', '/gang-card/me').length).toBeGreaterThan(0);
+    // Section « Jeux » (La Coupe du Gang, drapeau allumé par défaut dans l'API simulée) : ses points
+    // partent juste après la carte Gang ; révoquée avant, cette requête recevait le 401 et la page
+    // partait seule vers la connexion (vérification GitHub, 29 oct. 2026)
+    await expect.poll(() => api.requetesVers('GET', '/coupe/me').length).toBeGreaterThan(0);
 
     // Le jeton n'est plus accepté par le serveur : la prochaine requête répond 401
     api.revoquerSessions();
