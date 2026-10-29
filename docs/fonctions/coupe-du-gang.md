@@ -43,7 +43,7 @@
 ## Règles du match
 
 - Terrain vertical (téléphone tenu droit), vu du dessus ; ta cage toujours en bas. Bords = panneaux lumineux « D'Home Barber » où le ballon rebondit.
-- Chaque joueur = un rond avec sa photo, qui suit le doigt **dans sa moitié** (jamais au-delà de la ligne médiane), placé un peu au-dessus du doigt pour que le pouce ne le cache pas.
+- Chaque joueur = un rond avec sa photo, qui suit le doigt **dans sa moitié** (jamais au-delà de la ligne médiane). **Doigt posé sur son joueur (ou à 20 unités de son rond) : le joueur ne bouge pas**, il garde ensuite le même écart avec le doigt (demande du propriétaire du 29 oct. 2026 : avant, il sautait 34 unités devant le doigt). Doigt posé ailleurs : le joueur y va, un peu au-dessus du doigt pour que le pouce ne le cache pas. Souris : le pointeur lui-même. Code : `src/lib/coupe/finger.js` (`fingerOffset`), appelé par `CoupeGame.jsx` quand le doigt se pose ; astuce du premier match « Pose ton doigt sur ton joueur » (35 caractères au plus : à 320 px, deux lignes cachaient le pion adverse).
 - **Interdit d'entrer dans sa petite surface** : on ne gare pas son joueur devant sa cage.
 - Ballon gardé plus de 5 s dans une moitié : rendu à l'adversaire (anti-jeu).
 - Après un but, le ballon est posé devant celui qui l'a encaissé.

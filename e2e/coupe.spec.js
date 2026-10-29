@@ -12,6 +12,7 @@ import { CODE_MATCH, LIEN_MATCH, LIEN_DEFI, LIEN_INVITE, CLE_KEVIN } from './sup
 import { attendreSansDebordement, toast } from './support/outils.js';
 import { LocalMatch } from '../src/lib/coupe/localMatch.js';
 import { MS, MG, viewOf, screenToWorld } from '../src/lib/coupe/renderer.js';
+import { fingerOffset, GRAB_RADIUS } from '../src/lib/coupe/finger.js';
 
 const titre = (page) => page.getByRole('heading', { name: 'La Coupe du Gang' });
 /** Titre de l'accueil de la Coupe (/coupe). */
@@ -467,14 +468,14 @@ test.describe('La Coupe du Gang : fins de match et refus du serveur', () => {
 
   test('match trop court : amical, et l\'astuce du début ne reste pas sur l\'écran de fin', async ({ page, api, connecter }) => {
     const cnx = await rejoindreParCode(page, api, connecter);
-    await expect(page.getByText('Ton joueur suit ton doigt, juste au-dessus')).toBeVisible();
+    await expect(page.getByText('Pose ton doigt sur ton joueur')).toBeVisible();
     cnx.envoyer({
       t: 'end', winner: 1, sc: [0, 3], forfeit: false, cancelled: false, reason: 'too_short',
       points: { ranked: false, reason: 'too_short', delta: [0, 0], total: 42, rank: 8, rank_before: 8 },
     });
     await expect(page.getByRole('heading', { name: 'Victoire' })).toBeVisible();
     await expect(page.getByText('Match trop court pour compter des points (moins de 10 s de jeu)', { exact: true })).toBeVisible();
-    await expect(page.getByText('Ton joueur suit ton doigt, juste au-dessus')).toHaveCount(0);
+    await expect(page.getByText('Pose ton doigt sur ton joueur')).toHaveCount(0);
   });
 
   test('deux comptes du salon : ils ne peuvent pas s\'affronter (`salon_vs_salon`)', async ({ page, api, connecter }) => {
@@ -891,6 +892,25 @@ function chercherFrappe(cadre, alea) {
   return null;
 }
 
+test.describe('La Coupe du Gang : le doigt et son joueur', () => {
+  test('doigt posé sur son joueur : il ne bouge pas ; ailleurs : 34 unités devant le doigt', () => {
+    const bas = { x: 180, y: 540 };
+    const haut = { x: 180, y: 100 };
+    // Sur son joueur, même un peu à côté : la cible est le joueur lui-même, l'écart est gardé
+    expect(fingerOffset({ x: 180, y: 540 }, bas, 'touch', 0)).toEqual({ dx: 0, dy: 0 });
+    expect(fingerOffset({ x: 190, y: 560 }, bas, 'touch', 0)).toEqual({ dx: -10, dy: -20 });
+    expect(fingerOffset({ x: 180, y: 120 }, haut, 'touch', 1)).toEqual({ dx: 0, dy: -20 });
+    const pris = fingerOffset({ x: 180 + GRAB_RADIUS, y: 540 }, bas, 'pen', 0);
+    expect(pris).toEqual({ dx: -GRAB_RADIUS, dy: 0 });
+    // Ailleurs dans sa moitié : devant le doigt, vers le milieu du terrain
+    expect(fingerOffset({ x: 181 + GRAB_RADIUS, y: 540 }, bas, 'touch', 0)).toEqual({ dx: 0, dy: -34 });
+    expect(fingerOffset({ x: 60, y: 300 }, haut, 'touch', 1)).toEqual({ dx: 0, dy: 34 });
+    expect(fingerOffset({ x: 60, y: 600 }, null, 'touch', 0)).toEqual({ dx: 0, dy: -34 });
+    // Souris : le pointeur lui-même
+    expect(fingerOffset({ x: 180, y: 600 }, bas, 'mouse', 0)).toEqual({ dx: 0, dy: 0 });
+  });
+});
+
 test.describe('La Coupe du Gang : sans réseau', () => {
   test('contre le salon : un but en déplaçant la souris', async ({ page, api, connecter }) => {
     // Hasard figé : le salon joue toujours pareil, et ce test rejoue la même partie de son côté
@@ -935,10 +955,12 @@ test.describe('La Coupe du Gang : sans réseau', () => {
     await page.goto('/coupe-test');
     await page.getByRole('button', { name: /^À deux sur ce téléphone/ }).click();
     await expect(page.getByText('À deux sur ce téléphone', { exact: true })).toBeVisible();
-    await expect(page.getByText('Chacun pose le doigt dans sa moitié')).toBeVisible();
+    await expect(page.getByText('Chacun pose le doigt sur son joueur')).toBeVisible();
     expect(api.coupe.connexions).toEqual([]);
 
-    // Deux doigts (le joueur se place 34 unités devant le doigt, vers le milieu du terrain)
+    // Deux doigts : celui du bas loin de son joueur (le joueur se place 34 unités devant le doigt,
+    // vers le milieu du terrain) ; celui du haut posé sur son joueur, qui ne bouge pas puis le suit
+    // à la même distance (src/lib/coupe/finger.js)
     const cadre = await cadreDuTerrain(page);
     const vue = viewOf(cadre.width, cadre.height);
     const ecran = (x, y) => ({ clientX: cadre.left + vue.ox + (x + MS) * vue.s, clientY: cadre.top + vue.oy + (y + MG) * vue.s });
@@ -946,11 +968,11 @@ test.describe('La Coupe du Gang : sans réseau', () => {
       pointerId, pointerType: 'touch', isPrimary: pointerId === 1, bubbles: true, cancelable: true, ...p,
     });
     await doigt('pointerdown', 1, ecran(30, 600 + 34)); // joueur du bas : tout à gauche, loin du ballon
-    await doigt('pointerdown', 2, ecran(180, 150 - 34)); // joueur du haut : au-dessus du ballon
+    await doigt('pointerdown', 2, ecran(180, 100)); // sur le joueur du haut, chez lui au-dessus du ballon
     await expect(jeu(page)).toHaveAttribute('data-phase', 'live', { timeout: 6000 });
-    await doigt('pointermove', 2, ecran(180, 300 - 34)); // le joueur du haut fonce vers le bas
+    await doigt('pointermove', 2, ecran(180, 300)); // le joueur du haut fonce vers le bas
     await expect(page.getByText('Score : Joueur du bas 0 – 1 Joueur du haut')).toBeAttached();
-    await doigt('pointerup', 2, ecran(180, 300 - 34));
+    await doigt('pointerup', 2, ecran(180, 300));
     await doigt('pointerup', 1, ecran(30, 600 + 34));
   });
 

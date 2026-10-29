@@ -9,6 +9,7 @@ import { createRenderer, isSalonRole } from '@/lib/coupe/renderer';
 import { createSound, buzz } from '@/lib/coupe/sound';
 import { OnlineMatch, IDLE_UI, photoUrlOrNull, readPendingResume } from '@/lib/coupe/onlineMatch';
 import { LocalMatch } from '@/lib/coupe/localMatch';
+import { fingerOffset } from '@/lib/coupe/finger';
 import { COUPE_ENABLED_KEY, fetchCoupeEnabled, invalidateCoupe, useCoupeMusic } from '@/lib/coupe/coupeApi';
 import { COUPE_PAUSED_TEXT } from './coupeErrors';
 import GameStyles from './game/GameStyles';
@@ -77,6 +78,10 @@ const later = (set, fn, ms) => {
   return id;
 };
 
+// Aucun doigt posé : camp de chaque doigt, écart doigt → joueur fixé quand il s'est posé, doigt qui
+// mène chaque camp
+const noPointers = () => ({ map: new Map(), offsets: new Map(), active: [null, null] });
+
 /** L'adversaire s'est déconnecté : « Kevin s'est déconnecté : 8 s ». */
 function AwayNotice({ name, until }) {
   const left = useSecondsLeft(until);
@@ -123,7 +128,7 @@ export default function CoupeGame({
   const loopRef = useRef({ raf: 0, last: 0, statT: 0, timeLeft: null });
   const kickRef = useRef(() => {});
   // Doigts posés : id → camp ; le dernier posé de chaque camp mène son joueur
-  const pointersRef = useRef({ map: new Map(), active: [null, null] });
+  const pointersRef = useRef(noPointers());
   const timersRef = useRef(new Set());
   const taughtRef = useRef(false);
   const propsRef = useRef({ onExit, onFinished, action });
@@ -254,7 +259,7 @@ export default function CoupeGame({
     kickRef.current = kick;
 
     const resetPointers = () => {
-      pointersRef.current = { map: new Map(), active: [null, null] };
+      pointersRef.current = noPointers();
     };
 
     const onEvent = (type, data) => {
@@ -278,7 +283,7 @@ export default function CoupeGame({
           // L'astuce attend le terrain (après l'avant-match), sinon personne ne la verrait
           if (!taughtRef.current) {
             taughtRef.current = true;
-            firstHintRef.current = isLocal ? 'Chacun pose le doigt dans sa moitié' : 'Ton joueur suit ton doigt, juste au-dessus';
+            firstHintRef.current = isLocal ? 'Chacun pose le doigt sur son joueur' : 'Pose ton doigt sur ton joueur';
           }
           kick();
           break;
@@ -473,7 +478,7 @@ export default function CoupeGame({
     const m = matchRef.current;
     if (!m) return;
     m.setPaused(offPaused);
-    if (offPaused) pointersRef.current = { map: new Map(), active: [null, null] };
+    if (offPaused) pointersRef.current = noPointers();
     else kickRef.current();
   }, [online, offPaused]);
 
@@ -550,7 +555,7 @@ export default function CoupeGame({
   // « Retour » ramène à l'accueil
   const abandon = () => {
     setConfirmQuit(false);
-    pointersRef.current = { map: new Map(), active: [null, null] };
+    pointersRef.current = noPointers();
     matchRef.current?.abandon();
   };
 
@@ -615,13 +620,16 @@ export default function CoupeGame({
     return m.started && !m.paused && m.phase !== 'over';
   };
 
+  // Cible = doigt + l'écart fixé quand il s'est posé (finger.js : posé sur son joueur, celui-ci ne
+  // bouge pas) ; souris qui survole sans clic : le pointeur lui-même
   const aim = (side, e) => {
     const r = rendererRef.current;
     const m = matchRef.current;
     if (!r || !m) return;
-    const t = r.fingerTarget(e.clientX, e.clientY, e.pointerType, side);
-    if (online) m.setTarget(t.x, t.y);
-    else m.setTarget(side, t.x, t.y);
+    const w = r.toWorld(e.clientX, e.clientY);
+    const o = pointersRef.current.offsets.get(e.pointerId) || fingerOffset(null, null, e.pointerType, side);
+    if (online) m.setTarget(w.x + o.dx, w.y + o.dy);
+    else m.setTarget(side, w.x + o.dx, w.y + o.dy);
   };
 
   const hold = (side, down) => {
@@ -634,14 +642,12 @@ export default function CoupeGame({
   const onPointerDown = (e) => {
     if (!canControl()) return;
     e.preventDefault();
-    let side = 0;
-    if (isLocal) {
-      const w = rendererRef.current?.toWorld(e.clientX, e.clientY);
-      side = w && w.y < H / 2 ? 1 : 0;
-    }
+    const w = rendererRef.current?.toWorld(e.clientX, e.clientY) || null;
+    const side = isLocal && w && w.y < H / 2 ? 1 : 0;
     const P = pointersRef.current;
     P.map.delete(e.pointerId);
     P.map.set(e.pointerId, side);
+    P.offsets.set(e.pointerId, fingerOffset(w, matchRef.current?.getFrame()?.paddles?.[side], e.pointerType, side));
     P.active[side] = e.pointerId;
     try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* capture impossible : on suit quand même */ }
     hold(side, true);
@@ -665,6 +671,7 @@ export default function CoupeGame({
     const side = P.map.get(e.pointerId);
     if (side === undefined) return;
     P.map.delete(e.pointerId);
+    P.offsets.delete(e.pointerId);
     if (P.active[side] !== e.pointerId) return;
     // Téléphone tenu à deux mains : le dernier doigt encore posé du même camp prend le relais
     let next = null;
