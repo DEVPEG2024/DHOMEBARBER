@@ -15,6 +15,13 @@
 - **Aucun lot** : seulement un classement (donc pas de concours au sens de la règle Apple 5.3).
 - Match à deux sur un seul téléphone : amical, sans points (recommandation non contestée).
 
+## Décisions du propriétaire (29 oct. 2026)
+
+- Saison = un mois civil de Paris ; pion d'un barber = son initiale + des ciseaux (jamais sa photo en rond) ; « Dispo » coupé tout seul pendant les rendez-vous du barber (propositions validées par le « go »).
+- **Tous les matchs comptent** : ni limite par adversaire ni plafond par jour (remplace les garde-fous proposés le 28 oct.). Reste la condition d'avoir une carte Gang pour un client. Risque assumé : deux complices peuvent se faire gagner des points ; prévoir une vue admin des paires qui jouent le plus ensemble.
+- **Une seule ligne « D'Home Barber »** au classement pour tous les comptes admin (points additionnés).
+- **Interrupteur à part** pour figurer au classement de la Coupe (indépendant de celui du classement Gang).
+
 ## Règles du match
 
 - Terrain vertical (téléphone tenu droit), vu du dessus ; ta cage toujours en bas. Bords = panneaux lumineux « D'Home Barber » où le ballon rebondit.
@@ -42,7 +49,7 @@ On ne cherche jamais un client par son nom (pas d'oracle sur l'identité).
 ## Garde-fous
 
 - Points seulement avec une **carte Gang** (au moins une visite réelle au salon) : un faux compte ne peut pas gonfler un ami. Sans carte : matchs amicaux.
-- Contre un même adversaire, points au **premier match du jour** seulement ; au plus **5 matchs à points par jour** par joueur.
+- ~~Contre un même adversaire, points au premier match du jour seulement ; au plus 5 matchs à points par jour~~ : retiré le 29 oct. 2026, **tous les matchs comptent** (décision du propriétaire). `lib/coupePoints.js` (`matchCounts`, `DAILY_RANKED_MAX`) est à aligner avant de brancher les points.
 - Le serveur arbitre : il calcule le ballon, compte les buts, plafonne la vitesse des joueurs. Le téléphone n'envoie que la position du doigt.
 - Pas de discussion, seulement des réactions toutes faites. Invitations par notification jamais entre 21:00 et 08:00, avec quota par compte.
 - Suppression de compte : matchs et points effacés (check-list des entités, point 4).

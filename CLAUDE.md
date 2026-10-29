@@ -126,7 +126,7 @@ curl -s -o /dev/null -w "%{http_code}\n" https://dhomebarber-api-3aabb8313cb6.he
 - **iPhone Duo : le build 17 est encore compilé avec Xcode 26.3 (kit iOS 26.2)**, l'app reste réduite avec des bandes noires sur l'écran intérieur déplié. Pour le remplir : macOS ≥ 26.6 (ce Mac : 26.5.1 au 26 oct., la mise à jour redémarre le Mac), puis Xcode 27.1, puis un build 18 vérifié sur le simulateur iPhone Duo (plié, déplié, clavier). Détail : `docs/historique/restes-a-faire.md`.
 - **Scripts d'envoi** (client de l'API App Store Connect, soumission, mise en production Play, `exportOptions.plist`) : `~/store-watch/envoi/`, hors du dossier temporaire des sessions (effacé à chaque redémarrage). Copier `submit109.mjs` / `play-promote-18.mjs` en changeant les numéros.
 - **Remontée des erreurs déclarée aux deux stores le 21 oct. 2026** : App Store « Données de plantage » (fonctionnement de l'app, liées, publiée) ; Play « Journaux de plantage » (collectés, non partagés, facultatifs, fonctionnement de l'appli et analyse). Toute nouvelle donnée collectée suit la même voie (règle des stores plus bas).
-- **Après cette revue** : nettoyer les avis, publications et RDV de démonstration du compte `reviewer@dhomebarber.fr`, sans supprimer le compte (règle de nettoyage plus bas). La carte cadeau de démonstration `DHB-LTWB-WDEZ` n'existe déjà plus (constaté le 21 oct.) : les notes de revue de la 1.0.8 et de la 1.0.9 ne la promettent plus.
+- **Compte de démonstration** : contrôlé le 29 oct. 2026 après la revue de la 1.0.9, rien à nettoyer (règle de nettoyage plus bas, à refaire après chaque revue).
 - **Surveillance** : LaunchAgent `~/store-watch` (toutes les 3 h, se décharge seul, messages tirés de `IOS_VERSION` / `ANDROID_VERSION`) : terminée le 27 oct. 2026 (les deux versions en ligne), à relancer au prochain envoi. Rien ne tourne quand le Mac dort.
 - **Chrome dédié aux consoles** (Apple et Google, pilotable par CDP, port 9333) : `open -na "Google Chrome" --args --remote-debugging-port=9333 --user-data-dir="$HOME/Library/Application Support/DHB Chrome Consoles"` ; sessions App Store Connect et Play Console ouvertes par l'utilisateur le 21 oct. 2026 (profil hors dossier temporaire : il survit aux redémarrages).
 - **Snap** : revue approuvée ; reste *Push to Production* dans le portail puis le jeton de production dans Admin → Filtres Snap → Camera Kit (sans déploiement). Les filtres restent éteints tant que la lentille n'a pas d'effet.
@@ -396,13 +396,13 @@ Chaque ligne est un invariant : la casser réintroduit un bug déjà corrigé ou
 - Export comptable des cartes cadeau : format à voir plus tard (21 oct. 2026).
 - Réservation pour un proche : libellé « Un proche », visite comptée sur la carte Gang du parent, plafond de 6 RDV à venir gardé, pas de réservation groupée en un passage (24 oct. 2026).
 - L'admin s'adresse aux clients sous le nom « D'Home Barber », marqué d'une petite étoile bleue, sans badge écrit (26 oct. 2026).
-- La Coupe du Gang (28 oct. 2026) : foot façon air hockey en temps réel, premier à 3 buts ; victoire +3, défaite −1 en Points de Coupe **séparés du niveau Gang** ; l'admin joue sous « D'Home Barber » ; barbers « Dispo pour un match » ; aucun lot, seulement un classement. Détail : `docs/fonctions/coupe-du-gang.md`.
+- La Coupe du Gang (28 oct. 2026) : foot façon air hockey en temps réel, premier à 3 buts ; victoire +3, défaite −1 en Points de Coupe **séparés du niveau Gang** ; l'admin joue sous « D'Home Barber » (une seule ligne au classement pour tous les comptes admin) ; barbers « Dispo pour un match » ; aucun lot, seulement un classement ; **tous les matchs comptent** (ni limite par adversaire ni par jour, 29 oct.) ; interrupteur à part pour figurer au classement de la Coupe ; saison = un mois. Détail : `docs/fonctions/coupe-du-gang.md`.
 
 ## Restes à faire (les plus importants)
 
 Liste complète, dédoublonnée et datée : `docs/historique/restes-a-faire.md`.
 
-1. iOS 1.0.9 / Android 1.0.17 approuvées et en ligne (27 oct.) : nettoyer maintenant les contenus de démonstration du compte `reviewer@dhomebarber.fr` (celui de la revue de la 1.0.8 n'a pas été fait non plus).
+1. La Coupe du Gang : prototype réseau validé sur deux téléphones le 29 oct. 2026 ; reste le jeu complet (points, classement, défis, anti-triche serveur, Signaler / Bloquer, build 18). Voir `docs/fonctions/coupe-du-gang.md`.
 2. Snap : *Push to Production* et jeton de production ; la lentille « DHB Couleur » est vide, à refaire.
 3. Activité clients : retirer la seconde requête des annulations sans auteur vers le 27 oct. 2026.
 4. Dom et Romain sans notifications sur leur téléphone, Kevin sur le web seulement : leur faire activer l'app.
