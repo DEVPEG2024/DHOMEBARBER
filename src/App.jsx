@@ -43,6 +43,8 @@ const Partners = React.lazy(() => import('@/pages/Partners'));
 const Favorites = React.lazy(() => import('@/pages/Favorites'));
 // Carte Gang du client (lazy)
 const GangCardPage = React.lazy(() => import('@/pages/GangCardPage'));
+// Prototype réseau de La Coupe du Gang (lazy, plein écran, hors des mises en page)
+const CoupeTest = React.lazy(() => import('@/pages/CoupeTest'));
 
 // Admin pages (lazy-loaded - only for admin/barber users)
 const AdminDashboard = React.lazy(() => import('@/pages/admin/Dashboard'));
@@ -147,6 +149,32 @@ function RequireAdmin() {
   }
 
   if (user?.role !== 'admin' && user?.role !== 'barber') {
+    return <Navigate to="/" replace />;
+  }
+
+  return <Outlet />;
+}
+
+// Garde du prototype réseau de La Coupe du Gang (/coupe-test) : admin, barbers et comptes
+// testeurs (`users.is_tester`, renvoyé par /me). Le serveur de jeu vérifie aussi (not_allowed).
+function RequireCoupeTester() {
+  const { user, isAuthenticated, isLoadingAuth, sessionExpired } = useAuth();
+  const location = useLocation();
+
+  if (isLoadingAuth) {
+    return (
+      <div className="fixed inset-0 flex items-center justify-center bg-background">
+        <div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <Navigate to={loginPathFor(location, sessionExpired)} replace />;
+  }
+
+  const allowed = user?.role === 'admin' || user?.role === 'barber' || user?.is_tester === true;
+  if (!allowed) {
     return <Navigate to="/" replace />;
   }
 
@@ -294,6 +322,11 @@ const AppRoutes = () => {
           {/* Historique des notifications reçues par un barber (/notifications est une page client) */}
           <Route path="/admin/my-notifications" element={<ClientNotifications />} />
         </Route>
+      </Route>
+
+      {/* La Coupe du Gang, prototype réseau : plein écran, hors des mises en page client / admin */}
+      <Route element={<RequireCoupeTester />}>
+        <Route path="/coupe-test" element={<Suspense fallback={<LazyFallback />}><CoupeTest /></Suspense>} />
       </Route>
 
       <Route path="*" element={<PageNotFound />} />

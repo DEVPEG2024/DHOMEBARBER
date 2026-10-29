@@ -7,13 +7,15 @@
  *  - une route de l'API non prévue reçoit 501 ET est notée dans `nonPrevues` : la fixture fait
  *    échouer le test (on voit tout de suite qu'une route manque au faux serveur) ;
  *  - les autres domaines (polices Google, CDN, storage.googleapis…) reçoivent une réponse vide ;
- *  - le WebSocket `/ws/live` est neutralisé (`routeWebSocket`), il envoie un compteur fictif.
+ *  - le WebSocket `/ws/live` est neutralisé (`routeWebSocket`), il envoie un compteur fictif ;
+ *    `/ws/coupe` (La Coupe du Gang) est servi par un faux serveur de jeu (`support/fauxCoupe.js`).
  *
  * Un test peut remplacer la réponse d'une route avec `surcharger(méthode, chemin, fabrique)` :
  * la fabrique reçoit la requête décodée et rend `{ status, json }`, `RESEAU_COUPE` (échec réseau)
  * ou `undefined` (comportement par défaut).
  */
 import { creerDonnees } from './donnees.js';
+import { FauxCoupe } from './fauxCoupe.js';
 
 export const API_HOTE = 'dhomebarber-api-3aabb8313cb6.herokuapp.com';
 export const API_ORIGINE = `https://${API_HOTE}`;
@@ -109,6 +111,8 @@ export class FauxServeur {
     this.erreursServeur = [];
     this.surcharges = [];
     this.jetons = new Map();
+    /** Faux serveur de jeu de La Coupe du Gang (`/ws/coupe`) : connexions et messages reçus. */
+    this.coupe = new FauxCoupe(this);
     this.compteurId = 0;
     this.compteurJeton = 0;
   }
@@ -150,10 +154,16 @@ export class FauxServeur {
     const local = new URL(origineApp);
     await context.route((url) => url.host !== local.host, (route) => this.repondre(route, origineApp));
     // WebSockets : aucun n'est jamais ouvert vers un vrai serveur. Le compteur de connectés
-    // (`/ws/live`, tableau de bord) reçoit un nombre fictif ; tout autre est noté et refermé.
+    // (`/ws/live`, tableau de bord) reçoit un nombre fictif ; le jeu (`/ws/coupe`) a son faux
+    // serveur ; tout autre est noté et refermé.
     await context.routeWebSocket(() => true, (ws) => {
-      if (/\/ws\/live$/.test(new URL(ws.url()).pathname)) {
+      const chemin = new URL(ws.url()).pathname;
+      if (/\/ws\/live$/.test(chemin)) {
         ws.send(JSON.stringify({ type: 'live_count', count: 3 }));
+        return;
+      }
+      if (/\/ws\/coupe$/.test(chemin)) {
+        this.coupe.brancher(ws);
         return;
       }
       this.nonPrevues.push(`WEBSOCKET ${ws.url()}`);
