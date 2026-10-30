@@ -2,7 +2,7 @@
 
 > Demande du propriétaire du 29 oct. 2026 : « revoit l'architecture et améliore l'espace new gang pour plus d'interaction et de rétention ». Planche (diagnostic, architecture, écrans, plan) : https://claude.ai/artifact/R8re91ruSRri2pJ7YFxV9b. Chantier lancé le 30 oct. 2026 (« Lance le chantier sans que j'interviens »), avec les recommandations de la planche pour les six choix. **Contrat détaillé** (schéma, API, formes des réponses, tâches, partage des fichiers) : `fil-new-gang-contrat.md`.
 >
-> Site : en ligne avec le déploiement du 30 oct. 2026 (Heroku puis Vercel). **Apps natives** : avec les prochains builds (iOS build 19, Android code 20) ; Android 1.0.18 et iOS 1.0.10 (build 18, La Coupe du Gang) n'ont que l'ancien fil, qui continue de marcher grâce au CRUD inchangé.
+> Site : en ligne depuis le 30 oct. 2026 vers 07:10 (serveur `222b31d`, Heroku v165, puis app `8b41310` sur Vercel). **Apps natives** : avec les prochains builds (iOS build 19, Android code 20) ; Android 1.0.18 et iOS 1.0.10 (build 18, La Coupe du Gang) n'ont que l'ancien fil, qui continue de marcher grâce au CRUD inchangé.
 
 ## Ce qui a changé pour le client
 
@@ -49,3 +49,5 @@
 
 - Équipe : fondations du chef, 5 constructeurs (S1 lecture et gestes, S2 activité et tâches, F1 page et cartes, F2 formats, commentaires, composeur, F3 Activité, pastille, faux serveur, tests), 3 contre-expertises (code de l'app : 1 bloquant + 14 mineurs ; serveur : 0 bloquant, 10 points ; navigateur), correcteurs, vérification finale.
 - Toutes les requêtes nouvelles exécutées sur une base PostgreSQL 17 locale montée avec `init-db.js` et les migrations de `server.js` (routes réelles et tâches appelées pour de vrai, heure de jour simulée) ; aucune erreur de type.
+- Après le déploiement serveur : démarrage sans migration ignorée ; **`EXPLAIN` des 61 requêtes nouvelles sur la production, dans une transaction `READ ONLY`** (console `heroku run`, `heroku pg:psql` ne répondant pas avec la CLI 10.17), aucune erreur ; session de la base en UTC (les comparaisons `posts.created_at` sans fuseau / `timestamptz` en dépendent).
+- Suite e2e complète : 320 vérifications ; sous forte charge locale (simulateur iOS ouvert, charge ~50), une dizaine de délais dépassés sur `coupe-integrations`, `last-minute*`, qui échouent aussi sur le build d'avant le chantier dans les mêmes conditions et passent avec 2 navigateurs en parallèle ; vérification GitHub après l'envoi.
