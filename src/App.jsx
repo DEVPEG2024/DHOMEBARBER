@@ -3,6 +3,7 @@ import { Toaster as SonnerToaster } from "@/components/ui/sonner"
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClientInstance } from '@/lib/query-client'
 import { BrowserRouter as Router, Route, Routes, Navigate, Outlet, Link, useLocation, useSearchParams } from 'react-router-dom';
+import { Capacitor } from '@capacitor/core';
 import PageNotFound from './lib/PageNotFound';
 import { AuthProvider, useAuth } from '@/lib/AuthContext';
 import { ThemeProvider } from '@/lib/ThemeContext';
@@ -163,6 +164,10 @@ function RequireAdmin() {
 
   return <Outlet />;
 }
+
+// Écran d'essai /coupe-test : sur le site seulement. Dans les apps des stores, un écran réservé aux
+// testeurs serait une fonction cachée (règle Apple 2.5.19) : la route n'existe pas (page introuvable)
+const COUPE_TEST_ROUTE = (() => { try { return !Capacitor.isNativePlatform(); } catch { return true; } })();
 
 // Garde du prototype réseau de La Coupe du Gang (/coupe-test) : admin, barbers et comptes
 // testeurs (`users.is_tester`, renvoyé par /me). Le serveur de jeu vérifie aussi (not_allowed).
@@ -391,10 +396,13 @@ const AppRoutes = () => {
         </Route>
       </Route>
 
-      {/* La Coupe du Gang, prototype réseau : plein écran, hors des mises en page client / admin */}
-      <Route element={<RequireCoupeTester />}>
-        <Route path="/coupe-test" element={<Suspense fallback={<LazyFallback />}><CoupeTest /></Suspense>} />
-      </Route>
+      {/* La Coupe du Gang, prototype réseau : plein écran, hors des mises en page client / admin ;
+          site seulement (COUPE_TEST_ROUTE) */}
+      {COUPE_TEST_ROUTE && (
+        <Route element={<RequireCoupeTester />}>
+          <Route path="/coupe-test" element={<Suspense fallback={<LazyFallback />}><CoupeTest /></Suspense>} />
+        </Route>
+      )}
 
       {/* La Coupe du Gang : plein écran, hors des mises en page, tout compte connecté, drapeau features.coupe */}
       <Route element={<RequireCoupe />}>
