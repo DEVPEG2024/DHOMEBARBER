@@ -104,7 +104,9 @@ function loadMusic() {
   musicLoads += 1;
   musicLoading = fetch(TRIBUNE_URL)
     .then((r) => {
-      if (!r.ok) throw new Error(`musique ${r.status}`);
+      // App iPhone : Capacitor sert ses fichiers audio sans statut HTTP (statut 0, octets complets).
+      // `ok` y est faux alors que le fichier est là : pas de musique au match du build 18 (30 oct. 2026)
+      if (!r.ok && r.status !== 0) throw new Error(`musique ${r.status}`);
       return r.arrayBuffer();
     })
     .then(decodeMusic)

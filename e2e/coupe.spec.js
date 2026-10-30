@@ -1314,6 +1314,25 @@ test.describe('La Coupe du Gang : musique de tribune', () => {
     expect(await page.evaluate(() => window.__musique.sources[0].context === window.__contextes[0])).toBe(true);
   });
 
+  test('app iPhone : fichier servi sans statut HTTP (statut 0, octets complets), la musique part quand même', async ({ page, api, connecter }) => {
+    await noterMusique(page);
+    // Capacitor iOS rend ses fichiers audio par une réponse sans statut : `ok` faux, statut 0
+    await page.addInitScript(() => {
+      const fetchAvant = window.fetch;
+      window.fetch = async function sansStatut(input, ...rest) {
+        const r = await fetchAvant.call(this, input, ...rest);
+        if (!/tribune/.test(String(input?.url || input))) return r;
+        Object.defineProperty(r, 'status', { value: 0 });
+        Object.defineProperty(r, 'ok', { value: false });
+        return r;
+      };
+    });
+    const cnx = await rejoindreParCode(page, api, connecter);
+    api.coupe.etat(cnx, { ph: 'live' });
+    await expect.poll(() => page.evaluate(() => window.__musique.enCours)).toBe(1);
+    expect(await page.evaluate(() => window.__fichiers.length)).toBe(1);
+  });
+
   test('coupée par le serveur (COUPE_MUSIC=off) : ni chargée ni lancée, le jeu marche', async ({ page, api, connecter }) => {
     api.donnees.parametresPublics.features.coupeMusic = false;
     await noterMusique(page);
