@@ -1,12 +1,21 @@
 import React, { createContext, useContext, useState, useRef, useCallback, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import { App } from '@capacitor/app';
+// Chant de l'accueil de La Coupe du Gang (« On t'oublie pas », du propriétaire, 30 oct. 2026) :
+// -20 LUFS, fondu de 1,5 s à la fin pour reboucler sur la montée du début
+import COUPE_CHANT_URL from '@/assets/coupe/accueil-chant.mp3';
 
 const MusicContext = createContext();
 
-// Path to the audio file in public/ or an external URL
-const MUSIC_SRC = '/ambiance.mp3';
-const DEFAULT_VOLUME = 0.01; // 1% — very subtle background
+// Morceau joué selon la page (`MusicRouteSync`) : l'ambiance du salon, très discrète, partout ;
+// le chant de la Coupe sur ses pages (/coupe, /coupe/classement, /coupe-test). Pendant un match,
+// l'écran de jeu met ce morceau en pause et joue la tribune (useSalonMusicPaused, audioUnlock.js).
+// Le volume ne marche pas sur iOS : le niveau de chaque fichier est aussi posé dans le fichier.
+const TRACKS = {
+  salon: { src: '/ambiance.mp3', volume: 0.01 }, // 1% — very subtle background
+  coupe: { src: COUPE_CHANT_URL, volume: 1 },
+};
 // Choix « musique coupée » retenu d'une ouverture à l'autre : sans lui, le premier toucher
 // relançait la musique à chaque ouverture de l'app
 const OFF_KEY = 'dhb-music-off';
@@ -24,14 +33,19 @@ function writeMusicOff(off) {
 
 export function MusicProvider({ children }) {
   const audioRef = useRef(null);
+  const trackRef = useRef('salon');
   const [playing, setPlaying] = useState(false);
   const [started, setStarted] = useState(false);
+  const playingRef = useRef(false);
+  playingRef.current = playing;
 
   // Create audio element once
   useEffect(() => {
-    const audio = new Audio(MUSIC_SRC);
+    // Morceau déjà choisi par la page (les effets des enfants passent avant celui-ci)
+    const track = TRACKS[trackRef.current];
+    const audio = new Audio(track.src);
     audio.loop = true;
-    audio.volume = DEFAULT_VOLUME;
+    audio.volume = track.volume;
     audio.preload = 'auto';
     audioRef.current = audio;
 
@@ -39,6 +53,22 @@ export function MusicProvider({ children }) {
       audio.pause();
       audio.src = '';
     };
+  }, []);
+
+  // Autre morceau pour la page : le même lecteur (débloqué par le premier toucher sur iOS) change de
+  // fichier et repart du début s'il jouait ; en pause, il le prépare seulement
+  const setTrack = useCallback((key) => {
+    const track = TRACKS[key];
+    if (!track || trackRef.current === key) return;
+    trackRef.current = key;
+    const audio = audioRef.current;
+    if (!audio) return;
+    // Lecture en cours, ou demandée à l'instant (sortie du jeu sur une autre page)
+    const wasPlaying = playingRef.current || !audio.paused;
+    audio.src = track.src;
+    audio.volume = track.volume;
+    if (!wasPlaying) return;
+    audio.play().then(() => setPlaying(true), () => setPlaying(false));
   }, []);
 
   const toggle = useCallback(() => {
@@ -123,7 +153,7 @@ export function MusicProvider({ children }) {
   }, []);
 
   return (
-    <MusicContext.Provider value={{ playing, toggle }}>
+    <MusicContext.Provider value={{ playing, toggle, setTrack }}>
       {children}
     </MusicContext.Provider>
   );
@@ -131,4 +161,18 @@ export function MusicProvider({ children }) {
 
 export function useMusic() {
   return useContext(MusicContext);
+}
+
+/** Morceau d'une page : le chant de la Coupe sur ses pages, l'ambiance du salon ailleurs. */
+export function musicTrackFor(pathname) {
+  return /^\/coupe(\/|-test|$)/.test(pathname || '') ? 'coupe' : 'salon';
+}
+
+/** Dans le Router (le fournisseur est au-dessus) : choisit le morceau d'après la page. */
+export function MusicRouteSync() {
+  const { pathname } = useLocation();
+  const setTrack = useMusic()?.setTrack;
+  const track = musicTrackFor(pathname);
+  useEffect(() => { setTrack?.(track); }, [setTrack, track]);
+  return null;
 }

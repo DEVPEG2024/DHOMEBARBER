@@ -116,7 +116,6 @@ export default function CoupeGame({
   // Clavier ouvert (fiche « Signaler ») : la fenêtre rétrécie n'est pas un téléphone tourné
   const typing = useTyping();
   const rotate = landscape && !typing;
-  useSalonMusicPaused();
 
   const rootRef = useRef(null);
   const canvasRef = useRef(null);
@@ -152,6 +151,10 @@ export default function CoupeGame({
   const [endShown, setEndShown] = useState(false);
   const [reactLocked, setReactLocked] = useState(false);
   const [soundOn, setSoundOn] = useState(true);
+  // Tribune lancée (premier coup d'envoi ou reprise d'un match) : elle joue jusqu'à la sortie de
+  // l'écran. Avant (connexion, salle d'attente, défi reçu), le chant de l'accueil continue
+  const [tribuneOn, setTribuneOn] = useState(false);
+  useSalonMusicPaused(tribuneOn || !soundOn);
   const [net, setNet] = useState({ ping: null, recalages: 0, refusees: 0 });
   const [timeLeft, setTimeLeft] = useState(null);
   const [confirmQuit, setConfirmQuit] = useState(false);
@@ -281,6 +284,7 @@ export default function CoupeGame({
           setFx(null);
           director.newMatch();
           sound.music(true);
+          setTribuneOn(true);
           // L'astuce attend le terrain (après l'avant-match), sinon personne ne la verrait
           if (!taughtRef.current) {
             taughtRef.current = true;
@@ -299,6 +303,7 @@ export default function CoupeGame({
           setFx(null);
           director.resume();
           sound.music(true);
+          setTribuneOn(true);
           showHint('Connexion rétablie');
           kick();
           break;

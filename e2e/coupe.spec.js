@@ -842,6 +842,74 @@ test.describe('La Coupe du Gang : départs, coupures et reprises', () => {
   });
 });
 
+// Musique de l'app (MusicContext) : lecture simulée, dernier lecteur lancé noté. `morceau` : son
+// fichier s'il joue, sinon null (la tribune passe par le contexte audio, pas par un lecteur)
+async function noterMorceau(page) {
+  await page.addInitScript(() => {
+    window.__app = { lecteur: null };
+    HTMLMediaElement.prototype.play = function play() { this.__joue = true; window.__app.lecteur = this; return Promise.resolve(); };
+    HTMLMediaElement.prototype.pause = function pause() { this.__joue = false; };
+    try { localStorage.removeItem('dhb-music-off'); } catch { /* stockage indisponible */ }
+  });
+}
+const morceau = (page) => page.evaluate(() => {
+  const a = window.__app.lecteur;
+  return a && a.__joue ? a.src : null;
+});
+
+test.describe('La Coupe du Gang : chant de l\'accueil', () => {
+  test('« On t\'oublie pas » sur les pages de la Coupe et en salle d\'attente, la tribune au coup d\'envoi, le chant à la sortie du jeu, l\'ambiance ailleurs', async ({ page, api, connecter }) => {
+    await noterMorceau(page);
+    await connecter(CLIENT);
+    await page.goto('/jeux');
+    // Premier toucher : l'ambiance du salon
+    await page.getByRole('heading', { level: 1, name: 'Jeux' }).click();
+    await expect.poll(() => morceau(page)).toMatch(/ambiance/);
+    // Entrée dans la Coupe : le même lecteur passe au chant
+    await page.getByRole('article', { name: 'La Coupe du Gang' }).getByRole('link', { name: 'Jouer', exact: true }).click();
+    await expect(titreAccueil(page)).toBeVisible();
+    await expect.poll(() => morceau(page)).toMatch(/accueil-chant/);
+    await expect(page.locator('[data-music-toggle]')).toHaveAttribute('aria-label', 'Couper la musique');
+
+    // Salle d'attente : le chant continue
+    await creerDepuisAccueil(page);
+    await expect(page.getByText(CODE_MATCH, { exact: true })).toBeVisible();
+    expect(await morceau(page)).toMatch(/accueil-chant/);
+    // Coup d'envoi : le chant s'arrête (la tribune prend le relais), et le reste jusqu'à la fin
+    api.coupe.rejoint();
+    await expect(page.getByText('En ligne', { exact: true })).toBeVisible();
+    await expect.poll(() => morceau(page)).toBeNull();
+    api.coupe.derniere().envoyer({ ...FIN_VICTOIRE, winner: 0, sc: [3, 1], points: { ...FIN_VICTOIRE.points, delta: [3, -1] } });
+    await expect(page.getByRole('heading', { name: 'Victoire' })).toBeVisible();
+    expect(await morceau(page)).toBeNull();
+
+    // Retour à l'accueil de la Coupe : le chant revient ; puis la page des jeux : l'ambiance
+    await jeu(page).getByRole('button', { name: 'Retour', exact: true }).click();
+    await expect(titreAccueil(page)).toBeVisible();
+    await expect.poll(() => morceau(page)).toMatch(/accueil-chant/);
+    await page.getByRole('button', { name: 'Retour', exact: true }).click();
+    await expect(page).toHaveURL(/\/jeux$/);
+    await expect.poll(() => morceau(page)).toMatch(/ambiance/);
+    // Le jeu n'a jamais enregistré « musique coupée »
+    expect(await page.evaluate(() => localStorage.getItem('dhb-music-off'))).toBeNull();
+  });
+
+  test('son du jeu coupé (choix gardé) : pas de chant dans l\'écran de jeu, il revient à l\'accueil', async ({ page, connecter }) => {
+    await noterMorceau(page);
+    await page.addInitScript(() => { try { localStorage.setItem('cdg-sound', 'off'); } catch { /* stockage indisponible */ } });
+    await connecter(CLIENT);
+    await page.goto('/coupe');
+    await titreAccueil(page).click();
+    await expect.poll(() => morceau(page)).toMatch(/accueil-chant/);
+    await creerDepuisAccueil(page);
+    await expect(page.getByText(CODE_MATCH, { exact: true })).toBeVisible();
+    await expect.poll(() => morceau(page)).toBeNull();
+    await jeu(page).getByRole('button', { name: 'Annuler', exact: true }).click();
+    await expect(titreAccueil(page)).toBeVisible();
+    await expect.poll(() => morceau(page)).toMatch(/accueil-chant/);
+  });
+});
+
 test.describe('La Coupe du Gang à 1366 px', () => {
   test.use({ viewport: { width: 1366, height: 900 } });
 

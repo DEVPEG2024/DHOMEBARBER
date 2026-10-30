@@ -10,11 +10,13 @@ import { unlockAudio } from '@/lib/coupe/audioUnlock';
 const MUSIC_OFF_KEY = 'dhb-music-off';
 
 /**
- * Musique du salon en pause tant que l'écran de jeu est affiché (le jeu a ses propres sons), puis
- * reprise s'il l'a mise en pause. Aussi quand elle démarre pendant le jeu (premier toucher de la
- * session, voir MusicContext). Le choix « coupée » n'est jamais enregistré par le jeu.
+ * Musique de l'app (sur les pages de la Coupe : le chant de l'accueil, voir MusicContext) en pause
+ * pendant que `active` est vrai (match lancé : la tribune prend le relais ; son du jeu coupé), puis
+ * reprise s'il l'a mise en pause : quand `active` repasse à faux et à la sortie de l'écran de jeu.
+ * Aussi quand elle démarre pendant le jeu (premier toucher de la session, voir MusicContext). Le
+ * choix « coupée » n'est jamais enregistré par le jeu.
  */
-export function useSalonMusicPaused() {
+export function useSalonMusicPaused(active = true) {
   const music = useMusic();
   const musicRef = useRef(music);
   musicRef.current = music;
@@ -23,11 +25,16 @@ export function useSalonMusicPaused() {
 
   useEffect(() => {
     const m = musicRef.current;
-    if (!playing || typeof m?.toggle !== 'function') return;
-    m.toggle();
-    pausedRef.current = true;
-    try { localStorage.removeItem(MUSIC_OFF_KEY); } catch { /* stockage indisponible */ }
-  }, [playing]);
+    if (typeof m?.toggle !== 'function') return;
+    if (active && playing) {
+      m.toggle();
+      pausedRef.current = true;
+      try { localStorage.removeItem(MUSIC_OFF_KEY); } catch { /* stockage indisponible */ }
+    } else if (!active && !playing && pausedRef.current) {
+      pausedRef.current = false;
+      m.toggle();
+    }
+  }, [active, playing]);
 
   useEffect(() => () => {
     const m = musicRef.current;

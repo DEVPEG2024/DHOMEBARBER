@@ -6,7 +6,7 @@ import { BrowserRouter as Router, Route, Routes, Navigate, Outlet, Link, useLoca
 import PageNotFound from './lib/PageNotFound';
 import { AuthProvider, useAuth } from '@/lib/AuthContext';
 import { ThemeProvider } from '@/lib/ThemeContext';
-import { MusicProvider } from '@/lib/MusicContext';
+import { MusicProvider, MusicRouteSync } from '@/lib/MusicContext';
 import MusicToggle from '@/components/shared/MusicToggle';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { queryFailed } from '@/components/shared/LoadError';
@@ -418,7 +418,9 @@ function App() {
                 <ScrollToTop />
                 <AnalyticsTracker />
                 <AppRoutes />
-                {/* Dans le Router : le bouton lit la route (masqué sur l'accueil, intégré au hero) */}
+                {/* Dans le Router : le bouton lit la route (masqué sur l'accueil, intégré au hero) ;
+                    le morceau aussi (chant de la Coupe sur ses pages) */}
+                <MusicRouteSync />
                 <MusicToggle />
               </Router>
               <SonnerToaster />
