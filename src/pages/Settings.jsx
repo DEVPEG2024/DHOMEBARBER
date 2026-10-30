@@ -13,6 +13,7 @@ import FeedbackSection from '@/components/feedback/FeedbackSection';
 import { hasObjectionableName } from '@/lib/contentFilter';
 import LoadError, { friendlyError, queryFailed } from '@/components/shared/LoadError';
 import { GANG_LEADERBOARD_QUERY_KEY } from '@/lib/gangCardApi';
+import { invalidateFeed } from '@/lib/feed/feedCache';
 import { parisDay } from '@/lib/slots';
 
 // Mêmes limites que l'inscription (routes/auth.js côté serveur)
@@ -190,6 +191,8 @@ export default function Settings() {
       queryClient.invalidateQueries({ queryKey: ['userBlocks'] });
       queryClient.invalidateQueries({ queryKey: ['posts'] });
       queryClient.invalidateQueries({ queryKey: ['postComments'] });
+      // Fil v2 : ses publications, commentaires et activité reviennent tout de suite
+      invalidateFeed(queryClient);
       // Team of the Season : le membre débloqué y réapparaît sans attendre 5 min
       queryClient.invalidateQueries({ queryKey: GANG_LEADERBOARD_QUERY_KEY });
       toast.success(`${blockedLabel(b)} débloqué`);

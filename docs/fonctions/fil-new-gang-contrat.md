@@ -45,6 +45,7 @@ Partage d'une publication : lien `https://dhomebarber.fr/feed?post=<id>` (pas de
 - `post_poll_votes (post_id, user_email, option_id, created_at, updated_at)`, PK `(post_id, user_email)`.
 - `feed_activity (id, recipient_email, type, post_id, comment_id, appointment_id, actor_email, actor_name, actor_role, actor_photo_url, emoji, excerpt, created_at, read_at, pushed_at)` ; uniques : une `reaction` par (destinataire, publication, auteur), un `comment_like` par (destinataire, commentaire, auteur), un `visit_invite` par `appointment_id`.
 - `feed_broadcasts (post_id PK, created_at, pushed_at)` : push d'un nouveau sondage, une fois.
+- `feed_push_counts (recipient_email, day, count, last_at)` : pushs du fil envoyés par destinataire et jour de Paris (plafond 8).
 - `users.feed_seen_at`, `users.feed_prefs` (JSONB, `normalizePrefs`), `users.gang_moment_tier` (dernier niveau annoncé) ; `appointments.feed_invite_sent`.
 
 ## 3. Règles pures (fait)

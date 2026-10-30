@@ -55,6 +55,16 @@ donnent le même résultat quel que soit le jour ou l'heure du lancement. Animat
 Comptes simulés : `client.test@dhomebarber.fr` et `admin.test@dhomebarber.fr`, mot de passe
 `MotDePasse123`.
 
+**Fil v2** (30 oct. 2026, `fil-v2.spec.js`, `fil-v2-formats.spec.js`) : le faux serveur `FauxFil`
+(`api.filRest`, état `api.fil` : activité, votes, ❤️ de commentaires, réglages, vues) sert toutes
+les routes `/feed…` du contrat (`docs/fonctions/fil-new-gang-contrat.md`) à partir des tables
+`Post`, `PostLike` et `PostComment`, avec les mêmes règles que le vrai serveur (identité du jeton,
+`is_mine` par email, blocages, pastille en groupes). Fabriques de `support/donnees.js` :
+`MEMBRES`, `publicationFil`, `lookFil`, `avantApresFil`, `sondageFil`, `momentFil`,
+`reactionFil`, `commentaireFil`, `activiteFil`, `signalementFil`. `features.feedV2` vaut vrai par
+défaut ; un test de l'ancien fil le met à faux (`api.donnees.parametresPublics.features.feedV2 =
+false`) : toute route `/feed…` répond alors 501 et le test échoue s'il en appelle une.
+
 ## Ajouter un test
 
 ```js

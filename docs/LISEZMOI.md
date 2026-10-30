@@ -28,7 +28,8 @@ Les fichiers de `fonctions/` et `historique/` (sauf `restes-a-faire.md`) reprenn
 | `boutique-commandes-bons-plans.md` | boutique, commandes et annulations, fiche produit, bons plans |
 | `cartes-cadeau-wallet.md` | cartes cadeau, débit, historique, suppression, Apple / Google Wallet |
 | `carte-gang.md` | carte Gang des clients |
-| `coupe-du-gang.md` | La Coupe du Gang, mini-jeu de foot façon air hockey (cahier des charges, pas encore codé) |
+| `fil-new-gang.md` | le fil « New Gang » v2 : formats, commentaires, activité, pushs groupés (contrat : `fil-new-gang-contrat.md`) |
+| `coupe-du-gang.md` | La Coupe du Gang, mini-jeu de foot façon air hockey |
 | `textile.md` | textile et drops |
 | `evenements-privatisation.md` | privatiser le salon, événements du salon |
 | `snap-essayage.md` | filtres Snap, essayage couleur |

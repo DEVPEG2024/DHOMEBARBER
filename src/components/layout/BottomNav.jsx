@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Home, Calendar, Newspaper, User, PartyPopper } from 'lucide-react';
 import { hapticFeedback } from '@/lib/capacitor';
+import { useFeedUnread } from '@/lib/feed/useUnread';
 
 const navItems = [
   { path: '/', icon: Home, label: 'Accueil' },
@@ -14,8 +15,25 @@ const navItems = [
 
 const springy = { type: 'spring', stiffness: 420, damping: 30 };
 
+/**
+ * Nouveautés du fil v2 sur l'onglet « New's Gang ! » (30 oct. 2026) : pastille rouge = activité non
+ * lue (réactions, commentaires, réponses à moi ; « 9+ » au-delà de 9), sinon petit point vert =
+ * nouvelles publications seulement. Rien sans compte ni sans `features.feedV2`.
+ */
+function feedBadge({ activity, posts }) {
+  if (activity > 0) {
+    return {
+      count: activity > 9 ? '9+' : String(activity),
+      label: `${activity} nouveauté${activity > 1 ? 's' : ''}`,
+    };
+  }
+  if (posts > 0) return { dot: true, label: 'nouvelles publications' };
+  return null;
+}
+
 export default function BottomNav() {
   const location = useLocation();
+  const unread = useFeedUnread();
 
   if (location.pathname.startsWith('/admin')) return null;
 
@@ -50,8 +68,11 @@ export default function BottomNav() {
             );
           }
 
+          const badge = path === '/feed' ? feedBadge(unread) : null;
+
           return (
             <Link key={path} to={path} onClick={() => { if (!isActive) hapticFeedback(); }}
+              aria-label={badge ? `${label}, ${badge.label}` : undefined}
               className="flex flex-col items-center justify-center min-w-[56px] py-1.5">
               <div className="relative flex items-center justify-center w-10 h-10">
                 {/* Indicateur actif partagé : glisse d'un onglet à l'autre */}
@@ -72,6 +93,22 @@ export default function BottomNav() {
                     strokeWidth={isActive ? 2.5 : 1.8}
                   />
                 </motion.div>
+                {badge?.count && (
+                  <span
+                    aria-hidden="true"
+                    data-testid="feed-badge"
+                    className="absolute -top-0.5 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold leading-[18px] text-center ring-2 ring-background tabular-nums"
+                  >
+                    {badge.count}
+                  </span>
+                )}
+                {badge?.dot && (
+                  <span
+                    aria-hidden="true"
+                    data-testid="feed-dot"
+                    className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-primary ring-2 ring-background"
+                  />
+                )}
               </div>
               <span className={`text-[11px] font-medium transition-colors duration-300 ${
                 isActive ? 'text-primary' : 'text-muted-foreground/70'

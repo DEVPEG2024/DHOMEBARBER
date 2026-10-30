@@ -3,11 +3,14 @@ import { createPortal } from 'react-dom';
 import { motion, useReducedMotion } from 'framer-motion';
 import { X } from 'lucide-react';
 import { useAndroidBack } from '@/lib/useAndroidBack';
+import { useEscapeLayer } from '@/lib/feed/escapeStack';
+
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /**
  * Fenêtre du bas du fil (commentaires, composeur, signalement, menu) : portail dans `body` (le fil
  * est dans un parent animé), fermée par la croix seulement (le fond ne ferme rien), Échap au
- * clavier, retour Android. À placer dans un `<AnimatePresence>` chez l'appelant.
+ * clavier (fenêtre du dessus seulement), retour Android. À placer dans un `<AnimatePresence>` chez l'appelant.
  *
  * Étages : fenêtres du fil `z-[60]` ; ce qui s'ouvre par-dessus (menu Signaler / Bloquer depuis les
  * commentaires, confirmation) `layer="top"` → `z-[70]`.
@@ -32,16 +35,36 @@ export default function FeedSheet({
   closeRef.current = closeDisabled ? () => {} : onClose;
   useAndroidBack(true, () => closeRef.current?.());
 
+  // Échap : seule la fenêtre du dessus se ferme (pile partagée, src/lib/feed/escapeStack.js)
+  useEscapeLayer(true, () => closeRef.current?.());
+
+  // Focus dans la fenêtre à l'ouverture ; à la fermeture, rendu à l'élément d'origine (le bouton
+  // « Signaler » d'un commentaire, la carte…) seulement si le focus était encore ici : une fenêtre
+  // ouverte entre-temps par-dessus (menu → signalement) le garde, sinon il partait sous elle
   useEffect(() => {
     const previous = document.activeElement;
-    panelRef.current?.focus({ preventScroll: true });
-    const onKey = (e) => { if (e.key === 'Escape') closeRef.current?.(); };
-    window.addEventListener('keydown', onKey);
+    const panel = panelRef.current;
+    panel?.focus({ preventScroll: true });
     return () => {
-      window.removeEventListener('keydown', onKey);
+      const active = document.activeElement;
+      const stillOurs = !active || active === document.body || (panel && panel.contains(active));
+      if (!stillOurs) return;
       if (previous && typeof previous.focus === 'function' && document.contains(previous)) previous.focus({ preventScroll: true });
     };
   }, []);
+
+  // Tab tourne dans la fenêtre (du dernier élément au premier, et l'inverse) : il ne part jamais
+  // derrière le voile, sur le fil
+  const trapTab = (e) => {
+    if (e.key !== 'Tab' || !panelRef.current) return;
+    const items = [...panelRef.current.querySelectorAll(FOCUSABLE)].filter((el) => el.getClientRects().length > 0);
+    if (!items.length) { e.preventDefault(); return; }
+    const first = items[0];
+    const last = items[items.length - 1];
+    const active = document.activeElement;
+    if (e.shiftKey && (active === first || active === panelRef.current)) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
+  };
 
   const z = layer === 'top' ? 'z-[70]' : 'z-[60]';
   return createPortal(
@@ -60,6 +83,7 @@ export default function FeedSheet({
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
+        onKeyDown={trapTab}
         data-app-overlay=""
         initial={reduce ? { opacity: 0 } : { y: '100%' }}
         animate={reduce ? { opacity: 1 } : { y: 0 }}

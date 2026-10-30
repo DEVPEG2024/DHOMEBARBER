@@ -3,7 +3,7 @@
  * avis, produits. Une copie neuve est fabriquée pour chaque test (les écritures d'un test ne
  * débordent jamais sur le suivant). Toutes les dates partent du jour de référence (`jour(n)`).
  */
-import { jour } from './temps.js';
+import { jour, MAINTENANT } from './temps.js';
 
 export const MOT_DE_PASSE = 'MotDePasse123';
 
@@ -151,6 +151,185 @@ export const RDV = {
   }),
 };
 
+// ─── Fil « New Gang » v2 (30 oct. 2026) ───
+
+/** Logo du salon : avatar des contenus de l'admin (publiés au nom de « D'Home Barber »). */
+export const LOGO_SALON = '/icons/icon-192.png';
+
+/**
+ * Membres du Gang simulés (auteurs et acteurs du fil), sans compte de connexion sauf `salon`
+ * (l'admin, qui écrit au nom du salon) et `camille` (le client de test).
+ */
+export const MEMBRES = {
+  yanis: { email: 'yanis.k@exemple.fr', name: 'Yanis K.', role: 'user', photo_url: media(31) },
+  lucas: { email: 'lucas.m@exemple.fr', name: 'Lucas M.', role: 'user', photo_url: null },
+  sarah: { email: 'sarah.k@exemple.fr', name: 'Sarah K.', role: 'user', photo_url: media(32) },
+  mehdi: { email: 'mehdi.a@exemple.fr', name: 'Mehdi A.', role: 'user', photo_url: null },
+  kevin: { email: 'kevin@dhomebarber.fr', name: 'Kevin', role: 'barber', photo_url: null },
+  salon: { email: ADMIN.email, name: "D'Home Barber", role: 'admin', photo_url: LOGO_SALON },
+  camille: { email: CLIENT.email, name: CLIENT.full_name, role: 'user', photo_url: null },
+};
+
+/** Instant ISO `minutes` avant l'heure figée des tests (mardi 10 h, Paris). */
+export const ilYaMin = (minutes) => new Date(MAINTENANT.getTime() - minutes * 60_000).toISOString();
+
+/**
+ * Publication du fil telle que le serveur la range (table `posts`) : `kind` NULL pour une
+ * publication ordinaire, `meta` selon le format (contrat, section 2). `minutes` : âge.
+ */
+export function publicationFil({ id, auteur = MEMBRES.yanis, kind = null, content = '', image_url = null, meta = null, minutes = 30, ...reste }) {
+  return {
+    id,
+    kind,
+    author_email: auteur.email,
+    author_name: auteur.name,
+    author_role: auteur.role,
+    author_photo_url: auteur.photo_url,
+    content,
+    image_url,
+    meta,
+    created_at: ilYaMin(minutes),
+    ...reste,
+  };
+}
+
+/** Sondage du salon (`kind = 'poll'`), ouvert `jours` jours à partir de sa publication. */
+export function sondageFil({ id, question, reponses, jours = 3, minutes = 60, ...reste }) {
+  const debut = MAINTENANT.getTime() - minutes * 60_000;
+  return publicationFil({
+    id,
+    auteur: MEMBRES.salon,
+    kind: 'poll',
+    minutes,
+    content: `📊 Sondage : ${question}`,
+    meta: {
+      question,
+      options: reponses.map((label, i) => ({ id: 'abcd'[i], label })),
+      ends_at: new Date(debut + jours * 86_400_000).toISOString(),
+    },
+    ...reste,
+  });
+}
+
+/**
+ * Look d'un client (`kind = 'look'`) : `content` en base = texte de repli, le mot de l'auteur dans
+ * `meta.caption` ; barber et prestations relus de la visite par le serveur (jamais de prix).
+ */
+export function lookFil({ id, auteur = MEMBRES.sarah, mot = '', images = [media(61)], barber = BARBERS.kevin, prestations = [PRESTATIONS.coupe], reservable = true, minutes = 45, ...reste }) {
+  const noms = prestations.map((p) => p.name);
+  return publicationFil({
+    id,
+    auteur,
+    kind: 'look',
+    minutes,
+    image_url: images[0],
+    content: [mot, `✂️ ${noms.join(' + ')} avec ${barber.name}`].filter(Boolean).join('\n\n'),
+    meta: {
+      ...(images.length > 1 ? { images } : {}),
+      caption: mot,
+      employee_id: barber.id,
+      employee_name: barber.name,
+      service_ids: prestations.map((p) => p.id),
+      service_names: noms,
+      bookable: reservable,
+    },
+    ...reste,
+  });
+}
+
+/** Avant / Après d'un client : `image_url` = la photo « après », `meta.images` = [avant, après]. */
+export function avantApresFil({ id, auteur = MEMBRES.lucas, mot = '', avant = media(71), apres = media(72), minutes = 50, ...reste }) {
+  return publicationFil({
+    id,
+    auteur,
+    kind: 'before_after',
+    minutes,
+    image_url: apres,
+    content: [mot, '↔️ Avant / Après'].filter(Boolean).join('\n\n'),
+    meta: { images: [avant, apres], caption: mot, employee_id: null, employee_name: null },
+    ...reste,
+  });
+}
+
+/** Moment du Gang : publication du salon sans email d'auteur, au sujet d'un membre. */
+export function momentFil({ id, membre = 'Mehdi', niveau = 'or', libelle = 'Or', minutes = 70, ...reste }) {
+  return publicationFil({
+    id,
+    auteur: { ...MEMBRES.salon, email: null },
+    kind: 'moment',
+    minutes,
+    content: `${membre} passe ${libelle} sur sa carte Gang 👏`,
+    meta: { type: 'tier_up', tier: niveau, tier_label: libelle, member_name: membre, member_photo_url: null },
+    ...reste,
+  });
+}
+
+/** Réaction (`post_likes`) d'un membre sur une publication. */
+let compteurReaction = 0;
+export function reactionFil(postId, membre, reaction = '🔥') {
+  compteurReaction += 1;
+  return { id: `like-${compteurReaction}`, post_id: postId, user_email: membre.email, reaction, created_at: ilYaMin(10) };
+}
+
+/** Commentaire (`post_comments`) ; `parent_id` pour une réponse (un seul niveau). */
+export function commentaireFil({ id, post_id, de = MEMBRES.lucas, content, parent_id = null, minutes = 20 }) {
+  return {
+    id,
+    post_id,
+    parent_id,
+    author_email: de.email,
+    author_name: de.name,
+    author_role: de.role,
+    author_photo_url: de.photo_url,
+    content,
+    created_at: ilYaMin(minutes),
+  };
+}
+
+/** Signalement en attente (`post_reports`), tel que l'admin le lit. */
+export function signalementFil({ id, post_id = null, comment_id = null, par = MEMBRES.lucas, contre = MEMBRES.yanis, raison = 'Spam ou publicité', extrait = '', minutes = 30 }) {
+  return {
+    id,
+    post_id,
+    comment_id,
+    reporter_email: par.email,
+    reporter_name: par.name,
+    reported_name: contre.name,
+    reason: raison,
+    details: null,
+    content_snapshot: extrait,
+    status: 'pending',
+    created_at: ilYaMin(minutes),
+  };
+}
+
+/**
+ * Ligne d'activité (`feed_activity`) pour le client de test : `de` = membre auteur du geste.
+ * `lu` : déjà lue. Types : reaction, comment, reply, comment_like, moment, visit_invite.
+ */
+let compteurActivite = 0;
+export function activiteFil({ type, de = MEMBRES.yanis, pour = CLIENT.email, post_id = null, comment_id = null, appointment_id = null, emoji = null, excerpt = null, minutes = 15, lu = false, ...reste }) {
+  compteurActivite += 1;
+  return {
+    id: reste.id || `act-${compteurActivite}`,
+    recipient_email: pour,
+    type,
+    post_id,
+    comment_id,
+    appointment_id,
+    actor_email: de?.email ?? null,
+    actor_name: de?.name ?? null,
+    actor_role: de?.role ?? null,
+    actor_photo_url: de?.photo_url ?? null,
+    emoji,
+    excerpt,
+    created_at: ilYaMin(minutes),
+    read_at: lu ? ilYaMin(Math.max(0, minutes - 1)) : null,
+    pushed_at: null,
+    ...reste,
+  };
+}
+
 /** Fabrique une copie neuve des données. */
 export function creerDonnees() {
   const employes = Object.values(BARBERS).map((b) => ({
@@ -251,6 +430,13 @@ export function creerDonnees() {
       TextileReservation: [],
       PostReport: [],
     },
+    /**
+     * Fil v2 : tables sans entité du serveur (contrat, section 2). `activite` = `feed_activity`
+     * (lignes de `activiteFil`), `votes` = `post_poll_votes`, `likesCommentaires` = `comment_likes` ;
+     * par email (minuscules) : `reglages` = `users.feed_prefs`, `vuLe` = `users.feed_seen_at` (ISO) ;
+     * `vues` : nombre de membres qui ont vu chaque publication (par id).
+     */
+    fil: { activite: [], votes: [], likesCommentaires: [], reglages: {}, vuLe: {}, vues: {} },
     /** Réponse de `GET /api/apps/public/prod/public-settings/by-id/prod`. */
     parametresPublics: {
       id: 'prod',
@@ -269,6 +455,8 @@ export function creerDonnees() {
         guestBooking: true,
         appleWallet: false,
         googleWallet: false,
+        // Fil « New Gang » v2 servi (routes /feed… du faux serveur) ; `false` : l'ancien fil par les entités
+        feedV2: true,
       },
       popular_services: [],
       snap: null,

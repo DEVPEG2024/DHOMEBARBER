@@ -9,7 +9,8 @@
  *  - les autres domaines (polices Google, CDN, storage.googleapis…) reçoivent une réponse vide ;
  *  - le WebSocket `/ws/live` est neutralisé (`routeWebSocket`), il envoie un compteur fictif ;
  *    `/ws/coupe` (La Coupe du Gang) est servi par un faux serveur de jeu (`support/fauxCoupe.js`) ;
- *    les routes REST de la Coupe (`/coupe/…`) par `FauxCoupeRest`, plus bas (`api.coupeRest`).
+ *    les routes REST de la Coupe (`/coupe/…`) par `FauxCoupeRest`, plus bas (`api.coupeRest`) ;
+ *  - le fil « New Gang » v2 (`/feed…`) par `FauxFil` (`api.filRest`), état dans `api.fil`.
  *
  * Un test peut remplacer la réponse d'une route avec `surcharger(méthode, chemin, fabrique)` :
  * la fabrique reçoit la requête décodée et rend `{ status, json }`, `RESEAU_COUPE` (échec réseau)
@@ -17,7 +18,7 @@
  */
 import { creerDonnees, CLIENT, media } from './donnees.js';
 import { FauxCoupe, CLE_LISTE_LUCAS, PHOTO_LUCAS } from './fauxCoupe.js';
-import { MAINTENANT, cleDuJourParis, instantParis } from './temps.js';
+import { MAINTENANT, cleDuJourParis, instantParis, jour } from './temps.js';
 
 export const API_HOTE = 'dhomebarber-api-3aabb8313cb6.herokuapp.com';
 export const API_ORIGINE = `https://${API_HOTE}`;
@@ -120,11 +121,29 @@ export class FauxServeur {
     // Jeu ouvert, comme en production sans COUPE_WS=off ; un test le ferme avec
     // `api.donnees.parametresPublics.features.coupe = false` (les routes /coupe répondent alors 404 `disabled`)
     this.donnees.parametresPublics.features.coupe ??= true;
+    // Fil « New Gang » v2 (routes /feed…) : état dans `api.fil` (activité, votes, réglages, vues)
+    this.donnees.fil ??= { activite: [], votes: [], likesCommentaires: [], reglages: {}, vuLe: {}, vues: {} };
+    this.filRest = new FauxFil(this);
+    /** Heure du faux serveur : l'heure figée des tests, qui avance avec le temps réel écoulé. */
+    this.debutReel = Date.now();
     this.compteurId = 0;
     this.compteurJeton = 0;
   }
 
   // ─── Outils pour les tests ───────────────────────────────────────────
+
+  /**
+   * État du fil v2 (`donnees.fil`) : `activite` (lignes `activiteFil` de support/donnees.js), `votes`,
+   * `likesCommentaires`, `reglages` et `vuLe` (par email en minuscules), `vues` (par publication).
+   */
+  get fil() {
+    return this.donnees.fil;
+  }
+
+  /** Heure du serveur : `MAINTENANT` (mardi 10 h, Paris) + le temps réel écoulé depuis le début du test. */
+  maintenant() {
+    return new Date(MAINTENANT.getTime() + (Date.now() - this.debutReel));
+  }
 
   /**
    * Remplace la réponse d'une route. `chemin` : chaîne exacte (après `/api/apps/prod`) ou RegExp.
@@ -298,6 +317,19 @@ export class FauxServeur {
       };
     }
 
+    // Team of the Season (en tête du fil) : personne n'y figure ; un test la remplit par `surcharger`
+    if (methode === 'GET' && chemin === '/gang-card/leaderboard') {
+      if (!req.compte) return nonAuthentifie();
+      return { json: { since: jour(-90), days: 90, entries: [] } };
+    }
+
+    // Vues des publications du fil (admin, ancien fil) : aucune
+    if (methode === 'GET' && chemin === '/analytics/post-views') {
+      if (!req.compte) return nonAuthentifie();
+      if (req.compte.role !== 'admin') return { status: 403, json: { error: 'Accès refusé' } };
+      return { json: { counts: {} } };
+    }
+
     // Niveau de carte Gang des clients d'une fiche de l'agenda (équipe) : aucun client n'a de carte
     if (methode === 'GET' && chemin === '/gang-card/summary') {
       if (!req.compte) return nonAuthentifie();
@@ -320,6 +352,9 @@ export class FauxServeur {
 
     // La Coupe du Gang : routes REST (routes/coupe.js du serveur)
     if (chemin.startsWith('/coupe/')) return this.coupeRest.traiter(req);
+
+    // Fil « New Gang » v2 (routes/feed.js et routes/feedActivity.js du serveur)
+    if (chemin === '/feed' || chemin.startsWith('/feed/')) return this.filRest.traiter(req);
 
     // Entités
     const m = /^\/entities\/([A-Za-z]+)(?:\/([^/]+))?$/.exec(chemin);
@@ -375,6 +410,8 @@ export class FauxServeur {
         ...(req.corps || {}),
         id: `${nom.toLowerCase()}-e2e-${this.compteurId}`,
         created_date: new Date().toISOString(),
+        // Fil (Post, PostComment, PostLike, UserBlock, PostReport) : identité tirée du jeton
+        ...this.filRest.identiteCrud(nom, req.compte),
       };
       table.push(ligne);
       return { status: 201, json: nom === 'Appointment' ? avecBlocage(ligne) : ligne };
@@ -815,6 +852,790 @@ export class FauxCoupeRest {
     if (!ligne) return { status: 404, json: { error: 'Joueur introuvable', code: 'not_found' } };
     const stats = (l) => (l ? { points: l.points, rank: l.rank, wins: l.wins, losses: l.losses, matches: l.matches } : { points: 0, rank: null, wins: 0, losses: 0, matches: 0 });
     return { json: { name: ligne.name, role: ligne.role, season_stats: stats(saison), total_stats: stats(total) } };
+  }
+}
+
+// ─── Fil « New Gang » v2 ───────────────────────────────────────────────
+
+/** Réactions acceptées (FEED_REACTIONS du serveur) ; ❤ sans sélecteur de variante toléré. */
+const REACTIONS_FIL = ['❤️', '🔥', '💪', '😂', '👏', '💈'];
+const sansVariante = (r) => String(r).replace(/️/g, '');
+const PREFS_PAR_DEFAUT = Object.freeze({ reactions: true, comments: true, salon: false, visit: true });
+const CLES_PREFS = Object.keys(PREFS_PAR_DEFAUT);
+const TAILLE_PAGE_FIL = 20;
+const TAILLE_PAGE_FIL_MAX = 30;
+const JOUR_MS = 86_400_000;
+const LOGO_DU_SALON = '/icons/icon-192.png';
+
+const objet = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
+const minuscule = (v) => (v == null ? '' : String(v).trim().toLowerCase());
+const horodatage = (ligne) => new Date(ligne.created_at || ligne.created_date || 0).toISOString();
+const resume = (texte, n) => {
+  const t = String(texte ?? '').replace(/\s+/g, ' ').trim();
+  return t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t;
+};
+const erreurFil = (status, error, code) => ({ status, json: code ? { error, code } : { error } });
+
+/**
+ * Faux `routes/feed.js` + `routes/feedActivity.js` (contrat docs/fonctions/fil-new-gang-contrat.md,
+ * section 4), sur les tables du faux serveur : `Post`, `PostLike`, `PostComment`, `UserBlock`,
+ * `Appointment`, `Employee`, `Service`, et l'état du fil `api.fil` (`donnees.fil`) : activité, votes,
+ * ❤️ de commentaires, réglages, dernière visite du fil, vues. Tout est relu à chaque requête : un
+ * test peut remplacer une table (`api.tables.Post = …`, `api.fil.activite = …`) à tout moment.
+ *
+ * Règles reprises du serveur : identité lue dans le jeton (jamais dans le corps), l'admin écrit au
+ * nom du salon, auteurs bloqués par le lecteur exclus de tout, email seulement pour l'équipe et sur
+ * ses propres lignes, activité créée pour l'auteur de la publication (jamais pour soi). Sans
+ * `features.feedV2` (serveur plus ancien), aucune route : 501 et test en échec si l'app en appelle une.
+ */
+export class FauxFil {
+  constructor(serveur) {
+    this.serveur = serveur;
+    this.compteur = 0;
+  }
+
+  get etat() { return this.serveur.donnees.fil; }
+  get posts() { return this.serveur.tables.Post || []; }
+  get likes() { return this.serveur.tables.PostLike || (this.serveur.tables.PostLike = []); }
+  get commentaires() { return this.serveur.tables.PostComment || (this.serveur.tables.PostComment = []); }
+
+  nouvelId(prefixe) {
+    this.compteur += 1;
+    return `${prefixe}-fil-${this.compteur}`;
+  }
+
+  // ─── Identités ───────────────────────────────────────────────────────
+
+  compteParEmail(email) {
+    const e = minuscule(email);
+    return e ? this.serveur.comptes.find((c) => minuscule(c.email) === e) || null : null;
+  }
+
+  /** Clé publique d'un email : celle que `/me` donne au compte (`cle-<id>`), sinon tirée de l'email. */
+  cleDeEmail(email) {
+    const e = minuscule(email);
+    if (!e) return null;
+    const compte = this.compteParEmail(e);
+    if (compte) return `cle-${compte.id}`;
+    let h = 7;
+    for (const c of e) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+    return `cle-m${h.toString(16)}`;
+  }
+
+  /** Champs auteur d'un compte (`authorFields` du serveur) : l'admin = le salon. */
+  auteur(compte) {
+    if (compte.role === 'admin') {
+      return { author_email: minuscule(compte.email), author_name: "D'Home Barber", author_role: 'admin', author_photo_url: LOGO_DU_SALON };
+    }
+    return {
+      author_email: minuscule(compte.email),
+      author_name: compte.full_name || 'Membre du Gang',
+      author_role: compte.role || 'user',
+      author_photo_url: compte.photo_url || null,
+    };
+  }
+
+  /** Blocages du lecteur (`UserBlock` : `blocked_key`, `blocked_email`, `key:<clé>`). */
+  bloquesPar(email) {
+    const e = minuscule(email);
+    const cles = new Set();
+    const emails = new Set();
+    for (const b of this.serveur.tables.UserBlock || []) {
+      // Ligne créée par l'app sans `blocker_email` (le faux CRUD ne l'ajoute pas) : celle du lecteur
+      if (b.blocker_email && minuscule(b.blocker_email) !== e) continue;
+      if (b.blocked_key) cles.add(String(b.blocked_key));
+      const be = minuscule(b.blocked_email);
+      if (be.startsWith('key:')) cles.add(be.slice(4));
+      else if (be) emails.add(be);
+    }
+    return { cles, emails };
+  }
+
+  estBloque(blocages, email, cle) {
+    const k = cle || this.cleDeEmail(email);
+    return (!!k && blocages.cles.has(k)) || (!!email && blocages.emails.has(minuscule(email)));
+  }
+
+  /** Publication masquée pour ce lecteur : auteur bloqué, ou Moment d'un membre bloqué. */
+  publicationBloquee(post, blocages) {
+    if (this.estBloque(blocages, post.author_email, post.author_key)) return true;
+    if (post.kind === 'moment' && post.subject_user_id) {
+      const membre = this.serveur.comptes.find((c) => String(c.id) === String(post.subject_user_id));
+      if (membre && this.estBloque(blocages, membre.email)) return true;
+    }
+    return false;
+  }
+
+  /** Même email que le lecteur (`sameEmail` du serveur) : un admin n'est pas l'auteur d'une ligne d'un autre admin. */
+  estAMoi(ligne, lecteur, champEmail = 'author_email') {
+    const e = minuscule(ligne[champEmail]);
+    return !!e && e === minuscule(lecteur.email);
+  }
+
+  // ─── Formes de l'API ─────────────────────────────────────────────────
+
+  commentairesVisibles(postId, blocages) {
+    const tous = this.commentaires.filter((c) => String(c.post_id) === String(postId));
+    const ids = new Set(tous.map((c) => String(c.id)));
+    return tous
+      // Réponse dont la racine a été supprimée : partie avec elle (ON DELETE CASCADE)
+      .filter((c) => !c.parent_id || ids.has(String(c.parent_id)))
+      .filter((c) => !this.estBloque(blocages, c.author_email, c.author_key))
+      .sort((a, b) => horodatage(a).localeCompare(horodatage(b)) || String(a.id).localeCompare(String(b.id)));
+  }
+
+  commentaire(c, lecteur) {
+    const moi = this.estAMoi(c, lecteur);
+    const equipe = ['admin', 'barber'].includes(lecteur.role);
+    const coeurs = this.etat.likesCommentaires.filter((l) => String(l.comment_id) === String(c.id));
+    return {
+      id: c.id,
+      post_id: c.post_id,
+      parent_id: c.parent_id || null,
+      author_name: c.author_name || 'Membre du Gang',
+      author_role: c.author_role || 'user',
+      author_photo_url: c.author_photo_url || null,
+      author_key: c.author_key || this.cleDeEmail(c.author_email),
+      ...(equipe || moi ? { author_email: c.author_email || null } : {}),
+      is_mine: moi,
+      content: c.content,
+      created_at: horodatage(c),
+      likes: coeurs.length,
+      my_like: coeurs.some((l) => minuscule(l.user_email) === minuscule(lecteur.email)),
+    };
+  }
+
+  reactionsDe(postId, lecteur) {
+    const reactions = {};
+    let mienne = null;
+    const lignes = this.likes.filter((l) => String(l.post_id) === String(postId));
+    for (const l of lignes) {
+      const r = REACTIONS_FIL.find((x) => sansVariante(x) === sansVariante(l.reaction || '')) || '❤️';
+      reactions[r] = (reactions[r] || 0) + 1;
+      if (minuscule(l.user_email) === minuscule(lecteur.email)) mienne = r;
+    }
+    return { reactions, reactions_total: lignes.length, my_reaction: mienne };
+  }
+
+  sondage(post, lecteur) {
+    const meta = objet(post.meta);
+    const options = (Array.isArray(meta.options) ? meta.options : []).map((o) => ({
+      id: o.id,
+      label: o.label,
+      votes: this.etat.votes.filter((v) => String(v.post_id) === String(post.id) && v.option_id === o.id).length,
+    }));
+    const monVote = this.etat.votes.find((v) => String(v.post_id) === String(post.id) && minuscule(v.user_email) === minuscule(lecteur.email));
+    const fin = Date.parse(meta.ends_at || '');
+    return {
+      question: meta.question || '',
+      options,
+      total: options.reduce((s, o) => s + o.votes, 0),
+      my_vote: monVote && options.some((o) => o.id === monVote.option_id) ? monVote.option_id : null,
+      ends_at: meta.ends_at || null,
+      closed: !(Number.isFinite(fin) && fin > this.serveur.maintenant().getTime()),
+    };
+  }
+
+  metaPublique(kind, meta) {
+    const m = objet(meta);
+    if (kind === 'look') {
+      const ids = Array.isArray(m.service_ids) ? m.service_ids : [];
+      const reservable = !!m.bookable && !!m.employee_id && ids.length > 0;
+      return {
+        employee_id: m.employee_id || null,
+        employee_name: m.employee_name || null,
+        service_ids: ids,
+        service_names: Array.isArray(m.service_names) ? m.service_names : [],
+        bookable: !!m.bookable,
+        booking_path: reservable
+          ? `/booking?barber=${encodeURIComponent(m.employee_id)}&services=${ids.map(encodeURIComponent).join(',')}&from=feed-look`
+          : null,
+      };
+    }
+    if (kind === 'before_after') return { employee_id: m.employee_id || null, employee_name: m.employee_name || null };
+    if (kind === 'moment') {
+      return {
+        type: m.type || 'tier_up', tier: m.tier || null, tier_label: m.tier_label || null,
+        member_name: m.member_name || null, member_photo_url: m.member_photo_url || null,
+      };
+    }
+    if (kind === 'last_minute') return m;
+    return {};
+  }
+
+  /** Publication telle que `GET /feed` la rend (`item` du contrat). */
+  item(post, lecteur, blocages = this.bloquesPar(lecteur.email)) {
+    const kind = post.kind || 'post';
+    const meta = objet(post.meta);
+    const images = Array.isArray(meta.images) && meta.images.length
+      ? meta.images.filter((u) => typeof u === 'string').slice(0, 4)
+      : (post.image_url ? [post.image_url] : []);
+    const moi = this.estAMoi(post, lecteur);
+    const equipe = ['admin', 'barber'].includes(lecteur.role);
+    const commentaires = this.commentairesVisibles(post.id, blocages);
+    let content = post.content ?? '';
+    if (kind === 'poll') content = meta.question || '';
+    else if (kind === 'look' || kind === 'before_after') content = meta.caption ?? '';
+    return {
+      id: post.id,
+      kind,
+      created_at: horodatage(post),
+      author_name: post.author_name || 'Membre du Gang',
+      author_role: post.author_role || 'user',
+      author_photo_url: post.author_photo_url || null,
+      author_key: post.author_key || this.cleDeEmail(post.author_email),
+      ...(equipe || moi ? { author_email: post.author_email || null } : {}),
+      is_mine: moi,
+      content,
+      images,
+      image_url: post.image_url || null,
+      meta: this.metaPublique(kind, meta),
+      appointment_id: kind === 'last_minute' ? post.appointment_id || null : null,
+      ...this.reactionsDe(post.id, lecteur),
+      comments_count: commentaires.length,
+      comments_preview: commentaires.slice(-2).map((c) => this.commentaire(c, lecteur)),
+      poll: kind === 'poll' ? this.sondage(post, lecteur) : null,
+      views: moi || lecteur.role === 'admin' ? Number(this.etat.vues[post.id]) || 0 : null,
+    };
+  }
+
+  postVisible(id, lecteur) {
+    const post = this.posts.find((p) => String(p.id) === String(id));
+    if (!post || this.publicationBloquee(post, this.bloquesPar(lecteur.email))) return null;
+    return post;
+  }
+
+  // ─── Activité (lib/feedActivity.js) ──────────────────────────────────
+
+  /** Destinataire de l'activité d'une publication : son auteur, ou le membre d'un Moment. */
+  destinataireDe(post) {
+    if (post.kind === 'moment' && post.subject_user_id) {
+      return minuscule(this.serveur.comptes.find((c) => String(c.id) === String(post.subject_user_id))?.email) || null;
+    }
+    return minuscule(post.author_email) || null;
+  }
+
+  /** Le destinataire a-t-il bloqué l'auteur du geste ? (lignes `UserBlock` à son nom seulement) */
+  aBloque(destinataire, acteurEmail) {
+    const cle = this.cleDeEmail(acteurEmail);
+    return (this.serveur.tables.UserBlock || []).some((b) => minuscule(b.blocker_email) === destinataire
+      && (minuscule(b.blocked_email) === minuscule(acteurEmail) || (cle && (b.blocked_key === cle || minuscule(b.blocked_email) === `key:${cle}`))));
+  }
+
+  noterActivite(destinataire, acteur, champs, unique) {
+    const email = minuscule(acteur.author_email);
+    if (!destinataire || destinataire === email || this.aBloque(destinataire, email)) return;
+    const ligne = {
+      recipient_email: destinataire,
+      actor_email: email,
+      actor_name: acteur.author_name,
+      actor_role: acteur.author_role,
+      actor_photo_url: acteur.author_photo_url,
+      emoji: null,
+      excerpt: null,
+      post_id: null,
+      comment_id: null,
+      appointment_id: null,
+      ...champs,
+      created_at: this.serveur.maintenant().toISOString(),
+      read_at: null,
+      pushed_at: null,
+    };
+    const existante = unique ? this.etat.activite.find(unique) : null;
+    if (existante) Object.assign(existante, ligne);
+    else this.etat.activite.push({ id: this.nouvelId('act'), ...ligne });
+  }
+
+  retirerActivite(test) {
+    this.etat.activite = this.etat.activite.filter((a) => !(test(a) && !a.read_at));
+  }
+
+  /**
+   * Champs que le serveur écrit lui-même à la création par le CRUD des entités du fil (ancien fil,
+   * signalement, blocage) : identité lue dans le jeton, jamais dans le corps.
+   */
+  identiteCrud(nom, compte) {
+    if (!compte) return {};
+    const quand = this.serveur.maintenant().toISOString();
+    const email = minuscule(compte.email);
+    if (nom === 'Post' || nom === 'PostComment') return { ...this.auteur(compte), created_at: quand };
+    if (nom === 'PostLike') return { user_email: email, created_at: quand };
+    if (nom === 'UserBlock') return { blocker_email: email, created_at: quand };
+    if (nom === 'PostReport') return { reporter_email: email, status: 'pending', created_at: quand };
+    return {};
+  }
+
+  // ─── Routes ──────────────────────────────────────────────────────────
+
+  traiter(req) {
+    if (this.serveur.donnees.parametresPublics.features?.feedV2 !== true) return null;
+    const { methode, chemin, compte } = req;
+    if (!compte) return nonAuthentifie();
+    const corps = req.corps && typeof req.corps === 'object' && !Array.isArray(req.corps) ? req.corps : {};
+    const sous = chemin.slice('/feed'.length);
+
+    if (methode === 'GET' && sous === '') return this.page(req, compte);
+    if (methode === 'GET' && sous === '/visits') return { json: { visits: this.visites(compte) } };
+    if (methode === 'POST' && sous === '/posts') return this.publier(corps, compte);
+    if (methode === 'GET' && sous === '/activity') return this.activite(compte);
+    if (methode === 'POST' && sous === '/activity/read') return this.marquerLu(corps, compte);
+    if (methode === 'GET' && sous === '/unread') return this.nonLus(req, compte);
+    if (methode === 'POST' && sous === '/seen') {
+      this.etat.vuLe[minuscule(compte.email)] = this.serveur.maintenant().toISOString();
+      return { json: { ok: true } };
+    }
+    if (sous === '/prefs' && methode === 'GET') return { json: this.reglages(compte) };
+    if (sous === '/prefs' && methode === 'PUT') return this.changerReglages(req.corps, compte);
+
+    const coeur = /^\/comments\/([^/]+)\/like$/.exec(sous);
+    if (methode === 'POST' && coeur) return this.aimerCommentaire(decodeURIComponent(coeur[1]), corps, compte);
+
+    const m = /^\/([^/]+)(?:\/(comments|react|vote))?$/.exec(sous);
+    if (!m) return null;
+    const id = decodeURIComponent(m[1]);
+    const action = m[2] || null;
+    const post = this.postVisible(id, compte);
+    if (!post) return erreurFil(404, "Cette publication n'existe plus.", 'not_found');
+    if (methode === 'GET' && !action) return { json: { item: this.item(post, compte) } };
+    if (methode === 'GET' && action === 'comments') {
+      const liste = this.commentairesVisibles(post.id, this.bloquesPar(compte.email)).slice(0, 500);
+      return { json: { comments: liste.map((c) => this.commentaire(c, compte)), total: liste.length } };
+    }
+    if (methode === 'POST' && action === 'comments') return this.commenter(post, corps, compte);
+    if (methode === 'POST' && action === 'react') return this.reagir(post, corps, compte);
+    if (methode === 'POST' && action === 'vote') return this.voter(post, corps, compte);
+    return null;
+  }
+
+  /** `GET /feed?before=&filter=&limit=` → `{ items, next_cursor }` (curseur `<horodatage>_<id>`). */
+  page(req, compte) {
+    const filtre = ['all', 'salon', 'looks', 'polls'].includes(String(req.query.filter || 'all')) ? String(req.query.filter || 'all') : 'all';
+    const n = Number(req.query.limit);
+    const limite = Number.isInteger(n) && n >= 1 ? Math.min(n, TAILLE_PAGE_FIL_MAX) : TAILLE_PAGE_FIL;
+    let curseur = null;
+    if (req.query.before) {
+      const s = String(req.query.before);
+      const i = s.indexOf('_');
+      const ts = s.slice(0, i);
+      if (i < 0 || !Number.isFinite(Date.parse(ts)) || !s.slice(i + 1)) return erreurFil(400, 'Curseur invalide');
+      curseur = { ts: new Date(ts).toISOString(), id: s.slice(i + 1) };
+    }
+    const blocages = this.bloquesPar(compte.email);
+    const lignes = this.posts
+      .filter((p) => !this.publicationBloquee(p, blocages))
+      .filter((p) => {
+        if (filtre === 'salon') return p.author_role === 'admin';
+        if (filtre === 'looks') return p.kind === 'look' || p.kind === 'before_after';
+        if (filtre === 'polls') return p.kind === 'poll';
+        return true;
+      })
+      .map((p) => ({ p, ts: horodatage(p), id: String(p.id) }))
+      .sort((a, b) => b.ts.localeCompare(a.ts) || b.id.localeCompare(a.id))
+      .filter((l) => !curseur || l.ts < curseur.ts || (l.ts === curseur.ts && l.id < curseur.id));
+    const pageLignes = lignes.slice(0, limite);
+    const derniere = pageLignes[pageLignes.length - 1];
+    return {
+      json: {
+        items: pageLignes.map((l) => this.item(l.p, compte, blocages)),
+        next_cursor: lignes.length > limite && derniere ? `${derniere.ts}_${derniere.id}` : null,
+      },
+    };
+  }
+
+  /** Visites du client des 60 derniers jours (commencées, sans proche), la plus récente d'abord. */
+  visites(compte) {
+    if (compte.role !== 'user') return [];
+    const maintenant = this.serveur.maintenant().getTime();
+    return (this.serveur.tables.Appointment || [])
+      .filter((a) => minuscule(a.client_email) === minuscule(compte.email) && !a.guest_name
+        && ['confirmed', 'completed'].includes(a.status))
+      .map((a) => ({ a, debut: instantParis(a.date, a.start_time || '00:00').getTime() }))
+      .filter(({ debut }) => debut <= maintenant && debut >= maintenant - 60 * JOUR_MS)
+      .sort((x, y) => y.debut - x.debut)
+      .slice(0, 10)
+      .map(({ a }) => {
+        const fiche = (this.serveur.tables.Employee || []).find((e) => String(e.id) === String(a.employee_id));
+        return {
+          id: a.id,
+          date: a.date,
+          start_time: a.start_time,
+          employee_id: a.employee_id,
+          employee_name: fiche?.name || a.employee_name || null,
+          employee_photo_url: fiche?.photo_url || null,
+          service_names: (a.services || []).map((s) => s.name).filter(Boolean),
+        };
+      });
+  }
+
+  /** Une photo de l'app (`<API>/api/media/<id>`), sinon 400 (comme `profilePhotoOrNull`). */
+  photo(v, libelle = 'Photo') {
+    if (v === undefined || v === null || v === '') return { erreur: erreurFil(400, `${libelle} manquante`) };
+    if (typeof v !== 'string' || !v.startsWith(`${API_ORIGINE}/api/media/`)) {
+      return { erreur: erreurFil(400, "Photo invalide : envoyez-la depuis l'app") };
+    }
+    return { url: v };
+  }
+
+  /** `POST /feed/posts` (`validateNewPost`, puis `content` de repli, `meta.caption`, doublon de 10 min). */
+  publier(corps, compte) {
+    const kind = corps.kind === undefined || corps.kind === null || corps.kind === '' ? 'post' : String(corps.kind);
+    if (!['post', 'look', 'poll', 'before_after'].includes(kind)) return erreurFil(400, 'Format de publication inconnu');
+    if (corps.content != null && typeof corps.content !== 'string') return erreurFil(400, 'Publication invalide');
+    const texte = String(corps.content || '').trim();
+    if (texte.length > 5000) return erreurFil(400, 'Publication trop longue (5000 caractères au plus)');
+    const auteur = this.auteur(compte);
+    const meta = {};
+    let images = [];
+    let content = texte;
+
+    if (kind === 'poll') {
+      if (compte.role !== 'admin') return erreurFil(403, 'Seul le salon peut publier un sondage');
+      const p = objet(corps.poll);
+      const question = String(p.question || '').trim();
+      if (!question) return erreurFil(400, 'Question manquante');
+      const labels = [];
+      for (const o of Array.isArray(p.options) ? p.options : []) {
+        const label = String(o && typeof o === 'object' ? o.label || '' : o || '').trim();
+        if (!label) continue;
+        if (labels.some((l) => l.toLowerCase() === label.toLowerCase())) return erreurFil(400, 'Deux réponses identiques');
+        labels.push(label);
+      }
+      if (labels.length < 2) return erreurFil(400, 'Au moins 2 réponses');
+      if (labels.length > 4) return erreurFil(400, '4 réponses au plus');
+      const jours = p.days === undefined || p.days === null || p.days === '' ? 3 : Number(p.days);
+      if (!Number.isInteger(jours) || jours < 1 || jours > 14) return erreurFil(400, 'Durée du sondage : 1 à 14 jours');
+      Object.assign(meta, {
+        question,
+        options: labels.map((label, i) => ({ id: 'abcd'[i], label })),
+        ends_at: new Date(this.serveur.maintenant().getTime() + jours * JOUR_MS).toISOString(),
+      });
+      content = `📊 Sondage : ${question}\n\n${labels.map((l) => `• ${l}`).join('\n')}\n\nVote dans la dernière version de l'app D'Home Barber.`;
+    } else {
+      if ((kind === 'look' || kind === 'before_after') && compte.role !== 'user') {
+        return erreurFil(403, 'Ce format est réservé aux membres du Gang');
+      }
+      let visite = null;
+      if (corps.visit_id !== undefined && corps.visit_id !== null && corps.visit_id !== '') {
+        visite = this.visites(compte).find((v) => String(v.id) === String(corps.visit_id)) || null;
+        if (!visite) return erreurFil(404, 'Cette visite est introuvable : choisis une de tes visites récentes.', 'visit_not_found');
+      }
+      if (kind === 'before_after') {
+        const avant = this.photo(corps.before, 'Photo « avant »');
+        if (avant.erreur) return avant.erreur;
+        const apres = this.photo(corps.after, 'Photo « après »');
+        if (apres.erreur) return apres.erreur;
+        if (avant.url === apres.url) return erreurFil(400, 'Choisis deux photos différentes');
+        images = [avant.url, apres.url];
+        Object.assign(meta, { employee_id: visite?.employee_id ?? null, employee_name: visite?.employee_name ?? null });
+        content = [texte, '↔️ Avant / Après'].filter(Boolean).join('\n\n');
+      } else {
+        if (corps.images != null && !Array.isArray(corps.images)) return erreurFil(400, 'Photos invalides');
+        if ((corps.images || []).length > 4) return erreurFil(400, '4 photos au plus');
+        for (const v of corps.images || []) {
+          const r = this.photo(v);
+          if (r.erreur) return r.erreur;
+          if (!images.includes(r.url)) images.push(r.url);
+        }
+        if (kind === 'look') {
+          if (!images.length) return erreurFil(400, 'Ajoute au moins une photo de ton look');
+          if (!visite) return erreurFil(400, 'Choisis la visite de ce look');
+          const rdv = (this.serveur.tables.Appointment || []).find((a) => String(a.id) === String(visite.id));
+          const fiche = (this.serveur.tables.Employee || []).find((e) => String(e.id) === String(visite.employee_id));
+          const catalogue = this.serveur.tables.Service || [];
+          const prestations = (rdv?.services || [])
+            .map((s) => catalogue.find((c) => String(c.id) === String(s.service_id) && c.is_active !== false))
+            .filter(Boolean);
+          const reservable = corps.bookable !== false && !!fiche && fiche.is_active !== false && !fiche.is_hidden && prestations.length > 0;
+          Object.assign(meta, {
+            employee_id: visite.employee_id,
+            employee_name: fiche?.name || visite.employee_name || null,
+            service_ids: prestations.map((s) => String(s.id)),
+            service_names: prestations.map((s) => s.name),
+            bookable: reservable,
+          });
+          const quoi = meta.service_names.join(' + ');
+          const fin = [quoi, meta.employee_name ? `avec ${meta.employee_name}` : ''].filter(Boolean).join(' ');
+          content = [texte, fin ? `✂️ ${fin}` : ''].filter(Boolean).join('\n\n');
+        } else if (!texte && !images.length) {
+          return erreurFil(400, 'Publication vide');
+        }
+      }
+    }
+    if (images.length > 1) meta.images = images;
+    meta.caption = texte;
+    const imageUrl = kind === 'before_after' ? images[1] : images[0] || null;
+
+    // Doublon (même auteur, même texte en base, même photo, 10 min) : rendu tel quel
+    const maintenant = this.serveur.maintenant().getTime();
+    const doublon = this.posts.find((p) => minuscule(p.author_email) === auteur.author_email
+      && (p.content || '') === content && (p.image_url || null) === imageUrl
+      && maintenant - Date.parse(horodatage(p)) < 10 * 60_000);
+    if (doublon) return { json: { item: this.item(doublon, compte) } };
+
+    const ligne = {
+      id: this.nouvelId('post'),
+      kind: kind === 'post' ? null : kind,
+      ...auteur,
+      content,
+      image_url: imageUrl,
+      meta,
+      created_at: new Date(maintenant).toISOString(),
+    };
+    if (!this.serveur.tables.Post) this.serveur.tables.Post = [];
+    this.serveur.tables.Post.push(ligne);
+    return { status: 201, json: { item: this.item(ligne, compte) } };
+  }
+
+  /** `POST /feed/:id/react { reaction }` (emoji de la liste, ou null pour retirer). */
+  reagir(post, corps, compte) {
+    let reaction = null;
+    if (corps.reaction !== null && corps.reaction !== undefined) {
+      reaction = REACTIONS_FIL.find((r) => sansVariante(r) === sansVariante(String(corps.reaction).trim())) || null;
+      if (!reaction) return erreurFil(400, 'Réaction invalide');
+    }
+    const email = minuscule(compte.email);
+    const moi = (l) => String(l.post_id) === String(post.id) && minuscule(l.user_email) === email;
+    const existante = this.likes.find(moi);
+    const acteur = this.auteur(compte);
+    if (!reaction) {
+      this.serveur.tables.PostLike = this.likes.filter((l) => !moi(l));
+      this.retirerActivite((a) => a.type === 'reaction' && String(a.post_id) === String(post.id) && minuscule(a.actor_email) === email);
+    } else {
+      if (existante) existante.reaction = reaction;
+      else {
+        this.likes.push({
+          id: this.nouvelId('like'), post_id: post.id, user_email: email, reaction,
+          created_at: this.serveur.maintenant().toISOString(),
+        });
+      }
+      const destinataire = this.destinataireDe(post);
+      this.noterActivite(destinataire, acteur, { type: 'reaction', post_id: post.id, emoji: reaction },
+        (a) => a.type === 'reaction' && a.recipient_email === destinataire && String(a.post_id) === String(post.id) && a.actor_email === email);
+    }
+    return { json: this.reactionsDe(post.id, compte) };
+  }
+
+  /** `POST /feed/:id/comments { content, reply_to? }` → `{ comment, comments_count }`. */
+  commenter(post, corps, compte) {
+    if (corps.content != null && typeof corps.content !== 'string') return erreurFil(400, 'Commentaire invalide');
+    const content = String(corps.content || '').trim();
+    if (!content) return erreurFil(400, 'Commentaire vide');
+    if (content.length > 1000) return erreurFil(400, 'Commentaire trop long (1000 caractères au plus)');
+    let repondu = null;
+    if (corps.reply_to !== undefined && corps.reply_to !== null && corps.reply_to !== '') {
+      repondu = this.commentaires.find((c) => String(c.id) === String(corps.reply_to) && String(c.post_id) === String(post.id));
+      if (!repondu) return erreurFil(400, 'Ce commentaire n’appartient pas à cette publication.', 'bad_reply');
+    }
+    const auteur = this.auteur(compte);
+    const blocages = this.bloquesPar(compte.email);
+    const maintenant = this.serveur.maintenant().getTime();
+    const parentId = repondu ? repondu.parent_id || repondu.id : null;
+    // Doublon de 30 s (même texte, même fil) : rendu tel quel
+    const doublon = this.commentaires.find((c) => String(c.post_id) === String(post.id)
+      && minuscule(c.author_email) === auteur.author_email && c.content === content
+      && String(c.parent_id || '') === String(parentId || '')
+      && maintenant - Date.parse(horodatage(c)) < 30_000);
+    const ligne = doublon || {
+      id: this.nouvelId('com'),
+      post_id: post.id,
+      parent_id: parentId,
+      ...auteur,
+      content,
+      created_at: new Date(maintenant).toISOString(),
+    };
+    if (!doublon) {
+      this.commentaires.push(ligne);
+      const extrait = resume(content, 140);
+      const destRepondu = repondu ? minuscule(repondu.author_email) || null : null;
+      if (destRepondu) {
+        this.noterActivite(destRepondu, auteur, { type: 'reply', post_id: post.id, comment_id: ligne.id, excerpt: extrait });
+      }
+      const destPost = this.destinataireDe(post);
+      if (destPost && destPost !== destRepondu) {
+        this.noterActivite(destPost, auteur, { type: 'comment', post_id: post.id, comment_id: ligne.id, excerpt: extrait });
+      }
+    }
+    return {
+      status: doublon ? 200 : 201,
+      json: { comment: this.commentaire(ligne, compte), comments_count: this.commentairesVisibles(post.id, blocages).length },
+    };
+  }
+
+  /** `POST /feed/comments/:id/like { liked }` → `{ likes, my_like }`. */
+  aimerCommentaire(id, corps, compte) {
+    const c = this.commentaires.find((x) => String(x.id) === String(id));
+    const post = c ? this.postVisible(c.post_id, compte) : null;
+    if (!c || !post || this.estBloque(this.bloquesPar(compte.email), c.author_email, c.author_key)) {
+      return erreurFil(404, "Ce commentaire n'existe plus.", 'not_found');
+    }
+    if (typeof corps.liked !== 'boolean') return erreurFil(400, 'Choix invalide');
+    const email = minuscule(compte.email);
+    const moi = (l) => String(l.comment_id) === String(c.id) && minuscule(l.user_email) === email;
+    if (corps.liked) {
+      if (!this.etat.likesCommentaires.some(moi)) {
+        this.etat.likesCommentaires.push({ comment_id: c.id, user_email: email, created_at: this.serveur.maintenant().toISOString() });
+        const destinataire = minuscule(c.author_email) || null;
+        this.noterActivite(destinataire, this.auteur(compte), { type: 'comment_like', post_id: c.post_id, comment_id: c.id, excerpt: resume(c.content, 140) },
+          (a) => a.type === 'comment_like' && a.recipient_email === destinataire && String(a.comment_id) === String(c.id) && a.actor_email === email);
+      }
+    } else {
+      this.etat.likesCommentaires = this.etat.likesCommentaires.filter((l) => !moi(l));
+      this.retirerActivite((a) => a.type === 'comment_like' && String(a.comment_id) === String(c.id) && minuscule(a.actor_email) === email);
+    }
+    const vue = this.commentaire(c, compte);
+    return { json: { likes: vue.likes, my_like: vue.my_like } };
+  }
+
+  /** `POST /feed/:id/vote { option_id }` → `{ poll }` ; 409 `poll_closed` après la fin. */
+  voter(post, corps, compte) {
+    if (post.kind !== 'poll') return erreurFil(400, 'Cette publication n’est pas un sondage.', 'not_a_poll');
+    const avant = this.sondage(post, compte);
+    if (avant.closed) return erreurFil(409, 'Ce sondage est terminé.', 'poll_closed');
+    const option = String(corps.option_id == null ? '' : corps.option_id);
+    if (!avant.options.some((o) => o.id === option)) return erreurFil(400, 'Réponse inconnue');
+    const email = minuscule(compte.email);
+    const existant = this.etat.votes.find((v) => String(v.post_id) === String(post.id) && minuscule(v.user_email) === email);
+    const quand = this.serveur.maintenant().toISOString();
+    if (existant) Object.assign(existant, { option_id: option, updated_at: quand });
+    else this.etat.votes.push({ post_id: post.id, user_email: email, option_id: option, created_at: quand, updated_at: quand });
+    return { json: { poll: this.sondage(post, compte) } };
+  }
+
+  /** Lignes d'activité visibles du compte (90 jours, auteurs bloqués exclus, publication présente). */
+  lignesActivite(compte) {
+    const email = minuscule(compte.email);
+    const blocages = this.bloquesPar(email);
+    const depuis = this.serveur.maintenant().getTime() - 90 * JOUR_MS;
+    const commentaires = new Set(this.commentaires.map((c) => String(c.id)));
+    return this.etat.activite
+      .filter((a) => minuscule(a.recipient_email) === email && Date.parse(horodatage(a)) >= depuis)
+      .filter((a) => !a.actor_email || !this.estBloque(blocages, a.actor_email))
+      .map((a) => ({ a, post: a.post_id ? this.posts.find((p) => String(p.id) === String(a.post_id)) : null }))
+      // Publication ou commentaire supprimés : l'activité part avec (ON DELETE CASCADE)
+      .filter(({ a, post }) => (!a.post_id || post) && (!a.comment_id || commentaires.has(String(a.comment_id))))
+      .sort((x, y) => horodatage(y.a).localeCompare(horodatage(x.a)) || String(y.a.id).localeCompare(String(x.a.id)));
+  }
+
+  /**
+   * Lignes → éléments de l'écran Activité (`groupActivity` du serveur) : réactions par publication,
+   * ❤️ par commentaire, entre lignes de même état (lu / non lu) ; le reste un par un.
+   */
+  grouper(lignes) {
+    const groupes = [];
+    const index = new Map();
+    for (const { a, post } of lignes) {
+      const par = a.type === 'reaction' ? 'post_id' : a.type === 'comment_like' ? 'comment_id' : null;
+      const nonLu = !a.read_at;
+      const cle = par && a[par] ? `${a.type}:${a[par]}:${nonLu ? 'u' : 'r'}` : null;
+      let g = cle ? index.get(cle) : null;
+      if (!g) {
+        g = {
+          id: String(a.id), ids: [], type: a.type, post_id: a.post_id || null, comment_id: a.comment_id || null,
+          appointment_id: a.appointment_id || null, actors: [], actors_count: 0, emoji: a.emoji || null,
+          excerpt: a.excerpt || null, created_at: horodatage(a), unread: nonLu,
+          post_kind: post ? post.kind || 'post' : null, post_image_url: post ? post.image_url || null : null,
+          qui: new Set(),
+        };
+        groupes.push(g);
+        if (cle) index.set(cle, g);
+      }
+      g.ids.push(String(a.id));
+      const qui = this.cleDeEmail(a.actor_email) || a.actor_name || 'Un membre';
+      if (!g.qui.has(qui)) {
+        g.qui.add(qui);
+        g.actors_count += 1;
+        if (g.actors.length < 3) g.actors.push({ name: a.actor_name || 'Un membre', photo_url: a.actor_photo_url || null, role: a.actor_role || null });
+      }
+    }
+    return groupes.map(({ qui: _qui, ...g }) => g);
+  }
+
+  /** Non-lus de l'activité comptés en éléments de l'écran (groupes), 99 au plus, comme le serveur. */
+  nonLusActivite(compte) {
+    return Math.min(99, this.grouper(this.lignesActivite(compte).filter(({ a }) => !a.read_at)).length);
+  }
+
+  /** `GET /feed/activity` → `{ items, unread_count, polls }`. */
+  activite(compte) {
+    const items = this.grouper(this.lignesActivite(compte).slice(0, 80));
+    const maintenant = this.serveur.maintenant().getTime();
+    const blocages = this.bloquesPar(compte.email);
+    const polls = this.posts
+      // Sondages du salon que le lecteur n'a pas écrits (l'admin ne vote pas au sien depuis l'activité)
+      .filter((p) => p.kind === 'poll' && p.author_role === 'admin' && !this.estAMoi(p, compte) && !this.publicationBloquee(p, blocages))
+      .filter((p) => maintenant - Date.parse(horodatage(p)) <= 14 * JOUR_MS)
+      .map((p) => ({ p, s: this.sondage(p, compte) }))
+      .filter(({ s }) => !s.closed && !s.my_vote)
+      .sort((x, y) => horodatage(y.p).localeCompare(horodatage(x.p)))
+      .map(({ p, s }) => ({ post_id: p.id, question: s.question, ends_at: s.ends_at }));
+    return {
+      json: {
+        items,
+        unread_count: this.nonLusActivite(compte),
+        polls,
+      },
+    };
+  }
+
+  /** `POST /feed/activity/read { ids? }` → `{ unread_count }` (sans `ids` : tout). */
+  marquerLu(corps, compte) {
+    const email = minuscule(compte.email);
+    let ids = null;
+    if (corps.ids !== undefined) {
+      if (!Array.isArray(corps.ids) || corps.ids.length > 500 || corps.ids.some((x) => typeof x !== 'string' && typeof x !== 'number')) {
+        return erreurFil(400, 'Liste invalide');
+      }
+      ids = new Set(corps.ids.map(String));
+    }
+    const quand = this.serveur.maintenant().toISOString();
+    for (const a of this.etat.activite) {
+      if (minuscule(a.recipient_email) !== email || a.read_at) continue;
+      if (!ids || ids.has(String(a.id))) a.read_at = quand;
+    }
+    return { json: { unread_count: this.nonLusActivite(compte) } };
+  }
+
+  /** `GET /feed/unread?since=` → `{ activity, posts }` (99 au plus chacun). */
+  nonLus(req, compte) {
+    let depuis = null;
+    if (req.query.since) {
+      depuis = Date.parse(String(req.query.since));
+      if (!Number.isFinite(depuis)) return erreurFil(400, 'Date invalide');
+    } else {
+      const vu = this.etat.vuLe[minuscule(compte.email)];
+      depuis = vu ? Date.parse(vu) : null;
+    }
+    const activity = this.nonLusActivite(compte);
+    const blocages = this.bloquesPar(compte.email);
+    // Ni Last Minute, ni les siennes, ni un Moment du Gang qui le concerne
+    const posts = depuis == null ? 0 : Math.min(99, this.posts.filter((p) => p.kind !== 'last_minute'
+      && !this.estAMoi(p, compte)
+      && !(p.subject_user_id && String(p.subject_user_id) === String(compte.id))
+      && !this.publicationBloquee(p, blocages)
+      && Date.parse(horodatage(p)) > depuis).length);
+    return { json: { activity, posts } };
+  }
+
+  reglages(compte) {
+    const v = objet(this.etat.reglages[minuscule(compte.email)]);
+    const out = { ...PREFS_PAR_DEFAUT };
+    for (const k of CLES_PREFS) if (typeof v[k] === 'boolean') out[k] = v[k];
+    return out;
+  }
+
+  /** `PUT /feed/prefs` : clés connues, booléens stricts (400 sinon) → réglages complets. */
+  changerReglages(corps, compte) {
+    if (!corps || typeof corps !== 'object' || Array.isArray(corps)) return erreurFil(400, 'Réglages invalides');
+    const changement = {};
+    for (const [k, v] of Object.entries(corps)) {
+      if (!CLES_PREFS.includes(k)) return erreurFil(400, 'Réglage inconnu');
+      if (typeof v !== 'boolean') return erreurFil(400, 'Réglage invalide');
+      changement[k] = v;
+    }
+    if (!Object.keys(changement).length) return erreurFil(400, 'Aucun réglage');
+    const email = minuscule(compte.email);
+    this.etat.reglages[email] = { ...this.reglages(compte), ...changement };
+    return { json: this.reglages(compte) };
   }
 }
 

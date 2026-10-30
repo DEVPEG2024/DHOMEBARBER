@@ -44,6 +44,17 @@ Source : `docs/fonctions/coupe-du-gang.md`, `coupe-du-gang-contrat.md` (sections
 - **Non fait** : QR code du défi (un code à 4 chiffres le remplace, rien n'est promis) ; actions admin directement sur une paire suspecte (les clés sont dans `top_pairs`, l'écran ne les propose pas) ; niveau de carte Gang du défiant sur l'écran « Défi reçu ».
 - **Limite connue de l'anti-triche** : un téléphone modifié peut encore inventer, dans les 400 ms, une parade physiquement possible (« robot défenseur ») ; le compteur « buts en attente annulés » des lignes `[Coupe] fin de match` sert à le repérer.
 
+## Fil « New Gang » v2 (30 oct. 2026, en ligne sur le site)
+
+Source : `docs/fonctions/fil-new-gang.md`, `fil-new-gang-contrat.md`.
+
+- **Dans les apps avec les prochains builds** (iOS build 19, Android code 20 ; les builds 18 / code 19 de La Coupe n'ont que l'ancien fil, qui marche grâce au CRUD inchangé) : notes de revue Apple (formats look, sondage du salon, avant / après, Moments du Gang, écran Activité, réglages des notifications du fil ; contenus des utilisateurs toujours signalables et bloquables, App Store 1.2) ; étiquettes « Confidentialité de l'app » et « Sécurité des données » à revoir (votes aux sondages, ❤️ de commentaire, activité du fil : contenu de l'utilisateur et interactions, liées au compte) ; contrôle clavier iPad du composeur et de la fenêtre des commentaires.
+- **Essais réels jamais faits** : pushs groupés du fil sur un iPhone et un Android (texte, ouverture de `/feed?post=…&comments=1`), invitation « Ta coupe est toute fraîche » après une vraie visite, Moment du Gang publié à 11:00 ou 18:00, double tap ❤️ sur une photo dans l'app iPhone (il repose sur `dblclick`), glissement de l'avant / après au doigt sur un vrai téléphone.
+- **Points gardés tels quels (contre-expertise du 30 oct. 2026)** : un compte barber ou admin supprimé par l'admin ne purge que la Coupe (son activité, ses ❤️ et ses votes restent, comme ses publications aujourd'hui) ; une visite qui finit après 19:00 n'est jamais invitée (2 h après, c'est la nuit) ; les Moments sautent un passage si le dyno redémarre pile à 11:00 ou 18:00 (pas de rattrapage) ; les vues de l'admin ne se relisent plus toutes les 60 s (à la relecture du fil seulement).
+- **Non fait** : page d'aperçu d'une publication partagée (`dhomebarber.fr/p/<id>`, comme `/lm/<id>`) : le lien `https://dhomebarber.fr/feed?post=<id>` ouvre le fil sans aperçu riche ; un aperçu ne devra rien montrer d'un client (seulement les publications du salon) ; mesure dans Admin → Trafic des indicateurs de la planche (clients qui reviennent dans les 7 jours, réservations venues de « Réserver ce look » : l'événement `feed_look_booking` est envoyé, pas encore affiché).
+- **Coupure d'urgence** : `heroku config:set FEED_V2=off --app dhomebarber-api` (l'app relit l'ancien fil ; les tâches du fil continuent de tourner).
+- **Test e2e instable, antérieur au fil v2** (constaté le 30 oct. 2026) : `e2e/looks-editeur.spec.js:106` (« la croix et Échap ne ferment que la recherche ») échoue 3 fois sur 4 au second Échap, sur le code d'avant le chantier comme après (vérifié sur une copie du commit 1b8e8c2) ; la fenêtre « Prestations du look » rouverte ne se ferme pas à Échap. À regarder dans l'éditeur des looks (`Dialog` shadcn), sans lien avec le fil.
+
 ## Échéances
 
 - **Certificat Pass Type ID** `pass.fr.dhomebarber.giftcard` valable jusqu'au **16 nov. 2027** : le renouveler avant (passé cette date, le serveur éteint seul `features.appleWallet`). Source : `docs/fonctions/cartes-cadeau-wallet.md`.
