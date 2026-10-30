@@ -159,6 +159,7 @@ curl -s -o /dev/null -w "%{http_code}\n" https://dhomebarber-api-3aabb8313cb6.he
 - `Keyboard.resize = 'native'` dans `capacitor.config.ts`, **jamais `body`** (sur iPad en mode compatibilité le clavier recouvrait les champs : refus Apple du 9 sept. 2026).
 - `initKeyboardHandling()` (`src/lib/capacitor.js`) pose `--keyboard-overlap` (en `padding-bottom` via `body.keyboard-open`) seulement si la fenêtre n'a pas rétréci ; **jamais la hauteur du clavier en plus d'une fenêtre déjà réduite** (iPad simulateur : réduite après `keyboardDidShow` ; Android : avant `keyboardWillShow`). Le champ actif est ramené au centre de la zone visible.
 - Fenêtres du bas en `.kb-sheet` / `.kb-sheet-92` ; barres fixées en bas masquées clavier ouvert (`body.keyboard-open .booking-bar`) ; `.login-logo` se replie.
+- Un toucher clavier ouvert ferme d'abord le clavier, la page bouge, et le clic arrive à l'ancien endroit du doigt dans la nouvelle mise en page : une croix voisine d'éléments qui bougent ignore le clic qui suit la sortie d'un champ (`FeedSheet.jsx`, 700 ms ; fenêtre du composeur fermée en touchant « Sondage » sur iPad, 30 oct. 2026).
 
 ## Structure (condensée)
 

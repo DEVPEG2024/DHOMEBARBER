@@ -228,6 +228,38 @@ test.describe('Fil v2 : composeur', () => {
     await expect(premiere.getByRole('button', { name: 'Signaler ou bloquer' })).toHaveCount(0);
   });
 
+  test('clavier de l\'app ouvert : le toucher qui ferme le clavier ne ferme pas la fenêtre par la croix, le suivant oui', async ({ page, api, connecter }) => {
+    remplirFil(api);
+    await connecter(CLIENT);
+    await page.goto('/feed');
+    await page.getByRole('button', { name: 'Nouvelle publication' }).click();
+    const composeur = page.getByRole('dialog', { name: 'Nouvelle publication' });
+    const champ = composeur.getByPlaceholder('Quoi de neuf ? Partage un moment, une photo…');
+    await champ.fill('Nouvelle coupe');
+    // Clavier ouvert (classe posée par src/lib/capacitor.js dans les apps) : le champ perd la main,
+    // puis le toucher arrive sur la croix (iPad, 30 oct. 2026)
+    await page.evaluate(() => document.body.classList.add('keyboard-open'));
+    await champ.focus();
+    await composeur.getByRole('button', { name: 'Fermer' }).click();
+    await page.evaluate(() => document.body.classList.remove('keyboard-open'));
+    await page.waitForTimeout(800);
+    await expect(composeur).toBeVisible();
+    await expect(champ).toHaveValue('Nouvelle coupe');
+    await composeur.getByRole('button', { name: 'Fermer' }).click();
+    await expect(composeur).toHaveCount(0);
+  });
+
+  test('sans clavier de l\'app (ordinateur) : la croix ferme au premier clic, même pendant la saisie', async ({ page, api, connecter }) => {
+    remplirFil(api);
+    await connecter(CLIENT);
+    await page.goto('/feed');
+    await page.getByRole('button', { name: 'Nouvelle publication' }).click();
+    const composeur = page.getByRole('dialog', { name: 'Nouvelle publication' });
+    await composeur.getByPlaceholder('Quoi de neuf ? Partage un moment, une photo…').fill('Nouvelle coupe');
+    await composeur.getByRole('button', { name: 'Fermer' }).click();
+    await expect(composeur).toHaveCount(0);
+  });
+
   test('Mon look : ma dernière visite, photo, interrupteur « Réserver ce look » coupé', async ({ page, api, connecter }) => {
     remplirFil(api);
     await connecter(CLIENT);

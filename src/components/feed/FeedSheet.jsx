@@ -6,6 +6,8 @@ import { useAndroidBack } from '@/lib/useAndroidBack';
 import { useEscapeLayer } from '@/lib/feed/escapeStack';
 
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+// Croix ignorée ce temps-là après qu'un champ a perdu la main clavier ouvert (voir `onBlurCapture`)
+const KEYBOARD_TAP_MS = 700;
 
 /**
  * Fenêtre du bas du fil (commentaires, composeur, signalement, menu) : portail dans `body` (le fil
@@ -37,6 +39,20 @@ export default function FeedSheet({
 
   // Échap : seule la fenêtre du dessus se ferme (pile partagée, src/lib/feed/escapeStack.js)
   useEscapeLayer(true, () => closeRef.current?.());
+
+  // Apps : un toucher clavier ouvert ferme d'abord le clavier, la fenêtre redescend, et le toucher
+  // arrive à l'ancien endroit du doigt, parfois sur la croix (onglet « Sondage » du composeur, iPad,
+  // 30 oct. 2026 : fenêtre fermée). La croix ne réagit qu'au toucher suivant
+  const keyboardBlurAt = useRef(-Infinity);
+  const onBlurCapture = (e) => {
+    if (document.body.classList.contains('keyboard-open') && /^(INPUT|TEXTAREA)$/.test(e.target.tagName)) {
+      keyboardBlurAt.current = performance.now();
+    }
+  };
+  const onCloseClick = () => {
+    if (performance.now() - keyboardBlurAt.current < KEYBOARD_TAP_MS) return;
+    closeRef.current?.();
+  };
 
   // Focus dans la fenêtre à l'ouverture ; à la fermeture, rendu à l'élément d'origine (le bouton
   // « Signaler » d'un commentaire, la carte…) seulement si le focus était encore ici : une fenêtre
@@ -84,6 +100,7 @@ export default function FeedSheet({
         aria-labelledby={titleId}
         tabIndex={-1}
         onKeyDown={trapTab}
+        onBlurCapture={onBlurCapture}
         data-app-overlay=""
         initial={reduce ? { opacity: 0 } : { y: '100%' }}
         animate={reduce ? { opacity: 1 } : { y: 0 }}
@@ -99,7 +116,7 @@ export default function FeedSheet({
             {headerExtra}
             <button
               type="button"
-              onClick={() => closeRef.current?.()}
+              onClick={onCloseClick}
               disabled={closeDisabled}
               aria-label="Fermer"
               className="w-11 h-11 rounded-xl border border-border bg-secondary/70 text-muted-foreground hover:text-foreground flex items-center justify-center shrink-0 disabled:opacity-50"
