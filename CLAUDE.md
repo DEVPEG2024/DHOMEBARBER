@@ -120,10 +120,11 @@ curl -s -o /dev/null -w "%{http_code}\n" https://dhomebarber-api-3aabb8313cb6.he
 
 ## Apps natives et stores
 
-### État au 29 oct. 2026
+### État au 30 oct. 2026
 
 - **En ligne** : iOS **1.0.9 (build 17)** depuis le 27 oct. 2026 à 03:56 et Android **1.0.17 (code 18)** depuis le 26 oct. 2026 à 21:56 (constaté par `~/store-watch`), envoyées le 26 oct. (disponibles dans l'UE, France comprise, depuis la validation DSA du 12 oct.). Contenu : réservation pour un proche, l'admin au nom de « D'Home Barber » (étoile bleue), Last Minute dans le fil, « CB + Espèces », export du Trafic, correctifs de la réservation et du scanner QR.
-- **Prochains numéros : iOS build 18, Android versionCode 19.**
+- **Envoi du 30 oct. 2026 (La Coupe du Gang)** : Android **1.0.18 (code 19)** en production, en examen chez Google ; iOS **1.0.10 (build 18)** envoyé et rattaché à sa version, **pas encore soumis** (contrôle clavier iPad et étiquette « Contenu de jeu » à faire, Mac verrouillé et session App Store Connect déconnectée) : `node ~/store-watch/envoi/submit110.mjs submit` ensuite. Détail : `docs/historique/stores.md`.
+- **Prochains numéros : iOS build 19, Android versionCode 20.**
 - **iPhone Duo : le build 17 est encore compilé avec Xcode 26.3 (kit iOS 26.2)**, l'app reste réduite avec des bandes noires sur l'écran intérieur déplié. Pour le remplir : macOS ≥ 26.6 (ce Mac : 26.5.1 au 26 oct., la mise à jour redémarre le Mac), puis Xcode 27.1, puis un build 18 vérifié sur le simulateur iPhone Duo (plié, déplié, clavier). Détail : `docs/historique/restes-a-faire.md`.
 - **Scripts d'envoi** (client de l'API App Store Connect, soumission, mise en production Play, `exportOptions.plist`) : `~/store-watch/envoi/`, hors du dossier temporaire des sessions (effacé à chaque redémarrage). Copier `submit109.mjs` / `play-promote-18.mjs` en changeant les numéros.
 - **Remontée des erreurs déclarée aux deux stores le 21 oct. 2026** : App Store « Données de plantage » (fonctionnement de l'app, liées, publiée) ; Play « Journaux de plantage » (collectés, non partagés, facultatifs, fonctionnement de l'appli et analyse). Toute nouvelle donnée collectée suit la même voie (règle des stores plus bas).
