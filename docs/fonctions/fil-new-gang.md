@@ -2,7 +2,7 @@
 
 > Demande du propriétaire du 29 oct. 2026 : « revoit l'architecture et améliore l'espace new gang pour plus d'interaction et de rétention ». Planche (diagnostic, architecture, écrans, plan) : https://claude.ai/artifact/R8re91ruSRri2pJ7YFxV9b. Chantier lancé le 30 oct. 2026 (« Lance le chantier sans que j'interviens »), avec les recommandations de la planche pour les six choix. **Contrat détaillé** (schéma, API, formes des réponses, tâches, partage des fichiers) : `fil-new-gang-contrat.md`.
 >
-> Site : en ligne depuis le 30 oct. 2026 vers 07:10 (serveur `222b31d`, Heroku v165, puis app `8b41310` sur Vercel). **Apps natives** : avec les prochains builds (iOS build 19, Android code 20) ; Android 1.0.18 et iOS 1.0.10 (build 18, La Coupe du Gang) n'ont que l'ancien fil, qui continue de marcher grâce au CRUD inchangé.
+> Site : en ligne depuis le 30 oct. 2026 vers 07:10 (serveur `222b31d`, Heroku v165, puis app `8b41310` sur Vercel). **Apps natives** : iOS 1.0.11 (build 19) et Android 1.0.19 (code 20), envoyés aux stores le 31 oct. 2026 ; Android 1.0.18 et iOS 1.0.10 (build 18, La Coupe du Gang) n'ont que l'ancien fil, qui continue de marcher grâce au CRUD inchangé.
 
 ## Ce qui a changé pour le client
 
