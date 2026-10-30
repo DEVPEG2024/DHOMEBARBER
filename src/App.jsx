@@ -47,6 +47,8 @@ const Partners = React.lazy(() => import('@/pages/Partners'));
 const Favorites = React.lazy(() => import('@/pages/Favorites'));
 // Jeux du salon : liste des jeux ouverts (La Coupe du Gang…), lazy
 const Jeux = React.lazy(() => import('@/pages/Jeux'));
+// Fil v2 : écran Activité (réactions, commentaires, réponses, sondages à voter, réglages des pushs)
+const FeedActivity = React.lazy(() => import('@/pages/FeedActivity'));
 // Carte Gang du client (lazy)
 const GangCardPage = React.lazy(() => import('@/pages/GangCardPage'));
 // Prototype réseau de La Coupe du Gang (lazy, plein écran, hors des mises en page)
@@ -343,6 +345,7 @@ const AppRoutes = () => {
           <Route path="/profile" element={<Profile />} />
           <Route path="/barber/:id" element={<BarberProfile />} />
           <Route path="/feed" element={<Feed />} />
+          <Route path="/feed/activite" element={<Suspense fallback={<LazyFallback />}><FeedActivity /></Suspense>} />
           <Route path="/events" element={<Events />} />
           <Route path="/gift-cards" element={<GiftCards />} />
           <Route path="/try-on" element={<Suspense fallback={<LazyFallback />}><TryOn /></Suspense>} />
@@ -378,6 +381,7 @@ const AppRoutes = () => {
           <Route path="/admin/leave" element={<Suspense fallback={<LazyFallback />}><AdminLeave /></Suspense>} />
           <Route path="/admin/my-leave" element={<Suspense fallback={<LazyFallback />}><BarberLeave /></Suspense>} />
           <Route path="/admin/feed" element={<Feed />} />
+          <Route path="/admin/feed/activite" element={<Suspense fallback={<LazyFallback />}><FeedActivity /></Suspense>} />
           <Route path="/admin/events" element={<Suspense fallback={<LazyFallback />}><AdminEvents /></Suspense>} />
           <Route path="/admin/gift-cards" element={<Suspense fallback={<LazyFallback />}><AdminGiftCards /></Suspense>} />
           <Route path="/admin/textile" element={<Suspense fallback={<LazyFallback />}><AdminTextile /></Suspense>} />
