@@ -274,7 +274,7 @@ export default function PostCard({
           <PollCard
             item={item}
             onVote={(optionId) => onVote?.(item, optionId)}
-            canSeeResults={isAdmin || !!item.poll?.my_vote || !!item.poll?.closed}
+            canSeeResults={isAdmin || !!item.is_mine || !!item.poll?.my_vote || !!item.poll?.closed}
           />
         </div>
       );

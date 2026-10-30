@@ -4,7 +4,7 @@ Contrat écrit avant le code, comme `coupe-du-gang-contrat.md`. Il fait foi pour
 
 ## 0. Décisions (recommandations de la planche, prises le 30 oct. 2026)
 
-1. Sondages réservés au salon (compte admin, publié au nom de « D'Home Barber »).
+1. Sondages réservés au salon (compte admin, publié au nom de « D'Home Barber »). **Élargi le 30 oct. 2026** : tout compte publie un sondage (drapeau `features.feedMemberPolls`) ; seul celui du salon est poussé aux abonnés et proposé « à voter » dans l'Activité.
 2. Moments du Gang seulement pour les membres qui figurent au classement Team of the Season (`users.gang_leaderboard_opt_in = true`, non exclus).
 3. Push « Ta coupe est toute fraîche » 2 h après la fin de la visite, une seule fois par visite, jamais entre 21 h et 8 h.
 4. L'auteur voit combien de membres ont vu sa publication : le nombre seulement (l'admin le voit sur toutes).
@@ -143,14 +143,14 @@ Toutes les 5 min (node-cron, heure de Paris), chaque étape dans son `try` :
 
 ### Écrans
 
-- `/feed` (et `/admin/feed`) : en-tête « Communauté / Ca dit quoi le Gang ? » + cloche (pastille = activité non lue) vers `/feed/activite` (`/admin/feed/activite` dans l'admin) ; carte « Quoi de neuf, <prénom> ? » avec Photo, Mon look (client), Sondage (admin) ; puces de filtre (`FEED_FILTERS`) ; Team of the Season et « Jeux » comme avant ; bouton « N nouvelles publications » (`GET /feed/unread?since=`, toutes les 60 s) ; cartes ; défilement par curseur ; bouton flottant « Nouvelle publication » gardé.
+- `/feed` (et `/admin/feed`) : en-tête « Communauté / Ca dit quoi le Gang ? » + cloche (pastille = activité non lue) vers `/feed/activite` (`/admin/feed/activite` dans l'admin) ; carte « Quoi de neuf, <prénom> ? » avec Photo, Mon look (client), Sondage (admin, et tous avec `features.feedMemberPolls`) ; puces de filtre (`FEED_FILTERS`) ; Team of the Season et « Jeux » comme avant ; bouton « N nouvelles publications » (`GET /feed/unread?since=`, toutes les 60 s) ; cartes ; défilement par curseur ; bouton flottant « Nouvelle publication » gardé.
 - Carte (`PostCard`) : en-tête auteur (avatar, nom, étoile / Barber, temps, vues sur mes publications), corps selon le format, barre de réactions (pastilles emoji + nombre, la mienne en vert, bouton pour choisir), 2 commentaires en aperçu + « Voir les N commentaires », rangée Commenter / Partager. Plus de champ de commentaire sous chaque carte. Double tap sur la photo = ❤️. Halo vert retiré.
 - Look : photo(s) avec le badge « Mon look » et le bandeau prestations + barber, bouton « Réserver ce look avec <barber> » (`meta.booking_path`) si `bookable`.
 - Sondage : réponses en barres (pourcentage après mon vote ou à la fin, ou pour l'admin), ✓ sur mon vote, « 128 votes · encore 2 jours · tu peux changer ton vote ».
 - Avant / Après : les deux photos comparées (curseur glissant au doigt et au clavier : `input type="range"`), libellés AVANT / APRÈS.
 - Moment : carte dorée (niveau, prénom, « passe Or sur sa carte Gang »), bouton « 👏 Féliciter » = réaction 👏.
 - Fenêtre des commentaires (`CommentsSheet`) : fils d'un niveau, Répondre (« Réponse à Kevin » + annuler), ❤️ par commentaire, Supprimer (deux taps) sur les miens (l'admin : tous), Signaler sur les autres, emojis rapides, champ en bas (`kb-sheet`).
-- Composeur (`Composer`) : onglets Publication, Mon look (client), Sondage (admin), Avant/Après (client) ; photos jusqu'à 4 ; Mon look : « Ta dernière visite » + Changer (`GET /feed/visits`), interrupteur « Bouton Réserver ce look » ; Sondage : question, 2 à 4 réponses, durée ; règles de la communauté ; « Publier ». Ouvert par `?compose=look&visit=<id>` (push après la visite).
+- Composeur (`Composer`) : onglets Publication, Mon look (client), Avant/Après (client), Sondage (admin, et tous avec `features.feedMemberPolls`) ; photos jusqu'à 4 ; Mon look : « Ta dernière visite » + Changer (`GET /feed/visits`), interrupteur « Bouton Réserver ce look » ; Sondage : question, 2 à 4 réponses, durée ; règles de la communauté ; « Publier ». Ouvert par `?compose=look&visit=<id>` (push après la visite).
 - Activité (`/feed/activite`) : « Nouveau » / « Plus tôt », éléments groupés (`activityLine`), tap = lu + ouvre la publication (`/feed?post=<id>`, `&comments=1` pour un commentaire), « Tout marquer lu », sondages à voter, réglages « Me prévenir pour » (4 interrupteurs).
 - Onglet « New's Gang ! » : pastille rouge = activité non lue (nombre, « 9+ »), point vert = nouvelles publications seulement.
 - `?post=<id>` : la publication est chargée seule (`GET /feed/:id`) et montrée en tête, entourée ; `&comments=1` ouvre ses commentaires.

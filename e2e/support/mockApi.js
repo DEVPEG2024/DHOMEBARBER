@@ -1289,7 +1289,10 @@ export class FauxFil {
     let content = texte;
 
     if (kind === 'poll') {
-      if (compte.role !== 'admin') return erreurFil(403, 'Seul le salon peut publier un sondage');
+      // Serveur d'avant le 30 oct. 2026 (`features.feedMemberPolls` faux) : sondage réservé au salon
+      if (compte.role !== 'admin' && this.serveur.donnees.parametresPublics.features?.feedMemberPolls !== true) {
+        return erreurFil(403, 'Seul le salon peut publier un sondage');
+      }
       const p = objet(corps.poll);
       const question = String(p.question || '').trim();
       if (!question) return erreurFil(400, 'Question manquante');

@@ -24,7 +24,7 @@ import { useAuth } from '@/lib/AuthContext';
 import LoadError, { queryFailed } from '@/components/shared/LoadError';
 import GangLeaderboard from '@/components/gang/GangLeaderboard';
 import { GamesFeedEntry } from '@/components/home/GamesSection';
-import { markFeedSeen } from '@/lib/feed/feedApi';
+import { markFeedSeen, useMemberPolls } from '@/lib/feed/feedApi';
 import { updateFeedItem } from '@/lib/feed/feedCache';
 import { useFeed } from '@/lib/feed/useFeed';
 import FeedHeader, { WhatsNewCard, FeedFilters } from '@/components/feed/FeedHeader';
@@ -36,11 +36,14 @@ import ReportSheet from '@/components/feed/ReportSheet';
 import CommentsSheet from '@/components/feed/CommentsSheet';
 import Composer from '@/components/feed/Composer';
 
-/** Formats que ce compte peut publier (look et avant / après : client ; sondage : admin). */
-function canCompose(kind, role, legacy) {
+/**
+ * Formats que ce compte peut publier (look et avant / après : client ; sondage : le salon, et tout
+ * compte quand le serveur l'accepte, `features.feedMemberPolls`).
+ */
+function canCompose(kind, role, legacy, memberPolls) {
   if (legacy) return kind === 'post';
   if (kind === 'look' || kind === 'before_after') return role === 'user';
-  if (kind === 'poll') return role === 'admin';
+  if (kind === 'poll') return role === 'admin' || memberPolls;
   return kind === 'post';
 }
 
@@ -105,6 +108,7 @@ export default function Feed() {
 
   // Paramètres d'adresse (lien d'un push, d'un partage, de l'écran Activité), retirés une fois lus
   const flagReady = feed.flagReady;
+  const memberPolls = useMemberPolls();
   useEffect(() => {
     const postId = params.get('post');
     const compose = params.get('compose');
@@ -120,12 +124,12 @@ export default function Feed() {
       window.scrollTo({ top: 0 });
     }
     if (compose) {
-      if (user && canCompose(compose, role, legacy)) setComposer({ kind: compose, visitId: params.get('visit') || null });
+      if (user && canCompose(compose, role, legacy, memberPolls)) setComposer({ kind: compose, visitId: params.get('visit') || null });
       next.delete('compose');
       next.delete('visit');
     }
     setParams(next, { replace: true });
-  }, [params, setParams, flagReady, legacy, role, user]);
+  }, [params, setParams, flagReady, legacy, memberPolls, role, user]);
 
   // `&comments=1` : les commentaires s'ouvrent dès que la publication est là
   useEffect(() => {

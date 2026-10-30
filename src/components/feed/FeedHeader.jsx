@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Bell, Camera, Scissors, BarChart3 } from 'lucide-react';
 import { fetchPublicBarbers } from '@/lib/publicBarbers';
 import { useFeedUnread } from '@/lib/feed/useUnread';
+import { useMemberPolls } from '@/lib/feed/feedApi';
 import { FEED_FILTERS, SALON_LOGO } from '@/lib/feed/rules';
 import { PersonAvatar } from '@/components/feed/PostCard';
 
@@ -67,8 +68,9 @@ function useMyPhoto(user) {
 
 /**
  * Carte « Quoi de neuf, <prénom> ? » en tête du fil : ouvre le composeur (`onCompose(kind)`).
- * Raccourcis : Photo pour tous, « Mon look » pour un client, « Sondage » pour l'admin ; l'ancien fil
- * (serveur sans v2) n'a que la publication simple.
+ * Raccourcis : Photo pour tous, « Mon look » pour un client, « Sondage » pour l'admin, et pour tous
+ * quand le serveur l'accepte (`features.feedMemberPolls`) ; l'ancien fil (serveur sans v2) n'a que
+ * la publication simple.
  *
  * @param {object} props
  * @param {object} props.user
@@ -77,12 +79,13 @@ function useMyPhoto(user) {
  */
 export function WhatsNewCard({ user, legacy, onCompose }) {
   const photo = useMyPhoto(user);
+  const memberPolls = useMemberPolls();
   const role = user?.role || 'user';
   const firstName = String(user?.full_name || '').trim().split(/\s+/)[0];
   const prompt = role === 'admin' ? 'Quoi de neuf au salon ?' : firstName ? `Quoi de neuf, ${firstName} ?` : 'Quoi de neuf ?';
   const actions = [{ kind: 'post', label: 'Photo', Icon: Camera, color: 'text-blue-400' }];
   if (!legacy && role === 'user') actions.push({ kind: 'look', label: 'Mon look', Icon: Scissors, color: 'text-primary' });
-  if (!legacy && role === 'admin') actions.push({ kind: 'poll', label: 'Sondage', Icon: BarChart3, color: 'text-amber-300' });
+  if (!legacy && (role === 'admin' || memberPolls)) actions.push({ kind: 'poll', label: 'Sondage', Icon: BarChart3, color: 'text-amber-300' });
 
   return (
     <div className="rounded-2xl bg-card border border-border p-3">

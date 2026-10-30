@@ -27,22 +27,40 @@ export const FEED_KEYS = {
   flag: ['feed', 'flag'],
 };
 
-/** Vrai si le serveur sert le fil v2. Rejette sur une panne (jamais « ancien fil » par erreur). */
-export async function fetchFeedV2() {
+/** `features` des paramètres publics. Rejette sur une panne (jamais « ancien fil » par erreur). */
+async function fetchFeedFeatures() {
   const res = await fetch(`${API_SERVER_URL}/api/apps/public/prod/public-settings/by-id/${resolvedAppId}`);
   if (!res.ok) throw new Error(`Paramètres publics : ${res.status}`);
   const data = await res.json();
-  return data?.features?.feedV2 === true;
+  return data?.features && typeof data.features === 'object' ? data.features : {};
 }
 
-/** Requête du drapeau (cache 5 min) : `{ data, isLoading, isError, refetch, fetchStatus }`. */
+/** Vrai si le serveur sert le fil v2. Rejette sur une panne (jamais « ancien fil » par erreur). */
+export async function fetchFeedV2() {
+  return (await fetchFeedFeatures()).feedV2 === true;
+}
+
+// Une seule requête (cache 5 min) pour tous les drapeaux du fil ; chaque hook en lit un
+const selectFeedV2 = (f) => f.feedV2 === true;
+const selectMemberPolls = (f) => f.feedMemberPolls === true;
+const flagQuery = (select) => ({ queryKey: FEED_KEYS.flag, queryFn: fetchFeedFeatures, staleTime: 5 * 60 * 1000, retry: 2, select });
+
+/** Requête du drapeau : `{ data, isLoading, isError, refetch, fetchStatus }` (`data` : booléen). */
 export function useFeedV2Query() {
-  return useQuery({ queryKey: FEED_KEYS.flag, queryFn: fetchFeedV2, staleTime: 5 * 60 * 1000, retry: 2 });
+  return useQuery(flagQuery(selectFeedV2));
 }
 
 /** `true` seulement quand le serveur l'a dit (faux pendant le chargement et sur une panne). */
 export function useFeedV2() {
   return useFeedV2Query().data === true;
+}
+
+/**
+ * Sondages ouverts aux clients et aux barbers (`features.feedMemberPolls`, 30 oct. 2026) : faux
+ * pendant le chargement, sur une panne et avec un serveur plus ancien (qui les refusait : 403).
+ */
+export function useMemberPolls() {
+  return useQuery(flagQuery(selectMemberPolls)).data === true;
 }
 
 const enc = encodeURIComponent;

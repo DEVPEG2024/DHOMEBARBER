@@ -25,9 +25,10 @@ export function postShareContent(item) {
   switch (item.kind) {
     case 'look': text = `Un look tout frais chez ${SALON_NAME} 💈`; break;
     case 'before_after': text = `Avant / après chez ${SALON_NAME} 💈`; break;
-    case 'poll': text = item.poll?.question
+    // Sondage du salon : la question ; sondage d'un membre : rien de lui (comme ses publications)
+    case 'poll': text = item.author_role === 'admin' && item.poll?.question
       ? `Sondage du salon : « ${excerpt(item.poll.question, 120)} » Viens voter 💈`
-      : `Sondage du salon : viens voter 💈`; break;
+      : item.author_role === 'admin' ? 'Sondage du salon : viens voter 💈' : `Un sondage dans le Gang ${SALON_NAME} : viens voter 💈`; break;
     case 'moment': text = `Le Gang ${SALON_NAME} fête un nouveau niveau 💈`; break;
     default:
       // Publication du salon (admin) : un extrait ; publication d'un client : rien de lui

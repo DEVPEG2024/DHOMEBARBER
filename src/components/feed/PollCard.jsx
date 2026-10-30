@@ -3,10 +3,10 @@ import { Check } from 'lucide-react';
 import { pollPercent, pollRemaining } from '@/lib/feed/rules';
 
 /**
- * Corps d'un sondage du salon (fil v2, contrat section 5) : la question, une réponse par bouton,
+ * Corps d'un sondage, du salon ou d'un membre (fil v2, contrat section 5) : la question, une réponse par bouton,
  * puis « 128 votes · encore 2 jours · tu peux changer ton vote ».
  *
- * Pourcentages (barre + nombre) après mon vote, à la fin du sondage, ou pour l'admin
+ * Pourcentages (barre + nombre) après mon vote, à la fin du sondage, ou pour l'admin et l'auteur
  * (`canSeeResults`) ; ✓ sur mon vote ; vote changeable tant que ce n'est pas fini (`onVote` n'est
  * pas appelé sur ma réponse actuelle ni après la fin). Le vote est affiché tout de suite par
  * l'appelant (`applyVote` dans useFeed).
@@ -17,7 +17,7 @@ import { pollPercent, pollRemaining } from '@/lib/feed/rules';
  * @param {object} props
  * @param {object} props.item                     publication (`kind: 'poll'`, `item.poll` = pollView)
  * @param {(optionId: string) => void} [props.onVote]
- * @param {boolean} [props.canSeeResults]         admin : résultats visibles avant de voter
+ * @param {boolean} [props.canSeeResults]         admin, auteur : résultats visibles avant de voter
  */
 export default function PollCard({ item, onVote, canSeeResults = false }) {
   const questionId = useId();

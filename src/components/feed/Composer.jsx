@@ -12,7 +12,7 @@ import LoadError, { friendlyError, queryFailed } from '@/components/shared/LoadE
 import { Switch } from '@/components/ui/switch';
 import { contentFilterError } from '@/lib/contentFilter';
 import { fetchPublicBarbers } from '@/lib/publicBarbers';
-import { createFeedPost, FEED_KEYS, fetchLookVisits } from '@/lib/feed/feedApi';
+import { createFeedPost, FEED_KEYS, fetchLookVisits, useMemberPolls } from '@/lib/feed/feedApi';
 import { invalidateFeed, prependFeedItem } from '@/lib/feed/feedCache';
 import { legacyItem, MAX_IMAGES, SALON_LOGO, SALON_NAME } from '@/lib/feed/rules';
 
@@ -26,12 +26,16 @@ const POLL_DAYS = [1, 3, 7];
 
 const KIND_LABELS = { post: 'Publication', look: 'Mon look', poll: 'Sondage', before_after: 'Avant/Après' };
 
-/** Formats que ce compte peut publier (ancien fil : la publication seule). */
-function kindsFor(user, legacy) {
+/**
+ * Formats que ce compte peut publier (ancien fil : la publication seule). Sondage : le salon, et
+ * les clients et barbers quand le serveur l'accepte (`memberPolls`, 30 oct. 2026).
+ */
+function kindsFor(user, legacy, memberPolls) {
   if (legacy) return ['post'];
   if (user?.role === 'admin') return ['post', 'poll'];
-  if (user?.role === 'user') return ['post', 'look', 'before_after'];
-  return ['post'];
+  const poll = memberPolls ? ['poll'] : [];
+  if (user?.role === 'user') return ['post', 'look', 'before_after', ...poll];
+  return ['post', ...poll];
 }
 
 /** Filtres du fil où la publication apparaît tout de suite (en plus de « Tout »). */
@@ -211,7 +215,7 @@ function VisitChooser({ title, visits, value, onChange, allowNone = false }) {
 
 /**
  * Composeur du fil (fil v2, contrat section 5) : onglets Publication (tous), Mon look et
- * Avant/Après (clients), Sondage (admin) ; ancien fil (`legacy`) : la publication seule, une photo,
+ * Avant/Après (clients), Sondage (le salon, et les membres avec `features.feedMemberPolls`) ; ancien fil (`legacy`) : la publication seule, une photo,
  * envoyée par `Post.create` comme avant.
  *
  * Brouillon gardé à la fermeture (par compte et par onglet, voir « Brouillons » plus haut). Photos
@@ -235,8 +239,9 @@ export default function Composer({ user, initialKind = 'post', initialVisitId = 
   const isAdmin = role === 'admin';
   const isClient = role === 'user';
   const isStaff = isAdmin || role === 'barber';
-  const kinds = kindsFor(user, legacy);
-  const [kindState, setKind] = useState(() => (kindsFor(user, legacy).includes(initialKind) ? initialKind : 'post'));
+  const memberPolls = useMemberPolls();
+  const kinds = kindsFor(user, legacy, memberPolls);
+  const [kindState, setKind] = useState(() => (kindsFor(user, legacy, memberPolls).includes(initialKind) ? initialKind : 'post'));
   const kind = kinds.includes(kindState) ? kindState : 'post';
   const maxPhotos = legacy ? 1 : MAX_IMAGES;
 
@@ -606,7 +611,7 @@ export default function Composer({ user, initialKind = 'post', initialVisitId = 
             value={question}
             maxLength={POLL_QUESTION_MAX}
             onChange={(e) => setQuestion(e.target.value)}
-            placeholder="Ex. : quelle couleur pour le prochain hoodie ?"
+            placeholder={isAdmin ? 'Ex. : quelle couleur pour le prochain hoodie ?' : 'Ex. : dégradé bas ou mi-haut ?'}
             className="h-11 w-full min-w-0 rounded-xl border border-border bg-secondary/50 px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
           />
         </label>
@@ -716,8 +721,11 @@ export default function Composer({ user, initialKind = 'post', initialVisitId = 
             role="tablist"
             aria-label="Type de publication"
             onKeyDown={onTabsKey}
-            className="grid gap-1 rounded-[14px] border border-border bg-secondary/40 p-1"
-            style={{ gridTemplateColumns: `repeat(${kinds.length}, minmax(0, 1fr))` }}
+            // Quatre onglets (client) : deux lignes sous 375 px, sinon « Publication » était coupé
+            className={`grid gap-1 rounded-[14px] border border-border bg-secondary/40 p-1 ${
+              kinds.length === 4 ? 'grid-cols-2 min-[375px]:grid-cols-4' : ''
+            }`}
+            style={kinds.length === 4 ? undefined : { gridTemplateColumns: `repeat(${kinds.length}, minmax(0, 1fr))` }}
           >
             {kinds.map((k) => (
               <button

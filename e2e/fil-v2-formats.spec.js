@@ -1,6 +1,6 @@
 // Fil « New Gang » v2 (30 oct. 2026) : le fil lui-même. Contrat : docs/fonctions/fil-new-gang-contrat.md.
 // Réactions (pastilles, retour en arrière), commentaires (fenêtre, réponses, ❤️, suppression,
-// Signaler), composeur (Publication, Mon look, Avant/Après, Sondage du salon), formats (look →
+// Signaler), composeur (Publication, Mon look, Avant/Après, Sondage du salon et des clients), formats (look →
 // réservation, sondage, Moment du Gang, avant / après), liens (`?post=`, `&comments=1`,
 // `?compose=look`), « N nouvelles publications », filtres, modération, Signaler / Bloquer, et
 // l'ancien fil (serveur sans `features.feedV2`). Faux serveur : `FauxFil` (e2e/support/mockApi.js) ;
@@ -196,7 +196,7 @@ test.describe('Fil v2 : commentaires', () => {
 });
 
 test.describe('Fil v2 : composeur', () => {
-  test('Publication avec photo (client : pas d\'onglet Sondage) : en tête du fil', async ({ page, api, connecter }) => {
+  test('Publication avec photo (client : quatre onglets) : en tête du fil', async ({ page, api, connecter }) => {
     remplirFil(api);
     await connecter(CLIENT);
     await page.goto('/feed');
@@ -204,7 +204,7 @@ test.describe('Fil v2 : composeur', () => {
 
     await page.getByRole('button', { name: 'Nouvelle publication' }).click();
     const composeur = page.getByRole('dialog', { name: 'Nouvelle publication' });
-    await expect(composeur.getByRole('tab')).toHaveText(['Publication', 'Mon look', 'Avant/Après']);
+    await expect(composeur.getByRole('tab')).toHaveText(['Publication', 'Mon look', 'Avant/Après', 'Sondage']);
     await expect(composeur.getByRole('tab', { name: 'Publication' })).toHaveAttribute('aria-selected', 'true');
     const publier = composeur.getByRole('button', { name: 'Publier', exact: true });
     await expect(publier).toBeDisabled();
@@ -295,7 +295,55 @@ test.describe('Fil v2 : composeur', () => {
     await expect(curseur).not.toHaveValue('50');
   });
 
-  test('Sondage : seulement pour le salon ; question, trois réponses, 7 jours', async ({ page, api, connecter }) => {
+  test('Sondage d\'un client (30 oct. 2026) : à son nom, résultats visibles par lui sans voter', async ({ page, api, connecter }) => {
+    remplirFil(api);
+    await connecter(CLIENT);
+    await page.goto('/feed');
+    await expect(carte(page, 'p-yanis')).toBeVisible();
+
+    await page.getByRole('button', { name: 'Sondage', exact: true }).click();
+    const composeur = page.getByRole('dialog', { name: 'Nouvelle publication' });
+    await expect(composeur.getByRole('tab', { name: 'Sondage' })).toHaveAttribute('aria-selected', 'true');
+    // Quatre onglets lisibles en entier (une ligne à 390 px, deux à 320 px)
+    for (const largeur of [390, 320]) {
+      await page.setViewportSize({ width: largeur, height: 760 });
+      for (const tab of await composeur.getByRole('tab').all()) {
+        expect(await tab.evaluate((el) => el.scrollWidth <= el.clientWidth), `${await tab.textContent()} à ${largeur} px`).toBe(true);
+      }
+    }
+    await composeur.getByRole('textbox', { name: 'Question' }).fill('Dégradé bas ou mi-haut ?');
+    await composeur.getByRole('textbox', { name: 'Réponse 1' }).fill('Bas');
+    await composeur.getByRole('textbox', { name: 'Réponse 2' }).fill('Mi-haut');
+    await composeur.getByRole('button', { name: 'Publier', exact: true }).click();
+
+    await expect(toast(page, 'Publication envoyée')).toBeVisible();
+    expect(corpsVers(api, 'POST', '/feed/posts')).toEqual([
+      { kind: 'poll', content: '', poll: { question: 'Dégradé bas ou mi-haut ?', options: ['Bas', 'Mi-haut'], days: 3 } },
+    ]);
+    const sondage = page.locator('[data-post-id]').first();
+    await expect(sondage).toContainText('Dégradé bas ou mi-haut ?');
+    await expect(sondage).toContainText(CLIENT.full_name);
+    await expect(sondage).not.toContainText("D'Home Barber");
+    // L'auteur voit les résultats sans voter, et peut voter quand même
+    await expect(sondage.locator('[data-poll-option="a"]')).toContainText('0 %');
+    await expect(sondage).toContainText(/0 vote · encore [23] jours/);
+  });
+
+  test('Sondage d\'un client : pas d\'onglet avec un serveur plus ancien (`feedMemberPolls` absent)', async ({ page, api, connecter }) => {
+    remplirFil(api);
+    delete api.donnees.parametresPublics.features.feedMemberPolls;
+    await connecter(CLIENT);
+    await page.goto('/feed?compose=poll');
+    await expect(carte(page, 'p-yanis')).toBeVisible();
+    // `?compose=poll` ignoré, pas de raccourci Sondage
+    await expect(page.getByRole('dialog', { name: 'Nouvelle publication' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Sondage', exact: true })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Nouvelle publication' }).click();
+    const composeur = page.getByRole('dialog', { name: 'Nouvelle publication' });
+    await expect(composeur.getByRole('tab')).toHaveText(['Publication', 'Mon look', 'Avant/Après']);
+  });
+
+  test('Sondage du salon : question, trois réponses, 7 jours', async ({ page, api, connecter }) => {
     remplirFil(api);
     await connecter(ADMIN);
     await page.goto('/feed');

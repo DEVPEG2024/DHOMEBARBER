@@ -457,6 +457,8 @@ export function creerDonnees() {
         googleWallet: false,
         // Fil « New Gang » v2 servi (routes /feed… du faux serveur) ; `false` : l'ancien fil par les entités
         feedV2: true,
+        // Sondages ouverts aux clients et aux barbers ; `false` : serveur plus ancien (salon seul, 403)
+        feedMemberPolls: true,
       },
       popular_services: [],
       snap: null,
