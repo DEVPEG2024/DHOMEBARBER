@@ -6,9 +6,9 @@
  *    « Comme la dernière fois », déplaçable et masquable par l'admin dans « Organiser l'accueil ») :
  *    une carte « Jeux » avec le nom de chaque jeu, qui mène à la page « Jeux » (/jeux, demande du
  *    29 oct. 2026). Aucun jeu ouvert : rien, le conteneur `.auto-section` vide est caché par l'accueil ;
- *  - `CoupeGameCard` : carte « La Coupe du Gang » de la page « Jeux » (tes Points de Coupe de la
- *    saison, « Jouer » → /coupe, et deux accès directs, contre le salon et à deux sur ce téléphone,
- *    `/coupe?mode=…`, contrat 5.1) ;
+ *  - `CoupeGameCard` : carte « La Coupe du Gang » de la page « Jeux » (le logo de la Coupe en
+ *    grand, « Jouer » → /coupe, tes Points de Coupe de la saison vers le classement, et deux accès
+ *    directs, contre le salon et à deux sur ce téléphone, `/coupe?mode=…`, contrat 5.1) ;
  *  - `GamesFeedEntry` : entrée « Jeux » en tête du fil, sous la Team of the Season, vers /jeux ;
  *    absente quand l'admin a masqué la catégorie « Jeux » de l'accueil ;
  *  - `CoupeGangBlock` : bloc de la page de la carte Gang, SOUS la carte (jamais dessus : aucun
@@ -17,12 +17,13 @@
  *    marque du rôle de l'adversaire).
  * Thème stade (planche validée le 29 oct. 2026, docs/fonctions/coupe-du-gang-stade.md, maquette
  * « JeuxRouge ») : rouge, noir et blanc, une touche d'or (`COUPE_COLORS`), titres condensés
- * `font-fut`. La carte « Jeux » de l'accueil et la carte de la Coupe de la page « Jeux » sont posées
- * sur le haut du stade assombri (tribune au logo). Fonds sombres et textes clairs écrits en dur,
+ * `font-fut`. La carte « Jeux » de l'accueil est posée sur le haut du stade assombri (tribune au
+ * logo) ; la carte de la Coupe de la page « Jeux » porte le logo de la Coupe (30 oct. 2026, animations
+ * `.coupe-*` de src/index.css). Fonds sombres et textes clairs écrits en dur,
  * lisibles avec les deux thèmes de l'app (comme la Carte Cadeau). Textes au tutoiement, comme les
  * écrans du jeu.
  */
-import React from 'react';
+import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion, useReducedMotion } from 'framer-motion';
 import { ArrowRight, Bot, ChevronRight, Gamepad2, Scissors, Smartphone, Star, Trophy } from 'lucide-react';
@@ -37,6 +38,9 @@ import { useHomeSectionHidden } from '@/lib/homeSections';
 // Image du stade par stadiumImage.js, sans le moteur du jeu : ce fichier est dans le paquet
 // principal (accueil, fil, profil d'un barber), stadium.js y tirerait engine.js et renderer.js
 import { STADIUM_URL as stadiumUrl } from '@/lib/coupe/stadiumImage';
+// Logo de la Coupe détouré (envoyé par le propriétaire le 30 oct. 2026), 720 × 720 : titre de la
+// carte de la page « Jeux » et masque de son reflet (même fichier, une seule image à télécharger)
+import coupeLogoUrl from '@/assets/coupe/logo-coupe.webp';
 
 /** Or de la Coupe (`COUPE_COLORS.or`, #ebc15e) : aussi lu par le profil d'un barber et Mon espace. */
 export const COUPE_GOLD = C.or;
@@ -56,7 +60,29 @@ const FEED_TINT = 'rgba(34, 197, 94, 0.16)';
 // ses tribunes rouges juraient avec le vert
 const HOME_VEIL = 'linear-gradient(90deg, rgba(6, 20, 12, 0.97) 0%, rgba(6, 20, 12, 0.85) 60%, rgba(9, 38, 22, 0.5) 100%)';
 const HOME_IMAGE = { filter: 'grayscale(1)' };
-const COUPE_VEIL = 'linear-gradient(100deg, rgba(11, 11, 12, 0.96) 0%, rgba(11, 11, 12, 0.82) 55%, rgba(42, 11, 13, 0.55) 100%)';
+// Carte de la Coupe : nuit de stade (braise rouge derrière le logo, rayures rouge et noir du stade à
+// peine visibles, fondues vers les bords), « Jouer » rouge en relief
+const COUPE_NIGHT = `radial-gradient(80% 55% at 50% 40%, rgba(142, 15, 20, 0.5) 0%, rgba(42, 11, 13, 0.55) 45%, rgba(11, 11, 12, 0) 80%), linear-gradient(180deg, #170809 0%, ${C.noir} 75%)`;
+const COUPE_STRIPES = {
+  background: 'repeating-linear-gradient(90deg, rgba(224, 31, 38, 0.07) 0 22px, rgba(0, 0, 0, 0) 22px 44px)',
+  WebkitMaskImage: 'radial-gradient(70% 60% at 50% 38%, #000 0%, transparent 100%)',
+  maskImage: 'radial-gradient(70% 60% at 50% 38%, #000 0%, transparent 100%)',
+};
+const COUPE_CTA = {
+  background: `linear-gradient(180deg, #f2333a 0%, ${C.rouge} 52%, #c3161c 100%)`,
+  boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.32), 0 12px 28px -8px rgba(224, 31, 38, 0.7)',
+};
+// Étincelles qui montent derrière le logo : place (%), taille (px), durée et retard (s), dérive (px)
+const SPARKS = [
+  { x: 12, s: 3, t: 4.6, d: 0, dx: 10 },
+  { x: 22, s: 2, t: 5.4, d: 1.8, dx: -8 },
+  { x: 31, s: 4, t: 4.2, d: 3.1, dx: 6 },
+  { x: 43, s: 2, t: 5.8, d: 0.9, dx: -12 },
+  { x: 57, s: 3, t: 4.4, d: 2.4, dx: 8 },
+  { x: 68, s: 2, t: 5.1, d: 4, dx: -6 },
+  { x: 78, s: 4, t: 4.8, d: 1.3, dx: 12 },
+  { x: 88, s: 2, t: 5.6, d: 3.6, dx: -10 },
+];
 // Textes clairs posés sur l'image : une ombre légère les détache des tribunes éclairées
 const ON_IMAGE = { textShadow: '0 1px 2px rgba(0, 0, 0, 0.6)' };
 
@@ -239,9 +265,58 @@ function ModeTile({ to, icon: Icon, iconColor, title, text }) {
 }
 
 /**
- * « La Coupe du Gang » sur la page « Jeux » (ouverte seulement quand le jeu l'est, `useGames`) :
- * tes Points de Coupe et ta place, « Jouer », contre le salon et à deux sur ce téléphone. Maquette
- * « JeuxRouge » : sur le stade, bord or ; trophée, « Coupe » et points en or ; « Jouer » rouge.
+ * Logo de la Coupe, titre de la carte (texte lu : « La Coupe du Gang ») : il arrive, flotte devant le
+ * halo, et un reflet passe sur le logo seul (masque = le logo). Image absente (hors connexion sur le
+ * web) : le titre écrit d'avant.
+ */
+function CoupeLogoTitle({ reduceMotion }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <h2 id="coupe-game-title" className="relative my-6 font-fut text-[34px] font-extrabold uppercase leading-none tracking-wide text-white" style={ON_IMAGE}>
+        La <span style={{ color: C.or }}>Coupe</span> du Gang
+      </h2>
+    );
+  }
+  return (
+    <h2 id="coupe-game-title" className="relative mt-1.5 w-[78%] max-w-[320px]">
+      <motion.span
+        className="block"
+        initial={reduceMotion ? false : { opacity: 0, scale: 0.86, y: 10 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ type: 'spring', stiffness: 210, damping: 18 }}
+      >
+        <span className="coupe-logo-float relative block">
+          <img
+            src={coupeLogoUrl}
+            alt="La Coupe du Gang"
+            width={720}
+            height={720}
+            decoding="async"
+            draggable={false}
+            onError={() => setFailed(true)}
+            className="block w-full h-auto select-none"
+            style={{ filter: 'drop-shadow(0 10px 18px rgba(0, 0, 0, 0.55))' }}
+          />
+          <span aria-hidden="true" className="coupe-logo-shine" style={{ WebkitMaskImage: `url(${coupeLogoUrl})`, maskImage: `url(${coupeLogoUrl})` }} />
+        </span>
+      </motion.span>
+    </h2>
+  );
+}
+
+// Pastilles du haut de la carte de la Coupe
+const CHIP = 'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] whitespace-nowrap';
+const CHIP_STYLE = { background: 'rgba(0, 0, 0, 0.4)', borderColor: 'rgba(255, 255, 255, 0.14)', color: C.grisClair };
+const GOLD_TILE = { background: 'rgba(235, 193, 94, 0.12)', border: '1px solid rgba(235, 193, 94, 0.35)' };
+
+/**
+ * « La Coupe du Gang » sur la page « Jeux » (ouverte seulement quand le jeu l'est, `useGames`).
+ * Demande du propriétaire (30 oct. 2026) : son logo de la Coupe en grand, « un truc moderne qui donne
+ * envie de cliquer ». Nuit de stade (braise rouge, rayures rouge et noir), logo qui flotte devant un
+ * halo d'or, projecteurs, étincelles, liseré or et rouge qui tourne, « Jouer » qui brille ; tout le
+ * haut de la carte mène au jeu (le lien « Jouer » s'étend dessus). En bas : tes Points de Coupe et ta
+ * place, vers le classement. Puis contre le salon et à deux sur ce téléphone.
  */
 export function CoupeGameCard() {
   const { user } = useAuth();
@@ -262,55 +337,117 @@ export function CoupeGameCard() {
     else standing = 'Pas encore au classement';
   }
 
+  const trophy = (
+    <span className="w-10 h-10 shrink-0 rounded-xl grid place-items-center" style={GOLD_TILE}>
+      <Trophy className="w-5 h-5" style={{ color: C.or }} aria-hidden="true" />
+    </span>
+  );
+  const pointsValue = (
+    <span className="font-fut text-[30px] font-extrabold leading-[0.85] tabular-nums" style={{ color: C.or, textShadow: `0 2px 0 ${C.rougeSombre}` }}>
+      {points ?? '–'}
+    </span>
+  );
+  const pointsLabel = (
+    <span className="block text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: C.grisClair }}>Tes Points de Coupe</span>
+  );
+
   return (
     <article aria-labelledby="coupe-game-title">
-      <div className="shine-sweep relative overflow-hidden rounded-3xl border" style={{ background: C.noir, borderColor: C.orBord }}>
-        <StadiumBackdrop position="50% 14%" veil={COUPE_VEIL} />
-        <div className="relative min-h-[236px] flex flex-col p-5" style={ON_IMAGE}>
-          <div className="flex items-center gap-2">
-            <Trophy className="w-3.5 h-3.5 shrink-0" style={{ color: C.or }} aria-hidden="true" />
-            <p className="text-[10px] tracking-[0.3em] uppercase font-semibold" style={{ color: C.grisClair }}>Mini-jeu de foot</p>
-          </div>
-          <h2 id="coupe-game-title" className="mt-1.5 font-fut text-[30px] font-extrabold uppercase leading-none tracking-wide text-white">
-            La <span style={{ color: C.or }}>Coupe</span> du Gang
-          </h2>
-          <p className="mt-1.5 text-[12.5px] leading-snug" style={{ color: C.grisClair }}>Défie un barber, un pote ou le salon : premier à 3 buts.</p>
-
-          <div className="mt-auto pt-4 flex items-end justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: C.grisClair }}>Tes Points de Coupe</p>
-              <p
-                className="mt-1.5 font-fut text-[50px] font-extrabold leading-[0.85] tabular-nums"
-                style={{ color: C.or, textShadow: `0 3px 0 ${C.rougeSombre}` }}
-              >
-                {points ?? '–'}
-              </p>
-              {closed ? (
-                <p className="mt-1.5 text-xs leading-snug min-h-[1rem]" style={{ color: C.grisClair }}>{COUPE_PAUSED}</p>
-              ) : failed ? (
-                <button
-                  type="button"
-                  onClick={() => meQuery.refetch()}
-                  className="min-h-[44px] inline-flex items-center text-left text-xs underline underline-offset-2"
-                  style={{ color: C.grisClair }}
-                >
-                  Points indisponibles · Réessayer
-                </button>
-              ) : (
-                <p className="mt-1.5 text-xs leading-snug text-white min-h-[1rem]">{standing}</p>
-              )}
+      <div className="coupe-ring rounded-[28px] p-[1.5px]" style={{ background: 'rgba(235, 193, 94, 0.3)' }}>
+        <motion.div
+          whileTap={reduceMotion ? undefined : { scale: 0.985 }}
+          className="overflow-hidden rounded-[26.5px]"
+          style={{ background: C.noir }}
+        >
+          <div className="relative flex flex-col items-center px-5 pt-4 pb-5 text-center" style={{ background: COUPE_NIGHT }}>
+            {/* Décor : rayures du stade, projecteurs, halo d'or, étincelles (rien à lire, rien à toucher) */}
+            <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
+              <div className="absolute inset-0" style={COUPE_STRIPES} />
+              <span className="coupe-beam coupe-beam-left" />
+              <span className="coupe-beam coupe-beam-right" />
+              <span className="coupe-glow" />
+              {SPARKS.map((p) => (
+                <span
+                  key={p.x}
+                  className="coupe-spark"
+                  style={{ '--x': `${p.x}%`, '--s': `${p.s}px`, '--t': `${p.t}s`, '--d': `${p.d}s`, '--dx': `${p.dx}px` }}
+                />
+              ))}
             </div>
-            <Link to="/coupe" className="shrink-0 rounded-xl">
-              <motion.span
-                whileTap={reduceMotion ? undefined : { scale: 0.95 }}
-                className="flex items-center gap-1.5 min-h-[46px] px-5 rounded-xl font-fut text-lg font-extrabold uppercase tracking-[0.06em]"
-                style={{ background: C.rouge, color: C.blanc, boxShadow: '0 8px 24px rgba(224, 31, 38, 0.3)' }}
+
+            {/* Deux pastilles ; sur un écran de 320 px, la seconde laisse la place */}
+            <div className="relative self-stretch flex items-center justify-between gap-2">
+              <span className={CHIP} style={CHIP_STYLE}>
+                <CoupeBallIcon className="w-3.5 h-3.5 shrink-0" style={{ color: C.or }} />
+                Mini-jeu de foot
+              </span>
+              <span className={`${CHIP} hidden min-[360px]:inline-flex`} style={CHIP_STYLE}>
+                <span className="live-dot shrink-0" style={{ color: C.rougeVif }} aria-hidden="true" />
+                1 contre 1
+              </span>
+            </div>
+
+            <CoupeLogoTitle reduceMotion={reduceMotion} />
+
+            <p className="relative mt-1 max-w-[290px] text-[13px] leading-snug text-balance" style={{ ...ON_IMAGE, color: C.grisClair }}>
+              Défie un barber, un pote ou le salon : premier à 3 buts.
+            </p>
+
+            {/* « Jouer » : son lien s'étend sur tout le haut de la carte (after:inset-0, le haut est le
+                bloc positionné le plus proche) ; le bouton dessiné reste dessous, lien seul lu */}
+            <Link to="/coupe" className="mt-4 self-stretch block rounded-2xl after:absolute after:inset-0">
+              <span
+                className="relative flex items-center justify-center gap-2 min-h-[54px] rounded-2xl font-fut text-[22px] font-extrabold uppercase tracking-[0.1em] text-white"
+                style={COUPE_CTA}
               >
-                Jouer <ArrowRight className="w-4 h-4" aria-hidden="true" />
-              </motion.span>
+                <span className="coupe-cta-glow" aria-hidden="true" />
+                <span className="coupe-cta-shine" aria-hidden="true" />
+                <span className="relative">Jouer</span>
+                <span className="coupe-arrow relative" aria-hidden="true"><ArrowRight className="w-5 h-5" /></span>
+              </span>
             </Link>
           </div>
-        </div>
+
+          {/* Tes Points de Coupe et ta place, vers le classement ; panne : « Réessayer » sur place */}
+          <div className="border-t" style={{ borderColor: 'rgba(255, 255, 255, 0.08)', background: 'rgba(0, 0, 0, 0.3)' }}>
+            {me ? (
+              <Link to="/coupe/classement" className="flex items-center gap-3 px-5 py-3.5 active:opacity-80 transition-opacity">
+                {trophy}
+                <span className="flex-1 min-w-0 text-left">
+                  {pointsLabel}
+                  <span className="mt-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                    {pointsValue}
+                    <span className="text-xs leading-snug text-white">{standing}</span>
+                  </span>
+                </span>
+                <span className="shrink-0 flex items-center gap-0.5 text-xs font-semibold" style={{ color: C.or }}>
+                  <span className="sr-only min-[380px]:not-sr-only">Classement</span>
+                  <ChevronRight className="w-4 h-4" aria-hidden="true" />
+                </span>
+              </Link>
+            ) : (
+              <div className="flex items-center gap-3 px-5 py-3.5">
+                {trophy}
+                <div className="flex-1 min-w-0 text-left">
+                  {pointsLabel}
+                  <div className="mt-1.5">{pointsValue}</div>
+                  {closed ? (
+                    <p className="mt-1.5 text-xs leading-snug" style={{ color: C.grisClair }}>{COUPE_PAUSED}</p>
+                  ) : failed && (
+                    <button
+                      type="button"
+                      onClick={() => meQuery.refetch()}
+                      className="min-h-[44px] inline-flex items-center text-left text-xs underline underline-offset-2"
+                      style={{ color: C.grisClair }}
+                    >
+                      Points indisponibles · Réessayer
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </motion.div>
       </div>
       <div className="mt-2 grid grid-cols-2 gap-2">
         <ModeTile to="/coupe?mode=bot&level=apprenti" icon={Bot} iconColor={C.blanc} title="Contre le salon" text="3 niveaux · sans points" />

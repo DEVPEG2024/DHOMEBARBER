@@ -197,6 +197,48 @@ test.describe('La Coupe du Gang : accueil et page « Jeux »', () => {
     await expect(page.getByRole('heading', { name: 'La Coupe du Gang' })).toBeVisible();
   });
 
+  test('carte de la Coupe : le logo en titre, tout le haut de la carte mène au jeu, tes points au classement', async ({ page, api, connecter }) => {
+    drapeauCoupe(api, true);
+    installerCoupe(api);
+    await connecter(CLIENT);
+    await page.goto('/jeux');
+    const coupe = page.getByRole('article', { name: 'La Coupe du Gang' });
+    // Le titre est le logo de la Coupe (image chargée, lue « La Coupe du Gang »)
+    const logo = coupe.getByRole('heading', { name: 'La Coupe du Gang' }).getByRole('img', { name: 'La Coupe du Gang' });
+    await expect(logo).toBeVisible();
+    await expect.poll(() => logo.evaluate((img) => (img.complete ? img.naturalWidth : 0))).toBe(720);
+    await expect(coupe.getByRole('link', { name: /^Tes Points de Coupe 42 8e de la .+ Classement$/ })).toHaveAttribute('href', '/coupe/classement');
+
+    // Captures pour la revue (CAPTURE_CARTE=<dossier>) : animations en marche, trois largeurs
+    if (process.env.CAPTURE_CARTE) {
+      await page.emulateMedia({ reducedMotion: 'no-preference' });
+      for (const [largeur, hauteur] of [[390, 844], [320, 640], [1280, 900]]) {
+        await page.setViewportSize({ width: largeur, height: hauteur });
+        await page.waitForTimeout(2600);
+        await coupe.screenshot({ path: `${process.env.CAPTURE_CARTE}/carte-${largeur}.png` });
+      }
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+    }
+
+    // Toucher le logo, au-dessus du bouton, lance le jeu : le lien « Jouer » s'étend sur le haut
+    const boite = await logo.boundingBox();
+    await page.mouse.click(boite.x + boite.width / 2, boite.y + boite.height / 2);
+    await expect(page).toHaveURL(/\/coupe$/);
+  });
+
+  test('carte de la Coupe sans son logo (image injoignable) : le titre écrit, la carte reste nommée', async ({ page, api, connecter }) => {
+    drapeauCoupe(api, true);
+    installerCoupe(api);
+    await page.route('**/assets/logo-coupe-*.webp', (route) => route.fulfill({ status: 404, body: '' }));
+    await connecter(CLIENT);
+    await page.goto('/jeux');
+    const coupe = page.getByRole('article', { name: 'La Coupe du Gang' });
+    await expect(coupe.getByRole('heading', { name: 'La Coupe du Gang' })).toBeVisible();
+    await expect(coupe.getByRole('img', { name: 'La Coupe du Gang' })).toHaveCount(0);
+    await expect(coupe.getByRole('link', { name: 'Jouer', exact: true })).toHaveAttribute('href', '/coupe');
+  });
+
   test('sans le drapeau : ni section « Jeux » ni appel aux routes de la Coupe ; la page des jeux le dit', async ({ page, api, connecter }) => {
     drapeauCoupe(api, false);
     installerCoupe(api);

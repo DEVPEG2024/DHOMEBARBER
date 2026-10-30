@@ -565,3 +565,167 @@ body.keyboard-open .login-logo {
   .lm-shine, .lm-live { opacity: 0; }
   .lm-halo { opacity: 0.6; }
 }
+
+/* Carte de La Coupe du Gang sur la page « Jeux » (components/home/GamesSection.jsx, 30 oct. 2026) :
+   le logo détouré flotte devant un halo d'or qui respire, deux projecteurs qui balancent et des
+   étincelles qui montent ; un reflet passe sur le logo seul (masque = le logo) et sur « Jouer », dont
+   la flèche avance ; un liseré or et rouge fait le tour de la carte. Transform et opacité seulement ;
+   rien ne bouge avec « réduire les animations ». */
+.coupe-ring {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+/* Le faisceau est à l'angle du carré (315° et 135°) : il porte à 0,7 fois son côté, assez pour
+   atteindre les coins d'une carte haute avec un carré de 150 % seulement (comme .lm-ring::before) */
+.coupe-ring::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 150%;
+  aspect-ratio: 1;
+  z-index: 0;
+  background: conic-gradient(from 0deg, transparent 0deg 105deg, rgba(224, 31, 38, 0.9) 135deg, transparent 165deg 285deg, #ebc15e 308deg, #fff1c4 315deg, #ebc15e 322deg, transparent 345deg 360deg);
+  transform: translate(-50%, -50%);
+  animation: coupe-spin 7s linear infinite;
+  will-change: transform;
+}
+.coupe-ring > * {
+  position: relative;
+  z-index: 1;
+}
+.coupe-logo-float {
+  animation: coupe-float 4.6s cubic-bezier(0.37, 0, 0.63, 1) infinite;
+  will-change: transform;
+}
+.coupe-logo-shine {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+.coupe-logo-shine::after,
+.coupe-cta-shine::after {
+  content: '';
+  position: absolute;
+  top: -10%;
+  bottom: -10%;
+  left: 0;
+  width: 36%;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0), rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0));
+  transform: translateX(-160%) skewX(-16deg);
+  animation: coupe-shine 5s cubic-bezier(0.45, 0, 0.25, 1) 0.8s infinite;
+  will-change: transform;
+}
+.coupe-cta-shine {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+}
+.coupe-cta-shine::after {
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0), rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0));
+  animation-delay: 2.4s;
+}
+.coupe-cta-glow {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: 0 0 26px 4px rgba(224, 31, 38, 0.55);
+  animation: coupe-breathe 2.6s ease-in-out infinite;
+  will-change: opacity;
+}
+.coupe-arrow {
+  display: inline-flex;
+  animation: coupe-nudge 1.6s ease-in-out infinite;
+  will-change: transform;
+}
+.coupe-glow {
+  position: absolute;
+  left: 50%;
+  top: 41%;
+  width: 96%;
+  aspect-ratio: 1;
+  border-radius: 9999px;
+  background: radial-gradient(closest-side, rgba(235, 193, 94, 0.5), rgba(224, 31, 38, 0.18) 52%, rgba(224, 31, 38, 0) 100%);
+  transform: translate(-50%, -50%) scale(0.94);
+  opacity: 0.7;
+  animation: coupe-glow 4s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+/* Projecteur : coin de lumière (conique) qui part du haut, fondu vers le bas, et balance */
+.coupe-beam {
+  position: absolute;
+  top: -4%;
+  width: 115%;
+  height: 92%;
+  background: conic-gradient(from 162deg at 50% 0%, rgba(255, 236, 196, 0) 0deg, rgba(255, 236, 196, 0.2) 18deg, rgba(255, 236, 196, 0) 36deg);
+  -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 30%, transparent 95%);
+  mask-image: linear-gradient(180deg, #000 0%, #000 30%, transparent 95%);
+  transform-origin: 50% 0;
+  animation: coupe-beam 8s ease-in-out infinite alternate;
+  will-change: transform;
+}
+.coupe-beam-left { left: -47%; --beam-from: -30deg; --beam-to: -14deg; }
+.coupe-beam-right { right: -47%; --beam-from: 30deg; --beam-to: 14deg; animation-delay: -4s; }
+.coupe-spark {
+  position: absolute;
+  top: 66%;
+  left: var(--x);
+  width: var(--s);
+  height: var(--s);
+  border-radius: 9999px;
+  background: #ffe7a6;
+  box-shadow: 0 0 6px 1px rgba(235, 193, 94, 0.85);
+  opacity: 0;
+  animation: coupe-spark var(--t) ease-out var(--d) infinite;
+  will-change: transform, opacity;
+}
+@keyframes coupe-spin {
+  from { transform: translate(-50%, -50%) rotate(0deg); }
+  to { transform: translate(-50%, -50%) rotate(360deg); }
+}
+@keyframes coupe-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+@keyframes coupe-shine {
+  0%, 55% { transform: translateX(-160%) skewX(-16deg); }
+  100% { transform: translateX(330%) skewX(-16deg); }
+}
+@keyframes coupe-breathe {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.95; }
+}
+@keyframes coupe-nudge {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(4px); }
+}
+@keyframes coupe-glow {
+  0%, 100% { transform: translate(-50%, -50%) scale(0.94); opacity: 0.65; }
+  50% { transform: translate(-50%, -50%) scale(1.05); opacity: 1; }
+}
+@keyframes coupe-beam {
+  from { transform: rotate(var(--beam-from)); }
+  to { transform: rotate(var(--beam-to)); }
+}
+@keyframes coupe-spark {
+  0% { transform: translate3d(0, 0, 0) scale(1); opacity: 0; }
+  15% { opacity: 1; }
+  100% { transform: translate3d(var(--dx), -150px, 0) scale(0.4); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .coupe-ring::before, .coupe-logo-float, .coupe-logo-shine::after, .coupe-cta-shine::after, .coupe-cta-glow,
+  .coupe-arrow, .coupe-glow, .coupe-beam, .coupe-spark { animation: none; will-change: auto; }
+  .coupe-ring::before, .coupe-logo-shine::after, .coupe-cta-shine::after, .coupe-spark { opacity: 0; }
+  .coupe-cta-glow { opacity: 0.6; }
+  .coupe-beam-left { transform: rotate(-22deg); }
+  .coupe-beam-right { transform: rotate(22deg); }
+}
