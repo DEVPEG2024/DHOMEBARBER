@@ -121,16 +121,16 @@ curl -s -o /dev/null -w "%{http_code}\n" https://dhomebarber-api-3aabb8313cb6.he
 
 ## Apps natives et stores
 
-### État au 30 oct. 2026
+### État au 31 oct. 2026
 
-- **En ligne** : iOS **1.0.10 (build 18)** depuis le 30 oct. 2026 à 22:02 et Android **1.0.18 (code 19)** depuis le 30 oct. 2026 vers 06:12, toutes deux avec La Coupe du Gang (et l'ancien fil : le fil v2 n'est que sur le site). Disponibles dans l'UE, France comprise, depuis la validation DSA du 12 oct.
-- **Envoi du 31 oct. 2026 (fil « New Gang » v2, musique du match sur iPhone, croix du fil)** : iOS **1.0.11 (build 19)** soumis vers 00:13 (reviewSubmission `fccd7cf9-992f-456a-9283-00b846074d2c`, en attente d'examen, publication automatique à l'approbation) ; Android **1.0.19 (code 20)** envoyé en production au même moment, en examen chez Google. Détail : `docs/historique/stores.md`.
+- **En ligne** : iOS **1.0.11 (build 19)** depuis le 31 oct. 2026 (entre 15:14 et 18:14) et Android **1.0.19 (code 20)** depuis le 31 oct. 2026 vers 03:13 : La Coupe du Gang (règlement d'avant la v2), fil « New Gang » v2, musique du match sur iPhone. **Pas encore dans les apps** : règlement v2 de la Coupe (site seulement, notes de revue 2.5.19 à écrire) et « CA à venir · tous les mois » du tableau de bord. Disponibles dans l'UE, France comprise, depuis la validation DSA du 12 oct.
+- **Envoi du 31 oct. 2026** (fil v2, musique, croix du fil) : soumis vers 00:13, Android en ligne vers 03:13, iOS approuvé et publié seul dans l'après-midi. Détail : `docs/historique/stores.md`.
 - **Prochains numéros : iOS build 20, Android versionCode 21.**
 - **iPhone Duo : les builds 17 à 19 sont encore compilés avec Xcode 26.3 (kit iOS 26.2)**, l'app reste réduite avec des bandes noires sur l'écran intérieur déplié. Pour le remplir : macOS ≥ 26.6 (ce Mac : 26.5.1 au 26 oct., la mise à jour redémarre le Mac), puis Xcode 27.1, puis un build vérifié sur le simulateur iPhone Duo (plié, déplié, clavier). Détail : `docs/historique/restes-a-faire.md`.
 - **Scripts d'envoi** (client de l'API App Store Connect, soumission, mise en production Play, `exportOptions.plist`) : `~/store-watch/envoi/`, hors du dossier temporaire des sessions (effacé à chaque redémarrage). Copier `submit109.mjs` / `play-promote-18.mjs` en changeant les numéros.
 - **Remontée des erreurs déclarée aux deux stores le 21 oct. 2026** : App Store « Données de plantage » (fonctionnement de l'app, liées, publiée) ; Play « Journaux de plantage » (collectés, non partagés, facultatifs, fonctionnement de l'appli et analyse). Toute nouvelle donnée collectée suit la même voie (règle des stores plus bas).
-- **Compte de démonstration** : contrôlé le 29 oct. 2026 après la revue de la 1.0.9, rien à nettoyer (règle de nettoyage plus bas, à refaire après chaque revue).
-- **Surveillance** : LaunchAgent `~/store-watch` (toutes les 3 h, se décharge seul, messages tirés de `IOS_VERSION` / `ANDROID_VERSION`) : relancée le 31 oct. 2026 sur 1.0.11 / 1.0.19 (ancien état dans `state-1.0.10.json.bak`), à relancer au prochain envoi. Rien ne tourne quand le Mac dort.
+- **Compte de démonstration** : contrôlé le 31 oct. 2026 après la revue de la 1.0.11 : ni avis, ni publication, ni commentaire, ni réaction, ni match ; 5 RDV créés par la revue, tous annulés (rien à effacer). **Restent deux blocages d'une revue du 18–19 oct. sur `reviewer@`** : le salon « D'Home Barber » et « mehdi atwi » (le prochain testeur ne verrait pas les publications du salon) ; à retirer sur accord (règle de nettoyage plus bas, à refaire après chaque revue).
+- **Surveillance** : LaunchAgent `~/store-watch` (toutes les 3 h, se décharge seul, messages tirés de `IOS_VERSION` / `ANDROID_VERSION`) : terminée le 31 oct. 2026 à 18:14 (1.0.11 / 1.0.19 en ligne), à relancer au prochain envoi. Rien ne tourne quand le Mac dort.
 - **Chrome dédié aux consoles** (Apple et Google, pilotable par CDP, port 9333) : `open -na "Google Chrome" --args --remote-debugging-port=9333 --user-data-dir="$HOME/Library/Application Support/DHB Chrome Consoles"` ; sessions App Store Connect et Play Console ouvertes par l'utilisateur le 21 oct. 2026 (profil hors dossier temporaire : il survit aux redémarrages).
 - **Snap** : revue approuvée ; reste *Push to Production* dans le portail puis le jeton de production dans Admin → Filtres Snap → Camera Kit (sans déploiement). Les filtres restent éteints tant que la lentille n'a pas d'effet.
 - Apps gratuites : contrat « applications payantes », compte bancaire et questionnaire fiscal américain inutiles.
@@ -442,7 +442,7 @@ Liste complète, dédoublonnée et datée : `docs/historique/restes-a-faire.md`.
 
 1. La Coupe du Gang (ouverte sur le site le 29 oct. 2026) : essai réel à deux téléphones du jeu complet, barbers à rendre joignables (notifications web), liste du build 18 et choix du chef à faire valider (5 min, 10 s / 20 s). Voir `docs/historique/restes-a-faire.md`.
 2. Coupe du Gang, règlement v2 (sur le site le 31 oct. 2026) : build store (notes de revue 2.5.19) sur feu vert, mesures des vrais matchs (durée, penaltys en ligne, buts à 2), essai à deux téléphones. Voir `docs/historique/restes-a-faire.md`.
-3. Fil « New Gang » v2 (en ligne sur le site le 30 oct. 2026) : envoyé aux stores le 31 oct. 2026 (iOS 1.0.11, Android 1.0.19, notes de revue et étiquettes faites). Après la mise en ligne : nettoyer les comptes de démonstration, essai réel des pushs du fil sur un téléphone. Voir `docs/historique/restes-a-faire.md`.
+3. Fil « New Gang » v2 : en ligne dans les apps le 31 oct. 2026 (iOS 1.0.11, Android 1.0.19), comptes de démonstration contrôlés. Reste : essai réel des pushs du fil sur un téléphone, blocages anciens de `reviewer@` à retirer sur accord. Voir `docs/historique/restes-a-faire.md`.
 4. Snap : *Push to Production* et jeton de production ; la lentille « DHB Couleur » est vide, à refaire.
 5. Activité clients : retirer la seconde requête des annulations sans auteur vers le 27 oct. 2026.
 6. Dom et Romain sans notifications sur leur téléphone, Kevin sur le web seulement : leur faire activer l'app.
