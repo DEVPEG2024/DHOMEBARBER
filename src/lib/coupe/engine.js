@@ -47,7 +47,10 @@ export const GOALS_TO_WIN_V2 = 5;
 export const FX_NONE = 0;
 export const FX_FIRE = 1; // balle en feu : vaut 1 but, brûle mousse et gel, s'éteint dans l'eau
 export const FX_ELEC = 2; // balle électrique : vaut 2 buts, plus rapide, court-circuit dans l'eau
-export const FIRE_HIT = 1700; // vitesse d'impact (collidePaddle) d'une frappe très forte
+// Vitesse d'impact (collidePaddle) d'une frappe très forte : le joueur plafonne à HIT_CAP (1800),
+// il faut donc reprendre à pleine vitesse un ballon qui arrive (banc d'essai du 31 oct. : à 1700,
+// tout geste vif allumait le ballon, une vingtaine de fois par match)
+export const FIRE_HIT = 2200;
 export const BALL_MAX_ELEC = 1250;
 export const ELEC_BOOST = 1.3;
 export const HOP_S = 0.5; // bond du court-circuit : ballon intouchable pendant 0,5 s
@@ -55,7 +58,7 @@ export const FOAM_DRAG = 3.4; // freinage par seconde dans la mousse
 export const FOAM_MIN = 45; // … sans jamais arrêter le ballon
 export const GEL_GAIN = 2.2; // accélération par seconde sur le gel
 export const GEL_FIRE = 640; // vitesse à laquelle le gel enflamme le ballon
-export const CHARGE_R = 26; // rayon d'un point frappé par la foudre
+export const CHARGE_R = 32; // rayon d'un point frappé par la foudre
 export const CHARGE_MS = 3000; // point chargé pendant 3 s
 export const JET_MIN = 14; // un jet commence à 14 de la tête de l'arroseur
 export const JET_W = 14; // demi-largeur d'un jet
@@ -77,6 +80,9 @@ export const EVENT_MS = { foam: 6000, gel: 6000, storm: 5000, goals: 8000, water
 export const EVENT_ANNOUNCE_MS = 1000; // annoncé 1 s avant
 export const EVENT_GAP_MIN_MS = 20000; // un événement toutes les 20 à 40 s de jeu
 export const EVENT_GAP_MAX_MS = 40000;
+// Orage ou gel : l'arrosage s'y ajoute une fois sur trois (combos électrique + eau, feu + eau ;
+// sans lui, deux événements ne se croisaient jamais)
+export const COMBO_P = 0.35;
 
 export const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 
@@ -137,6 +143,7 @@ export function constrainPaddle(p, side, mode) {
   }
   if (mode && mode.k === 'pen') {
     if (side !== mode.s) {
+      p.x = clamp(p.x, GL, GR);
       p.y = keeperLine(side);
       return false;
     }
@@ -622,6 +629,17 @@ export function makeEvent(kind, id, t, rnd, pads) {
   return e;
 }
 
+// Événements créés à l'heure t : celui de `kind`, et une fois sur COMBO_P l'arrosage avec un orage
+// ou un gel (mêmes heures, identifiant suivant). Le serveur et le match hors ligne passent par ici.
+export function makeEvents(kind, id, t, rnd, pads) {
+  const list = [makeEvent(kind, id, t, rnd, pads)];
+  if ((kind === 'storm' || kind === 'gel') && rnd() < COMBO_P) {
+    const w = makeEvent('water', id + 1, t, rnd, pads);
+    list.push(w);
+  }
+  return list;
+}
+
 // Événement vu par le joueur du haut (terrain tourné de 180°) : positions et angles tournés, cages
 // échangées (la cage du bas devient celle du haut), décalages inversés
 export function flipEvent(e) {
@@ -665,8 +683,10 @@ export function pinnedBy(b, p, side) {
 // Point de penalty du tireur : devant la cage qu'il attaque
 export const penaltySpot = (shooter) => ({ x: W / 2, y: shooter === 0 ? PEN_D : H - PEN_D });
 
-// Ligne du gardien pendant un penalty : au bord de sa petite surface
-export const keeperLine = (side) => (side === 0 ? H - SBD - PR : SBD + PR);
+// Ligne du gardien pendant un penalty : sa ligne de but (centre à PR + 3 de la ligne, entre les
+// poteaux). Au bord de sa petite surface, il arrêtait tous les tirs directs sans bouger (banc
+// d'essai du 31 oct.)
+export const keeperLine = (side) => (side === 0 ? H - PR - 3 : PR + 3);
 
 // Penalty : ballon arrêté sur le point, sans effet
 export function placePenalty(b, shooter) {
