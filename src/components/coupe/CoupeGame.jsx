@@ -4,13 +4,15 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Loader2, Smartphone, Timer } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
 import { useAndroidBack } from '@/lib/useAndroidBack';
-import { H, LEVELS } from '@/lib/coupe/engine';
+import { H, LEVELS, GOALS_TO_WIN, GOALS_TO_WIN_V2 } from '@/lib/coupe/engine';
 import { createRenderer, isSalonRole } from '@/lib/coupe/renderer';
 import { createSound, buzz } from '@/lib/coupe/sound';
 import { OnlineMatch, IDLE_UI, photoUrlOrNull, readPendingResume } from '@/lib/coupe/onlineMatch';
 import { LocalMatch } from '@/lib/coupe/localMatch';
 import { fingerOffset } from '@/lib/coupe/finger';
-import { COUPE_ENABLED_KEY, fetchCoupeEnabled, invalidateCoupe, useCoupeMusic } from '@/lib/coupe/coupeApi';
+import {
+  COUPE_ENABLED_KEY, fetchCoupeEnabled, invalidateCoupe, readCoupeRulesV2, useCoupeMusic,
+} from '@/lib/coupe/coupeApi';
 import { COUPE_PAUSED_TEXT } from './coupeErrors';
 import GameStyles from './game/GameStyles';
 import Panel from './game/Panel';
@@ -25,6 +27,10 @@ import StadiumStage, { createStadiumDirector } from './game/StadiumStage';
 import MatchIntro from './game/MatchIntro';
 import { offlinePlayers, onlinePlayers, seasonLabel, shownName } from './game/format';
 import { useMediaQuery, useSalonMusicPaused, useSecondsLeft, useTyping, useWakeLock } from './game/hooks';
+import { RulesBanner, RulesBar } from './game/RulesHud';
+import {
+  EVENT_NAMES, GOLD_BANNER, TIPS, eventBanner, foulBanner, goalBanner, penEndBanner, penaltyBanner,
+} from './game/rulesV2';
 
 /*
  * Écran de jeu de La Coupe du Gang (contrat : docs/fonctions/coupe-du-gang-contrat.md, section 5.1).
@@ -82,6 +88,74 @@ const later = (set, fn, ms) => {
 // Aucun doigt posé : camp de chaque doigt, écart doigt → joueur fixé quand il s'est posé, doigt qui
 // mène chaque camp
 const noPointers = () => ({ map: new Map(), offsets: new Map(), active: [null, null] });
+
+// ─── Règlement v2 (docs/fonctions/coupe-du-gang-regles-v2-contrat.md, sections 6 et 8) ──────────
+
+// Bandeaux : un à la fois, ~1,4 s ; une faute suivie d'un penalty reste 1,6 s (le temps que les
+// joueurs se placent, 1,8 s : le bandeau ne cache jamais le début du tir) ; deux en attente au plus
+const BANNER_MS = 1400;
+const FOUL_BANNER_MS = 1600;
+const BANNER_QUEUE = 2;
+// Le penalty annoncé dans le bandeau de sa faute n'a pas le sien
+const FOUL_THEN_PENALTY_MS = 800;
+// Astuce « camper » : à partir de 1,5 s d'affilée dans sa grande surface (faute à 3 s)
+const CAMP_TIP_S = 1.5;
+// Hors ligne : règlement lu au lancement, attendu au plus 1,5 s (sinon la règle d'aujourd'hui)
+const RULES_WAIT_MS = 1500;
+
+const count = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
+};
+
+/** Bande du règlement v2 au coup d'envoi (avant la première image du match). */
+function rulesAtStart(data) {
+  if (data?.rules !== 2) return null;
+  const gw = Number(data.goalsToWin) > 0 ? Math.round(Number(data.goalsToWin)) : GOALS_TO_WIN_V2;
+  return { gw, warn: [0, 0], mode: null, penS: null, digit: null, shot: false, goldLeft: null, event: null, hasNext: false };
+}
+
+/**
+ * Ce que la bande du règlement v2 affiche, lu dans une image du match (null : règle d'aujourd'hui).
+ * Seulement des valeurs qui changent quelques fois par seconde au plus : la boucle ne rend React que
+ * quand l'une d'elles change.
+ */
+/**
+ * Événements annoncés ou en cours dans une image (`an` ≤ now < `until`), dans l'ordre : deux à la
+ * fois quand l'arrosage accompagne un orage ou un gel (`makeEvents`, mêmes heures).
+ */
+function liveEventsOf(f) {
+  const now = Number(f?.now);
+  if (!Array.isArray(f?.events) || !Number.isFinite(now)) return [];
+  return f.events.filter((e) => e && EVENT_NAMES[e.k] && now >= Number(e.an) && now < Number(e.until));
+}
+
+function rulesOf(f) {
+  if (!f || f.rules !== 2) return null;
+  const mode = f.mode && typeof f.mode === 'object' ? f.mode : null;
+  const pen = mode?.k === 'pen';
+  const gold = mode?.k === 'gold';
+  const left = Number(mode?.left);
+  // Sortes des événements en cours, « storm+water » pour un orage avec l'arrosage
+  const live = liveEventsOf(f);
+  const event = live.length ? live.map((e) => e.k).join('+') : null;
+  const next = f.nextEvent;
+  return {
+    gw: Number(f.goalsToWin) > 0 ? Math.round(Number(f.goalsToWin)) : GOALS_TO_WIN_V2,
+    warn: [count(f.warn?.[0]), count(f.warn?.[1])],
+    mode: pen || f.phase === 'pen' ? 'pen' : gold ? 'gold' : null,
+    penS: pen ? (mode.s === 1 ? 1 : 0) : null,
+    digit: pen && left > 0 ? Math.min(9, Math.ceil(left)) : null,
+    shot: pen && left < 0,
+    goldLeft: gold && Number.isFinite(left) ? Math.max(0, Math.ceil(left)) : null,
+    event: pen || gold ? null : event,
+    hasNext: !!(next && Number(next.total) > 0),
+  };
+}
+
+const sameRules = (a, b) => (a === b) || (!!a && !!b && a.gw === b.gw && a.warn[0] === b.warn[0] && a.warn[1] === b.warn[1]
+  && a.mode === b.mode && a.penS === b.penS && a.digit === b.digit && a.shot === b.shot && a.goldLeft === b.goldLeft
+  && a.event === b.event && a.hasNext === b.hasNext);
 
 /** L'adversaire s'est déconnecté : « Kevin s'est déconnecté : 8 s ». */
 function AwayNotice({ name, until }) {
@@ -165,14 +239,82 @@ export default function CoupeGame({
   const [stadium, setStadiumStatus] = useState('loading');
   // Affiche VS ('vs', puis 'vs-out' le temps de sa sortie) ou « FIN DU MATCH » ('fin', 'fin-out')
   const [fx, setFx] = useState(null);
+  // Règlement v2 : bande du match (null = règle d'aujourd'hui), bandeau affiché, jauge du prochain
+  // événement (remplie par la boucle) ; règlement et tireur du match en cours ; astuces déjà vues
+  const [rulesUi, setRulesUi] = useState(null);
+  const rulesUiRef = useRef(null);
+  const [banner, setBanner] = useState(null);
+  const bannersRef = useRef({ seq: 0, queue: [], current: null, shownAt: 0, timer: 0, foulAt: -Infinity });
+  const gaugeRef = useRef(null);
+  const gaugeFracRef = useRef(-1);
+  const matchRulesRef = useRef({ rules: 1, penS: 0 });
+  const tipsRef = useRef(new Set());
+  // Pause hors ligne demandée pendant que le règlement se lit (le match n'existe pas encore)
+  const offPausedRef = useRef(false);
 
   const status = online ? ui.status : off.status;
   const opponent = online ? (ui.names[1] || 'Adversaire') : offlinePlayers(mode, lvl)[1].name;
 
-  const showHint = useCallback((msg) => {
+  // `pos` : 'bottom' pose l'astuce en bas du terrain (penalty tiré vers la cage du haut)
+  const showHint = useCallback((msg, pos = null) => {
     const id = Date.now() + Math.random();
-    setHint({ id, msg });
+    setHint({ id, msg, pos });
     later(timersRef.current, () => setHint((h) => (h?.id === id ? null : h)), 2400);
+  }, []);
+
+  /** Astuce du règlement v2, une fois par écran de jeu. */
+  const tip = useCallback((key, msg, pos = null) => {
+    if (!msg || tipsRef.current.has(key)) return;
+    tipsRef.current.add(key);
+    showHint(msg, pos);
+  }, [showHint]);
+
+  // Bandeaux : un à la fois ; `urgent` (but, but en or) passe devant tout et vide la file
+  const showBannerNow = useCallback((item) => {
+    const B = bannersRef.current;
+    const timers = timersRef.current;
+    if (B.timer) { clearTimeout(B.timer); timers.delete(B.timer); }
+    B.current = item;
+    B.shownAt = performance.now();
+    setBanner(item);
+    B.timer = later(timers, () => {
+      B.timer = 0;
+      B.current = null;
+      const next = B.queue.shift();
+      if (next) showBannerNow(next);
+      else setBanner(null);
+    }, item.ms);
+  }, []);
+
+  const pushBanner = useCallback((b, { ms = BANNER_MS, urgent = false } = {}) => {
+    if (!b) return;
+    const B = bannersRef.current;
+    B.seq += 1;
+    const item = { ...b, id: B.seq, ms };
+    if (urgent) B.queue = [];
+    if (B.current && !urgent) {
+      B.queue.push(item);
+      if (B.queue.length > BANNER_QUEUE) B.queue.shift();
+      return;
+    }
+    showBannerNow(item);
+  }, [showBannerNow]);
+
+  const clearBanners = useCallback(() => {
+    const B = bannersRef.current;
+    if (B.timer) { clearTimeout(B.timer); timersRef.current.delete(B.timer); }
+    B.timer = 0;
+    B.queue = [];
+    B.current = null;
+    B.foulAt = -Infinity;
+    setBanner(null);
+  }, []);
+
+  /** Bande du règlement v2 posée seulement quand une valeur affichée change. */
+  const applyRules = useCallback((next) => {
+    if (sameRules(rulesUiRef.current, next)) return;
+    rulesUiRef.current = next;
+    setRulesUi(next);
   }, []);
 
   const clearOutro = useCallback(() => {
@@ -188,6 +330,7 @@ export default function CoupeGame({
 
   useEffect(() => {
     const timers = timersRef.current;
+    let unmounted = false;
     const sound = createSound();
     soundRef.current = sound;
     setSoundOn(sound.isEnabled());
@@ -212,6 +355,41 @@ export default function CoupeGame({
     });
     directorRef.current = director;
 
+    // Règlement v2 : la bande suit l'image du match (rendu React seulement quand un chiffre affiché
+    // change), la jauge du prochain événement est remplie ici, l'astuce « camper » part d'ici
+    const rulesTick = (f) => {
+      if (!f) return;
+      const next = rulesOf(f);
+      const prev = rulesUiRef.current;
+      // Compte du penalty (3, 2, 1) : un bip à chaque seconde du tir
+      if (next?.mode === 'pen' && f.phase === 'live' && next.digit != null && prev?.digit != null && next.digit !== prev.digit) sound.blip();
+      applyRules(next);
+      if (!next) return;
+      matchRulesRef.current.rules = 2;
+      if (next.penS != null) matchRulesRef.current.penS = next.penS;
+      // Jauge : temps qui reste à l'événement en cours (pleine pendant son annonce), sinon avant
+      // l'annonce du prochain
+      const el = gaugeRef.current;
+      if (el) {
+        let frac = null;
+        // Plusieurs à la fois : celui qui dure le plus longtemps
+        const e = next.event ? liveEventsOf(f).reduce((a, b) => (!a || Number(b.until) > Number(a.until) ? b : a), null) : null;
+        if (e) frac = Number(f.now) < Number(e.at) ? 1 : (Number(e.until) - Number(f.now)) / Math.max(1, Number(e.until) - Number(e.at));
+        else if (f.nextEvent && Number(f.nextEvent.total) > 0) frac = Number(f.nextEvent.left) / Number(f.nextEvent.total);
+        if (frac != null && Number.isFinite(frac)) {
+          frac = Math.max(0, Math.min(1, frac));
+          if (Math.abs(frac - gaugeFracRef.current) > 0.002) {
+            gaugeFracRef.current = frac;
+            el.style.transform = `scaleX(${frac.toFixed(3)})`;
+          }
+        }
+      }
+      const c = f.camp;
+      if (Array.isArray(c) && (Number(c[0]) >= CAMP_TIP_S || (isLocal && Number(c[1]) >= CAMP_TIP_S))) {
+        tip('camp', isLocal ? TIPS.campLocal : TIPS.camp);
+      }
+    };
+
     const shouldRun = () => {
       const m = matchRef.current;
       if (!m || !rendererRef.current) return false;
@@ -234,18 +412,20 @@ export default function CoupeGame({
       if (root && f && root.dataset.phase !== f.phase) root.dataset.phase = f.phase;
       // Caméra et canvas : attributs de la racine, posés seulement quand ils changent
       director.frame(f, now);
+      rulesTick(f);
+      // Temps de jeu restant (après `time_left` ; hors ligne, seulement en règlement v2, qui a les
+      // 5 minutes du serveur) : un rendu par seconde affichée, pas par image
+      const left = f && f.timeLeft != null ? f.timeLeft : null;
+      if (left !== L.timeLeft) {
+        L.timeLeft = left;
+        setTimeLeft(left);
+      }
       if (online) {
         L.statT += dt;
         if (L.statT >= 0.25) {
           L.statT = 0;
           const s = m.stats();
           setNet((p) => (p.ping === s.ping && p.recalages === s.recalages && p.refusees === s.refusees ? p : s));
-        }
-        // Temps de jeu restant (après `time_left`) : un rendu par seconde affichée, pas par image
-        const left = f ? f.timeLeft : null;
-        if (left !== L.timeLeft) {
-          L.timeLeft = left;
-          setTimeLeft(left);
         }
         // Score du serveur (états, reprise) : le texte lu par les lecteurs d'écran le suit
         if (f && Array.isArray(f.score)) {
@@ -266,6 +446,33 @@ export default function CoupeGame({
       pointersRef.current = noPointers();
     };
 
+    // Règlement v2 : les deux joueurs pour les textes des bandeaux (repère local : [bas, haut])
+    const whoNow = () => {
+      if (isLocal) {
+        return [{ name: 'Le joueur du bas', obj: 'le joueur du bas' }, { name: 'Le joueur du haut', obj: 'le joueur du haut' }];
+      }
+      if (!online) return [{ name: 'Toi', me: true }, { name: 'Le salon', obj: 'le salon' }];
+      const n = matchRef.current?.ui?.names?.[1] || null;
+      return [{ name: 'Toi', me: true }, n ? { name: n, obj: n } : { name: 'L’adversaire', obj: 'l’adversaire' }];
+    };
+    // Bruitages du règlement v2 (sound.js) : jamais d'erreur, rien sur un dessin plus ancien
+    const sfx = (name) => {
+      try { if (typeof sound.fx === 'function') sound.fx(name); } catch { /* son indisponible */ }
+    };
+    const eventSound = (kind) => {
+      try { if (typeof sound.event === 'function') sound.event(kind); } catch { /* son indisponible */ }
+    };
+    // Règlement du match qui commence (ou reprend) : la bande, ou rien (règle d'aujourd'hui)
+    const setMatchRules = (data, { keep = false } = {}) => {
+      const v2 = data?.rules === 2;
+      matchRulesRef.current = { rules: v2 ? 2 : 1, penS: keep ? matchRulesRef.current.penS : 0 };
+      if (keep && v2 && rulesUiRef.current) return;
+      const next = rulesAtStart(data);
+      rulesUiRef.current = next;
+      gaugeFracRef.current = -1;
+      setRulesUi(next);
+    };
+
     const onEvent = (type, data) => {
       switch (type) {
         case 'start': {
@@ -277,7 +484,13 @@ export default function CoupeGame({
           setScore([0, 0]);
           setConfirmQuit(false);
           setSheet(null);
-          if (!online) setOff({ status: 'match', result: null, paused: false });
+          setMatchRules(data);
+          clearBanners();
+          if (!online) {
+            setOff({ status: 'match', result: null, paused: false });
+            L.timeLeft = null;
+            setTimeLeft(null);
+          }
           // Nouveau match (revanche comprise) : plus rien de la fin du précédent ; l'avant-match se
           // décide sur les premières images (`countS`)
           clearOutro();
@@ -299,6 +512,8 @@ export default function CoupeGame({
           renderer.setPlayers(onlinePlayers(data.names, data.roles, data.photos));
           resetPointers();
           if (Array.isArray(data.score)) setScore(data.score);
+          setMatchRules(data, { keep: true });
+          clearBanners();
           clearOutro();
           setFx(null);
           director.resume();
@@ -321,11 +536,86 @@ export default function CoupeGame({
         case 'post':
           sound.post();
           break;
-        case 'goal':
-          renderer.goal(data.scorer);
+        case 'goal': {
+          // Règlement v2 : valeur (1 ou 2) et effet du ballon au franchissement, pour le dessin
+          renderer.goal(data.scorer, { value: data.value, fx: data.fx });
           sound.goal();
           buzz('goal');
           setScore(data.score);
+          if (matchRulesRef.current.rules === 2) {
+            if (Number(data.value) === 2) sfx('goal2');
+            // Jamais un bandeau sous la bannière « BUT ! » du dessin : la file est vidée
+            const b = goalBanner(data, whoNow());
+            if (b) pushBanner(b, { urgent: true });
+            else clearBanners();
+          }
+          break;
+        }
+        // ─── Règlement v2 (contrat, section 6) ───
+        // Deux événements peuvent arriver coup sur coup (arrosage avec un orage ou un gel) : leurs
+        // bandeaux passent l'un après l'autre (file d'attente)
+        case 'event':
+          if (data?.e) {
+            pushBanner(eventBanner(data.e));
+            eventSound(data.e.k);
+            buzz('light');
+          }
+          break;
+        case 'bolt':
+          sfx('bolt');
+          buzz('light');
+          break;
+        case 'fire':
+        case 'charge':
+        case 'douse':
+        case 'short':
+          sfx(type);
+          break;
+        case 'foul': {
+          const pen = !!data?.pen;
+          pushBanner(foulBanner(data || {}, whoNow()), { ms: pen ? FOUL_BANNER_MS : BANNER_MS });
+          if (pen) bannersRef.current.foulAt = performance.now();
+          sfx('whistle');
+          if (!pen && data?.k === 'keep') sfx('warn');
+          buzz(!isLocal && data?.side === 0 ? 'medium' : 'light');
+          break;
+        }
+        case 'penalty': {
+          const s = data?.s === 1 ? 1 : 0;
+          matchRulesRef.current.penS = s;
+          // Ballon posé sur le point de penalty sans `kickoff` : plus de traînée depuis l'ancienne place
+          renderer.resetTrail();
+          sfx('penalty');
+          // Penalty sans faute juste avant (reprise d'un match) : son propre bandeau
+          if (performance.now() - bannersRef.current.foulAt > FOUL_THEN_PENALTY_MS) {
+            pushBanner(penaltyBanner(s, whoNow()), { ms: FOUL_BANNER_MS });
+          }
+          // Astuce loin de la cage visée (jamais sur le gardien), après le bandeau de la faute : sur
+          // un petit écran, le terrain est trop court pour les deux
+          const where = s === 0 ? 'bottom' : null;
+          const penTip = () => {
+            if (isLocal) tip('pen', TIPS.penLocal, where);
+            else if (s === 0) tip('shoot', TIPS.shoot, where);
+            else tip('keep', TIPS.keep, where);
+          };
+          const B = bannersRef.current;
+          const wait = B.current ? B.current.ms - (performance.now() - B.shownAt) : 0;
+          if (wait > 0) later(timers, penTip, wait);
+          else penTip();
+          break;
+        }
+        case 'pen_end': {
+          const b = penEndBanner(data?.r, matchRulesRef.current.penS, whoNow());
+          if (b) pushBanner(b);
+          if (data?.r === 'saved') sfx('save');
+          if (data?.r === 'saved' || data?.r === 'missed') buzz('light');
+          break;
+        }
+        case 'gold':
+          pushBanner(GOLD_BANNER, { urgent: true });
+          sfx('gold');
+          buzz('medium');
+          tip('gold', isLocal ? TIPS.goldLocal : TIPS.gold);
           break;
         case 'time_left':
           // 30 s avant la fin des 5 minutes de jeu : un signal discret
@@ -340,9 +630,11 @@ export default function CoupeGame({
         case 'end': {
           setScore(data.score);
           setHint(null);
+          clearBanners();
           resetPointers();
           // La pluie de lames est dans l'écran de fin (thème stade) : plus de renderer.victory()
-          const won = online ? data.won && !data.cancelled : isLocal || data.winner === 0;
+          // (à deux, un vainqueur ; un nul hors ligne, règlement v2 : but en or sans but)
+          const won = online ? data.won && !data.cancelled : isLocal ? data.winner === 0 || data.winner === 1 : data.winner === 0;
           if (won) {
             sound.win();
             buzz('win');
@@ -353,7 +645,12 @@ export default function CoupeGame({
             result = { mode: 'online', ...data, abandoned: !!data.abandoned };
             invalidateCoupe(queryClient);
           } else {
-            result = { mode, level: lvl, won: data.winner === 0, winner: data.winner, draw: false, score: data.score, forfeit: false, cancelled: false, reason: null, points: null, abandoned: false };
+            // Règlement v2 : `reason` ('time_limit', 'golden_goal', 'time_limit_draw') et nul possible
+            const winner = data.winner === 0 || data.winner === 1 ? data.winner : null;
+            result = {
+              mode, level: lvl, won: winner === 0, winner, draw: winner === null, score: data.score, forfeit: false,
+              cancelled: false, reason: typeof data.reason === 'string' ? data.reason : null, points: null, abandoned: false,
+            };
             setOff((o) => ({ ...o, status: 'over', result, paused: false }));
           }
           // « FIN DU MATCH » sur le terrain, puis la caméra recule jusqu'au stade entier (le canvas
@@ -381,6 +678,8 @@ export default function CoupeGame({
           break;
         }
         case 'toast':
+          // Règlement v2 : le ballon gardé 5 s a son bandeau AVERTISSEMENT (faute `keep`)
+          if (matchRulesRef.current.rules === 2 && /^Ballon gardé/.test(String(data))) break;
           showHint(data);
           break;
         default:
@@ -410,13 +709,23 @@ export default function CoupeGame({
       else match.create();
       renderer.paint(null);
     } else {
-      const match = new LocalMatch({ mode, level: lvl, onEvent });
-      matchRef.current = match;
-      match.start();
-      if (rootRef.current) rootRef.current.dataset.phase = match.phase;
+      // Règlement du serveur (`features.coupeRulesV2`), lu dès l'accueil de la Coupe : sans
+      // attente s'il est en cache, sinon attendu au plus 1,5 s (hors connexion : règle d'aujourd'hui)
+      const begin = (v2) => {
+        if (unmounted) return;
+        const match = new LocalMatch({ mode, level: lvl, onEvent, rules: v2 ? 2 : 1 });
+        matchRef.current = match;
+        match.start();
+        if (offPausedRef.current) match.setPaused(true);
+        if (rootRef.current) rootRef.current.dataset.phase = match.phase;
+      };
+      const flag = readCoupeRulesV2(queryClient, { waitMs: RULES_WAIT_MS });
+      if (flag.now !== null) begin(flag.now);
+      else flag.later.then(begin, () => begin(false));
     }
 
     return () => {
+      unmounted = true;
       if (L.raf) cancelAnimationFrame(L.raf);
       L.raf = 0;
       kickRef.current = () => {};
@@ -480,6 +789,7 @@ export default function CoupeGame({
 
   // Hors ligne : pause demandée, ou téléphone en paysage (le match attend qu'on le redresse)
   const offPaused = !online && off.status === 'match' && (off.paused || rotate);
+  offPausedRef.current = offPaused;
   useEffect(() => {
     if (online) return;
     const m = matchRef.current;
@@ -540,7 +850,9 @@ export default function CoupeGame({
       eyebrow: t.eyebrow,
       points: p ? { delta: p.delta, total: p.total, rank: p.rank } : null,
       season: seasonLabel(),
-      note: online ? (result.draw ? 'Temps écoulé : match nul' : null) : isLocal ? 'Match amical à deux' : 'Entraînement contre le salon',
+      note: online
+        ? (result.draw ? 'Temps écoulé : match nul' : result.reason === 'golden_goal' ? 'Décidé au but en or' : null)
+        : isLocal ? 'Match amical à deux' : 'Entraînement contre le salon',
     };
   }, [result, online, mode, lvl, opponent, ui.names, user, isLocal]);
   const storyShare = useScoreStoryShare(endShown ? story : null);
@@ -702,6 +1014,12 @@ export default function CoupeGame({
   const diag = diagnostic && online
     ? `Ping ${net.ping ?? '…'} ms · recalages ${net.recalages} · refusées ${net.refusees}`
     : null;
+  // Bande du règlement v2 : [bas, haut]
+  const barNames = isLocal ? ['Bas', 'Haut'] : ['Toi', online ? opponent : L.name];
+  const setGaugeEl = useCallback((el) => {
+    gaugeRef.current = el;
+    gaugeFracRef.current = -1;
+  }, []);
   const oppKey = online ? ui.keys[1] : null;
   const canModerate = online && !!oppKey && !isSalonRole(ui.roles[1]);
   const waitName = ui.waitingFor?.name || 'l’autre joueur';
@@ -864,6 +1182,11 @@ export default function CoupeGame({
             diag={diag}
           />
         )}
+        {/* Règlement v2 seulement (posée au coup d'envoi, avant le zoom : le terrain ne change plus
+            de taille pendant le match) */}
+        {showHud && rulesUi && (
+          <RulesBar ui={rulesUi} names={barNames} score={score} local={isLocal} fillRef={setGaugeEl} />
+        )}
         <div className="cdg-stage">
           {/* Stade sous le canvas (caché tant que l'image n'est pas prête, ou si elle échoue) */}
           <StadiumStage onReady={() => setStadiumStatus('on')} onFail={() => setStadiumStatus('off')} />
@@ -878,7 +1201,7 @@ export default function CoupeGame({
             onPointerCancel={onPointerEnd}
           />
           {inMatch && <p className="sr-only" aria-live="polite">{scoreText}</p>}
-          {online && ui.status === 'match' && ui.timeWarn && (
+          {(online ? ui.status === 'match' && ui.timeWarn : off.status === 'match' && timeLeft != null) && (
             <>
               <p className="sr-only" role="status">Plus que 30 secondes de jeu</p>
               {timeLeft != null && (
@@ -890,7 +1213,8 @@ export default function CoupeGame({
             </>
           )}
           {/* L'astuce du début (« Ton joueur suit ton doigt ») ne passe jamais sur l'écran de fin */}
-          {hint && inMatch && !endOpen && <div className="cdg-hint" role="status">{hint.msg}</div>}
+          {hint && inMatch && !endOpen && <div className="cdg-hint" role="status" data-pos={hint.pos || undefined}>{hint.msg}</div>}
+          {rulesUi && inMatch && !endOpen && <RulesBanner banner={banner} />}
           {bubbles.map((b) => (b.mine ? (
             <span key={b.id} className="cdg-bubble cdg-mine" aria-hidden="true">{REACTIONS[b.r]?.emoji}</span>
           ) : (
@@ -971,7 +1295,7 @@ export default function CoupeGame({
         )}
       </div>
       {/* Affiche VS de l'avant-match, « FIN DU MATCH » : sur tout l'écran, au-dessus du terrain */}
-      <MatchIntro fx={fx} mode={online ? 'online' : mode} players={introPlayers} />
+      <MatchIntro fx={fx} mode={online ? 'online' : mode} players={introPlayers} goals={rulesUi?.gw ?? GOALS_TO_WIN} />
       {rotate && (
         <div className="cdg-rotate" role="alert">
           <Smartphone className="h-10 w-10 text-[#ff3d44]" aria-hidden="true" />

@@ -13,6 +13,7 @@ import Pawn from './Pawn';
  *
  * `players` : [toi (ou le joueur du bas), l'adversaire (ou le joueur du haut)], chacun
  * { name, role, tag?, photo?, label } ; `label` est écrit sous la pastille, `photo` (client) dedans.
+ * `goals` : buts pour gagner (3, ou 5 en règlement v2, d'après le coup d'envoi du match).
  */
 
 const MODE_LINES = {
@@ -30,7 +31,7 @@ function Side({ player, tone }) {
   );
 }
 
-export default function MatchIntro({ fx, mode = 'online', players = [] }) {
+export default function MatchIntro({ fx, mode = 'online', players = [], goals = 3 }) {
   if (!fx) return null;
   const out = fx.endsWith('-out') ? ' cdg-out' : '';
 
@@ -59,7 +60,7 @@ export default function MatchIntro({ fx, mode = 'online', players = [] }) {
           <Side player={players[1]} tone="rival" />
         </div>
         <p className="cdg-vs-rules">
-          Premier à 3 buts ·{' '}
+          Premier à {goals} buts ·{' '}
           {/* Les droits aux points ne sont connus qu'à la fin du match (carte Gang d'un client) */}
           {online ? <><b>+3</b> à la victoire, −1 à la défaite quand vous y avez droit tous les deux</> : 'match amical'}
         </p>

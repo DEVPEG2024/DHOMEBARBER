@@ -80,7 +80,75 @@ export const GAME_CSS = `
    d'envoi, et reste seulement quand l'image a échoué */
 .cdg-root:not([data-stadium="off"]):not([data-play]) .cdg-canvas { opacity: 0; }
 .cdg-root:not([data-play]) .cdg-hud,
+.cdg-root:not([data-play]) .cdg-v2,
+.cdg-root:not([data-play]) .cdg-banner-zone,
 .cdg-root:not([data-play]) .cdg-reacts { opacity: 0; visibility: hidden; pointer-events: none; }
+
+/* Règlement v2 (RulesHud, planche « Écran de match » du 31 oct. 2026) : sous la barre du haut, les
+   buts de chacun en pastilles (rouge : toi, blanc : l'adversaire), ses avertissements (or), au
+   milieu l'événement, le penalty et son compte, le but en or ; dessous la jauge du prochain
+   événement (remplie par la boucle, transform seul). Montée seulement en règlement v2 */
+.cdg-v2 { position: relative; z-index: 18; flex: none; display: flex; flex-direction: column; gap: 5px; padding: 0 4px 6px; text-shadow: ${TEXT_SHADOW}; }
+/* Trois colonnes : toi, le milieu (qui cède la place, texte coupé), l'adversaire */
+.cdg-v2-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+.cdg-v2-mid { min-width: 0; display: flex; justify-content: center; }
+.cdg-v2-side { min-width: 0; display: flex; align-items: center; gap: 7px; }
+.cdg-v2-name { flex: none; max-width: 104px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  font: 800 16px/1.05 var(--cdg-display); letter-spacing: .06em; text-transform: uppercase; color: var(--cdg-blanc); }
+.cdg-v2-name.cdg-me { color: var(--cdg-rouge-vif); }
+.cdg-v2-pips { flex: none; display: flex; gap: 3px; }
+.cdg-v2-pip { display: block; width: 11px; height: 11px; border-radius: 50%; box-sizing: border-box; border: 2px solid var(--cdg-gris-sombre); background: ${noir(0.55)}; }
+.cdg-v2-pip.cdg-on.cdg-me { background: var(--cdg-rouge); border-color: var(--cdg-rouge); }
+.cdg-v2-pip.cdg-on.cdg-rival { background: var(--cdg-blanc-casse); border-color: var(--cdg-blanc-casse); }
+.cdg-v2-warn { flex: none; display: flex; align-items: center; gap: 3px; font: 600 10.5px/1 var(--cdg-body); color: var(--cdg-gris-clair); }
+.cdg-v2-warn > span { margin-right: 2px; }
+.cdg-v2-dot { display: block; width: 9px; height: 9px; border-radius: 50%; box-sizing: border-box; border: 1.5px solid var(--cdg-or); background: ${noir(0.55)}; }
+.cdg-v2-dot.cdg-on { background: var(--cdg-or); }
+.cdg-v2-chip { min-width: 0; max-width: 100%; box-sizing: border-box; display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px;
+  border-radius: 999px; background: ${noir(0.86)}; border: 1px solid ${blanc(0.2)}; text-shadow: none;
+  font: 800 14px/1 var(--cdg-display); letter-spacing: .08em; text-transform: uppercase; color: var(--cdg-blanc); }
+.cdg-v2-chip > span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cdg-v2-chip b { flex: none; font-size: 19px; font-weight: 800; color: var(--cdg-or); font-variant-numeric: tabular-nums; }
+.cdg-v2-chip.cdg-v2-pen, .cdg-v2-chip.cdg-v2-gold { border-color: ${alpha(C.or, 0.6)}; color: var(--cdg-or); }
+.cdg-v2-line { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: center;
+  font: 600 11.5px/1.2 var(--cdg-body); color: var(--cdg-blanc); }
+.cdg-v2-gauge { min-width: 0; display: flex; align-items: center; gap: 8px; visibility: hidden;
+  font: 600 11px/1 var(--cdg-body); color: var(--cdg-gris-clair); }
+.cdg-v2-gauge[data-on] { visibility: visible; }
+.cdg-v2-gauge-label { flex: none; white-space: nowrap; }
+.cdg-v2-gauge[data-live] .cdg-v2-gauge-label { font: 800 13px/1 var(--cdg-display); letter-spacing: .08em; text-transform: uppercase; color: var(--cdg-or); }
+.cdg-v2-bar { flex: 1; min-width: 24px; height: 6px; border-radius: 3px; overflow: hidden; background: ${blanc(0.16)}; }
+.cdg-v2-fill { display: block; height: 100%; background: var(--cdg-or); transform-origin: left center; transform: scaleX(0); }
+/* Petit écran (320 px) : pastilles et noms plus petits, le nom de l'adversaire coupé plus tôt */
+@media (max-width: 359px) {
+  .cdg-v2-row { gap: 6px; }
+  .cdg-v2-side { gap: 5px; }
+  .cdg-v2-name { max-width: 64px; font-size: 14px; letter-spacing: .03em; }
+  .cdg-v2-pips { gap: 2px; }
+  .cdg-v2-pip { width: 8px; height: 8px; border-width: 1.5px; }
+  .cdg-v2-chip { padding: 0 7px; font-size: 13px; letter-spacing: .05em; }
+  .cdg-v2-gauge-label { font-size: 10px; }
+}
+
+/* Bandeaux du règlement v2 (RulesBanner) : un à la fois sur le terrain, jamais dans le canvas.
+   Milieu du terrain par défaut ; au-dessus de la bannière « BUT ! » du dessin pour un but ou le
+   but en or ; loin du point de penalty et du tireur pour une faute (--cdg-pitch-top et
+   --cdg-pitch-h : terrain dans le stage, posés par StadiumStage) */
+.cdg-banner-zone { position: absolute; inset: 0; z-index: 13; pointer-events: none; overflow: hidden; }
+.cdg-banner { position: absolute; left: 50%; top: calc(var(--cdg-pitch-top, 6px) + var(--cdg-pitch-h, 600px) * .45);
+  width: max-content; max-width: min(calc(100% - 24px), calc(var(--cdg-pitch-w, 360px) + 8px)); box-sizing: border-box; transform: translate(-50%, -50%);
+  display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; }
+.cdg-banner[data-pos="high"] { top: calc(var(--cdg-pitch-top, 6px) + var(--cdg-pitch-h, 600px) * .26); }
+.cdg-banner[data-pos="low"] { top: calc(var(--cdg-pitch-top, 6px) + var(--cdg-pitch-h, 600px) * .74); }
+.cdg-banner strong { max-width: 100%; font: 800 min(46px, calc(var(--cdg-pitch-w, 360px) * .125))/.92 var(--cdg-display); letter-spacing: .03em; text-transform: uppercase;
+  text-wrap: balance; color: var(--cdg-blanc); text-shadow: 0 .07em 0 ${alpha(C.rougeSombre, 0.95)}, 0 0 18px ${noir(0.6)}; }
+.cdg-banner span { max-width: 100%; box-sizing: border-box; padding: 5px 11px; border-radius: 999px; background: ${noir(0.86)};
+  font: 600 13.5px/1.3 var(--cdg-body); color: var(--cdg-blanc); }
+.cdg-banner span.cdg-banner-sub2 { color: var(--cdg-or); font-weight: 700; }
+.cdg-banner[data-kind="foul"] strong, .cdg-banner[data-kind="warn"] strong,
+.cdg-banner[data-kind="penalty"] strong, .cdg-banner[data-kind="gold"] strong { color: var(--cdg-or); }
+.cdg-banner[data-kind="elec"] strong { color: ${C.elecClair}; text-shadow: 0 .07em 0 rgba(10, 40, 90, .95), 0 0 22px ${alpha(C.elec, 0.6)}; }
+.cdg-banner[data-kind="fire"] strong { color: ${C.feuClair}; text-shadow: 0 .07em 0 ${alpha(C.rougeSombre, 0.95)}, 0 0 22px ${alpha(C.feu, 0.55)}; }
 
 .cdg-reacts { position: relative; z-index: 18; flex: none; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 0 4px; }
 .cdg-reacts-row { display: flex; gap: 12px; }
@@ -99,6 +167,8 @@ export const GAME_CSS = `
 .cdg-hint { position: absolute; z-index: 30; left: 50%; top: calc(var(--cdg-pitch-top, 6px) + 6px); transform: translateX(-50%); width: max-content; max-width: calc(100% - 24px);
   box-sizing: border-box; padding: 10px 14px; border-radius: 999px; pointer-events: none; text-align: center;
   background: ${noir(0.92)}; border: 1px solid ${blanc(0.22)}; font: 600 13px/1.3 var(--cdg-body); color: var(--cdg-blanc); }
+/* Astuce posée en bas du terrain (penalty tiré vers la cage du haut : rien ne cache le gardien) */
+.cdg-hint[data-pos="bottom"] { top: calc(var(--cdg-pitch-top, 6px) + var(--cdg-pitch-h, 600px) - 6px); transform: translate(-50%, -100%); }
 .cdg-bubble { position: absolute; z-index: 14; pointer-events: none; }
 .cdg-bubble.cdg-mine { left: 18px; bottom: 18px; font-size: 34px; line-height: 1; }
 .cdg-bubble.cdg-theirs { right: 30px; top: 14px; padding: 6px 10px; border-radius: 999px; background: ${noir(0.86)};
@@ -271,6 +341,7 @@ export const GAME_CSS = `
 @keyframes cdg-fade-out { from { opacity: 1; } to { opacity: 0; } }
 @keyframes cdg-vs-in { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
 @keyframes cdg-vs-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(-12px); } }
+@keyframes cdg-banner-in { 0% { opacity: 0; transform: scale(.55); } 60% { opacity: 1; transform: scale(1.08); } 100% { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: no-preference) {
   .cdg-panel, .cdg-defi { animation: cdg-rise .35s cubic-bezier(.2, .9, .3, 1.15); }
   .cdg-bubble { animation: cdg-float-up 1.6s ease-out forwards; }
@@ -285,9 +356,14 @@ export const GAME_CSS = `
      début du zoom arrière) : en fondu, joueurs, ballon et score restaient 0,2 s posés sur le stade
      entier, deux terrains à l'écran */
   .cdg-root[data-play] .cdg-canvas { transition: opacity .2s ease; }
-  .cdg-hud, .cdg-reacts { transition: opacity .2s ease, visibility 0s; }
+  .cdg-hud, .cdg-v2, .cdg-reacts { transition: opacity .2s ease, visibility 0s; }
   .cdg-root:not([data-play]) .cdg-hud,
+  .cdg-root:not([data-play]) .cdg-v2,
   .cdg-root:not([data-play]) .cdg-reacts { transition: opacity .2s ease, visibility 0s .2s; }
+  /* Bandeau : il saute, puis s'efface juste avant d'être retiré (--cdg-banner-out) */
+  .cdg-banner strong { animation: cdg-banner-in .32s cubic-bezier(.2, .9, .3, 1.1) both; }
+  .cdg-banner span { animation: cdg-fade-in .25s ease-out .08s both; }
+  .cdg-banner { animation: cdg-fade-out .28s ease-in var(--cdg-banner-out, 1120ms) both; }
   .cdg-intro .cdg-intro-band { animation: cdg-fade-in .3s ease-out both; }
   .cdg-intro .cdg-vs { animation: cdg-vs-in .45s cubic-bezier(.2, .8, .2, 1) both; }
   .cdg-intro.cdg-out .cdg-intro-band { animation: cdg-fade-out .3s ease-in both; }
@@ -300,7 +376,7 @@ export const GAME_CSS = `
 }
 /* Changement sans transition (reprise d'un match, placement recalculé) : withoutTransition() */
 .cdg-root[data-instant] .cdg-camera, .cdg-root[data-instant] .cdg-veil, .cdg-root[data-instant] .cdg-canvas,
-.cdg-root[data-instant] .cdg-hud, .cdg-root[data-instant] .cdg-reacts { transition: none !important; }
+.cdg-root[data-instant] .cdg-hud, .cdg-root[data-instant] .cdg-v2, .cdg-root[data-instant] .cdg-reacts { transition: none !important; }
 `;
 
 export default function GameStyles() {

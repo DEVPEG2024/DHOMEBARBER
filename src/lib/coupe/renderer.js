@@ -10,6 +10,19 @@
  * noms, le score et les effets. Sans l'image (`false`, par défaut, ou image qui ne charge pas), le
  * terrain est dessiné comme avant, aux nouvelles couleurs.
  *
+ * Règlement v2 (31 oct. 2026, docs/fonctions/coupe-du-gang-regles-v2-contrat.md, sections 6 et 7) :
+ * les six événements, le ballon en feu, électrique ou en l'air, les éclats (allumage, charge,
+ * vapeur, court-circuit, éclair), le penalty, le but en or et les anneaux des fautes sont dessinés
+ * par `effects.js`, d'après l'image seule (`events`, `now`, `goalOff`, `ball.fx` / `air`, `mode`,
+ * `camp`, `pin`). Une image sans ces champs (règle d'aujourd'hui) se dessine comme avant.
+ * `goal(scorer, { value, fx })` : célébration plus forte d'un but électrique (+2) ou en feu (bande
+ * de la bannière orange ou bleue, flammes ou décharges dans la cage). Aucun texte de plus dans le
+ * canvas : les bandeaux du règlement v2 sont dans l'interface. Ordre du dessin : effets au sol
+ * (raccord de pelouse et cages qui bougent, ligne du milieu, gel, eau, traces, ciel d'orage), puis
+ * les noms et le score, le penalty et les anneaux, le ballon, les joueurs, puis par-dessus la
+ * mousse, l'eau, la pluie, les éclairs, la fumée (elle cache le ballon) et les étincelles.
+ * L'image du stade est aussi chargée ici (même fichier que celui de l'écran) pour les raccords.
+ *
  * Indépendant de React et du réseau : on lui donne une « image » du match (`render(frame, dt)`).
  * Repère local : le joueur du bas est toujours l'indice 0 (anneau rouge : toi, ou le joueur du bas
  * à deux), celui du haut l'indice 1 (anneau blanc). À deux sur un téléphone (`setTwoPlayers(true)`),
@@ -20,15 +33,16 @@
  * les joueurs changent) ; une frame ne fait que les recopier. Le renderer ne dessine que quand on
  * l'appelle : l'écran n'anime rien quand aucun match n'est affiché (`paint` une fois, puis rien).
  *
- * Joueurs : jamais de photo (une photo de barber n'est jamais ronde, règle de l'app). Le salon =
- * « DHB » + petite étoile bleue ; un barber = son initiale + petits ciseaux ; un client = ses
- * initiales.
+ * Joueurs : photo ronde d'un client quand il en a une (jamais pour un barber : ses photos ne sont
+ * jamais rondes, règle de l'app). Le salon = « DHB » + petite étoile bleue ; un barber = son
+ * initiale + petits ciseaux ; un client = ses initiales.
  */
 import {
-  W, H, GW, GL, GR, GD, SBW, SBD, BBW, BBD, BR, PR, POST, POSTS, KEEP_LIMIT, boxOf,
+  W, H, GW, GL, GR, GD, SBW, SBD, BBW, BBD, BR, PR, POST, POSTS, KEEP_LIMIT, FX_FIRE, FX_ELEC, boxOf,
 } from './engine.js';
-// Chemin relatif (pas l'alias `@/`) : les vérifications de bout en bout chargent ce fichier dans Node
+// Chemins relatifs (pas l'alias `@/`) : les vérifications de bout en bout chargent ce fichier dans Node
 import { COUPE_COLORS } from '../../components/coupe/palette.js';
+import { createEffects } from './effects.js';
 
 // Marges autour du terrain (unités du terrain) : panneaux sur les côtés, cages et noms en haut et en bas
 export const MS = 16;
@@ -55,8 +69,13 @@ const GO_S = 0.5;
 const END_FADE_S = 0.15;
 /** Opacité restante d'un effet coupé par la fin du match (`cut` : son âge à la fin), 1 sinon. */
 const endFade = (fx) => (fx.cut == null ? 1 : Math.max(0, 1 - (fx.t - fx.cut) / END_FADE_S));
-// Bande rouge inclinée de la bannière « BUT ! » (skewX(-8deg) de la maquette StadeAnimation)
+// Bande rouge inclinée de la bannière « BUT ! » (skewX(-8deg) de la maquette StadeAnimation) ;
+// orange pour un but en feu, bleue pour un but électrique (blanc lisible dessus)
 const BANNER_SKEW = Math.tan((-8 * Math.PI) / 180);
+const BANNER_FIRE = '#e8590c';
+const BANNER_ELEC = '#1f6fe0';
+// Traînée du ballon : blanche, orange en feu, bleue électrique
+const TRAIL_COLOR = { [FX_FIRE]: 'rgb(255,160,50)', [FX_ELEC]: 'rgb(140,200,255)' };
 
 /**
  * Couleurs du jeu (thème stade, `COUPE_COLORS`) : le jeu reste sombre quel que soit le thème de
@@ -270,6 +289,13 @@ function namePill(c, badge, color, alignEnd, minPx = 0) {
  */
 export function createRenderer(canvas, { reducedMotion = false } = {}) {
   const ctx = canvas.getContext('2d');
+  // Règlement v2 : événements, ballon en feu / électrique / en l'air, penalty, but en or, fautes
+  const fx = createEffects({ reducedMotion });
+  // Terrain dessiné de secours : filets (cages qui bougent) et ligne du milieu (but en or) retirés
+  // du calque quand les effets les dessinent ou les effacent
+  let fieldNets = true;
+  let fieldMid = true;
+  let stadiumImg = null; // chargement de l'image du stade pour les raccords (une fois)
   const layer = document.createElement('canvas');
   const lctx = layer.getContext('2d');
   const strips = [document.createElement('canvas'), document.createElement('canvas')]; // gauche, droite
@@ -374,8 +400,10 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
     c.fillStyle = bg;
     c.fillRect(0, 0, canvas.width, canvas.height);
     worldTransform(c);
-    drawNet(c, -1);
-    drawNet(c, 1);
+    if (fieldNets) {
+      drawNet(c, -1);
+      drawNet(c, 1);
+    }
     const bands = 14;
     for (let k = 0; k < bands; k++) {
       c.fillStyle = k % 2 ? COLORS.turfA : COLORS.turfB;
@@ -404,13 +432,16 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
     c.lineWidth = 2;
     c.lineCap = 'round';
     c.strokeRect(1, 1, W - 2, H - 2);
-    // Ligne médiane arrêtée au rond central, comme sur l'image du stade : le rond ne garde que le logo
-    c.beginPath();
-    c.moveTo(1, H / 2);
-    c.lineTo(W / 2 - 48, H / 2);
-    c.moveTo(W / 2 + 48, H / 2);
-    c.lineTo(W - 1, H / 2);
-    c.stroke();
+    // Ligne médiane arrêtée au rond central, comme sur l'image du stade : le rond ne garde que le
+    // logo (effacée au but en or)
+    if (fieldMid) {
+      c.beginPath();
+      c.moveTo(1, H / 2);
+      c.lineTo(W / 2 - 48, H / 2);
+      c.moveTo(W / 2 + 48, H / 2);
+      c.lineTo(W - 1, H / 2);
+      c.stroke();
+    }
     c.beginPath();
     c.arc(W / 2, H / 2, 48, 0, TAU);
     c.stroke();
@@ -445,11 +476,13 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
     c.textBaseline = 'middle';
     c.fillText('DHB', W / 2, H / 2 + 1);
     c.fillStyle = '#ffffff';
-    POSTS.forEach(([x, y]) => {
-      c.beginPath();
-      c.arc(x, y, POST, 0, TAU);
-      c.fill();
-    });
+    if (fieldNets) {
+      POSTS.forEach(([x, y]) => {
+        c.beginPath();
+        c.arc(x, y, POST, 0, TAU);
+        c.fill();
+      });
+    }
     // Fond des panneaux (le texte qui défile est dans `strips`)
     for (const side of [-1, 1]) {
       const x0 = side < 0 ? -MS + 3 : W + 3;
@@ -622,6 +655,8 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
     view.s = v.s;
     view.ox = v.ox;
     view.oy = v.oy;
+    // Effets : échelle (caches) et bords du canvas en unités du terrain (éclairs, flash)
+    fx.setView(scale(), -v.ox / v.s - MS, -v.oy / v.s - MG, (r.width - v.ox) / v.s - MS, (r.height - v.oy) / v.s - MG);
     buildLayers();
     // Redimensionné entre deux frames (ou à l'arrêt) : la dernière image est redessinée une fois
     if (painted) paint(lastFrame);
@@ -661,15 +696,18 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
       shakeY = rand(-a, a);
     }
     if (particles.length) {
-      particles = particles.filter((q) => {
+      // Sur place (pas de nouveau tableau à chaque image)
+      let n = 0;
+      for (const q of particles) {
         q.life -= dt;
-        if (q.life <= 0) return false;
+        if (q.life <= 0) continue;
         q.x += q.vx * dt;
         q.y += q.vy * dt;
         q.vx *= 0.92;
         q.vy *= 0.92;
-        return true;
-      });
+        particles[n++] = q;
+      }
+      particles.length = n;
     }
     if (blades.length) {
       blades = blades.filter((bl) => {
@@ -682,11 +720,25 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
     if (frame) {
       const b = frame.ball;
       const speed = Math.sqrt((b.vx || 0) ** 2 + (b.vy || 0) ** 2);
-      if (speed > 180 && frame.phase !== 'ready' && frame.phase !== 'count' && frame.phase !== 'pause') {
-        trail.unshift({ x: b.x, y: b.y });
-        if (trail.length > 12) trail.pop();
+      if (speed > 180 && frame.phase !== 'ready' && frame.phase !== 'count' && frame.phase !== 'pause' && frame.phase !== 'pen') {
+        // Point le plus ancien réutilisé (pas d'objet neuf à chaque image une fois la traînée pleine)
+        const pt = trail.length >= 12 ? trail.pop() : { x: 0, y: 0 };
+        pt.x = b.x;
+        pt.y = b.y;
+        trail.unshift(pt);
       } else if (trail.length) trail.pop();
     } else trail = [];
+    // Règlement v2 : événements, éclats du ballon ; terrain dessiné de secours refait sans filets
+    // ni ligne du milieu quand les effets les remplacent
+    fx.step(frame, dt);
+    if (!stadium) {
+      const f = fx.fieldFlags();
+      if (f.nets !== fieldNets || f.midline !== fieldMid) {
+        fieldNets = f.nets;
+        fieldMid = f.midline;
+        buildPitch();
+      }
+    }
   }
 
   // ─── Frame : dessin ───────────────────────────────────────────────
@@ -736,26 +788,40 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
     });
   }
 
-  function drawBall(b) {
+  // Ballon. `hop` (0 à 1, règlement v2) : ballon en l'air après un court-circuit, plus gros, son
+  // ombre décalée et plus pâle ; la traînée prend la couleur du feu ou de la charge
+  function drawBall(b, hop = 0) {
     const c = ctx;
     if (trail.length) {
-      // Traînée blanche
       c.save();
       c.globalCompositeOperation = 'lighter';
-      trail.forEach((t, k) => {
+      const hot = TRAIL_COLOR[b.fx | 0];
+      c.fillStyle = hot || '#ffffff';
+      const a0 = hot ? 0.34 : 0.2;
+      for (let k = 0; k < trail.length; k++) {
+        const t = trail[k];
         const f = 1 - k / trail.length;
-        c.fillStyle = `rgba(255,255,255,${0.2 * f})`;
+        c.globalAlpha = a0 * f;
         c.beginPath();
         c.arc(t.x, t.y, BR * (0.45 + 0.55 * f), 0, TAU);
         c.fill();
-      });
+      }
       c.restore();
     }
+    const lift = hop * 14;
+    const k = 1 + 0.6 * hop;
     c.fillStyle = 'rgba(0,0,0,.35)';
+    c.globalAlpha = 1 - 0.45 * hop;
     c.beginPath();
-    c.ellipse(b.x + 2.5, b.y + 4, BR, BR * 0.9, 0, 0, TAU);
+    c.ellipse(b.x + 2.5 + 10 * hop, b.y + 4 + 12 * hop, BR * (1 - 0.15 * hop), BR * 0.9 * (1 - 0.15 * hop), 0, 0, TAU);
     c.fill();
+    c.globalAlpha = 1;
     c.save();
+    if (hop > 0) {
+      c.translate(b.x, b.y - lift);
+      c.scale(k, k);
+      c.translate(-b.x, -b.y);
+    }
     c.beginPath();
     c.arc(b.x, b.y, BR, 0, TAU);
     c.clip();
@@ -776,7 +842,7 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
     c.strokeStyle = 'rgba(0,0,0,.28)';
     c.lineWidth = 0.8;
     c.beginPath();
-    c.arc(b.x, b.y, BR, 0, TAU);
+    c.arc(b.x, b.y - lift, BR * k, 0, TAU);
     c.stroke();
   }
 
@@ -796,7 +862,8 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
     c.lineCap = 'round';
     for (const q of particles) {
       const f = q.life / q.max;
-      c.strokeStyle = q.gold ? `rgba(235,193,94,${f})` : `rgba(255,255,255,${f})`;
+      c.globalAlpha = f;
+      c.strokeStyle = q.gold ? COLORS.gold : '#ffffff';
       c.lineWidth = 1.6 * f + 0.4;
       c.beginPath();
       c.moveTo(q.x, q.y);
@@ -923,7 +990,7 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
     c.save();
     c.translate(0, mid);
     c.transform(1, 0, BANNER_SKEW, 1, 0, 0);
-    c.fillStyle = COLORS.me;
+    c.fillStyle = banner.fx === FX_FIRE ? BANNER_FIRE : banner.fx === FX_ELEC || banner.value >= 2 ? BANNER_ELEC : COLORS.me;
     c.fillRect(-half, top - mid, half * 2, bottom - top);
     c.fillStyle = COLORS.fg;
     c.fillText('BUT !', 0, ty - mid);
@@ -970,25 +1037,63 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
       if (blades.length) drawBlades();
       return;
     }
-    // Sur l'image du stade, le calque ne porte que les noms et le cadre du score
-    if (!stadium || labels) c.drawImage(layer, shakeX * scale(), shakeY * scale());
-    worldTransform(c, shakeX, shakeY);
-    if (!stadium) drawBoardText();
+    if (stadium) {
+      // Image du stade : les effets au sol (raccords, cages qui bougent, gel, eau, ciel d'orage)
+      // sous les noms et le cadre du score, qui restent lisibles ; le calque ne porte qu'eux
+      if (frame) {
+        worldTransform(c, shakeX, shakeY);
+        fx.ground(c, frame, true);
+        c.setTransform(1, 0, 0, 1, 0, 0);
+      }
+      if (labels) c.drawImage(layer, shakeX * scale(), shakeY * scale());
+      worldTransform(c, shakeX, shakeY);
+    } else {
+      // Terrain dessiné : le calque (terrain, noms) d'abord, les effets au sol dessus
+      c.drawImage(layer, shakeX * scale(), shakeY * scale());
+      worldTransform(c, shakeX, shakeY);
+      drawBoardText();
+      if (frame) fx.ground(c, frame, false);
+    }
     if (!frame) {
       drawBall(IDLE_BALL);
     } else {
+      const b = frame.ball;
+      const hop = fx.hop(b);
       drawBoxFlash(frame.flashBox);
       if (labels) drawScore(frame.score);
+      fx.play(c, frame);
       drawBallRing(frame);
-      drawBall(frame.ball);
+      fx.ballBack(c, b, hop);
+      drawBall(b, hop);
+      fx.ballFront(c, frame, hop);
       drawPaddle(0, frame.paddles[0]);
       drawPaddle(1, frame.paddles[1]);
+      fx.over(c, frame);
       drawParticles();
       drawBanner(frame.score);
       drawCountdown(frame);
       drawGo();
     }
     if (blades.length) drawBlades();
+  }
+
+  // Image du stade pour les raccords des effets (le même fichier que l'écran : déjà en cache).
+  // `new URL(…, import.meta.url)` : Vite en fait l'adresse du fichier ; rien n'est chargé sous Node
+  function loadStadiumImage() {
+    if (stadiumImg || typeof Image === 'undefined') return;
+    try {
+      stadiumImg = new Image();
+      stadiumImg.decoding = 'async';
+      stadiumImg.onload = () => {
+        if (destroyed) return;
+        fx.setImage(stadiumImg);
+        if (painted) paint(lastFrame);
+      };
+      stadiumImg.onerror = () => { stadiumImg = null; };
+      stadiumImg.src = new URL('../../assets/coupe/stade.webp', import.meta.url).href;
+    } catch {
+      stadiumImg = null;
+    }
   }
 
   // Doigt → terrain (repère local, joueur en bas)
@@ -1052,12 +1157,16 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
      * revient. La dernière image est redessinée aussitôt (jamais deux terrains à l'écran).
      */
     setStadium(on) {
+      if (on) loadStadiumImage();
       if (stadium === !!on) return;
       stadium = !!on;
       buildLayers();
       if (painted) paint(lastFrame);
     },
-    setReducedMotion(on) { reduced = !!on; },
+    setReducedMotion(on) {
+      reduced = !!on;
+      fx.setReduced(reduced);
+    },
     burst,
     /** Frappe : étincelles au point de contact, d'autant plus nombreuses que la frappe est forte. */
     hit(v, x, y) {
@@ -1066,11 +1175,18 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
     /**
      * But (scorer 0 = joueur du bas) : bannière, tremblement, gerbe d'étincelles au fond de la cage.
      * Pas de tremblement sur l'image du stade : seuls les joueurs bougeraient sur un terrain immobile.
+     * Règlement v2, deuxième argument facultatif `{ value, fx }` (valeur du but, effet du ballon au
+     * franchissement) : but en feu (bande orange, flammes et onde dans la cage) ou électrique / à 2
+     * (bande bleue, décharges et petits éclairs) ; sans lui, le but d'aujourd'hui.
      */
-    goal(scorer) {
-      banner = { t: 0, scorer: scorer === 1 ? 1 : 0 };
+    goal(scorer, opts) {
+      const value = opts && Number(opts.value) >= 2 ? 2 : 1;
+      const kind = opts ? Number(opts.fx) || 0 : 0;
+      banner = { t: 0, scorer: scorer === 1 ? 1 : 0, value, fx: kind };
       shake = reduced || stadium ? 0 : 1;
-      burst(W / 2, scorer === 0 ? 0 : H, reduced ? 10 : 26, true);
+      const big = kind || value > 1;
+      burst(W / 2, scorer === 0 ? 0 : H, reduced ? 10 : big ? 40 : 26, true);
+      if (big) fx.goal(scorer === 1 ? 1 : 0, { value, fx: kind }, lastFrame && lastFrame.ball);
     },
     /** Victoire : pluie de lames de rasoir (l'écran de jeu du thème stade la met dans l'écran de fin). */
     victory() {
@@ -1098,6 +1214,7 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
       shakeX = 0;
       shakeY = 0;
       if (!keepBlades) blades = [];
+      fx.reset();
     },
     resetTrail() { trail = []; },
     /** Une frame : effets avancés de `dt` secondes, puis dessin. */
@@ -1108,9 +1225,12 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
     },
     /** Dessin seul, sans animation (terrain d'attente, match en pause, après un redimensionnement). */
     paint,
-    /** Des effets sont encore en cours (étincelles, bannière, « GO ! », tremblement, lames). */
+    /**
+     * Des effets passagers sont encore en cours (étincelles, bannière, « GO ! », tremblement, lames,
+     * éclats du règlement v2). Les événements eux-mêmes suivent les images du match.
+     */
     busy() {
-      return particles.length > 0 || blades.length > 0 || banner !== null || go !== null || shake > 0;
+      return particles.length > 0 || blades.length > 0 || banner !== null || go !== null || shake > 0 || fx.busy();
     },
     destroy() {
       destroyed = true;

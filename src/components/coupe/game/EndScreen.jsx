@@ -166,6 +166,14 @@ function PointsCard({ points, opponent, draw, reason }) {
   );
 }
 
+/** Fin d'un match hors ligne en règlement v2 (`reason` du match) : une ligne sous le score, ou rien. */
+function offlineNote(result) {
+  if (result?.draw) return 'But en or sans but en 2 minutes : match nul.';
+  if (result?.reason === 'golden_goal') return 'Égalité au bout des 5 minutes : le premier but a tout décidé.';
+  if (result?.reason === 'time_limit') return 'Temps écoulé : 5 minutes de jeu, celui qui mène gagne.';
+  return null;
+}
+
 /**
  * Titre et textes de la fin, d'après le résultat (en ligne, contre le salon, à deux).
  * `tone` : 'victoire' (titre en or, pluie de lames), 'defaite' (titre blanc sur bande noire
@@ -183,6 +191,11 @@ export function endTexts({ mode, level, opponent, result }) {
     } else if (result?.draw) {
       out.title = 'Match nul';
       out.note = 'Temps écoulé : 5 minutes de jeu sans vainqueur.';
+    } else if (result?.reason === 'golden_goal' && !result?.forfeit) {
+      // Règlement v2 : égalité au bout des 5 minutes, le premier but a gagné (points normaux)
+      out.win = !!result?.won;
+      out.title = out.win ? 'Victoire au but en or' : 'Défaite au but en or';
+      out.note = 'Égalité au bout des 5 minutes : le premier but a tout décidé.';
     } else if (result?.reason === 'time_limit' && !result?.forfeit) {
       // 5 minutes de jeu effectif : celui qui mène gagne
       out.win = !!result?.won;
@@ -197,21 +210,26 @@ export function endTexts({ mode, level, opponent, result }) {
   } else if (mode === 'local') {
     out.eyebrow = 'À deux sur ce téléphone';
     out.who = 'Bas contre haut';
-    out.win = true;
-    out.title = result?.winner === 1 ? 'Haut gagne' : 'Bas gagne';
+    // Règlement v2 : but en or sans but au bout de 2 minutes = match nul
+    out.win = !result?.draw;
+    out.title = result?.draw ? 'Match nul' : result?.winner === 1 ? 'Haut gagne' : 'Bas gagne';
+    out.note = offlineNote(result);
     out.info = 'Match amical sur un téléphone : pas de points.';
   } else {
     const L = LEVELS[level] || LEVELS.barber;
     out.eyebrow = `Contre le salon · ${L.name}`;
     out.who = `Toi contre ${L.name}`;
     out.win = result?.winner === 0;
-    out.title = out.win ? 'Victoire' : 'Défaite';
+    if (result?.draw) out.title = 'Match nul';
+    else if (result?.reason === 'golden_goal') out.title = out.win ? 'Victoire au but en or' : 'Défaite au but en or';
+    else out.title = out.win ? 'Victoire' : 'Défaite';
+    out.note = offlineNote(result);
     out.info = out.win
       ? <>Entraînement, pas de points. En ligne, cette victoire te rapporterait <b>+3 Points de Coupe</b>.</>
       : <>Entraînement, pas de points. En ligne, une défaite retire <b>1 Point de Coupe</b>, jamais sous 0.</>;
   }
   if (out.win) out.tone = 'victoire';
-  else if (online && (result?.cancelled || result?.draw)) out.tone = 'neutre';
+  else if (result?.draw || (online && result?.cancelled)) out.tone = 'neutre';
   return out;
 }
 

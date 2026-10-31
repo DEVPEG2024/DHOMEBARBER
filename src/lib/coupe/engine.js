@@ -66,10 +66,14 @@ export const JET_PUSH = 1300; // poussée d'un jet (unités par seconde²)
 export const GOAL_SLIDE = 90; // décalage maximal d'une cage qui bouge
 export const CAMP_S = 3; // camper : plus de 3 s dans sa grande surface
 export const BLOCK_S = 1.5; // bloquer : ballon coincé plus de 1,5 s contre son mur
-export const PIN_SPEED = 150;
-export const PIN_GAP = 6;
+export const PIN_BAND = 12; // bloquer : ballon à moins de BR + 12 d'un de ses bords…
+export const PIN_GAP = 20; // … son joueur à moins de PR + BR + 20, côté terrain
+export const PIN_DECAY = 2; // le chrono de blocage redescend deux fois plus vite qu'il ne monte
 export const WARN_MAX = 3; // 3e avertissement (ballon gardé 5 s) : penalty
-export const PEN_D = 190; // point de penalty : distance à la ligne de but
+// Point de penalty : distance à la ligne de but. Banc d'essai de F2 (31 oct.), gardien sur sa ligne :
+// à 190, un bon tireur ne marquait que 26 % contre le salon Barber ; à 160, 48 % (59 % entre deux
+// humains). Plus près, le gardien couvre plus d'angle et le taux retombe.
+export const PEN_D = 160;
 export const PEN_SET_S = 1.8; // phase `pen` : ballon posé, joueurs en place
 export const PEN_SHOT_S = 3; // pour tirer
 export const PEN_END_S = 1.5; // après le tir, sans but : raté
@@ -667,18 +671,27 @@ export function inBigBox(p, side) {
   return side === 0 ? p.y > H - BBD : p.y < BBD;
 }
 
-// Bloquer : ballon lent dans la moitié de `side`, contre un bord (côtés, ligne de fond hors de la
-// cage), son joueur au contact
+// Bloquer : ballon dans la moitié de `side`, contre un de ses bords (côtés, ligne de fond hors de
+// la cage), son joueur collé à lui côté terrain. Sans condition de vitesse : un ballon écrasé contre
+// le bord vibre vite (S1, 31 oct. : 784 unités/s), et le serveur ne le voit qu'entre deux frappes ;
+// le chrono (pinClock) redescend au lieu de repartir de zéro à chaque rebond.
 export function pinnedBy(b, p, side) {
   if (halfOf(b) !== side) return false;
-  if (b.vx * b.vx + b.vy * b.vy > PIN_SPEED * PIN_SPEED) return false;
   const dx = b.x - p.x;
   const dy = b.y - p.y;
   const m = PR + BR + PIN_GAP;
   if (dx * dx + dy * dy > m * m) return false;
-  if (b.x <= BR + 2 || b.x >= W - BR - 2) return true;
-  return side === 0 ? b.y >= H - BR - 2 : b.y <= BR + 2;
+  const lim = BR + PIN_BAND;
+  if (b.x <= lim) return p.x > b.x;
+  if (b.x >= W - lim) return p.x < b.x;
+  if (b.x > GL && b.x < GR) return false;
+  if (side === 0) return b.y >= H - lim && p.y < b.y;
+  return b.y <= lim && p.y > b.y;
 }
+
+// Chrono de la faute « bloquer » (secondes) : monte pendant le blocage, redescend deux fois plus
+// vite sinon
+export const pinClock = (s, pinned, dt) => (pinned ? s + dt : Math.max(0, s - PIN_DECAY * dt));
 
 // Point de penalty du tireur : devant la cage qu'il attaque
 export const penaltySpot = (shooter) => ({ x: W / 2, y: shooter === 0 ? PEN_D : H - PEN_D });

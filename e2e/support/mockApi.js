@@ -121,6 +121,11 @@ export class FauxServeur {
     // Jeu ouvert, comme en production sans COUPE_WS=off ; un test le ferme avec
     // `api.donnees.parametresPublics.features.coupe = false` (les routes /coupe répondent alors 404 `disabled`)
     this.donnees.parametresPublics.features.coupe ??= true;
+    // Règlement v2 de la Coupe annoncé (premier à 5 buts, fautes, événements…), comme en production
+    // sans COUPE_RULES_V2=off : les matchs hors ligne le jouent, les textes disent « 5 buts ». En
+    // ligne, le faux serveur de jeu décide (`api.coupe.regles = 2` avant le coup d'envoi). Un test le
+    // retire avec `api.donnees.parametresPublics.features.coupeRulesV2 = false` (règle d'aujourd'hui)
+    this.donnees.parametresPublics.features.coupeRulesV2 ??= true;
     // Fil « New Gang » v2 (routes /feed…) : état dans `api.fil` (activité, votes, réglages, vues)
     this.donnees.fil ??= { activite: [], votes: [], likesCommentaires: [], reglages: {}, vuLe: {}, vues: {} };
     this.filRest = new FauxFil(this);

@@ -104,7 +104,7 @@ function drawPawn(ctx, cx, cy, { ring, photo, label }) {
   ctx.restore();
 }
 
-function drawChallenge({ name, role, code }, { stadium, photo }) {
+function drawChallenge({ name, role, code, goals = 3 }, { stadium, photo }) {
   const canvas = document.createElement('canvas');
   canvas.width = CHALLENGE_IMAGE_WIDTH;
   canvas.height = CHALLENGE_IMAGE_HEIGHT;
@@ -193,19 +193,20 @@ function drawChallenge({ name, role, code }, { stadium, photo }) {
   });
   ctx.fillStyle = C.grisClair;
   ctx.font = `500 28px ${BODY}`;
-  drawText(ctx, 'Premier à 3 buts · code valable 2 minutes · dhomebarber.fr', cx, 1262, { align: 'center' });
+  drawText(ctx, `Premier à ${goals} buts · code valable 2 minutes · dhomebarber.fr`, cx, 1262, { align: 'center' });
 
   return canvas;
 }
 
 /**
  * Image du défi : JPEG 1080 × 1350. `me` : { name (nom affiché en jeu), role, photo (url d'une
- * photo de client, ou null) } ; `code` : code du match à 4 chiffres.
+ * photo de client, ou null) } ; `code` : code du match à 4 chiffres ; `goals` : buts pour gagner
+ * (5 quand le serveur annonce le règlement v2, 3 sinon).
  * @returns {Promise<Blob>}
  */
-export async function renderChallengeImage({ name, role, photo, code }) {
+export async function renderChallengeImage({ name, role, photo, code, goals = 3 }) {
   const [stadium, face] = await Promise.all([loadImage(STADIUM_URL), loadPhoto(photo), loadFonts()]);
-  return toBlob(drawChallenge({ name, role, code }, { stadium, photo: face }));
+  return toBlob(drawChallenge({ name, role, code, goals: Number(goals) === 5 ? 5 : 3 }, { stadium, photo: face }));
 }
 
 /**

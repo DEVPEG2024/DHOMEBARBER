@@ -227,6 +227,19 @@ test.describe('La Coupe du Gang : accueil et page « Jeux »', () => {
     await expect(page).toHaveURL(/\/coupe$/);
   });
 
+  // Règlement v2 (31 oct. 2026) : « premier à 5 buts » quand le serveur l'annonce, 3 sinon
+  for (const [regles, buts] of [[true, 5], [false, 3]]) {
+    test(`carte de la Coupe ${regles ? 'avec' : 'sans'} le règlement v2 : « premier à ${buts} buts »`, async ({ page, api, connecter }) => {
+      drapeauCoupe(api, true);
+      api.donnees.parametresPublics.features.coupeRulesV2 = regles;
+      installerCoupe(api);
+      await connecter(CLIENT);
+      await page.goto('/jeux');
+      const coupe = page.getByRole('article', { name: 'La Coupe du Gang' });
+      await expect(coupe.getByText(`Défie un barber, un pote ou le salon : premier à ${buts} buts.`)).toBeVisible();
+    });
+  }
+
   test('carte de la Coupe sans son logo (image injoignable) : le titre écrit, la carte reste nommée', async ({ page, api, connecter }) => {
     drapeauCoupe(api, true);
     installerCoupe(api);

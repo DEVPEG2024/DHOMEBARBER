@@ -32,7 +32,7 @@ import CoupeLoadError from '@/components/coupe/CoupeLoadError';
 import { COUPE_PAUSED, isCoupeClosed } from '@/components/coupe/coupeErrors';
 import { COUPE_COLORS as C } from '@/components/coupe/palette';
 import { useAuth } from '@/lib/AuthContext';
-import { useCoupeEnabled, useCoupeMe } from '@/lib/coupe/coupeApi';
+import { useCoupeEnabled, useCoupeMe, useCoupeRulesV2 } from '@/lib/coupe/coupeApi';
 import { useGames } from '@/lib/games';
 import { useHomeSectionHidden } from '@/lib/homeSections';
 // Image du stade par stadiumImage.js, sans le moteur du jeu : ce fichier est dans le paquet
@@ -321,6 +321,9 @@ const GOLD_TILE = { background: 'rgba(235, 193, 94, 0.12)', border: '1px solid r
 export function CoupeGameCard() {
   const { user } = useAuth();
   const meQuery = useCoupeMe({ enabled: !!user });
+  // Règlement v2 annoncé par le serveur : premier à 5 buts (chiffre écrit ici : l'accueil ne charge
+  // jamais le moteur du jeu)
+  const rulesV2 = useCoupeRulesV2();
   const reduceMotion = useReducedMotion();
 
   const me = meQuery.data || null;
@@ -390,7 +393,7 @@ export function CoupeGameCard() {
             <CoupeLogoTitle reduceMotion={reduceMotion} />
 
             <p className="relative mt-1 max-w-[290px] text-[13px] leading-snug text-balance" style={{ ...ON_IMAGE, color: C.grisClair }}>
-              Défie un barber, un pote ou le salon : premier à 3 buts.
+              Défie un barber, un pote ou le salon : premier à {rulesV2 ? 5 : 3} buts.
             </p>
 
             {/* « Jouer » : son lien s'étend sur tout le haut de la carte (after:inset-0, le haut est le

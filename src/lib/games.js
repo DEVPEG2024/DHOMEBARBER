@@ -9,10 +9,17 @@
  * et l'accueil un nom dans la carte « Jeux ».
  */
 import { queryFailed } from '@/components/shared/LoadError';
-import { useCoupeFlagQuery } from '@/lib/coupe/coupeApi';
+import { useCoupeFlagQuery, useCoupeRulesV2 } from '@/lib/coupe/coupeApi';
 
+// `taglineV2` : accroche quand le serveur annonce le règlement v2 de la Coupe (premier à 5 buts)
 export const GAMES = [
-  { id: 'coupe', title: 'La Coupe du Gang', tagline: 'Foot façon air hockey : premier à 3 buts.', to: '/coupe' },
+  {
+    id: 'coupe',
+    title: 'La Coupe du Gang',
+    tagline: 'Foot façon air hockey : premier à 3 buts.',
+    taglineV2: 'Foot façon air hockey : premier à 5 buts.',
+    to: '/coupe',
+  },
 ];
 
 /**
@@ -21,9 +28,10 @@ export const GAMES = [
  */
 export function useGames() {
   const flags = [{ id: 'coupe', query: useCoupeFlagQuery() }];
+  const coupeV2 = useCoupeRulesV2();
   const open = new Set(flags.filter((f) => f.query.data === true).map((f) => f.id));
   return {
-    games: GAMES.filter((g) => open.has(g.id)),
+    games: GAMES.filter((g) => open.has(g.id)).map((g) => (g.id === 'coupe' && coupeV2 ? { ...g, tagline: g.taglineV2 } : g)),
     ready: flags.every((f) => f.query.data !== undefined),
     failed: flags.map((f) => f.query).find((q) => queryFailed(q)) || null,
   };

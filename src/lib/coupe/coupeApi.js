@@ -11,6 +11,7 @@
  *   useCoupeBarbers({ poll })      → `GET /coupe/barbers` (relu toutes les 30 s avec `poll`)
  *   useCoupePlayersEnabled()       → liste « Défier un joueur » connue du serveur (`features.coupePlayers`)
  *   useCoupePlayers({ poll })      → `GET /coupe/players` (relu toutes les 30 s avec `poll`)
+ *   useCoupeRulesV2()              → règlement v2 annoncé par le serveur (`features.coupeRulesV2`)
  *   useCoupeBlocks()               → `GET /coupe/blocks`
  *   useCoupeAdminOverview()        → `GET /coupe/admin/overview` (admin)
  * Envois (promesses) : setCoupeOptIn, setCoupeChallengeOptIn, setCoupeAvailability, blockCoupePlayer, unblockCoupePlayer,
@@ -28,6 +29,8 @@ export const COUPE_BARBERS_KEY = ['coupe', 'barbers'];
 export const COUPE_PLAYERS_KEY = ['coupe', 'players'];
 // Drapeau `features.coupePlayers` : sous `enabled` pour échapper à invalidateCoupe comme le drapeau du jeu
 export const COUPE_PLAYERS_FLAG_KEY = ['coupe', 'enabled', 'players'];
+// Drapeau `features.coupeRulesV2` (règlement v2) : sous `enabled` pour la même raison
+export const COUPE_RULES_FLAG_KEY = ['coupe', 'enabled', 'rules'];
 export const COUPE_BLOCKS_KEY = ['coupe', 'blocks'];
 export const COUPE_ADMIN_KEY = ['coupe', 'admin'];
 export const COUPE_MUSIC_KEY = ['coupe', 'music'];
@@ -99,6 +102,43 @@ export async function fetchCoupePlayersEnabled() {
 export function useCoupePlayersEnabled() {
   const { data } = useQuery({ queryKey: COUPE_PLAYERS_FLAG_KEY, queryFn: fetchCoupePlayersEnabled, staleTime: 5 * 60 * 1000, retry: 1 });
   return data === true;
+}
+
+/**
+ * Règlement v2 (31 oct. 2026, docs/fonctions/coupe-du-gang-regles-v2-contrat.md, section 8) :
+ * premier à 5 buts, balles en feu et électrique, fautes et penalty, événements, but en or. Vrai
+ * seulement si le serveur annonce `features.coupeRulesV2` (jeu ouvert et COUPE_RULES_V2 différent
+ * de `off`) : un serveur plus ancien, ou la coupure d'urgence, garde la règle d'aujourd'hui (aussi
+ * pour les matchs hors ligne). En ligne, c'est le serveur qui décide match par match (`start.rules`).
+ * Rejette sur une panne.
+ */
+export async function fetchCoupeRulesV2() {
+  const res = await fetch(`${API_SERVER_URL}/api/apps/public/prod/public-settings/by-id/${resolvedAppId}`);
+  if (!res.ok) throw new Error(`Paramètres publics : ${res.status}`);
+  const data = await res.json();
+  return data?.features?.coupeRulesV2 === true;
+}
+
+const rulesV2Query = { queryKey: COUPE_RULES_FLAG_KEY, queryFn: fetchCoupeRulesV2, staleTime: 5 * 60 * 1000, retry: 1 };
+
+/** Règlement v2 annoncé ? Faux tant que rien n'est chargé ou si la lecture a échoué. */
+export function useCoupeRulesV2() {
+  const { data } = useQuery(rulesV2Query);
+  return data === true;
+}
+
+/**
+ * Règlement d'un match hors ligne, lu au lancement (écran de jeu) : la réponse déjà en cache (elle
+ * est lue dès l'accueil de la Coupe), sinon une lecture attendue au plus `waitMs` ms (hors
+ * connexion, la règle d'aujourd'hui : le jeu sans réseau ne doit jamais attendre le réseau).
+ * Rend `{ now: true | false | null, later: Promise<boolean> }` : `now` non nul = sans attente.
+ */
+export function readCoupeRulesV2(queryClient, { waitMs = 1500 } = {}) {
+  const cached = queryClient.getQueryData(COUPE_RULES_FLAG_KEY);
+  if (cached === true || cached === false) return { now: cached, later: Promise.resolve(cached) };
+  const read = queryClient.fetchQuery({ ...rulesV2Query, retry: 0 }).then((v) => v === true, () => false);
+  const timeout = new Promise((resolve) => { setTimeout(() => resolve(false), waitMs); });
+  return { now: null, later: Promise.race([read, timeout]) };
 }
 
 /** Le jeu est-il ouvert ? Faux tant que rien n'est chargé ou si la lecture a échoué (entrées cachées). */

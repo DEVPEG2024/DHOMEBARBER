@@ -1,13 +1,15 @@
 /**
- * Faux serveur de jeu de La Coupe du Gang (`/ws/coupe`, protocole v2) pour les vérifications de
- * bout en bout. Il suit le contrat (docs/fonctions/coupe-du-gang-contrat.md, sections 4 et 7) et
- * le serveur réel (dhomebarber-api/lib/coupeRooms.js) d'assez près pour que l'app s'y trompe : un
+ * Faux serveur de jeu de La Coupe du Gang (`/ws/coupe`, protocoles v2 et v3) pour les
+ * vérifications de bout en bout. Il suit les contrats (docs/fonctions/coupe-du-gang-contrat.md,
+ * sections 4 et 7 ; docs/fonctions/coupe-du-gang-regles-v2-contrat.md, sections 4 et 6) et le
+ * serveur réel (dhomebarber-api/lib/coupeRooms.js) d'assez près pour que l'app s'y trompe : un
  * écart avec lui doit faire échouer un test. Aucun WebSocket n'atteint un vrai serveur
  * (`routeWebSocket` sans `connectToServer`).
  *
  * Connexion :
- *  - `auth` doit être le premier message, avec `v: 2` (sinon `update_required` puis 4426) et un
- *    jeton de session du faux serveur (sinon 4401) ; `refuser` : `error not_allowed` puis 4403 →
+ *  - `auth` doit être le premier message, avec `v: 2` ou `v: 3` (sinon `update_required` puis
+ *    4426 ; la connexion garde sa version, `cnx.version`) et un jeton de session du faux serveur
+ *    (sinon 4401) ; `refuser` : `error not_allowed` puis 4403 →
  *    `hello {name, role}` après `delaiAuth` ms (vérification du jeton, 30 ms par défaut) ;
  *    `injoignable` : la connexion est refermée aussitôt ;
  *  - pendant la vérification, comme le serveur : 2 `ping` au plus, la dernière commande de salle
@@ -47,6 +49,23 @@
  *
  * Un test pousse lui-même le reste (`goal`, `end`, `pause`, `declined`, `time_left`, `invite`…)
  * avec `envoyer`.
+ *
+ * Règlement v2 (protocole v3) :
+ *  - `regles` (1 par défaut) : `faux.regles = 2` avant le `start` y met `rules: 2, gw: 5`, comme le
+ *    vrai serveur quand les deux téléphones sont en v3 (une connexion `v: 2` garde la règle
+ *    d'aujourd'hui). La salle retient son règlement (`salle.regles`) : une reprise par une socket
+ *    v2 dans un match en règlement v2 reçoit `error no_room`, comme chez le serveur ;
+ *  - `etat(cnx, {…})` passe tels quels les champs v2 (`md`, `w`, `cp`, `pk`, `ne`, `b` à 7
+ *    valeurs `[x, y, vx, vy, fx, own, air]`), tous dans le repère du serveur (joueur 0 en bas) ; ils
+ *    restent dans l'état envoyé toutes les 100 ms jusqu'à ce qu'un `etat` les change (`md:
+ *    undefined` l'efface : jeu normal) ;
+ *  - `envoyer(cnx, {…})` passe tels quels `ev {e}`, `ev_end {id}`, `foul {side, k, w, pen}`,
+ *    `pen_end {r}`, `gold {}` et `goal {by, sc, v, fx}` ; les événements envoyés (`ev`), moins ceux
+ *    finis par `ev_end`, repartent dans `start.evs` d'une reprise (ceux dont `until` n'est pas
+ *    passé à l'heure du faux serveur) ;
+ *  - `evenements(cnx, [e1, e2…])` envoie un `ev` par descripteur, dans l'ordre : un combo du vrai
+ *    serveur (`makeEvents` : orage ou gel avec l'arrosage, mêmes heures, identifiants qui se
+ *    suivent) part ainsi en deux `ev` de suite, gardés ensemble.
  */
 export const CODE_MATCH = '4821';
 /** Lien d'un match (12 caractères [a-z0-9], contrat 4.2). */
@@ -96,7 +115,7 @@ const ETAT_DEPART = () => ({ ph: 'count', pt: 0.4, b: [180, 320, 0, 0], p: [[180
 export class FauxCoupe {
   constructor(serveur) {
     this.serveur = serveur;
-    /** Connexions reçues : `{ url, messages, compte, envoyer, ws, salle, ferme, muet }` (messages décodés, dans l'ordre). */
+    /** Connexions reçues : `{ url, messages, compte, version, envoyer, ws, salle, ferme, muet }` (messages décodés, dans l'ordre). */
     this.connexions = [];
     /** Salles ouvertes par l'app (la plus récente en dernier). */
     this.salles = [];
@@ -132,6 +151,11 @@ export class FauxCoupe {
      * null : rien (l'app fait sa fin elle-même au bout de 3,5 s). Par défaut : défaite classée.
      */
     this.finAbandon = { forfeit: true, cancelled: false, reason: null, points: { ranked: true, reason: null, delta: null, total: 41, rank: 9, rank_before: 8 } };
+    /**
+     * Règlement des matchs commencés (`start`) : 1 (règle d'aujourd'hui) ou 2 (règlement v2 :
+     * `rules: 2, gw: 5` dans le `start` d'une connexion en protocole v3).
+     */
+    this.regles = 1;
     this.delaiAuth = DELAI_AUTH;
     this.delaiReprise = DELAI_REPRISE;
     /** Sockets fermées en 1008 (message de jeu avant `hello`). */
@@ -195,6 +219,14 @@ export class FauxCoupe {
     cnx.envoyer({ t: 'state', s: this.heure(cnx), ...etat, ...(etat.ph === 'count' ? { cd: valeurs.cd ?? cd } : {}), ack: [0, 0] });
   }
 
+  /**
+   * Règlement v2 : un `ev {e}` par descripteur (repère du serveur), dans l'ordre, comme le vrai
+   * serveur à la création d'un combo (`makeEvents`) ; ils restent dans `start.evs` d'une reprise.
+   */
+  evenements(cnx = this.derniere(), liste = []) {
+    for (const e of liste) this.envoyer(cnx, { t: 'ev', e });
+  }
+
   /** Coupe la connexion de l'app comme une perte de réseau (1001 : rien de fatal). */
   couper(cnx = this.derniere(), code = 1001) {
     this.fermeture(cnx);
@@ -246,7 +278,7 @@ export class FauxCoupe {
   // ─── Branchement ─────────────────────────────────────────────────────
 
   brancher(ws) {
-    const cnx = { url: ws.url(), messages: [], compte: null, dernierPing: 0, pingRecuA: 0, ws, salle: null, ferme: false, muet: false };
+    const cnx = { url: ws.url(), messages: [], compte: null, version: null, dernierPing: 0, pingRecuA: 0, ws, salle: null, ferme: false, muet: false };
     cnx.envoyer = (obj) => this.envoyer(cnx, obj);
     this.connexions.push(cnx);
     if (this.injoignable) {
@@ -288,11 +320,16 @@ export class FauxCoupe {
         salle.phase = 'match';
         salle.etat = ETAT_DEPART();
         salle.compteDepuis = null;
-        // `ack` et `acc` repartent de zéro à chaque match (revanche comprise)
+        // `ack` et `acc` repartent de zéro à chaque match (revanche comprise), comme les événements
         salle.dernierHit = 0;
         salle.derniereAcceptee = 0;
+        salle.evs = [];
+        salle.regles = obj.rules === 2 ? 2 : 1;
         this.demarrerEtats(salle);
       }
+      // Règlement v2 : événements du match, pour le `start.evs` d'une reprise
+      if (obj.t === 'ev' && obj.e && typeof obj.e === 'object') salle.evs = [...(salle.evs || []).filter((e) => e.id !== obj.e.id), obj.e];
+      if (obj.t === 'ev_end') salle.evs = (salle.evs || []).filter((e) => e.id !== obj.id);
     }
     try {
       cnx.ws.send(JSON.stringify(obj));
@@ -353,6 +390,8 @@ export class FauxCoupe {
     const salle = {
       code: CODE_MATCH, lien, you, adversaire, invited, phase: 'wait', ouverteA: Date.now(),
       cnx, absentDepuis: null, adversairePret: false, etat: ETAT_DEPART(), dernierHit: 0, derniereAcceptee: 0, tic: null,
+      // Règlement du match (décidé au `start`) et événements envoyés (règlement v2)
+      regles: 1, evs: [],
     };
     this.salles.push(salle);
     cnx.salle = salle;
@@ -398,6 +437,13 @@ export class FauxCoupe {
     const moi = cnx.compte;
     const you = salle.you;
     const cote = (mien, autre) => (you === 0 ? [mien, autre] : [autre, mien]);
+    // Règlement v2 : décidé au coup d'envoi (`regles` = 2 et connexion en protocole v3), gardé à la
+    // reprise ; la reprise redonne les événements pas encore finis (`evs`)
+    const v2 = reprise ? salle.regles === 2 : this.regles === 2 && cnx.version === 3;
+    const heure = this.heure(cnx);
+    const regles = v2
+      ? { rules: 2, gw: 5, ...(reprise ? { evs: (salle.evs || []).filter((e) => !(Number(e.until) <= heure)) } : {}) }
+      : {};
     cnx.envoyer({
       t: 'start',
       you,
@@ -412,6 +458,7 @@ export class FauxCoupe {
       // Durée du compte à rebours en cours, comme le vrai serveur : 4,5 au premier coup d'envoi
       // (`avantMatchCd`), 3 après un retour
       ...(reprise ? { cd: 3, resume: true } : this.avantMatchCd ? { cd: this.avantMatchCd } : {}),
+      ...regles,
     });
   }
 
@@ -454,12 +501,14 @@ export class FauxCoupe {
         return;
       }
       cnx.authRecu = true;
-      if (m.v !== 2) {
+      // Protocole v2 (apps publiées) ou v3 (règlement v2 possible) ; la connexion garde sa version
+      if (m.v !== 2 && m.v !== 3) {
         cnx.envoyer({ t: 'error', code: 'update_required' });
         cnx.ferme = true;
         cnx.ws.close({ code: 4426, reason: 'update_required' });
         return;
       }
+      cnx.version = m.v;
       const idCompte = this.serveur.jetons.get(m.token);
       const compte = this.serveur.comptes.find((c) => c.id === idCompte);
       if (!compte) {
@@ -576,7 +625,8 @@ export class FauxCoupe {
         const visee = [...this.salles].reverse().find((s) => s.lien === m.link && s.absentDepuis != null
           && (s.phase === 'match' ? Date.now() - s.absentDepuis <= this.delaiReprise
             : s.phase === 'wait' && s.you === 0 && Date.now() - s.ouverteA <= DUREE_SALLE));
-        if (!visee) {
+        // Match en règlement v2 : une socket v2 (app publiée) ne peut pas le reprendre
+        if (!visee || (visee.phase === 'match' && visee.regles === 2 && cnx.version !== 3)) {
           cnx.envoyer({ t: 'error', code: 'no_room' });
           break;
         }

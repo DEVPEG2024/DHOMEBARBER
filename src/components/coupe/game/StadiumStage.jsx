@@ -216,9 +216,12 @@ export default function StadiumStage({ onReady, onFail }) {
         ].map(px).join(' ');
         cam.style.setProperty('--cdg-cam-full', cameraCss(cameraTransform(at, full)));
         // Centre du terrain dans l'écran : « FIN DU MATCH » (MatchIntro) ; haut du terrain dans le
-        // stage : l'astuce du début, sous le nom de l'adversaire
+        // stage : l'astuce du début, sous le nom de l'adversaire ; taille du terrain : les bandeaux
+        // du règlement v2 (RulesBanner) et les astuces posées en bas
         root.style.setProperty('--cdg-pitch-cy', `${(sr.top - rr.top + pitch.top + pitch.height / 2).toFixed(1)}px`);
         stage.style.setProperty('--cdg-pitch-top', `${pitch.top.toFixed(1)}px`);
+        stage.style.setProperty('--cdg-pitch-h', `${pitch.height.toFixed(1)}px`);
+        stage.style.setProperty('--cdg-pitch-w', `${pitch.width.toFixed(1)}px`);
       });
     };
 

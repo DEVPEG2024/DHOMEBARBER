@@ -1,15 +1,17 @@
 import React, { useRef } from 'react';
 import { Info } from 'lucide-react';
+import { useCoupeRulesV2 } from '@/lib/coupe/coupeApi';
 import { COUPE_COLORS } from '../palette';
 import { BOT_LEVELS } from './coupeFormat';
 import { BotIcon, GlobeIcon, SharedPhoneIcon } from './icons';
+import RulesLink from './RulesSheet';
 
 /**
  * Accueil de la Coupe repensé (planche validée le 29 oct. 2026 au soir :
  * https://claude.ai/artifact/7SCyeV4pPNSeHtUzmZvW2m) : une question à la fois.
  *  - `StepTitle` : « 1. Comment tu joues ? », « 2. Contre qui ? » (numéro dans un rond rouge) ;
  *  - `ModePicker` : trois grandes cartes, En ligne, Contre le salon, À deux (groupe de boutons
- *    radio, flèches du clavier) ;
+ *    radio, flèches du clavier), puis « Règles du match » (règlement v2, RulesSheet.jsx) ;
  *  - `BotPanel` : « Ton niveau » (Apprenti, Barber, Boss) et un seul bouton Jouer ;
  *  - `LocalPanel` : le téléphone posé à plat, la règle en trois lignes et le bouton Jouer.
  * Le choix de l'adversaire en ligne : OpponentTabs.jsx.
@@ -62,27 +64,31 @@ export function ModePicker({ value, onChange, eligible = true, labelledBy }) {
   ];
   const { refs, onKeyDown } = useRadioKeys(MODES, value, onChange);
   return (
-    <div role="radiogroup" aria-labelledby={labelledBy} className="grid grid-cols-3 gap-2" onKeyDown={onKeyDown}>
-      {cards.map((c, i) => {
-        const on = value === c.value;
-        return (
-          <button
-            key={c.value}
-            ref={(el) => { refs.current[i] = el; }}
-            type="button"
-            role="radio"
-            aria-checked={on}
-            tabIndex={on ? 0 : -1}
-            onClick={() => onChange(c.value)}
-            className={`flex min-h-[112px] min-w-0 flex-col items-start gap-2 rounded-2xl p-3 text-left text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white ${on ? SELECTED : IDLE}`}
-          >
-            <c.Icon size={24} strokeWidth={2} className={on ? 'text-[color:var(--coupe-rouge-vif)]' : 'text-[color:var(--coupe-gris-clair)]'} />
-            <span className="font-fut text-[19px] font-extrabold uppercase leading-none tracking-[0.03em] [overflow-wrap:anywhere]">{c.title}</span>
-            <span className={`text-xs leading-[1.3] ${on ? 'text-[color:var(--coupe-gris-clair)]' : 'text-[color:var(--coupe-gris)]'}`}>{c.text}</span>
-          </button>
-        );
-      })}
-    </div>
+    <>
+      <div role="radiogroup" aria-labelledby={labelledBy} className="grid grid-cols-3 gap-2" onKeyDown={onKeyDown}>
+        {cards.map((c, i) => {
+          const on = value === c.value;
+          return (
+            <button
+              key={c.value}
+              ref={(el) => { refs.current[i] = el; }}
+              type="button"
+              role="radio"
+              aria-checked={on}
+              tabIndex={on ? 0 : -1}
+              onClick={() => onChange(c.value)}
+              className={`flex min-h-[112px] min-w-0 flex-col items-start gap-2 rounded-2xl p-3 text-left text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white ${on ? SELECTED : IDLE}`}
+            >
+              <c.Icon size={24} strokeWidth={2} className={on ? 'text-[color:var(--coupe-rouge-vif)]' : 'text-[color:var(--coupe-gris-clair)]'} />
+              <span className="font-fut text-[19px] font-extrabold uppercase leading-none tracking-[0.03em] [overflow-wrap:anywhere]">{c.title}</span>
+              <span className={`text-xs leading-[1.3] ${on ? 'text-[color:var(--coupe-gris-clair)]' : 'text-[color:var(--coupe-gris)]'}`}>{c.text}</span>
+            </button>
+          );
+        })}
+      </div>
+      {/* Règlement v2 annoncé par le serveur : le résumé des règles, dans un volet */}
+      <RulesLink className="mt-1.5" />
+    </>
   );
 }
 
@@ -156,10 +162,12 @@ function FlatPhone() {
 }
 
 export function LocalPanel({ onPlay }) {
+  // Règlement v2 annoncé par le serveur : premier à 5 buts (à deux aussi)
+  const rulesV2 = useCoupeRulesV2();
   const steps = [
     ['Téléphone à plat', 'Posé sur la table, entre vous deux.'],
     ['Chacun son bout', 'Ton doigt sur ton pion, dans ta moitié.'],
-    ['Premier à 3 buts', 'Match amical, sans points.'],
+    [`Premier à ${rulesV2 ? 5 : 3} buts`, 'Match amical, sans points.'],
   ];
   return (
     <div>

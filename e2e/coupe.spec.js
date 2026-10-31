@@ -139,12 +139,12 @@ test.describe('La Coupe du Gang : en ligne (protocole v2)', () => {
     await expect(page.getByText('En attente de l\'autre joueur')).toBeVisible();
     await expect(terrain(page)).toBeVisible();
 
-    // Jeton jamais dans l'adresse : premier message `auth` (v2), puis la création
+    // Jeton jamais dans l'adresse : premier message `auth` (protocole v3), puis la création
     expect(api.coupe.connexions).toHaveLength(1);
     const [cnx] = api.coupe.connexions;
     expect(new URL(cnx.url).pathname).toBe('/ws/coupe');
     expect(cnx.url).not.toContain(jeton);
-    expect(cnx.messages[0]).toEqual({ t: 'auth', v: 2, token: jeton });
+    expect(cnx.messages[0]).toEqual({ t: 'auth', v: 3, token: jeton });
     expect(api.coupe.messages('create')).toEqual([{ t: 'create' }]);
 
     // Salle d'attente : le terrain est dessiné une fois, aucune image demandée ensuite
@@ -353,7 +353,7 @@ test.describe('La Coupe du Gang : en ligne (protocole v2)', () => {
     await expect.poll(() => api.coupe.messages('resume')[0]).toEqual({ t: 'resume', link: LIEN_MATCH });
     const reprise = api.coupe.derniere();
     expect(reprise).not.toBe(cnx);
-    expect(reprise.messages[0]).toMatchObject({ t: 'auth', v: 2 });
+    expect(reprise.messages[0]).toMatchObject({ t: 'auth', v: 3 });
 
     api.coupe.libererReprise();
     await expect(page.getByText('Connexion rétablie')).toBeVisible();

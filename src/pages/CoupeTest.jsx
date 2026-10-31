@@ -8,13 +8,16 @@ import GameStyles from '@/components/coupe/game/GameStyles';
 import Panel from '@/components/coupe/game/Panel';
 import { formatDelta } from '@/components/coupe/game/format';
 import { useAudioUnlockOnGesture } from '@/components/coupe/game/hooks';
-import { useCoupeMusic } from '@/lib/coupe/coupeApi';
+import { useCoupeMusic, useCoupeRulesV2 } from '@/lib/coupe/coupeApi';
 
 /*
  * Écran d'essai de La Coupe du Gang (/coupe-test, docs/fonctions/coupe-du-gang.md) : réservé à
  * l'équipe et aux comptes testeurs (garde dans App.jsx ; le serveur de jeu vérifie aussi). Toutes
  * les façons de jouer, sur le vrai écran de jeu (`CoupeGame`), avec le diagnostic réseau en ligne
  * (ping, recalages, frappes refusées).
+ *
+ * Règlement v2 (`features.coupeRulesV2`, 31 oct. 2026) : premier à 5 buts et règles du nouveau
+ * règlement dans le texte ; en ligne le serveur décide match par match.
  *
  * Aucun WebSocket n'est ouvert avant « Créer un match », « Rejoindre » ou un défi. Accueil sans
  * dessin (rien ne s'anime hors match). L'adresse peut ouvrir directement une partie, comme /coupe :
@@ -66,6 +69,8 @@ export default function CoupeTest() {
   const [params, setParams] = useSearchParams();
   // Son débloqué pendant le clic qui ouvre une partie : musique et bruitages au coup d'envoi
   useAudioUnlockOnGesture(useCoupeMusic());
+  // Règlement v2 annoncé par le serveur (lu ici aussi : une partie ouverte d'ici l'a déjà en cache)
+  const rulesV2 = useCoupeRulesV2();
   const [game, setGame] = useState(() => {
     const g = gameFromParams(params);
     return g ? { ...g, key: 1 } : null;
@@ -122,7 +127,9 @@ export default function CoupeTest() {
         <Panel labelledBy="cdg-title" onClose={exitPage} closeLabel="Fermer La Coupe du Gang">
           <p className="cdg-eyebrow">D&apos;Home Barber · écran d&apos;essai</p>
           <h1 className="cdg-title" id="cdg-title">La <span>Coupe</span> <br />du Gang</h1>
-          <p className="cdg-lead">Ton joueur suit ton doigt, le premier à 3 buts gagne. En ligne, le diagnostic réseau s&apos;affiche sous la barre du match.</p>
+          <p className="cdg-lead">
+            Ton joueur suit ton doigt, le premier à {rulesV2 ? 5 : 3} buts gagne. En ligne, le diagnostic réseau s&apos;affiche sous la barre du match.
+          </p>
           <button type="button" className="cdg-btn cdg-primary" onClick={() => start({ mode: 'online', action: { t: 'create' } })}>
             Créer un match
             <small>Tu reçois un code et un lien à donner à l&apos;autre joueur</small>
@@ -167,7 +174,16 @@ export default function CoupeTest() {
           <ul className="cdg-rules">
             <li>Ton joueur reste dans ta moitié de terrain.</li>
             <li>Interdit d&apos;entrer dans ta petite surface.</li>
-            <li>Ballon gardé 5 s dans une moitié : il change de camp.</li>
+            {rulesV2 ? (
+              <>
+                <li>Ballon gardé 5 s : avertissement, il change de camp ; au 3e, penalty.</li>
+                <li>Plus de 3 s dans ta grande surface, ou ballon bloqué contre ton mur : penalty.</li>
+                <li>Reprise de volée très forte : balle en feu. Foudre de l&apos;orage : balle électrique, but à 2.</li>
+                <li>Un événement au hasard toutes les 20 à 40 s ; égalité à 5 min : but en or.</li>
+              </>
+            ) : (
+              <li>Ballon gardé 5 s dans une moitié : il change de camp.</li>
+            )}
           </ul>
         </Panel>
       </div>

@@ -24,4 +24,10 @@ export const COUPE_COLORS = {
   orBord: 'rgba(235, 193, 94, .45)',
   // Étoile du salon : même bleu que dans le fil (règle de l'app, jamais rouge ni or)
   etoile: '#3b82f6',
+  // Règlement v2 (planche du 31 oct. 2026) : balle en feu (orange) et balle électrique (bleu),
+  // en texte sur fond noir pour les versions claires
+  feu: '#ff8a1f',
+  feuClair: '#ffb020',
+  elec: '#5fb4ff',
+  elecClair: '#9fd4ff',
 };
