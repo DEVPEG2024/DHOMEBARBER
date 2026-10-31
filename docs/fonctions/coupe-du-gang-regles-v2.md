@@ -19,7 +19,15 @@ Point de départ mesuré le 31 oct. 2026 : 10 matchs en ligne depuis le 29 oct.,
 
 ## Propositions de la planche, à valider
 
-- Durées : mousse 6 s, gel 6 s, éclair 3 s (point chargé), buts qui bougent 8 s, arrosage 10 s, fumigène 10 s ; chaque événement annoncé 1 s avant (contour qui clignote), placé **en miroir** dans les deux camps, jamais devant un but ni sur un joueur.
+- Durées : mousse 6 s, gel 6 s, orage (1 à 3 éclairs, chaque point chargé 3 s), buts qui bougent 8 s, arrosage 10 s, fumigène 10 s ; chaque événement annoncé 1 s avant (contour qui clignote), jamais sur un joueur ni dans une cage.
+- **Plus réalistes et aléatoires** (demande du 31 oct. 2026, « revois les 6 événements plus réalistes et aléatoires », la règle « en miroir » abandonnée) : un événement **toutes les 20 à 40 s** (30 s en moyenne, au lieu de 30 s pile), et le serveur tire **lequel, où, combien, la forme et le sens** :
+  - mousse : flaque de bulles de forme, de taille et d'orientation au hasard, le ballon y ralentit et y creuse un sillon ;
+  - gel : flaque brillante de forme et d'orientation au hasard, le ballon y glisse et accélère, jusqu'à prendre feu ;
+  - orage : ciel qui s'assombrit, pluie, **1 à 3 éclairs** à des endroits au hasard, chacun laissant une trace brûlée et un point chargé 3 s ;
+  - buts qui bougent : chaque cage a son propre trajet (vitesse, sens, arrêts) ;
+  - arrosage : **2 à 4 arroseurs** qui sortent de la pelouse au hasard, jets qui balaient (angle et vitesse au hasard), pelouse mouillée plus sombre ;
+  - fumigène : lancé d'une tribune au hasard, il roule, la fumée part dans le sens d'un vent tiré au hasard et cache le ballon.
+  Le hasard peut avantager un camp sur un événement ; il s'équilibre sur un match (plusieurs événements) et ne touche jamais un joueur ni une cage.
 - Balle en feu ou électrique : le reste jusqu'au but, jusqu'à une touche de l'adversaire, ou jusqu'à l'eau.
 - Camper = plus de 3 s dans sa **grande surface** (la petite reste interdite, comme aujourd'hui) ; bloquer = ballon coincé plus de 1,5 s contre son propre mur par son joueur.
 - Ballon gardé 5 s : l'avertissement s'ajoute à la règle d'aujourd'hui (le ballon change de camp, `KEEP_LIMIT`, `_keepAway` de `localMatch.js`).
