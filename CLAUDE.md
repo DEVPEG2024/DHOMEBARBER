@@ -347,6 +347,7 @@ Chaque ligne est un invariant : la casser réintroduit un bug déjà corrigé ou
 - `/coupe-test` n'existe que sur le site (`COUPE_TEST_ROUTE` d'`App.jsx` : aucune route dans les apps, règle 2.5.19).
 - Les deux apps publiées ont le jeu depuis le 30 oct. 2026 (iOS 1.0.10, Android 1.0.18) ; le push de défi part encore vers le **web seulement** et l'alerte admin d'un signalement vers `/admin` (passage aux pushs natifs : `docs/historique/restes-a-faire.md`) ; `/coupe-test` jamais dans un build store sans description (règle 2.5.19). Signaler / Bloquer obligatoires (App Store 1.2).
 - **Défier un joueur** (29 oct. 2026) : seulement les clients volontaires (`users.coupe_challenge_opt_in`, « Me proposer aux défis », à part du classement, jamais l'équipe), liste `GET /coupe/players` et `challenge {key_hash}` (`player_unavailable`) ; une clé de la liste est **relue en base, jamais dans la mémoire des clés** (un joueur sorti ou exclu n'est plus trouvé) ; jamais de recherche d'un client par son nom ; drapeau `features.coupePlayers`. Doigt posé sur son joueur : il ne bouge pas (`src/lib/coupe/finger.js`).
+- Un compte testeur (`users.is_tester`) joue la Coupe **comme un client** : classement et « Défier un joueur » s'il l'accepte (31 oct. 2026) ; son seul privilège reste de voir les fiches cachées.
 - Données de jeu purgées avec le compte (client, admin, compte barber : `purgeAccount`) ; purge quotidienne 04:15 ; un compte exclu du classement Gang l'est aussi de la Coupe. Détail : `docs/fonctions/coupe-du-gang.md`.
 
 ### Médias et ramasse-miettes
