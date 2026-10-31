@@ -35,6 +35,10 @@ Point de départ mesuré le 31 oct. 2026 : 10 matchs en ligne depuis le 29 oct.,
 - But en or : la petite surface reste interdite ; balle en feu gardée (le premier but gagne, quelle que soit sa valeur).
 - Écran de match : 5 pastilles de buts par joueur, 3 pastilles d'avertissement, jauge « prochain événement », bandeau d'annonce (« ORAGE »).
 
+## La planche en simulation
+
+Demandes du 31 oct. 2026 (« encore beaucoup plus réaliste, le maximum », puis « applique la même logique à toute la planche ») : tous les tableaux sauf le règlement écrit sont des **simulations en direct** dessinées dans un `<canvas>` : vraie image du stade du jeu, ballon et joueurs avec une physique proche du moteur (mêmes mesures `W`, `H`, `GW`, `BR`, `PR`), particules (flammes, étincelles, bulles, gouttes, pluie, fumée), ombres et lumières. Les règles sont des séquences rejouées en boucle (frappe, foudre, penalty, but en or, trois fautes, trois combos), les événements un match joué seul avec un tirage nouveau à chaque passage, l'écran de match une suite d'événements au hasard. Moteur : `docs/prototypes/coupe-regles-v2/coupe-sim.js` (copie de celui de la planche, `CoupeSim.mount(canvas, def, opts)`), base possible pour le dessin du vrai jeu ; contrôlé à blanc (17 simulations, 45 s chacune, sans erreur ; issues comptées sur 80 s : buts en feu, buts électriques, penaltys marqués ou arrêtés, fautes sifflées).
+
 ## À savoir avant de coder
 
 - Tout passe par le **moteur en deux copies identiques** (`src/lib/coupe/engine.js`, `lib/coupeEngine.mjs`) et par l'arbitre du serveur (`collidePaddle`, chocs recalculés) : feu, foudre, fautes, événements décidés et tirés par le serveur (graine commune), jamais par un téléphone.
