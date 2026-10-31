@@ -68,7 +68,7 @@ export const CAMP_S = 3; // camper : plus de 3 s dans sa grande surface
 export const BLOCK_S = 1.5; // bloquer : ballon coincé plus de 1,5 s contre son mur
 export const PIN_BAND = 12; // bloquer : ballon à moins de BR + 12 d'un de ses bords…
 export const PIN_GAP = 20; // … son joueur à moins de PR + BR + 20, côté terrain
-export const PIN_DECAY = 2; // le chrono de blocage redescend deux fois plus vite qu'il ne monte
+export const FOUL_DECAY = 2; // chronos de camping et de blocage : redescendent deux fois plus vite
 export const WARN_MAX = 3; // 3e avertissement (ballon gardé 5 s) : penalty
 // Point de penalty : distance à la ligne de but. Banc d'essai de F2 (31 oct.), gardien sur sa ligne :
 // à 190, un bon tireur ne marquait que 26 % contre le salon Barber ; à 160, 48 % (59 % entre deux
@@ -136,7 +136,8 @@ function outOfBox(p, b, inward) {
 // Garde le joueur dans sa moitié, hors de sa petite surface. Rend true si la surface l'a repoussé.
 // `mode` (règlement v2) : { k: 'pen', s: tireur } pendant un penalty (le gardien sur sa ligne, le
 // tireur derrière le point de penalty, ligne du milieu franchie), { k: 'gold' } pendant le but en
-// or (tout le terrain, sauf les deux petites surfaces) ; absent : la règle d'aujourd'hui.
+// or (tout le terrain, sauf les deux petites surfaces), { k: 'line' } pendant les cages qui bougent
+// (modeAt) ; absent : la règle d'aujourd'hui.
 export function constrainPaddle(p, side, mode) {
   p.x = clamp(p.x, PR, W - PR);
   if (mode && mode.k === 'gold') {
@@ -144,6 +145,13 @@ export function constrainPaddle(p, side, mode) {
     const own = outOfBox(p, boxOf(side), side === 0 ? -1 : 1);
     const opp = outOfBox(p, boxOf(1 - side), side === 0 ? 1 : -1);
     return own || opp;
+  }
+  if (mode && mode.k === 'line') {
+    // Cages qui bougent : sa ligne de but interdite sur toute la largeur (profondeur de la petite
+    // surface), sinon un joueur collé à sa ligne bouchait la cage déplacée
+    const lim = side === 0 ? H - SBD - PR : SBD + PR;
+    p.y = side === 0 ? clamp(p.y, H / 2 + PR, lim) : clamp(p.y, lim, H / 2 - PR);
+    return false;
   }
   if (mode && mode.k === 'pen') {
     if (side !== mode.s) {
@@ -367,15 +375,18 @@ export function clearFx(b) {
 // Valeur d'un but : 2 pour un ballon électrique, sinon 1 (le feu vaut 1)
 export const goalValue = (b) => (b.fx === FX_ELEC ? 2 : 1);
 
-// Camp dont le ballon prend la direction d'attaque : 0 s'il monte (vers la cage du haut)
-const towardSide = (b) => (b.vy < 0 ? 0 : 1);
+// Camp dont le ballon prend la direction d'attaque : 0 s'il monte (vers la cage du haut), 1 s'il
+// descend, -1 à l'arrêt (ballon chargé à l'engagement : à personne, contre-expertise du 31 oct.)
+const towardSide = (b) => (b.vy < 0 ? 0 : b.vy > 0 ? 1 : -1);
 
 // Après une frappe de `side` (hit : vitesse rendue par collidePaddle, > 0). Une touche de
-// l'adversaire éteint le feu ou la charge ('out') ; une frappe très forte vers le camp adverse
+// l'adversaire éteint le feu ou la charge ('out'), celle du premier venu prend un ballon chargé à
+// l'arrêt ; une frappe très forte vers le camp adverse
 // allume le feu ('fire'), sauf sur un ballon électrique. Rend 'fire', 'out' ou null.
 export function touchBall(b, side, hit) {
   let r = null;
-  if (b.fx && b.own !== side) {
+  if (b.fx && b.own === -1) b.own = side; // chargé à l'arrêt : à celui qui le touche le premier
+  else if (b.fx && b.own !== side) {
     b.fx = FX_NONE;
     b.own = -1;
     r = 'out';
@@ -433,6 +444,11 @@ function slide(keys, tau) {
   }
   return keys[keys.length - 1][1];
 }
+
+// Mode des joueurs à l'heure t : celui du match (penalty, but en or), sinon LINE_MODE pendant des
+// cages qui bougent, sinon null. À passer à movePaddle, unpin et constrainPaddle partout.
+export const LINE_MODE = { k: 'line' };
+export const modeAt = (mode, fld, t) => mode || (fld && fld.length && goalOffsets(fld, t) ? LINE_MODE : null);
 
 // [décalage de la cage du bas, de la cage du haut] à l'heure t (ms), ou null : cages au milieu
 export function goalOffsets(fld, t) {
@@ -689,9 +705,11 @@ export function pinnedBy(b, p, side) {
   return b.y <= lim && p.y > b.y;
 }
 
-// Chrono de la faute « bloquer » (secondes) : monte pendant le blocage, redescend deux fois plus
-// vite sinon
-export const pinClock = (s, pinned, dt) => (pinned ? s + dt : Math.max(0, s - PIN_DECAY * dt));
+// Chrono d'une faute (camper, bloquer) : monte tant que la faute dure, redescend deux fois plus vite
+// sinon. Remis à zéro seulement par une frappe de ce joueur (camper). Sans cette redescente, un seul
+// `in` hors de la surface toutes les 2,5 s effaçait le camping (contre-expertise du 31 oct.).
+export const foulClock = (s, on, dt) => (on ? s + dt : Math.max(0, s - FOUL_DECAY * dt));
+export const pinClock = foulClock;
 
 // Point de penalty du tireur : devant la cage qu'il attaque
 export const penaltySpot = (shooter) => ({ x: W / 2, y: shooter === 0 ? PEN_D : H - PEN_D });
