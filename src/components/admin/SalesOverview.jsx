@@ -106,8 +106,9 @@ function ChannelPanel({ title, icon: Icon, color, to, children, badge, failed = 
  * @param {{ today: number, month: number, giftToday?: number, giftMonth?: number, unpaidToday: number, unpaidMonth: number, unpaidCount: number, upcomingMonth: number, upcomingCount: number }} props.appointments
  *   CA des rendez-vous encaissés (prestations + produits vendus en RDV, hors pourboires), dont la part
  *   réglée par carte cadeau (`gift*`), et montants non encaissés
+ * @param {React.ReactNode} [props.afterHeadline]  sous les cartes du haut (CA à venir, tous les mois)
  */
-export default function SalesOverview({ appointments }) {
+export default function SalesOverview({ appointments, afterHeadline = null }) {
   const navigate = useNavigate();
   const today = format(new Date(), 'yyyy-MM-dd');
   const monthPrefix = today.slice(0, 7);
@@ -354,6 +355,7 @@ export default function SalesOverview({ appointments }) {
           )}
         </motion.div>
       </div>
+      {afterHeadline}
 
       {/* Répartition du CA du mois par canal */}
       <div className="bg-card border border-border rounded-xl p-4 mb-4">

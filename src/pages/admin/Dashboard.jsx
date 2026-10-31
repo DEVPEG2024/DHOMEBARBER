@@ -5,21 +5,21 @@ import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import {
   Calendar, TrendingUp, Clock, AlertTriangle, CheckCircle,
-  CreditCard, Banknote, Euro, Star, UserCheck, ArrowUpRight, ArrowDownRight, Coffee, Heart, ShoppingBag, Zap, Gift, Wifi
+  CreditCard, Banknote, Euro, Star, UserCheck, ArrowUpRight, ArrowDownRight, Coffee, Heart, ShoppingBag, Zap, Gift, Wifi, CalendarClock
 } from 'lucide-react';
 import { useLiveCount } from '@/lib/useLiveCount';
 import { useAuth } from '@/lib/AuthContext';
-import { format, subDays, startOfDay, startOfMonth, endOfMonth, parseISO, isValid } from 'date-fns';
+import { format, subDays, addDays, addMonths, startOfDay, startOfMonth, endOfMonth, parseISO, isValid } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { exportToCSV } from '@/utils/exportCSV';
-import SalesOverview from '@/components/admin/SalesOverview';
+import SalesOverview, { eur } from '@/components/admin/SalesOverview';
 import {
   needsClosing, appointmentEndParis, datesBetween, fetchAppointmentsForDates, isCancelledLike, isConvertedLastMinute, isUnclaimedLastMinute,
   isClientPlaceholder,
 } from '@/components/agenda/agendaUtils';
-import LoadError from '@/components/shared/LoadError';
+import LoadError, { queryFailed } from '@/components/shared/LoadError';
 import { toast } from 'sonner';
 import { isRescheduledCancel, cancellationActor } from '@/lib/cancellation';
 
@@ -129,6 +129,34 @@ function monthDates(month) {
   return isValid(d) ? datesBetween(startOfMonth(d), endOfMonth(d)) : [];
 }
 
+// « CA à venir, tous les mois » (demande du salon, 31 oct. 2026) : RDV confirmés d'aujourd'hui au
+// dernier RDV confirmé de la base, 24 mois au plus (un RDV saisi par erreur en 2099 ne fait pas lire
+// des années de jours). Le serveur ne filtre que par égalité ou par liste : paquets de 62 jours,
+// comme l'agenda.
+const UPCOMING_MAX_MONTHS = 24;
+const DATES_PER_REQUEST = 62;
+
+/** `{ rows, incomplete, beyond }` : `beyond` = dernier jour lu quand des RDV confirmés vont plus loin. */
+async function fetchUpcomingConfirmed(fromDay) {
+  const [last] = await api.entities.Appointment.filter({ status: 'confirmed' }, '-date', 1);
+  const lastDay = last?.date ? String(last.date).slice(0, 10) : '';
+  if (!lastDay || lastDay < fromDay) return { rows: [], incomplete: false, beyond: null };
+  const start = parseISO(fromDay);
+  const cap = format(addMonths(start, UPCOMING_MAX_MONTHS), 'yyyy-MM-dd');
+  const end = lastDay < cap ? lastDay : cap;
+  const dates = [];
+  for (let d = start; format(d, 'yyyy-MM-dd') <= end; d = addDays(d, 1)) dates.push(format(d, 'yyyy-MM-dd'));
+  const chunks = [];
+  for (let i = 0; i < dates.length; i += DATES_PER_REQUEST) chunks.push(dates.slice(i, i + DATES_PER_REQUEST));
+  const pages = await Promise.all(chunks.map((c) =>
+    api.entities.Appointment.filter({ date: c, status: 'confirmed' }, 'start_time', APPOINTMENTS_LIMIT)));
+  return {
+    rows: pages.flat(),
+    incomplete: pages.some((p) => p.length >= APPOINTMENTS_LIMIT),
+    beyond: lastDay > cap ? cap : null,
+  };
+}
+
 function StatCard({ title, value, subtitle, icon: Icon, trend, color = 'primary', onClick }) {
   const isUp = trend > 0;
   return (
@@ -167,6 +195,85 @@ function MiniCard({ label, value, icon: Icon, color }) {
         <p className="text-sm font-bold">{value}</p>
       </div>
     </div>
+  );
+}
+
+/**
+ * CA à venir, tous les mois : total des RDV confirmés pas encore encaissés, puis un pavé par mois
+ * (vers la vue Mois de l'agenda si `onOpenMonth`). Le pavé du mois en cours vaut la ligne « à venir
+ * ce mois » d'À encaisser.
+ */
+function UpcomingRevenue({ query, upcoming, monthPrefix, onOpenMonth }) {
+  const failed = queryFailed(query);
+  const loading = !failed && query.isPending;
+  const monthLabel = (key) => {
+    const d = parseISO(`${key}-01`);
+    return isValid(d) ? format(d, 'MMMM yyyy', { locale: fr }) : key;
+  };
+  return (
+    <motion.section
+      aria-label="CA à venir, tous les mois"
+      initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+      className="bg-card border border-border rounded-xl p-4 mb-4"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">CA à venir · tous les mois</p>
+          <p className="text-2xl font-bold mt-1 text-foreground tabular-nums">{failed ? '—' : loading ? '…' : eur(upcoming.amount)}</p>
+          {!failed && !loading && (
+            <p className="text-[10px] text-muted-foreground mt-0.5">
+              {upcoming.count > 0
+                ? `${upcoming.count} RDV confirmé${upcoming.count > 1 ? 's' : ''}, pas encore encaissé${upcoming.count > 1 ? 's' : ''}`
+                : 'Aucun RDV confirmé à venir'}
+            </p>
+          )}
+        </div>
+        <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+          <CalendarClock className="w-5 h-5 text-primary" aria-hidden="true" />
+        </div>
+      </div>
+      {failed && (
+        <LoadError compact className="mt-3" what="les rendez-vous à venir" error={query.error}
+          onRetry={query.refetch} retrying={query.isFetching} />
+      )}
+      {!failed && upcoming.months.length > 0 && (
+        <ul className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mt-3">
+          {upcoming.months.map((m) => {
+            const body = (
+              <>
+                <span className="block text-[10px] text-muted-foreground truncate first-letter:uppercase">
+                  {monthLabel(m.key)}{m.key === monthPrefix ? ' · ce mois' : ''}
+                </span>
+                <span className="block text-sm font-bold text-foreground tabular-nums">{eur(m.amount)}</span>
+                <span className="block text-[10px] text-muted-foreground">{m.count} RDV</span>
+              </>
+            );
+            return (
+              <li key={m.key} className="min-w-0">
+                {onOpenMonth ? (
+                  <button type="button" onClick={() => onOpenMonth(m.key)}
+                    className="w-full text-left rounded-lg bg-secondary/50 px-3 py-2 hover:bg-secondary active:scale-[0.98] transition-all">
+                    {body}
+                  </button>
+                ) : (
+                  <div className="rounded-lg bg-secondary/50 px-3 py-2">{body}</div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {!failed && upcoming.beyond && (
+        <p className="text-[10px] text-amber-300 mt-2">
+          Des RDV confirmés vont au-delà du {format(parseISO(upcoming.beyond), 'd MMMM yyyy', { locale: fr })} : non comptés ici.
+        </p>
+      )}
+      {!failed && upcoming.incomplete && (
+        <p className="text-[10px] text-amber-300 mt-2">
+          Plus de {APPOINTMENTS_LIMIT} rendez-vous sur une période de {DATES_PER_REQUEST} jours : le total peut être incomplet.
+        </p>
+      )}
+    </motion.section>
   );
 }
 
@@ -211,6 +318,10 @@ export default function AdminDashboard() {
     queryKey: ['adminAppointments', 'export', exportMonth],
     queryFn: () => fetchAppointmentsForDates(exportDates),
     enabled: showExport && exportDates.length > 0 && !exportInPeriod,
+  });
+  const upcomingQuery = useQuery({
+    queryKey: ['adminAppointments', 'upcoming', today],
+    queryFn: () => fetchUpcomingConfirmed(today),
   });
   const exportSource = exportInPeriod ? allAppointments : (exportQuery.data || []);
   const exportLoading = !exportInPeriod && exportDates.length > 0 && exportQuery.isFetching && !exportQuery.data;
@@ -294,8 +405,27 @@ export default function AdminDashboard() {
   //  - RDV confirmés **à venir** du mois (pas encore dus).
   const unclosedMonth = thisMonth.filter(a => a.status === 'confirmed' && !isPaid(a) && needsClosing(a));
   const monthUnpaid = round2(unclosedMonth.reduce((sum, a) => sum + outsideGift(a), 0));
-  const upcomingMonth = thisMonth.filter(a => a.status === 'confirmed' && !isPaid(a) && !needsClosing(a));
+  const isUpcomingDue = (a) => a.status === 'confirmed' && !isPaid(a) && !needsClosing(a);
+  const upcomingMonth = thisMonth.filter(isUpcomingDue);
   const monthUpcoming = round2(upcomingMonth.reduce((sum, a) => sum + outsideGift(a), 0));
+  // CA à venir, tous les mois : même règle que la part « à venir » ci-dessus, sur tous les RDV
+  // confirmés à partir d'aujourd'hui (lus à part : la période chargée s'arrête à la fin du mois)
+  const upcomingAll = (upcomingQuery.data?.rows || []).filter(a => a.date >= today && isRealAppt(a) && isUpcomingDue(a));
+  const upcomingByMonth = new Map();
+  for (const a of upcomingAll) {
+    const key = a.date.slice(0, 7);
+    const m = upcomingByMonth.get(key) || { key, amount: 0, count: 0 };
+    m.amount += outsideGift(a);
+    m.count += 1;
+    upcomingByMonth.set(key, m);
+  }
+  const upcoming = {
+    amount: round2(upcomingAll.reduce((sum, a) => sum + outsideGift(a), 0)),
+    count: upcomingAll.length,
+    months: [...upcomingByMonth.values()].map(m => ({ ...m, amount: round2(m.amount) })).sort((a, b) => a.key.localeCompare(b.key)),
+    incomplete: !!upcomingQuery.data?.incomplete,
+    beyond: upcomingQuery.data?.beyond || null,
+  };
   const noShowsMonth = thisMonth.filter(a => a.status === 'no_show').length;
   // Annulations des clients seulement : ni déplacement, ni annulation du salon ou du système
   // (sans auteur connu : comptée, pour ne pas perdre l'historique)
@@ -497,7 +627,17 @@ export default function AdminDashboard() {
       )}
 
       {/* Tous les canaux de vente : CA global, répartition, boutique, cartes cadeau, privatisations, textile */}
-      <SalesOverview appointments={{ today: todayRevenue, month: monthRevenue, giftToday: todayGift, giftMonth: monthGift, unpaidToday: todayUnpaid, unpaidMonth: monthUnpaid, unpaidCount: unclosedMonth.length, upcomingMonth: monthUpcoming, upcomingCount: upcomingMonth.length }} />
+      <SalesOverview
+        appointments={{ today: todayRevenue, month: monthRevenue, giftToday: todayGift, giftMonth: monthGift, unpaidToday: todayUnpaid, unpaidMonth: monthUnpaid, unpaidCount: unclosedMonth.length, upcomingMonth: monthUpcoming, upcomingCount: upcomingMonth.length }}
+        afterHeadline={(
+          <UpcomingRevenue
+            query={upcomingQuery}
+            upcoming={upcoming}
+            monthPrefix={monthPrefix}
+            onOpenMonth={canAgenda ? (key) => navigate(`/admin/agenda?view=month&date=${key}-01`) : undefined}
+          />
+        )}
+      />
 
       {/* Rendez-vous : prestations + produits vendus en RDV */}
       <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
