@@ -40,6 +40,10 @@
 - **Une seule ligne « D'Home Barber »** au classement pour tous les comptes admin (points additionnés).
 - **Interrupteur à part** pour figurer au classement de la Coupe (indépendant de celui du classement Gang).
 
+## Règlement v2 (31 oct. 2026)
+
+Premier à 5 buts, balle en feu et électrique, fautes et penalty, but en or, six événements au hasard : décisions dans `coupe-du-gang-regles-v2.md`, construction (moteur, protocole v3, arbitre, écran, réglages) dans `coupe-du-gang-regles-v2-contrat.md`. Seulement entre deux téléphones v3 (site, puis apps du prochain build) et hors ligne avec `features.coupeRulesV2` ; sinon la règle ci-dessous, inchangée.
+
 ## Règles du match
 
 - Terrain vertical (téléphone tenu droit), vu du dessus ; ta cage toujours en bas. Bords = panneaux lumineux « D'Home Barber » où le ballon rebondit.
