@@ -11,13 +11,7 @@
  * dessin il n'y a pas la place) ou 'low' (entre le milieu et la cage du bas) ; un penalty pousse
  * le bandeau loin du point de penalty et du tireur.
  */
-import { FX_ELEC, FX_FIRE, GOALS_TO_WIN, GOALS_TO_WIN_V2, WARN_MAX } from '@/lib/coupe/engine';
-
-/** Buts pour gagner d'après le drapeau du serveur (textes d'avant le match). */
-export const goalsFor = (rulesV2) => (rulesV2 ? GOALS_TO_WIN_V2 : GOALS_TO_WIN);
-
-/** « Premier à 5 buts ». */
-export const firstTo = (rulesV2) => `Premier à ${goalsFor(rulesV2)} buts`;
+import { FX_ELEC, FX_FIRE, WARN_MAX } from '@/lib/coupe/engine';
 
 /** Nom de chaque événement, annoncé 1 s avant (bandeau en capitales), et ce qu'il fait. */
 export const EVENT_NAMES = {
@@ -116,6 +110,25 @@ export function eventBanner(e) {
   const name = EVENT_NAMES[e?.k];
   if (!name) return null;
   return { kind: 'event', event: e.k, title: name, sub: EVENT_HINTS[e.k], pos: 'mid' };
+}
+
+// Deux événements annoncés ensemble (l'arrosage avec un orage ou un gel, `makeEvents`)
+const COMBO_HINTS = {
+  // Trait d'union insécable : à 320 px, « court-circuit » se coupait sur deux lignes
+  'storm+water': 'Ballon électrique dans l’eau : court‑circuit',
+  'gel+water': 'Le gel enflamme le ballon, l’eau l’éteint',
+};
+
+/**
+ * Un seul bandeau pour plusieurs événements annoncés à la même heure : « Orage + Arrosage » et ce
+ * qu'ils font ensemble.
+ */
+export function eventsBanner(list) {
+  const kinds = (Array.isArray(list) ? list : []).map((e) => e?.k).filter((k) => EVENT_NAMES[k]);
+  if (kinds.length < 2) return kinds.length ? eventBanner({ k: kinds[0] }) : null;
+  const key = kinds.join('+');
+  const sub = COMBO_HINTS[key] || COMBO_HINTS[[...kinds].reverse().join('+')] || kinds.map((k) => EVENT_HINTS[k]).join(' · ');
+  return { kind: 'event', event: key, title: kinds.map((k) => EVENT_NAMES[k]).join(' + '), sub, pos: 'mid' };
 }
 
 /** Astuces montrées une fois par écran de jeu (bulle du haut du terrain). */

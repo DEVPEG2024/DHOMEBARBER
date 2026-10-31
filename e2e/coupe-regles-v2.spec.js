@@ -17,24 +17,28 @@ const bande = (page) => page.getByRole('group', { name: 'Buts et avertissements'
 const bandeau = (page) => page.locator('.cdg-banner');
 
 /**
- * Bandeaux (un à la fois, ~1,4 s) notés à leur apparition, dans l'ordre, par un observateur posé
- * avant le chargement : titre et lignes, place (`pos`), sorte, et combien il y en avait à l'écran
- * (`ensemble`, toujours 1). Une machine lente ne fait donc jamais rater un bandeau déjà reparti.
+ * Bandeaux (un à la fois, ~1,4 s) notés dans l'ordre de leur apparition par un observateur posé
+ * avant le chargement : titre et lignes (les derniers : deux événements à la même heure se fondent
+ * dans le même bandeau), place (`pos`), sorte, et combien il y en a eu à l'écran en même temps au
+ * plus (`ensemble`, toujours 1). Une machine lente ne fait donc jamais rater un bandeau reparti.
  */
 async function noterBandeaux(page) {
   await page.addInitScript(() => {
     window.__bandeaux = [];
-    const vus = new WeakSet();
+    const notes = new WeakMap();
     new MutationObserver(() => {
       const tous = document.querySelectorAll('.cdg-banner');
       for (const b of tous) {
-        if (vus.has(b)) continue;
-        vus.add(b);
-        window.__bandeaux.push({
-          sorte: b.dataset.kind, pos: b.dataset.pos, textes: [...b.children].map((c) => c.textContent), ensemble: tous.length,
-        });
+        let n = notes.get(b);
+        if (!n) {
+          n = { sorte: b.dataset.kind, pos: b.dataset.pos, textes: [], ensemble: 0 };
+          notes.set(b, n);
+          window.__bandeaux.push(n);
+        }
+        n.textes = [...b.children].map((c) => c.textContent);
+        n.ensemble = Math.max(n.ensemble, tous.length);
       }
-    }).observe(document, { subtree: true, childList: true });
+    }).observe(document, { subtree: true, childList: true, characterData: true });
   });
 }
 const bandeauxVus = (page) => page.evaluate(() => window.__bandeaux);
@@ -108,19 +112,27 @@ test.describe('La Coupe du Gang : règlement v2 en ligne', () => {
     await expect(bandeau(page)).toHaveCount(0, { timeout: 4000 });
   });
 
-  test('deux événements annoncés ensemble (orage et arrosage) : deux bandeaux, l\'un après l\'autre, jamais l\'un sur l\'autre', async ({ page, api, connecter }) => {
+  test('deux événements annoncés à la même heure (orage et arrosage) : un seul bandeau « Orage + Arrosage »', async ({ page, api, connecter }) => {
     const cnx = await matchEnLigne(page, api, connecter);
     const s = heure(api, cnx);
     const temps = { an: s, at: s + 1000, until: s + 6000 };
     cnx.envoyer({ t: 'ev', e: { k: 'storm', id: 4, ...temps, sd: 3, b: [[120, 260, s + 1800]] } });
     cnx.envoyer({ t: 'ev', e: { k: 'water', id: 5, ...temps, sd: 4, s: [[90, 400, 0, 1.2, 120, 0], [270, 240, 3.1, 1.2, 120, 1]] } });
-    await expect.poll(async () => (await bandeauxVus(page)).map((b) => b.textes[0])).toEqual(['Orage', 'Arrosage']);
-    const vus = await bandeauxVus(page);
-    expect(vus.every((b) => b.ensemble === 1)).toBe(true);
-    expect(vus[1].textes).toEqual(['Arrosage', 'Les jets poussent le ballon']);
+    await attendreBandeau(page, ['Orage + Arrosage', 'Ballon électrique dans l’eau : court‑circuit'], { sorte: 'event', pos: 'mid' });
+    // Le bandeau reparti, aucun autre derrière lui (le second, en plein jeu, cachait le ballon)
+    await expect(bandeau(page)).toHaveCount(0, { timeout: 5000 });
+    expect((await bandeauxVus(page)).map((b) => b.textes[0])).toEqual(['Orage + Arrosage']);
     // Les deux en cours : leurs deux noms au-dessus de la jauge
     await expect(bande(page).getByText('Orage + Arrosage', { exact: true })).toBeVisible();
-    await expect(bandeau(page)).toHaveCount(0, { timeout: 5000 });
+  });
+
+  test('deux événements à des heures différentes : deux bandeaux, l\'un après l\'autre, jamais l\'un sur l\'autre', async ({ page, api, connecter }) => {
+    const cnx = await matchEnLigne(page, api, connecter);
+    const s = heure(api, cnx);
+    cnx.envoyer({ t: 'ev', e: { k: 'foam', id: 6, an: s, at: s + 1000, until: s + 7000, sd: 2, l: [[120, 300, 40, 25, 0.3], [220, 360, 35, 22, 1.1]] } });
+    cnx.envoyer({ t: 'ev', e: { k: 'smoke', id: 7, an: s + 200, at: s + 1200, until: s + 11000, sd: 5, x0: -20, y0: 300, x: 140, y: 280, w: [20, -5] } });
+    await expect.poll(async () => (await bandeauxVus(page)).map((b) => b.textes[0]), { timeout: 8000 }).toEqual(['Mousse à raser', 'Fumigène']);
+    expect((await bandeauxVus(page)).every((b) => b.ensemble === 1)).toBe(true);
   });
 
   test('faute et avertissements : AVERTISSEMENT 1/3, pastille d\'or ; camper : FAUTE, penalty, compte 3, 2, 1, arrêt', async ({ page, api, connecter }) => {
@@ -139,7 +151,8 @@ test.describe('La Coupe du Gang : règlement v2 en ligne', () => {
     // Un seul bandeau pour la faute et son penalty, en bas (le tir part vers la cage du haut)
     await attendreBandeau(page, ['Faute', 'Kevin campait devant son but', 'Penalty pour toi'], { sorte: 'foul', pos: 'low' });
     await expect(bande(page).locator('.cdg-v2-pen')).toHaveText('Penalty3');
-    await expect(bande(page).getByText('À toi de tirer : 3 s')).toBeVisible();
+    // Le compte est dans la pastille ; la ligne dit seulement qui tire
+    await expect(bande(page).getByText('À toi de tirer', { exact: true })).toBeVisible();
     // Astuce du penalty, une fois, après le bandeau de la faute, en bas du terrain (le tir part vers
     // la cage du haut : rien sur le gardien)
     const astuce = page.getByRole('status').filter({ hasText: 'Tire avant 3 s' });
@@ -150,6 +163,7 @@ test.describe('La Coupe du Gang : règlement v2 en ligne', () => {
     // Le tir : 1,4 s restantes → 2
     api.coupe.etat(cnx, { ph: 'live', md: ['pen', 0, 1.4], w: [0, 1] });
     await expect(bande(page).locator('.cdg-v2-pen')).toHaveText('Penalty2');
+    await expect(bande(page).getByText('À toi de tirer', { exact: true })).toBeVisible();
     // Arrêté par Kevin
     cnx.envoyer({ t: 'pen_end', r: 'saved' });
     api.coupe.etat(cnx, { ph: 'ready', w: [0, 1], md: undefined });
@@ -170,14 +184,14 @@ test.describe('La Coupe du Gang : règlement v2 en ligne', () => {
     await expect(page.getByText('Score : Toi 3 – 1 Kevin')).toBeAttached();
   });
 
-  test('but en or : bandeau, « Le prochain but gagne » et son temps, puis « Victoire au but en or »', async ({ page, api, connecter }) => {
+  test('but en or : bandeau, son temps dans la pastille, « Le prochain but gagne », puis « Victoire au but en or »', async ({ page, api, connecter }) => {
     const cnx = await matchEnLigne(page, api, connecter);
     api.coupe.etat(cnx, { ph: 'live', sc: [3, 3] });
     cnx.envoyer({ t: 'gold' });
     api.coupe.etat(cnx, { ph: 'count', md: ['gold', 120], sc: [3, 3] });
     await attendreBandeau(page, ['But en or', 'Le prochain but gagne'], { sorte: 'gold', pos: 'high' });
-    await expect(bande(page).getByText('But en or', { exact: true })).toBeVisible();
-    await expect(bande(page).getByText('Le prochain but gagne · 2:00')).toBeVisible();
+    await expect(bande(page).locator('.cdg-v2-gold')).toHaveText('But en or2:00');
+    await expect(bande(page).getByText('Le prochain but gagne', { exact: true })).toBeVisible();
     await expect(page.getByRole('status').filter({ hasText: 'Tu peux monter chez l’adversaire' })).toBeVisible();
 
     cnx.envoyer({ t: 'goal', by: 0, sc: [4, 3], v: 1, fx: 0 });
@@ -218,6 +232,51 @@ test.describe('La Coupe du Gang : règlement v2 en ligne', () => {
     await expect(buts(page, 'Toi : 2 buts sur 5')).toBeVisible();
   });
 
+  for (const [largeur, hauteur] of [[390, 844], [320, 640]]) {
+    test(`à ${largeur} px, le terrain ne bouge jamais : avant, pendant et après un événement, un penalty et le but en or`, async ({ page, api, connecter }) => {
+      await page.setViewportSize({ width: largeur, height: hauteur });
+      const cnx = await matchEnLigne(page, api, connecter);
+      // Place du canvas et du stade, hauteur de la bande, au dixième de pixel
+      const place = () => page.evaluate(() => {
+        const r = (sel) => {
+          const b = document.querySelector(sel)?.getBoundingClientRect();
+          return b ? [b.left, b.top, b.width, b.height].map((v) => Math.round(v * 10) / 10) : null;
+        };
+        return { canvas: r('.cdg-canvas'), stade: r('.cdg-pic'), bande: r('.cdg-v2')?.[3] ?? null };
+      });
+      const s = heure(api, cnx);
+      const etapes = [
+        ['jeu', () => api.coupe.etat(cnx, { ph: 'live', sc: [1, 0], ne: [15, 30] }), () => expect(page.getByText('Prochain événement')).toBeVisible()],
+        ['événement', () => cnx.envoyer({ t: 'ev', e: { k: 'storm', id: 1, an: s, at: s + 1000, until: s + 60000, sd: 7, b: [[180, 200, s + 1500]] } }),
+          () => expect(bande(page).getByText('Orage', { exact: true })).toBeVisible()],
+        ['penalty', () => {
+          cnx.envoyer({ t: 'ev_end', id: 1 });
+          cnx.envoyer({ t: 'foul', side: 1, k: 'camp', w: 0, pen: true });
+          api.coupe.etat(cnx, { ph: 'pen', md: ['pen', 0, 3], sc: [1, 0] });
+        }, () => expect(bande(page).locator('.cdg-v2-pen')).toBeVisible()],
+        ['tir', () => api.coupe.etat(cnx, { ph: 'live', md: ['pen', 0, 1.5], sc: [1, 0] }), () => expect(bande(page).locator('.cdg-v2-pen')).toHaveText('Penalty2')],
+        ['après le penalty', () => {
+          cnx.envoyer({ t: 'pen_end', r: 'missed' });
+          api.coupe.etat(cnx, { ph: 'ready', md: undefined, sc: [1, 0], ne: [20, 30] });
+        }, () => expect(bande(page).locator('.cdg-v2-pen')).toHaveCount(0)],
+        ['but en or', () => {
+          cnx.envoyer({ t: 'gold' });
+          api.coupe.etat(cnx, { ph: 'count', md: ['gold', 120], sc: [1, 1], ne: undefined });
+        }, () => expect(bande(page).locator('.cdg-v2-gold')).toBeVisible()],
+        ['but en or en jeu', () => api.coupe.etat(cnx, { ph: 'live', md: ['gold', 95], sc: [1, 1] }), () => expect(bande(page).locator('.cdg-v2-gold')).toHaveText('But en or1:35')],
+      ];
+      const vues = [];
+      for (const [nom, agir, attendre] of etapes) {
+        agir();
+        await attendre();
+        vues.push({ nom, ...(await place()) });
+      }
+      const [ref] = vues;
+      expect(ref.bande).toBeGreaterThan(40);
+      for (const v of vues) expect({ nom: v.nom, canvas: v.canvas, stade: v.stade, bande: v.bande }).toEqual({ nom: v.nom, canvas: ref.canvas, stade: ref.stade, bande: ref.bande });
+    });
+  }
+
   for (const largeur of [320, 390]) {
     test(`écran de match v2 à ${largeur} px : bande et bandeaux sans défilement horizontal`, async ({ page, api, connecter, journal }) => {
       await page.setViewportSize({ width: largeur, height: largeur === 320 ? 640 : 844 });
@@ -239,6 +298,20 @@ test.describe('La Coupe du Gang : règlement v2 en ligne', () => {
         return out;
       });
       expect(deborde).toEqual([]);
+      // Deuxième rangée : la jauge (ici un événement au nom long) ne passe jamais sur les avertissements
+      api.coupe.etat(cnx, { ph: 'live', md: undefined, sc: [4, 3], w: [2, 1], ne: [10, 30] });
+      const t = heure(api, cnx);
+      cnx.envoyer({ t: 'ev', e: { k: 'goals', id: 9, an: t, at: t + 1000, until: t + 60000, sd: 1, g: [[[0, 0], [8000, 0]], [[0, 0], [8000, 0]]] } });
+      await expect(bande(page).getByText('Buts qui bougent', { exact: true })).toBeAttached();
+      const chevauche = await page.evaluate(() => {
+        const [a, b] = [...document.querySelectorAll('.cdg-v2-low .cdg-v2-warn')].map((el) => el.getBoundingClientRect());
+        const g = document.querySelector('.cdg-v2-low .cdg-v2-gauge').getBoundingClientRect();
+        const libelle = document.querySelector('.cdg-v2-gauge-label').getBoundingClientRect();
+        return { gauche: Math.round(a.right - g.left), droite: Math.round(g.right - b.left), libelle: Math.round(libelle.right - g.right) };
+      });
+      expect(chevauche.gauche).toBeLessThanOrEqual(0);
+      expect(chevauche.droite).toBeLessThanOrEqual(0);
+      expect(chevauche.libelle).toBeLessThanOrEqual(0);
       expect(journal.console).toEqual([]);
     });
   }

@@ -110,13 +110,17 @@ test.describe('La Coupe du Gang : accès à l\'écran d\'essai', () => {
 
 test.describe('La Coupe du Gang : en ligne (protocole v2)', () => {
   test('salle d\'attente : rien avant « Créer un match », puis code, lien à partager, et plus rien ne se dessine', async ({ page, api, connecter }) => {
-    // Partage du navigateur remplacé (Chromium sans interface n'en a pas) ; images demandées comptées
+    // Partage du navigateur remplacé (Chromium sans interface n'en a pas), sans partage de fichiers
+    // (WebKit l'accepte : l'image du défi partirait avec le lien selon le moment où elle est prête ;
+    // la voie avec image a son propre test, « Envoyer le défi » : image 1080 × 1350) ; images
+    // demandées comptées
     await page.addInitScript(() => {
       window.__partages = [];
       Object.defineProperty(navigator, 'share', {
         configurable: true,
         value: (donnees) => { window.__partages.push(donnees); return Promise.resolve(); },
       });
+      Object.defineProperty(navigator, 'canShare', { configurable: true, value: () => false });
       window.__images = 0;
       const raf = window.requestAnimationFrame.bind(window);
       window.requestAnimationFrame = (fn) => { window.__images += 1; return raf(fn); };
@@ -340,6 +344,29 @@ test.describe('La Coupe du Gang : en ligne (protocole v2)', () => {
     await expect(page.getByRole('button', { name: 'Bloqué', exact: true })).toBeDisabled();
     await expect(page.getByRole('button', { name: /^Revanche/ })).toBeDisabled();
     await expect(page.getByText('Joueur bloqué')).toBeVisible();
+  });
+
+  test('serveur d\'avant le protocole v3 (il n\'accepte que la v2) : l\'app y repasse sans rien montrer et joue la règle d\'aujourd\'hui', async ({ page, api, connecter }) => {
+    // Site déployé avant le serveur, ou serveur revenu en arrière ; le règlement v2 demandé ne peut
+    // pas s'appliquer à une connexion v2
+    api.coupe.versions = [2];
+    api.coupe.regles = 2;
+    const cnx = await rejoindreParCode(page, api, connecter);
+    // `auth` v3 refusé (update_required, 4426), une seule nouvelle connexion en v2
+    expect(api.coupe.messages('auth').map((m) => m.v)).toEqual([3, 2]);
+    expect(api.coupe.connexions).toHaveLength(2);
+    expect(cnx.version).toBe(2);
+    expect(api.coupe.messages('join')).toEqual([{ t: 'join', code: CODE_MATCH }]);
+    await expect(page.getByText('Mets l\'app à jour pour jouer en ligne')).toHaveCount(0);
+    // Match à la règle d'aujourd'hui : score, aucune bande du règlement v2
+    api.coupe.etat(cnx, { ph: 'live', sc: [0, 1] });
+    await expect(page.getByText('Score : Toi 1 – 0 Kevin')).toBeAttached();
+    await expect(page.getByRole('group', { name: 'Buts et avertissements' })).toHaveCount(0);
+    // Après une coupure, la reprise reste en v2 (pas de nouvel essai en v3)
+    api.coupe.couper(cnx);
+    await expect.poll(() => api.coupe.messages('resume').length).toBe(1);
+    expect(api.coupe.messages('auth').map((m) => m.v)).toEqual([3, 2, 2]);
+    await expect(page.getByText('Connexion rétablie')).toBeVisible();
   });
 
   test('coupure en plein match : reprise automatique avec le lien du match', async ({ page, api, connecter }) => {

@@ -65,6 +65,16 @@ les routes `/feed…` du contrat (`docs/fonctions/fil-new-gang-contrat.md`) à p
 défaut ; un test de l'ancien fil le met à faux (`api.donnees.parametresPublics.features.feedV2 =
 false`) : toute route `/feed…` répond alors 501 et le test échoue s'il en appelle une.
 
+**La Coupe du Gang, règlement v2** (31 oct. 2026, `coupe-regles-v2.spec.js`) : `features.coupeRulesV2`
+vaut vrai par défaut dans l'API simulée, comme en production sans `COUPE_RULES_V2=off` (matchs hors
+ligne en règlement v2, textes « premier à 5 buts », lien « Règles du match ») ; un test le met à
+faux (`api.donnees.parametresPublics.features.coupeRulesV2 = false`) pour la règle d'aujourd'hui.
+En ligne, c'est le faux serveur de jeu qui décide (`api.coupe.regles = 2` avant le coup d'envoi :
+`start` porte `rules: 2, gw: 5`, puis `etat` et `envoyer` passent les messages du protocole v3).
+La spec vérifie la bande (pastilles, avertissements, jauge), les bandeaux (notés à leur apparition
+par un observateur : ils ne vivent que ~1,4 s), le penalty, le but en or, la place du terrain qui ne
+bouge pas, et l'écran d'aujourd'hui contre une app publiée.
+
 ## Ajouter un test
 
 ```js

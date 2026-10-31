@@ -6,8 +6,6 @@ import { mmss } from './format';
 import { useSecondsLeft } from './hooks';
 import { shareChallenge } from './share';
 import { renderChallengeImage } from './challengeImage';
-import { useCoupeRulesV2 } from '@/lib/coupe/coupeApi';
-import { goalsFor } from './rulesV2';
 
 // Une salle d'attente dure 2 minutes côté serveur (contrat 4.2)
 const ROOM_MS = 2 * 60 * 1000;
@@ -37,21 +35,19 @@ export default function WaitingRoom({ code, link, invited, roomAt, onCancel, rec
   const myName = me?.name || '';
   const myRole = me?.role || '';
   const myPhoto = me?.photo || null;
-  // « Premier à 5 buts » sur l'image quand le serveur annonce le règlement v2
-  const goals = goalsFor(useCoupeRulesV2());
   useEffect(() => {
     if (invited || !link || !code) return undefined;
-    const key = [code, link, myName, myRole, myPhoto || '', goals].join('|');
+    const key = [code, link, myName, myRole, myPhoto || ''].join('|');
     if (imageRef.current.key === key) return undefined;
     imageRef.current = { key, blob: null };
     let cancelled = false;
     const timer = setTimeout(() => {
-      renderChallengeImage({ name: myName, role: myRole, photo: myPhoto, code, goals })
+      renderChallengeImage({ name: myName, role: myRole, photo: myPhoto, code })
         .then((blob) => { if (!cancelled && imageRef.current.key === key) imageRef.current = { key, blob }; })
         .catch(() => { /* le lien partira seul */ });
     }, 300);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [invited, link, code, myName, myRole, myPhoto, goals]);
+  }, [invited, link, code, myName, myRole, myPhoto]);
 
   const share = async () => {
     setShareMsg(null);

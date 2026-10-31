@@ -295,6 +295,7 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
   // du calque quand les effets les dessinent ou les effacent
   let fieldNets = true;
   let fieldMid = true;
+  let fieldSpots = true; // points de penalty peints (retirés pendant un penalty : le jeu pose le sien)
   let stadiumImg = null; // chargement de l'image du stade pour les raccords (une fois)
   const layer = document.createElement('canvas');
   const lctx = layer.getContext('2d');
@@ -463,13 +464,16 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
       c.arc(x, y, 10, s, s + Math.PI / 2);
       c.stroke();
     });
-    // Points de penalty seulement : pas de point central sur le logo
+    // Points de penalty seulement : pas de point central sur le logo (pendant un penalty du
+    // règlement v2, le jeu pose le sien plus loin : un seul point à chaque bout)
     c.fillStyle = COLORS.chalk;
-    [[W / 2, 72], [W / 2, H - 72]].forEach(([x, y]) => {
-      c.beginPath();
-      c.arc(x, y, 2.6, 0, TAU);
-      c.fill();
-    });
+    if (fieldSpots) {
+      [[W / 2, 72], [W / 2, H - 72]].forEach(([x, y]) => {
+        c.beginPath();
+        c.arc(x, y, 2.6, 0, TAU);
+        c.fill();
+      });
+    }
     c.fillStyle = 'rgba(236,248,240,.16)';
     c.font = font(800, 30);
     c.textAlign = 'center';
@@ -728,14 +732,15 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
         trail.unshift(pt);
       } else if (trail.length) trail.pop();
     } else trail = [];
-    // Règlement v2 : événements, éclats du ballon ; terrain dessiné de secours refait sans filets
-    // ni ligne du milieu quand les effets les remplacent
+    // Règlement v2 : événements, éclats du ballon ; terrain dessiné de secours refait sans filets,
+    // ligne du milieu ni points de penalty quand les effets les remplacent
     fx.step(frame, dt);
     if (!stadium) {
       const f = fx.fieldFlags();
-      if (f.nets !== fieldNets || f.midline !== fieldMid) {
+      if (f.nets !== fieldNets || f.midline !== fieldMid || f.spots !== fieldSpots) {
         fieldNets = f.nets;
         fieldMid = f.midline;
+        fieldSpots = f.spots;
         buildPitch();
       }
     }

@@ -17,7 +17,10 @@
  *    plus de `goal()`, qui ne se rejoue pas) ;
  *  - `event(sorte)` à l'annonce d'un événement, un bruit court par sorte : 'foam' (aérosol), 'gel'
  *    (glissé), 'storm' (grondement), 'goals' (mécanisme), 'water' (arroseur), 'smoke' (fumigène).
- * Coupés avec le son du jeu ; un nom inconnu ou un contexte audio absent : silence, jamais d'erreur.
+ * Niveaux réglés autour de celui du but (environ −30 dB sur 100 ms, mesure hors temps réel de la
+ * contre-expertise du 31 oct. 2026), à ±3 dB près ; faute avec penalty : deux sons, l'interface
+ * choisit. Coupés avec le son du jeu ; un nom inconnu ou un contexte audio absent : silence, jamais
+ * d'erreur.
  */
 import { Capacitor } from '@capacitor/core';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
@@ -134,9 +137,9 @@ export function createSound() {
   const FX = {
     fire() {
       // Souffle qui s'embrase, coup sourd, crépitements
-      noise(0.5, 0.2, 500, 0.7, 0.02, 0, 'lowpass', 3200);
-      tone(90, 0.18, 'sine', 0.18, 50);
-      for (let i = 0; i < 5; i++) noise(0.03, 0.06, 4200, 2, 0.002, 0.08 + i * 0.07 + Math.random() * 0.03, 'highpass');
+      noise(0.5, 0.14, 500, 0.7, 0.02, 0, 'lowpass', 3200);
+      tone(90, 0.18, 'sine', 0.13, 50);
+      for (let i = 0; i < 5; i++) noise(0.03, 0.045, 4200, 2, 0.002, 0.08 + i * 0.07 + Math.random() * 0.03, 'highpass');
     },
     charge() {
       // Montée électrique et bourdonnement
@@ -146,8 +149,8 @@ export function createSound() {
     },
     douse() {
       // Sifflement de vapeur
-      noise(0.7, 0.16, 3500, 0.5, 0.02, 0, 'highpass', 6500);
-      tone(220, 0.12, 'sine', 0.05, 120);
+      noise(0.7, 0.09, 3500, 0.5, 0.02, 0, 'highpass', 6500);
+      tone(220, 0.12, 'sine', 0.03, 120);
     },
     short() {
       // Trois grésillements, puis le bond
@@ -157,23 +160,23 @@ export function createSound() {
     },
     bolt() {
       // Claquement de la foudre puis grondement
-      noise(0.35, 0.35, 6000, 0.4, 0.004, 0, 'lowpass', 300);
-      noise(1.6, 0.25, 140, 0.5, 0.12, 0.08, 'lowpass');
+      noise(0.35, 0.22, 6000, 0.4, 0.004, 0, 'lowpass', 300);
+      noise(1.6, 0.16, 140, 0.5, 0.12, 0.08, 'lowpass');
     },
     whistle() {
       // Faute : « tuit, tuuuit »
-      whistle(0.12, 0, 0.1);
-      whistle(0.32, 0.17, 0.1);
+      whistle(0.12, 0, 0.04);
+      whistle(0.32, 0.17, 0.04);
     },
     warn() {
-      tone(880, 0.1, 'square', 0.045);
-      tone(660, 0.16, 'square', 0.045, 0, 0.12);
+      tone(880, 0.1, 'square', 0.08);
+      tone(660, 0.16, 'square', 0.08, 0, 0.12);
     },
     penalty() {
       // Long coup de sifflet et coup de grosse caisse
-      whistle(0.6, 0, 0.11);
-      tone(70, 0.4, 'sine', 0.22, 45, 0.02);
-      noise(0.3, 0.1, 200, 1, 0.005, 0.02, 'lowpass');
+      whistle(0.6, 0, 0.035);
+      tone(70, 0.4, 'sine', 0.07, 45, 0.02);
+      noise(0.3, 0.03, 200, 1, 0.005, 0.02, 'lowpass');
     },
     save() {
       // Ballon repoussé et « ooh » de la tribune
@@ -183,9 +186,9 @@ export function createSound() {
     },
     gold() {
       // Arpège brillant sur un gong
-      [1046, 1318, 1568, 2093].forEach((f, i) => tone(f, 0.5, 'triangle', 0.07, 0, i * 0.08));
-      tone(220, 1.6, 'sine', 0.08);
-      tone(330, 1.4, 'sine', 0.05);
+      [1046, 1318, 1568, 2093].forEach((f, i) => tone(f, 0.5, 'triangle', 0.04, 0, i * 0.08));
+      tone(220, 1.6, 'sine', 0.045);
+      tone(330, 1.4, 'sine', 0.03);
     },
     goal2() {
       // But à 2 : joué en plus de `goal()` (l'écran de jeu appelle les deux) : une décharge et deux
@@ -200,7 +203,7 @@ export function createSound() {
   const EVENT = {
     foam() {
       // Aérosol de mousse à raser, quelques bulles
-      noise(0.75, 0.14, 4200, 0.6, 0.04, 0, 'highpass');
+      noise(0.75, 0.085, 4200, 0.6, 0.04, 0, 'highpass');
       tone(700, 0.06, 'sine', 0.04, 1100, 0.25);
       tone(900, 0.06, 'sine', 0.04, 1300, 0.38);
       tone(620, 0.06, 'sine', 0.04, 1000, 0.5);
@@ -212,23 +215,23 @@ export function createSound() {
     },
     storm() {
       // Grondement lointain et vent
-      noise(1.4, 0.2, 110, 0.6, 0.35, 0, 'lowpass');
-      noise(1.2, 0.05, 800, 0.4, 0.4, 0, 'bandpass', 400);
+      noise(1.4, 0.62, 110, 0.6, 0.35, 0, 'lowpass');
+      noise(1.2, 0.16, 800, 0.4, 0.4, 0, 'bandpass', 400);
     },
     goals() {
       // Cliquets d'un mécanisme et moteur grave
-      for (let i = 0; i < 6; i++) noise(0.025, 0.1, 2500, 3, 0.002, i * 0.07);
-      tone(80, 0.5, 'sawtooth', 0.04, 60);
+      for (let i = 0; i < 6; i++) noise(0.025, 0.25, 2500, 3, 0.002, i * 0.07);
+      tone(80, 0.5, 'sawtooth', 0.1, 60);
     },
     water() {
       // Arroseur à turbine : « tch, tch, tch » et chuintement
-      for (let i = 0; i < 8; i++) noise(0.04, 0.09, 5000, 1, 0.003, i * 0.075, 'highpass');
-      noise(0.8, 0.04, 6000, 0.5, 0.1, 0, 'highpass');
+      for (let i = 0; i < 8; i++) noise(0.04, 0.13, 5000, 1, 0.003, i * 0.075, 'highpass');
+      noise(0.8, 0.055, 6000, 0.5, 0.1, 0, 'highpass');
     },
     smoke() {
       // Fumigène qui s'allume : petit claquement et grésillement
-      tone(320, 0.12, 'triangle', 0.08, 110);
-      noise(0.9, 0.12, 1800, 0.8, 0.12, 0.05, 'bandpass', 900);
+      tone(320, 0.12, 'triangle', 0.13, 110);
+      noise(0.9, 0.19, 1800, 0.8, 0.12, 0.05, 'bandpass', 900);
     },
   };
 

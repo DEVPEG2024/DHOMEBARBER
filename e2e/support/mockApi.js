@@ -185,7 +185,9 @@ export class FauxServeur {
     const local = new URL(origineApp);
     // Fin du test : le faux serveur de jeu arrête ses envois (états du match, minuteries)
     context.on('close', () => this.coupe.arreter());
-    await context.route((url) => url.host !== local.host, (route) => this.repondre(route, origineApp));
+    // Seulement http(s) : une adresse `blob:` ou `data:` (image de la story, host vide) reste au
+    // navigateur ; avant, WebKit la recevait vide (« domaine externe ») et l'image faisait 0 × 0
+    await context.route((url) => /^https?:$/.test(url.protocol) && url.host !== local.host, (route) => this.repondre(route, origineApp));
     // WebSockets : aucun n'est jamais ouvert vers un vrai serveur. Le compteur de connectés
     // (`/ws/live`, tableau de bord) reçoit un nombre fictif ; le jeu (`/ws/coupe`) a son faux
     // serveur ; tout autre est noté et refermé.

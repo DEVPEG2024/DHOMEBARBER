@@ -29,7 +29,7 @@ import { offlinePlayers, onlinePlayers, seasonLabel, shownName } from './game/fo
 import { useMediaQuery, useSalonMusicPaused, useSecondsLeft, useTyping, useWakeLock } from './game/hooks';
 import { RulesBanner, RulesBar } from './game/RulesHud';
 import {
-  EVENT_NAMES, GOLD_BANNER, TIPS, eventBanner, foulBanner, goalBanner, penEndBanner, penaltyBanner,
+  EVENT_NAMES, GOLD_BANNER, TIPS, eventBanner, eventsBanner, foulBanner, goalBanner, penEndBanner, penaltyBanner,
 } from './game/rulesV2';
 
 /*
@@ -116,41 +116,47 @@ function rulesAtStart(data) {
 }
 
 /**
- * Ce que la bande du règlement v2 affiche, lu dans une image du match (null : règle d'aujourd'hui).
- * Seulement des valeurs qui changent quelques fois par seconde au plus : la boucle ne rend React que
- * quand l'une d'elles change.
+ * Événements d'une image, lus une fois par image et sans tableau nouveau : sortes de ceux annoncés
+ * ou en cours (`an` ≤ now < `until`), « storm+water » pour deux à la fois (l'arrosage avec un orage
+ * ou un gel, `makeEvents`, mêmes heures), et celui qui finit le plus tard (jauge). `out` est réutilisé.
  */
-/**
- * Événements annoncés ou en cours dans une image (`an` ≤ now < `until`), dans l'ordre : deux à la
- * fois quand l'arrosage accompagne un orage ou un gel (`makeEvents`, mêmes heures).
- */
-function liveEventsOf(f) {
+function scanEvents(f, out) {
+  out.kinds = null;
+  out.longest = null;
   const now = Number(f?.now);
-  if (!Array.isArray(f?.events) || !Number.isFinite(now)) return [];
-  return f.events.filter((e) => e && EVENT_NAMES[e.k] && now >= Number(e.an) && now < Number(e.until));
+  const evs = f?.events;
+  if (!Array.isArray(evs) || !Number.isFinite(now)) return out;
+  for (let i = 0; i < evs.length; i += 1) {
+    const e = evs[i];
+    if (!e || !EVENT_NAMES[e.k] || now < Number(e.an) || now >= Number(e.until)) continue;
+    out.kinds = out.kinds ? `${out.kinds}+${e.k}` : e.k;
+    if (!out.longest || Number(e.until) > Number(out.longest.until)) out.longest = e;
+  }
+  return out;
 }
 
-function rulesOf(f) {
-  if (!f || f.rules !== 2) return null;
+/**
+ * Ce que la bande du règlement v2 affiche, lu dans une image du match, écrit dans `into` (réutilisé
+ * d'une image à l'autre). Seulement des valeurs qui changent quelques fois par seconde au plus : la
+ * boucle ne rend React (avec une copie) que quand l'une d'elles change.
+ */
+function readRules(f, scan, into) {
   const mode = f.mode && typeof f.mode === 'object' ? f.mode : null;
   const pen = mode?.k === 'pen';
   const gold = mode?.k === 'gold';
   const left = Number(mode?.left);
-  // Sortes des événements en cours, « storm+water » pour un orage avec l'arrosage
-  const live = liveEventsOf(f);
-  const event = live.length ? live.map((e) => e.k).join('+') : null;
   const next = f.nextEvent;
-  return {
-    gw: Number(f.goalsToWin) > 0 ? Math.round(Number(f.goalsToWin)) : GOALS_TO_WIN_V2,
-    warn: [count(f.warn?.[0]), count(f.warn?.[1])],
-    mode: pen || f.phase === 'pen' ? 'pen' : gold ? 'gold' : null,
-    penS: pen ? (mode.s === 1 ? 1 : 0) : null,
-    digit: pen && left > 0 ? Math.min(9, Math.ceil(left)) : null,
-    shot: pen && left < 0,
-    goldLeft: gold && Number.isFinite(left) ? Math.max(0, Math.ceil(left)) : null,
-    event: pen || gold ? null : event,
-    hasNext: !!(next && Number(next.total) > 0),
-  };
+  into.gw = Number(f.goalsToWin) > 0 ? Math.round(Number(f.goalsToWin)) : GOALS_TO_WIN_V2;
+  into.warn[0] = count(f.warn?.[0]);
+  into.warn[1] = count(f.warn?.[1]);
+  into.mode = pen || f.phase === 'pen' ? 'pen' : gold ? 'gold' : null;
+  into.penS = pen ? (mode.s === 1 ? 1 : 0) : null;
+  into.digit = pen && left > 0 ? Math.min(9, Math.ceil(left)) : null;
+  into.shot = pen && left < 0;
+  into.goldLeft = gold && Number.isFinite(left) ? Math.max(0, Math.ceil(left)) : null;
+  into.event = pen || gold ? null : scan.kinds;
+  into.hasNext = !!(next && Number(next.total) > 0);
+  return into;
 }
 
 const sameRules = (a, b) => (a === b) || (!!a && !!b && a.gw === b.gw && a.warn[0] === b.warn[0] && a.warn[1] === b.warn[1]
@@ -357,23 +363,26 @@ export default function CoupeGame({
 
     // Règlement v2 : la bande suit l'image du match (rendu React seulement quand un chiffre affiché
     // change), la jauge du prochain événement est remplie ici, l'astuce « camper » part d'ici
+    // Lecture d'une image réutilisée d'une image à l'autre (aucun objet nouveau tant que rien ne change)
+    const scan = { kinds: null, longest: null };
+    const scratch = rulesAtStart({ rules: 2 });
     const rulesTick = (f) => {
       if (!f) return;
-      const next = rulesOf(f);
+      if (f.rules !== 2) { applyRules(null); return; }
+      scanEvents(f, scan);
+      const next = readRules(f, scan, scratch);
       const prev = rulesUiRef.current;
       // Compte du penalty (3, 2, 1) : un bip à chaque seconde du tir
-      if (next?.mode === 'pen' && f.phase === 'live' && next.digit != null && prev?.digit != null && next.digit !== prev.digit) sound.blip();
-      applyRules(next);
-      if (!next) return;
+      if (next.mode === 'pen' && f.phase === 'live' && next.digit != null && prev?.digit != null && next.digit !== prev.digit) sound.blip();
+      if (!sameRules(prev, next)) applyRules({ ...next, warn: [next.warn[0], next.warn[1]] });
       matchRulesRef.current.rules = 2;
       if (next.penS != null) matchRulesRef.current.penS = next.penS;
-      // Jauge : temps qui reste à l'événement en cours (pleine pendant son annonce), sinon avant
-      // l'annonce du prochain
+      // Jauge : temps qui reste à l'événement en cours (pleine pendant son annonce ; plusieurs à la
+      // fois : celui qui finit le plus tard), sinon avant l'annonce du prochain
       const el = gaugeRef.current;
       if (el) {
         let frac = null;
-        // Plusieurs à la fois : celui qui dure le plus longtemps
-        const e = next.event ? liveEventsOf(f).reduce((a, b) => (!a || Number(b.until) > Number(a.until) ? b : a), null) : null;
+        const e = next.event ? scan.longest : null;
         if (e) frac = Number(f.now) < Number(e.at) ? 1 : (Number(e.until) - Number(f.now)) / Math.max(1, Number(e.until) - Number(e.at));
         else if (f.nextEvent && Number(f.nextEvent.total) > 0) frac = Number(f.nextEvent.left) / Number(f.nextEvent.total);
         if (frac != null && Number.isFinite(frac)) {
@@ -451,7 +460,8 @@ export default function CoupeGame({
       if (isLocal) {
         return [{ name: 'Le joueur du bas', obj: 'le joueur du bas' }, { name: 'Le joueur du haut', obj: 'le joueur du haut' }];
       }
-      if (!online) return [{ name: 'Toi', me: true }, { name: 'Le salon', obj: 'le salon' }];
+      // Contre le salon : le nom de son pion et de la bande (« Boss »), partout le même
+      if (!online) return [{ name: 'Toi', me: true }, { name: LEVELS[lvl].name, obj: LEVELS[lvl].name }];
       const n = matchRef.current?.ui?.names?.[1] || null;
       return [{ name: 'Toi', me: true }, n ? { name: n, obj: n } : { name: 'L’adversaire', obj: 'l’adversaire' }];
     };
@@ -552,15 +562,29 @@ export default function CoupeGame({
           break;
         }
         // ─── Règlement v2 (contrat, section 6) ───
-        // Deux événements peuvent arriver coup sur coup (arrosage avec un orage ou un gel) : leurs
-        // bandeaux passent l'un après l'autre (file d'attente)
-        case 'event':
-          if (data?.e) {
-            pushBanner(eventBanner(data.e));
-            eventSound(data.e.k);
+        // Deux événements annoncés à la même heure `an` (l'arrosage avec un orage ou un gel) : un
+        // seul bandeau, « Orage + Arrosage » (le second, en file, serait arrivé en plein jeu)
+        case 'event': {
+          const e = data?.e;
+          const first = eventBanner(e);
+          if (!first) break;
+          const B = bannersRef.current;
+          const sameTime = (it) => !!it && it.kind === 'event' && Array.isArray(it.events) && it.an === Number(e.an);
+          const into = sameTime(B.current) ? B.current : B.queue.find(sameTime);
+          if (into) {
+            const events = [...into.events, e];
+            const merged = { ...into, ...eventsBanner(events), events };
+            if (into === B.current) {
+              B.current = merged;
+              setBanner(merged);
+            } else B.queue[B.queue.indexOf(into)] = merged;
+          } else {
+            pushBanner({ ...first, events: [e], an: Number(e.an) });
             buzz('light');
           }
+          eventSound(e.k);
           break;
+        }
         case 'bolt':
           sfx('bolt');
           buzz('light');
@@ -575,8 +599,11 @@ export default function CoupeGame({
           const pen = !!data?.pen;
           pushBanner(foulBanner(data || {}, whoNow()), { ms: pen ? FOUL_BANNER_MS : BANNER_MS });
           if (pen) bannersRef.current.foulAt = performance.now();
-          sfx('whistle');
-          if (!pen && data?.k === 'keep') sfx('warn');
+          // Faute avec penalty : le son du penalty siffle déjà (jamais deux sifflets de suite)
+          if (!pen) {
+            sfx('whistle');
+            if (data?.k === 'keep') sfx('warn');
+          }
           buzz(!isLocal && data?.side === 0 ? 'medium' : 'light');
           break;
         }

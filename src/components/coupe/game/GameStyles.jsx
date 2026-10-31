@@ -88,9 +88,15 @@ export const GAME_CSS = `
    buts de chacun en pastilles (rouge : toi, blanc : l'adversaire), ses avertissements (or), au
    milieu l'événement, le penalty et son compte, le but en or ; dessous la jauge du prochain
    événement (remplie par la boucle, transform seul). Montée seulement en règlement v2 */
-.cdg-v2 { position: relative; z-index: 18; flex: none; display: flex; flex-direction: column; gap: 5px; padding: 0 4px 6px; text-shadow: ${TEXT_SHADOW}; }
+/* Hauteur fixe, quoi qu'affiche la bande (jeu, événement, penalty, but en or) : 22 + 5 + 14 + 6 =
+   47 px. Sinon le stage change de taille et le terrain saute (contre-expertise du 31 oct. 2026 :
+   38,8 px en jeu, 40,8 pendant un événement, 46,8 au penalty) */
+.cdg-v2 { position: relative; z-index: 18; flex: none; display: flex; flex-direction: column; gap: 5px; height: 47px; box-sizing: border-box;
+  padding: 0 4px 6px; overflow: hidden; text-shadow: ${TEXT_SHADOW}; }
 /* Trois colonnes : toi, le milieu (qui cède la place, texte coupé), l'adversaire */
-.cdg-v2-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+.cdg-v2-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; flex: none; }
+.cdg-v2-row.cdg-v2-top { height: 22px; }
+.cdg-v2-row.cdg-v2-low { height: 14px; }
 .cdg-v2-mid { min-width: 0; display: flex; justify-content: center; }
 .cdg-v2-side { min-width: 0; display: flex; align-items: center; gap: 7px; }
 .cdg-v2-name { flex: none; max-width: 104px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
@@ -104,20 +110,23 @@ export const GAME_CSS = `
 .cdg-v2-warn > span { margin-right: 2px; }
 .cdg-v2-dot { display: block; width: 9px; height: 9px; border-radius: 50%; box-sizing: border-box; border: 1.5px solid var(--cdg-or); background: ${noir(0.55)}; }
 .cdg-v2-dot.cdg-on { background: var(--cdg-or); }
-.cdg-v2-chip { min-width: 0; max-width: 100%; box-sizing: border-box; display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px;
+.cdg-v2-chip { min-width: 0; max-width: 100%; box-sizing: border-box; display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px; overflow: hidden;
   border-radius: 999px; background: ${noir(0.86)}; border: 1px solid ${blanc(0.2)}; text-shadow: none;
   font: 800 14px/1 var(--cdg-display); letter-spacing: .08em; text-transform: uppercase; color: var(--cdg-blanc); }
 .cdg-v2-chip > span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.cdg-v2-chip b { flex: none; font-size: 19px; font-weight: 800; color: var(--cdg-or); font-variant-numeric: tabular-nums; }
+.cdg-v2-chip b { flex: none; font-size: 19px; line-height: 20px; font-weight: 800; color: var(--cdg-or); font-variant-numeric: tabular-nums; }
+.cdg-v2-chip.cdg-v2-gold b { font-size: 16px; }
 .cdg-v2-chip.cdg-v2-pen, .cdg-v2-chip.cdg-v2-gold { border-color: ${alpha(C.or, 0.6)}; color: var(--cdg-or); }
+/* Deuxième rangée : toutes les lignes sur 14 px (libellé d'un événement en 13 px compris) */
 .cdg-v2-line { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: center;
-  font: 600 11.5px/1.2 var(--cdg-body); color: var(--cdg-blanc); }
-.cdg-v2-gauge { min-width: 0; display: flex; align-items: center; gap: 8px; visibility: hidden;
-  font: 600 11px/1 var(--cdg-body); color: var(--cdg-gris-clair); }
+  font: 600 11.5px/14px var(--cdg-body); color: var(--cdg-blanc); }
+/* La jauge cède la place aux avertissements : son libellé se coupe (« ORAGE + ARRO… » à 320 px) */
+.cdg-v2-gauge { min-width: 0; height: 14px; overflow: hidden; display: flex; align-items: center; gap: 8px; visibility: hidden;
+  font: 600 11px/14px var(--cdg-body); color: var(--cdg-gris-clair); }
 .cdg-v2-gauge[data-on] { visibility: visible; }
-.cdg-v2-gauge-label { flex: none; white-space: nowrap; }
-.cdg-v2-gauge[data-live] .cdg-v2-gauge-label { font: 800 13px/1 var(--cdg-display); letter-spacing: .08em; text-transform: uppercase; color: var(--cdg-or); }
-.cdg-v2-bar { flex: 1; min-width: 24px; height: 6px; border-radius: 3px; overflow: hidden; background: ${blanc(0.16)}; }
+.cdg-v2-gauge-label { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cdg-v2-gauge[data-live] .cdg-v2-gauge-label { font: 800 13px/14px var(--cdg-display); letter-spacing: .08em; text-transform: uppercase; color: var(--cdg-or); }
+.cdg-v2-bar { flex: 1 0 24px; height: 6px; border-radius: 3px; overflow: hidden; background: ${blanc(0.16)}; }
 .cdg-v2-fill { display: block; height: 100%; background: var(--cdg-or); transform-origin: left center; transform: scaleX(0); }
 /* Petit écran (320 px) : pastilles et noms plus petits, le nom de l'adversaire coupé plus tôt */
 @media (max-width: 359px) {
@@ -127,16 +136,19 @@ export const GAME_CSS = `
   .cdg-v2-pips { gap: 2px; }
   .cdg-v2-pip { width: 8px; height: 8px; border-width: 1.5px; }
   .cdg-v2-chip { padding: 0 7px; font-size: 13px; letter-spacing: .05em; }
+  .cdg-v2-gauge { gap: 6px; }
   .cdg-v2-gauge-label { font-size: 10px; }
+  .cdg-v2-gauge[data-live] .cdg-v2-gauge-label { font-size: 12px; letter-spacing: .04em; }
 }
 
 /* Bandeaux du règlement v2 (RulesBanner) : un à la fois sur le terrain, jamais dans le canvas.
    Milieu du terrain par défaut ; au-dessus de la bannière « BUT ! » du dessin pour un but ou le
    but en or ; loin du point de penalty et du tireur pour une faute (--cdg-pitch-top et
-   --cdg-pitch-h : terrain dans le stage, posés par StadiumStage) */
+   --cdg-pitch-h : terrain dans le stage, posés par StadiumStage). Jamais sur le cadre du score,
+   au bord droit du terrain (36 px de chaque côté laissés libres) */
 .cdg-banner-zone { position: absolute; inset: 0; z-index: 13; pointer-events: none; overflow: hidden; }
 .cdg-banner { position: absolute; left: 50%; top: calc(var(--cdg-pitch-top, 6px) + var(--cdg-pitch-h, 600px) * .45);
-  width: max-content; max-width: min(calc(100% - 24px), calc(var(--cdg-pitch-w, 360px) + 8px)); box-sizing: border-box; transform: translate(-50%, -50%);
+  width: max-content; max-width: min(calc(100% - 24px), calc(var(--cdg-pitch-w, 360px) - 72px)); box-sizing: border-box; transform: translate(-50%, -50%);
   display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; }
 .cdg-banner[data-pos="high"] { top: calc(var(--cdg-pitch-top, 6px) + var(--cdg-pitch-h, 600px) * .26); }
 .cdg-banner[data-pos="low"] { top: calc(var(--cdg-pitch-top, 6px) + var(--cdg-pitch-h, 600px) * .74); }

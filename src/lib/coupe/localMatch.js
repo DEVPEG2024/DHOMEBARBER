@@ -14,8 +14,9 @@
  *   jeu, fautes (camper 3 s, bloquer 1,5 s, ballon gardé 5 s : avertissement, penalty au 3e),
  *   penalty. Le salon apprend le penalty (gardien qui suit le ballon sur sa ligne, tireur qui
  *   attend puis frappe fort, direct ou par la bande), le but en or (il monte chercher le ballon),
- *   ne campe jamais (il sort de sa grande surface avant 2 s) et ne bloque pas le ballon. À deux,
- *   les mêmes règles pour les deux joueurs.
+ *   ne campe jamais (il sort de sa grande surface à mi-chemin de la faute) et ne bloque pas le
+ *   ballon. À deux, les mêmes règles pour les deux joueurs. Cages qui bougent : personne sur sa
+ *   ligne de but (modeAt du moteur).
  *
  * Indépendant de React et du DOM : l'écran lui donne les cibles des joueurs et le dessine.
  *
@@ -42,7 +43,7 @@ import {
   GOALS_TO_WIN_V2, LEVELS, RULES_V2, FX_FIRE, FX_ELEC, CAMP_S, BLOCK_S, WARN_MAX, PEN_SET_S, PEN_SHOT_S,
   PEN_END_S, PEN_SAVE_S, GOLD_MAX_S, clamp, createBall, createPaddle, homePaddle, placeKickoff,
   movePaddle, stepBall, collidePaddle, walls, unpin, goalScorer, halfOf, botTarget, touchBall,
-  goalValue, clearFx, inBigBox, pinnedBy, pinClock, penaltySpot, keeperLine, placePenalty, penaltyPlace,
+  goalValue, clearFx, inBigBox, pinnedBy, pinClock, foulClock, modeAt, penaltySpot, keeperLine, placePenalty, penaltyPlace,
   goalOffsets, liveEvents, nextEventGap, pickEventKind, makeEvents,
 } from './engine.js';
 
@@ -67,11 +68,12 @@ const BOT_FIRST_THINK = 0.3;
 const MATCH_PLAY_MS = 5 * 60 * 1000;
 const TIME_WARN_MS = 30 * 1000;
 const PEN_EVENT_GAP_MS = 5000;
-// Le salon et les fautes : il sort de sa grande surface après 1,4 s d'affilée (dehors avant 2 s,
-// la faute est à 3 s), recule après 0,5 s de ballon coincé (la faute est à 1,5 s)
+// Le salon et les fautes : il sort de sa grande surface quand son chrono de camping (foulClock)
+// atteint 1,4 s (la faute est à 3 s), recule après 0,5 s de ballon coincé (la faute est à 1,5 s)
 const BOT_BOX_S = 1.4;
+const BOT_BOX_LOW = 0.4; // … et ne revient qu'une fois le chrono redescendu là
 const BOT_OUT = 18; // sortie : son centre 18 au-delà de la grande surface
-const BOT_ESCAPE_S = 0.25; // … et il y reste un instant avant de rejouer
+const BOT_ESCAPE_S = 0.25; // recul du ballon coincé : il reste un instant à l'écart avant de rejouer
 const BOT_PIN_S = 0.5;
 const BOT_PIN_BACK = 40;
 // Le salon au penalty : élan derrière le ballon, frappe à travers à la vitesse maximale d'une frappe
@@ -82,6 +84,9 @@ const SHOT_THROUGH = 60;
 const SHOT_TRIES = 97; // un angle tous les 1,5°
 const SHOT_ANGLE = 1.25;
 const SHOT_AIM = 0.25;
+// … plus 5 dans tous les cas : sans elle, le Boss marquait 100 % de ses penaltys (tir au point en
+// 0,14 s, qu'aucun gardien ne rattrape s'il est bien placé dans le coin)
+const SHOT_AIM_MIN = 5;
 // Le salon gardien : il réagit au tir après son réflexe de penalty (± 20 %), plus lent que son temps
 // de réaction du jeu normal (LEVELS.react) : un tir parti du point met environ 0,17 s pour atteindre
 // sa ligne, et 0,13 s rendaient le Barber imbattable (7 % de penaltys marqués par un bon tireur,
@@ -351,7 +356,7 @@ export class LocalMatch {
     this.shownAir = false;
     if (this.v2) {
       clearFx(this.ball);
-      this.pads.forEach((p) => { p.boost = 0; p.boxT = 0; p.escape = 0; });
+      this.pads.forEach((p) => { p.boost = 0; p.boxOut = false; p.escape = 0; });
     }
   }
 
@@ -375,16 +380,18 @@ export class LocalMatch {
       this.pen = null;
       this._clearFoulTimers();
       this._syncFx();
-      this.pads.forEach((p) => { p.boost = 0; p.boxT = 0; p.escape = 0; });
+      this.pads.forEach((p) => { p.boost = 0; p.boxOut = false; p.escape = 0; });
     }
     this.emit('kickoff', { toSide });
   }
 
   // Ordre d'un pas (contrat, section 2) : joueurs (contrainte du mode), ballon (événements),
-  // chocs (touchBall en règlement v2), bords (cages décalées), joueurs décollés du ballon
+  // chocs (touchBall en règlement v2), bords (cages décalées), joueurs décollés du ballon. Mode des
+  // joueurs à l'heure du pas (modeAt) : penalty, but en or, ou LINE_MODE pendant les cages qui
+  // bougent (personne sur sa ligne de but)
   _substep(dt) {
     const L = LEVELS[this.level];
-    const md = this.md;
+    const md = this.v2 ? modeAt(this.md, this.evs, this.clock) : this.md;
     this.pads.forEach((p, i) => {
       const human = this.isHuman(i);
       if (movePaddle(p, i, dt, human ? HUMAN_SPEED : (p.boost > 0 ? p.boost : L.speed), md) && human) {
@@ -558,9 +565,10 @@ export class LocalMatch {
         }
       }
     } else if (i !== P.s && P.shot && !P.saved) {
+      // Touche du gardien : l'arrêt n'est acquis (pen_end 'saved') que si le ballon ne franchit pas
+      // la ligne pendant PEN_SAVE_S, comme au serveur ; le mode reste `pen` jusque-là
       P.saved = true;
       P.savedT = P.t;
-      this._penEnd('saved');
     }
   }
 
@@ -596,7 +604,9 @@ export class LocalMatch {
     const b = this.ball;
     for (let i = 0; i < 2; i++) {
       const p = this.pads[i];
-      this.campT[i] = inBigBox(p, i) && !this.hitStep[i] ? this.campT[i] + dt : 0;
+      // Camper : foulClock (redescend deux fois plus vite hors de la surface), remis à zéro par une
+      // frappe de ce joueur
+      this.campT[i] = this.hitStep[i] ? 0 : foulClock(this.campT[i], inBigBox(p, i), dt);
       this.pinT[i] = pinClock(this.pinT[i], pinnedBy(b, p, i), dt);
     }
     for (let i = 0; i < 2; i++) {
@@ -627,17 +637,21 @@ export class LocalMatch {
   }
 
   // Faute de `side` : camper et bloquer donnent un penalty ; ballon gardé, un avertissement (le
-  // ballon change de camp comme aujourd'hui), penalty au 3e et son compteur repart à 0
+  // ballon change de camp comme aujourd'hui), penalty au 3e et son compteur repart à 0 (`foul.warn`
+  // vaut alors 3, comme au serveur ; 0 dans l'image). Messages dans l'ordre du serveur : `foul`,
+  // puis `penalty` (hors ligne, sans le délai de grâce du réseau)
   _foul(side, k) {
     let pen = k !== 'keep';
+    let warn = this.warn[side];
     if (k === 'keep') {
-      this.warn[side] += 1;
-      if (this.warn[side] >= WARN_MAX) {
+      warn += 1;
+      this.warn[side] = warn;
+      if (warn >= WARN_MAX) {
         pen = true;
         this.warn[side] = 0;
       }
     }
-    this.emit('foul', { side, k, warn: this.warn[side], pen });
+    this.emit('foul', { side, k, warn, pen });
     if (pen) this._penalty(1 - side);
     else {
       this.emit('toast', 'Ballon gardé 5 s : il change de camp');
@@ -660,7 +674,7 @@ export class LocalMatch {
       p.vy = 0;
       p.think = BOT_FIRST_THINK;
       p.boost = 0;
-      p.boxT = 0;
+      p.boxOut = false;
       p.escape = 0;
       if (!this.held[i] || !this.isHuman(i)) { p.tx = p.x; p.ty = p.y; }
     });
@@ -673,21 +687,24 @@ export class LocalMatch {
     this.emit('penalty', { s });
   }
 
-  // Un pas de penalty en jeu : but, arrêt (engagement 0,6 s plus tard), tir manqué
+  // Un pas de penalty en jeu : but (aussi dans les PEN_SAVE_S qui suivent la touche du gardien),
+  // arrêt acquis au bout de ce délai (engagement du gardien), tir manqué
   _penStep(dt) {
     const P = this.pen;
-    if (!P || (P.done && !P.saved)) return;
+    if (!P || P.done) return;
     P.t += dt;
-    if (P.saved) {
-      // Arrêté : plus de but possible, engagement du gardien
-      if (P.t - P.savedT >= PEN_SAVE_S) this._penOver();
-      return;
-    }
     const g = goalScorer(this.ball);
     if (g >= 0) {
       // Le tireur marque ; un ballon renvoyé dans sa propre cage compte pour le gardien
       this._penEnd(g === P.s ? 'goal' : 'missed');
       this._goal(g);
+      return;
+    }
+    if (P.saved) {
+      if (P.t - P.savedT >= PEN_SAVE_S) {
+        this._penEnd('saved');
+        this._penOver();
+      }
       return;
     }
     if ((!P.shot && P.t >= PEN_SHOT_S) || (P.shot && P.t - P.shotT >= PEN_END_S)) {
@@ -782,8 +799,8 @@ export class LocalMatch {
     const r = (a, c) => a + this.rnd() * (c - a);
     const { list, step } = shotAngles(s);
     let a = list.length ? list[Math.floor(this.rnd() * list.length)] + r(-0.5, 0.5) * step : r(-SHOT_ANGLE, SHOT_ANGLE);
-    // Précision du niveau : L.aim (écart en x à la distance du point) ramené en angle
-    a += r(-1, 1) * Math.atan((L.aim * SHOT_AIM) / PEN_D);
+    // Précision du niveau : L.aim (écart en x à la distance du point, plus SHOT_AIM_MIN) en angle
+    a += r(-1, 1) * Math.atan((L.aim * SHOT_AIM + SHOT_AIM_MIN) / PEN_D);
     return { dx: Math.sin(a), dy: (s === 1 ? 1 : -1) * Math.cos(a), wait: r(0.4, 1.4), power: HIT_CAP };
   }
 
@@ -849,20 +866,24 @@ export class LocalMatch {
     return true;
   }
 
-  // Jeu normal : 1,4 s d'affilée dans sa grande surface, il en sort (la faute est à 3 s) ; ballon
-  // coincé par lui 0,5 s, il recule (la faute est à 1,5 s)
+  // Jeu normal : chrono de camping (foulClock, qui redescend au lieu de repartir à zéro) à 1,4 s, il
+  // sort de sa grande surface et n'y revient qu'une fois le chrono redescendu à 0,4 s (la faute est
+  // à 3 s) ; ballon coincé par lui 0,5 s, il recule (la faute est à 1,5 s)
   _botEscape(i, p, dt) {
     if (this.phase !== 'live') {
-      p.boxT = 0;
+      p.boxOut = false;
       p.escape = 0;
       return false;
     }
-    p.boxT = inBigBox(p, i) ? p.boxT + dt : 0;
-    if (p.boxT >= BOT_BOX_S) {
+    if (this.campT[i] >= BOT_BOX_S) p.boxOut = true;
+    if (p.boxOut && this.campT[i] > BOT_BOX_LOW) {
       p.tx = clamp(p.x, PR, W - PR);
       p.ty = i === 1 ? BBD + BOT_OUT : H - BBD - BOT_OUT;
-      p.escape = BOT_ESCAPE_S;
       return true;
+    }
+    if (p.boxOut) {
+      p.boxOut = false;
+      p.think = 0;
     }
     if (p.escape > 0) {
       p.escape -= dt;

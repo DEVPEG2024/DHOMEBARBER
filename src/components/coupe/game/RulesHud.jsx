@@ -13,6 +13,8 @@ import { mmss } from './format';
  *    (`goalsToWin`) et ses avertissements (3) ; au milieu, le penalty et son compte (3, 2, 1) ou
  *    le but en or ; dessous, la jauge « Prochain événement » (pendant un événement : son nom et le
  *    temps qui lui reste).
+ *    Hauteur fixe (rangées de 22 et 14 px, libellés sur la même hauteur de ligne) : le terrain ne
+ *    bouge jamais pendant le match, ni au penalty, ni pendant un événement, ni au but en or.
  *    Valeurs lues dans l'image du match par la boucle de l'écran de jeu : `ui` ne change que quand
  *    un chiffre affiché change (quelques fois par seconde au plus) ; la jauge est remplie par la
  *    boucle elle-même (`fillRef`, transform seul), sans rendu React à chaque image.
@@ -65,13 +67,20 @@ export function RulesBar({ ui, names, score, local = false, fillRef }) {
         {ui.digit ? <b>{ui.digit}</b> : null}
       </span>
     );
+    // Le compte (3, 2, 1) est dans la pastille : la ligne dit seulement qui tire
     const shooter = ui.penS === 1 ? 1 : 0;
     if (local) line = `Tir du joueur du ${shooter === 0 ? 'bas' : 'haut'}`;
-    else if (shooter === 0) line = ui.shot ? 'Tir parti' : 'À toi de tirer : 3 s';
-    else line = `${names[1]} tire : garde ta ligne de but`;
+    else if (shooter === 0) line = ui.shot ? 'Tir parti' : 'À toi de tirer';
+    else line = `${names[1]} tire : garde ta cage`;
   } else if (ui.mode === 'gold') {
-    chip = <span className="cdg-v2-chip cdg-v2-gold"><span>But en or</span></span>;
-    line = ui.goldLeft == null ? 'Le prochain but gagne' : `Le prochain but gagne · ${mmss(ui.goldLeft)}`;
+    // Temps qui reste dans la pastille, comme le compte du penalty (la ligne tient à 320 px)
+    chip = (
+      <span className="cdg-v2-chip cdg-v2-gold">
+        <span>But en or</span>
+        {ui.goldLeft != null ? <b>{mmss(ui.goldLeft)}</b> : null}
+      </span>
+    );
+    line = 'Le prochain but gagne';
   }
   // Événement annoncé ou en cours : son nom à la place de « Prochain événement », la jauge montre
   // alors le temps qui lui reste (remplie par la boucle)
@@ -80,7 +89,7 @@ export function RulesBar({ ui, names, score, local = false, fillRef }) {
     : null;
   return (
     <div className="cdg-v2" role="group" aria-label="Buts et avertissements">
-      <div className="cdg-v2-row">
+      <div className="cdg-v2-row cdg-v2-top">
         <span className="cdg-v2-side">
           <span className="cdg-v2-name cdg-me">{names[0]}</span>
           <GoalPips n={a} of={gw} tone="me" label={`${names[0]} : ${buts(a)} sur ${gw}`} />
@@ -91,7 +100,7 @@ export function RulesBar({ ui, names, score, local = false, fillRef }) {
           <span className="cdg-v2-name">{names[1]}</span>
         </span>
       </div>
-      <div className="cdg-v2-row">
+      <div className="cdg-v2-row cdg-v2-low">
         <WarnPips n={ui.warn[0]} label={`Avertissements, ${names[0]} : ${ui.warn[0]} sur ${WARN_MAX}`} />
         {line ? (
           <span className="cdg-v2-line">{line}</span>

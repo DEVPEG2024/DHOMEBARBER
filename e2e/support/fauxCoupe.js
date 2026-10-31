@@ -9,7 +9,9 @@
  * Connexion :
  *  - `auth` doit être le premier message, avec `v: 2` ou `v: 3` (sinon `update_required` puis
  *    4426 ; la connexion garde sa version, `cnx.version`) et un jeton de session du faux serveur
- *    (sinon 4401) ; `refuser` : `error not_allowed` puis 4403 →
+ *    (sinon 4401). `versions` (`[2, 3]` par défaut) : versions acceptées ; `faux.versions = [2]`
+ *    joue un serveur d'avant le protocole v3 (site déployé avant le serveur, ou serveur revenu en
+ *    arrière). `refuser` : `error not_allowed` puis 4403 →
  *    `hello {name, role}` après `delaiAuth` ms (vérification du jeton, 30 ms par défaut) ;
  *    `injoignable` : la connexion est refermée aussitôt ;
  *  - pendant la vérification, comme le serveur : 2 `ping` au plus, la dernière commande de salle
@@ -156,6 +158,8 @@ export class FauxCoupe {
      * `rules: 2, gw: 5` dans le `start` d'une connexion en protocole v3).
      */
     this.regles = 1;
+    /** Versions du protocole acceptées par `auth` : `[2]` pour un serveur d'avant la v3. */
+    this.versions = [2, 3];
     this.delaiAuth = DELAI_AUTH;
     this.delaiReprise = DELAI_REPRISE;
     /** Sockets fermées en 1008 (message de jeu avant `hello`). */
@@ -502,7 +506,7 @@ export class FauxCoupe {
       }
       cnx.authRecu = true;
       // Protocole v2 (apps publiées) ou v3 (règlement v2 possible) ; la connexion garde sa version
-      if (m.v !== 2 && m.v !== 3) {
+      if (!this.versions.includes(m.v)) {
         cnx.envoyer({ t: 'error', code: 'update_required' });
         cnx.ferme = true;
         cnx.ws.close({ code: 4426, reason: 'update_required' });

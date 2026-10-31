@@ -7,7 +7,9 @@
  * Protocole v3 (31 oct. 2026) : `auth.v` = 3. Le serveur joue le règlement v2 seulement si les deux
  * téléphones sont en v3 (`start.rules === 2`, `start.gw` = 5) ; sans `start.rules` (adversaire sur
  * une app publiée, ou `COUPE_RULES_V2=off`), tout se passe exactement comme en v2 : aucun champ du
- * règlement v2 n'est lu, l'image et les événements ajoutés restent neutres (0, null, []).
+ * règlement v2 n'est lu, l'image et les événements ajoutés restent neutres (0, null, []). Serveur
+ * plus ancien qui répond `update_required` à la v3 (site déployé avant lui, ou serveur revenu en
+ * arrière) : une seule nouvelle connexion en v2, sans rien montrer, et la règle d'aujourd'hui.
  *
  * Principe « la frappe appartient à celui qui frappe » :
  *  - ce téléphone simule son joueur et le ballon sans attendre ; il ne fait le choc qu'avec SON
@@ -55,34 +57,42 @@
  *  - état : `b` à 7 valeurs (`fx`, `own`, `air` ; `own` tourné pour le joueur 1), `md` (penalty,
  *    but en or), `w`, `cp`, `pk` (échangés pour le joueur 1), `ne` ; phase `pen` : son joueur est posé
  *    sur `penaltyPlace(0, tireur local)` à son début, comme à l'engagement ; le mode du moteur
- *    (`movePaddle`, `unpin`) suit `md` ;
+ *    (`movePaddle`, `unpin`) est `modeAt(md, fld, t)` (ligne de but interdite pendant des cages
+ *    qui bougent) ; chrono de camping de son joueur tenu par le téléphone (`foulClock`, remis à 0
+ *    par sa frappe) ; au but en or, plus de compte à rebours des 5 minutes (`timeLeft` null) ;
  *  - affichage : la frontière entre « sa » zone (ballon prédit au présent) et celle de
  *    l'adversaire (ballon au même instant que lui) suit le mode. Jeu normal : la ligne médiane.
- *    Penalty : le milieu entre la ligne du gardien et le point de penalty (le tireur passe la ligne
- *    médiane, le gardien reste sur sa ligne). But en or (les deux joueurs vont partout, sauf dans les
- *    petites surfaces) : le ballon appartient à celui des deux joueurs dont il est le plus près
+ *    Penalty : chez le tireur, le milieu entre la ligne du gardien et le point de penalty (le
+ *    tireur passe la ligne médiane, le gardien reste sur sa ligne) ; chez le gardien, le tir tel que
+ *    le tireur l'a vu, en entier et à sa vitesse, jusqu'à PEN_BAND * 2 de la portée de son joueur ;
+ *    le limiteur de sauts reste actif partout pendant un penalty. But en or (les deux joueurs vont
+ *    partout, sauf dans les petites surfaces) : le ballon appartient au joueur dont il est le plus près
  *    (soi au présent, l'adversaire tel qu'il est affiché) ; en jeu normal, ce partage retombe sur la
  *    ligne médiane. Les frappes adverses sont repérées de la même façon (près de l'adversaire en but
  *    en or). La prédiction ne fait toujours le choc qu'avec SON joueur : une frappe de l'adversaire
  *    dans sa moitié (but en or) arrive par le recalage, et l'affichage montre alors le ballon de
  *    l'adversaire (vue retardée), qui ne le traverse jamais ;
  *  - effet du ballon affiché (`fx`, `own`, `air`) : celui de l'horloge qui domine l'affichage
- *    (présent ou vue adverse), sans jamais revenir à un état plus ancien que celui déjà montré : un
- *    ballon allumé par sa frappe reste allumé quand la vue adverse, en retard, ne le sait pas encore.
- *    Les événements `fire`, `charge`, `douse`, `short` naissent de ses changements, une fois chacun
- *    (rien sur un recalage qui confirme, rien sur une frappe refusée) ; `bolt` quand l'heure du
- *    serveur passe un éclair ;
+ *    (présent ou vue adverse), sans jamais revenir à un état plus ancien que celui déjà montré (un
+ *    ballon allumé par sa frappe reste allumé quand la vue adverse, en retard, ne le sait pas
+ *    encore) ; les changements locaux sont ordonnés par un numéro croissant, et un effet sur lequel
+ *    les deux horloges s'accordent est toujours pris. Une prévision du terrain (gel, foudre, eau) ou
+ *    une frappe risquée (poussée, bord, frappes pas encore acquittées) n'est montrée que confirmée
+ *    par le serveur (150 ou 300 ms au plus). Les événements `fire`, `charge`, `douse`, `short`
+ *    naissent de ses changements, une fois chacun (rien sur un recalage qui confirme, rien quand le
+ *    serveur défait une prévision) ; `bolt` quand l'heure du serveur passe un éclair (jamais après
+ *    la fin de son orage) ;
  *  - cages qui bougent : `getFrame().goalOff` donne la cage du bas à l'heure présente et celle du
  *    haut à l'heure de la vue adverse, celles où le ballon affiché les rencontre ; la ligne de but
  *    du ballon affiché suit ces décalages.
  */
 import {
   W, H, GL, GR, BR, PR, STEP, HUMAN_SPEED, KEEP_LIMIT, BALL_MAX, GOALS_TO_WIN,
-  RULES_V2, GOALS_TO_WIN_V2, FX_NONE, FX_FIRE, FX_ELEC, HOP_S, CAMP_S, BLOCK_S, EVENT_KINDS,
+  RULES_V2, GOALS_TO_WIN_V2, FX_NONE, FX_FIRE, FX_ELEC, HOP_S, CAMP_S, BLOCK_S, EVENT_KINDS, PIN_BAND,
   createBall, createPaddle, homePaddle, flipPoint, flipVel,
   movePaddle, stepBall, collidePaddle, walls, unpin, advanceBall,
-  touchBall, goalOffsets, liveEvents, flipEvent, penaltyPlace, penaltySpot, keeperLine,
-  inBigBox, pinnedBy, pinClock,
+  touchBall, goalOffsets, liveEvents, flipEvent, penaltyPlace, penaltySpot, keeperLine, modeAt,
+  inBigBox, pinnedBy, foulClock,
 } from './engine.js';
 import { API_SERVER_URL, getToken as readToken } from '@/api/apiClient';
 
@@ -202,6 +212,23 @@ const FLD_MAX = 24;
 // Frappe adverse en but en or : ballon à moins de cette distance de l'adversaire (contact + trajet
 // d'un intervalle d'état)
 const OPP_REACH_GOLD = PR + BR + 70;
+// Feu allumé (ou feu adverse éteint) par ma frappe pendant une poussée (choc moins de 60 ms après le
+// précédent), contre un bord (ballon à moins de BR + PIN_BAND d'un bord) ou derrière des frappes pas
+// encore acquittées : le serveur, qui refait le choc, le refuse ou le juge autrement assez souvent
+// (0 à 3 feux fantômes par match, contre-expertise du 31 oct. 2026) ; montré seulement confirmé par
+// le serveur. Une frappe nette, loin des bords : tout de suite
+const PUSH_GAP_MS = 60;
+const nearBorder = (b) => b.x <= BR + PIN_BAND || b.x >= W - BR - PIN_BAND || b.y <= BR + PIN_BAND || b.y >= H - BR - PIN_BAND;
+// Penalty vu du gardien : la vue du tireur (au même instant que lui) jusqu'à PEN_BAND * 2 unités de
+// la portée de son joueur, le ballon prédit au présent à partir de là (contre-expertise du 31 oct.
+// 2026 : avec la bande du jeu normal, 9 à 13 sauts de 40 à 80 unités par match et les 100 premières
+// unités du tir jamais montrées)
+const PEN_BAND = 40;
+// Prévision à confirmer par le serveur (voir _noteLocalFx) : montrée quand même au bout de 150 ms
+// (terrain) ou 300 ms (frappe risquée) sans démenti, les recalages pouvant être suspendus par une
+// frappe en attente
+const CONFIRM_MS = 150;
+const RISKY_MS = 300;
 // Match quitté sans abandon : lien gardé pour la reprise (onglet seulement, jamais d'un appareil à l'autre)
 const RESUME_KEY = 'cdg-reprise';
 /** Événement de `window` quand le match à reprendre change (accueil de la Coupe). */
@@ -222,6 +249,7 @@ const smooth = (u) => u * u * (3 - 2 * u);
 // Effet du ballon réduit à une valeur comparable : effet, camp qui l'a donné, ballon en l'air
 const fxKeyOf = (fx, own, air) => fx * 6 + (fx ? own + 1 : 0) * 2 + (air > 0 ? 1 : 0);
 const NO_FX = Object.freeze({ fx: FX_NONE, own: -1, air: 0 });
+const NO_EVENTS = Object.freeze([]);
 
 // Liste de 1 à `max` tableaux d'au moins `n` nombres
 const rows = (a, n, max) => Array.isArray(a) && a.length >= 1 && a.length <= max
@@ -470,6 +498,9 @@ export class OnlineMatch {
     // Règlement du match en cours (`start.rules`, `start.gw`)
     this.rules = 1;
     this.goalsToWin = GOALS_TO_WIN;
+    // Version du protocole envoyée dans `auth` : 3, ou 2 après un `update_required` d'un serveur
+    // plus ancien (gardée pour toute la vie de cet écran)
+    this.proto = PROTOCOL_VERSION;
     this._resetMatch();
     // Bruits de la prédiction locale. 'fire', 'charge', 'douse' et 'short' (règlement v2) ne sortent
     // pas d'ici : ils naissent du ballon AFFICHÉ (_shownFx), une fois chacun
@@ -757,8 +788,12 @@ export class OnlineMatch {
         this.playedMs += dt * 1000;
         if (this.timeLeftMs != null) this.timeLeftMs = Math.max(0, this.timeLeftMs - dt * 1000);
       }
-      // Règlement v2 : événements finis oubliés, éclairs annoncés quand leur heure passe
+      // Règlement v2 : événements finis oubliés, éclairs annoncés quand leur heure passe ; chrono de
+      // camping de son joueur (jeu normal seulement)
       if (this.fld.length) this._tickEvents(this.serverNow());
+      if (this.rules === RULES_V2) {
+        this.campMine = this.phase === 'live' && !this.md ? foulClock(this.campMine, inBigBox(this.me, 0), dt) : 0;
+      }
       // État reçu plus récent que le ballon local à son arrivée : comparé maintenant que la
       // simulation l'a rattrapé
       const late = this.lateState;
@@ -798,6 +833,25 @@ export class OnlineMatch {
     const v2 = this.rules === RULES_V2;
     // Secondes de jeu écoulées depuis le dernier état (les chronos du serveur n'avancent qu'en jeu)
     const el = v2 && this.phase === 'live' && this.v2At != null ? Math.max(0, (now - this.v2At) / 1000) : 0;
+    // Tableaux et objets de l'image réutilisés d'une image à l'autre (comme LocalMatch) : le dessin
+    // garde ses propres copies des valeurs
+    const F = this.fv;
+    F.paddles[0] = this.me;
+    F.paddles[1] = this.view.opp;
+    F.warn[0] = this.warn[0];
+    F.warn[1] = this.warn[1];
+    if (v2) {
+      this._campNow(el, F.camp);
+      this._pinNow(el, F.pin);
+    } else {
+      F.camp[0] = 0; F.camp[1] = 0; F.pin[0] = 0; F.pin[1] = 0;
+    }
+    let next = null;
+    if (v2 && this.nextEv) {
+      next = F.next;
+      next.left = Math.max(0, this.nextEv.left - el);
+      next.total = this.nextEv.total;
+    }
     return {
       phase: this.phase,
       phaseT,
@@ -807,62 +861,63 @@ export class OnlineMatch {
       score: this.score,
       flashBox: this.flash,
       ball: this.view.ball,
-      paddles: [this.me, this.view.opp],
-      // Secondes de jeu restantes après `time_left` (null avant)
+      paddles: F.paddles,
+      // Secondes de jeu restantes après `time_left` (null avant, et au but en or)
       timeLeft: this.timeLeftMs == null ? null : Math.ceil(this.timeLeftMs / 1000),
       // Règlement v2 (neutre en règle d'aujourd'hui)
       rules: this.rules,
       goalsToWin: this.goalsToWin,
       // Heure des événements : celle du serveur, estimée
       now,
-      events: v2 ? this.fld.filter((e) => now < e.until) : [],
-      goalOff: v2 ? this._goalOff(now) : null,
+      events: v2 ? this._frameEvents(now) : NO_EVENTS,
+      // Cages qui bougent : calculées par _computeView (celle du bas à l'heure présente, celle du
+      // haut à l'heure de la vue adverse)
+      goalOff: v2 ? this.goalOff : null,
       mode: v2 ? this._frameMode(el) : null,
-      warn: [this.warn[0], this.warn[1]],
-      camp: v2 ? this._campNow(el) : [0, 0],
-      pin: v2 ? this._pinNow(el) : [0, 0],
-      nextEvent: v2 && this.nextEv ? { left: Math.max(0, this.nextEv.left - el), total: this.nextEv.total } : null,
+      warn: F.warn,
+      camp: F.camp,
+      pin: F.pin,
+      nextEvent: next,
     };
-  }
-
-  // Cages qui bougent : celle du bas à l'heure présente (le ballon y est prédit au présent), celle
-  // du haut à l'heure de la vue adverse (le ballon y est montré au même instant que l'adversaire)
-  _goalOff(now) {
-    const b = goalOffsets(this.fld, now);
-    const t = goalOffsets(this.fld, now - this.viewDelay);
-    if (!b && !t) return null;
-    return [b ? b[0] : 0, t ? t[1] : 0];
   }
 
   // Mode affiché : { k: 'pen', s, left } ou { k: 'gold', left } ; `left` s'écoule en jeu
   _frameMode(el) {
     const md = this.md;
     if (!md) return null;
-    if (md.k === 'pen') return { k: 'pen', s: md.s, left: md.left < 0 ? -1 : Math.max(0, md.left - el) };
-    return { k: 'gold', left: Math.max(0, md.left - el) };
+    const F = this.fv;
+    if (md.k === 'pen') {
+      F.pen.s = md.s;
+      F.pen.left = md.left < 0 ? -1 : Math.max(0, md.left - el);
+      return F.pen;
+    }
+    F.gold.left = Math.max(0, md.left - el);
+    return F.gold;
   }
 
-  // Secondes d'affilée dans sa grande surface : celles du serveur, avancées depuis son état. Pour
-  // son joueur, le téléphone sait tout de suite qu'il en est sorti ou qu'il a touché le ballon
-  _campNow(el) {
+  // Secondes de camping (chrono `foulClock` : monte dans sa grande surface, redescend deux fois plus
+  // vite dehors). Le sien est tenu par le téléphone (remis à 0 par sa frappe), et celui du serveur
+  // le relève s'il est plus haut, sauf juste après sa frappe (le serveur ne la connaît pas encore) ;
+  // celui de l'adversaire : celui du serveur, avancé depuis son état
+  _campNow(el, out) {
     const c = this.campS;
     let mine = 0;
-    if (!this.md && inBigBox(this.me, 0)) {
-      // Dernier état calculé avant que le serveur connaisse ma dernière frappe (un demi-aller-retour
-      // plus tard) : le chrono repart de cette frappe
-      const before = this.v2At < this.lastHitAt + (this.pingMs ?? 150) / 2 + 50;
-      if (before && this.phase === 'live') mine = Math.max(0, (this.serverNow() - this.lastHitAt) / 1000);
-      else if (c[0] > 0) mine = c[0] + el;
+    if (!this.md && this.phase === 'live') {
+      mine = this.campMine;
+      const fresh = this.v2At != null && this.v2At >= this.lastCollideAt + (this.pingMs ?? 150) / 2 + 50;
+      if (fresh && c[0] > 0) mine = Math.max(mine, foulClock(c[0], inBigBox(this.me, 0), el));
     }
-    return [Math.min(CAMP_S, mine), c[1] > 0 ? Math.min(CAMP_S, c[1] + el) : 0];
+    const opp = this.view.opp;
+    out[0] = Math.min(CAMP_S, mine);
+    out[1] = c[1] > 0 ? Math.min(CAMP_S, foulClock(c[1], opp ? inBigBox(opp, 1) : true, el)) : 0;
   }
 
   // Secondes de ballon bloqué : celles du serveur, avancées depuis son état (la sienne redescend
-  // comme chez le serveur, pinClock, dès que le ballon prédit n'est plus coincé par son joueur)
-  _pinNow(el) {
+  // comme chez le serveur, foulClock, dès que le ballon prédit n'est plus coincé par son joueur)
+  _pinNow(el, out) {
     const p = this.pinS;
-    const mine = p[0] > 0 && !this.md ? Math.min(BLOCK_S, pinClock(p[0], pinnedBy(this.ball, this.me, 0), el)) : 0;
-    return [mine, p[1] > 0 ? Math.min(BLOCK_S, p[1] + el) : 0];
+    out[0] = p[0] > 0 && !this.md ? Math.min(BLOCK_S, foulClock(p[0], pinnedBy(this.ball, this.me, 0), el)) : 0;
+    out[1] = p[1] > 0 ? Math.min(BLOCK_S, p[1] + el) : 0;
   }
 
   // ─── Simulation locale ───────────────────────────────────────────
@@ -923,7 +978,9 @@ export class OnlineMatch {
     // celui du moteur, avertissements, chronos des fautes, prochain événement, heure de l'état qui
     // les a donnés, tireur du dernier penalty sifflé
     this.fld = [];
-    this.bolts = new Set();
+    // Éclairs déjà annoncés : un masque de bits par orage (id → masque)
+    this.boltMask = new Map();
+    this._fldChanged();
     this.md = null;
     this.engMode = undefined;
     this.warn = [0, 0];
@@ -936,9 +993,22 @@ export class OnlineMatch {
     // l'heure (serveur) où il a commencé. `mine` : donné par ma propre frappe ; `quiet` : venu d'un
     // recalage qui défait ce que ma dernière frappe venait de faire (refusée ou jugée autrement par
     // le serveur) : pas d'éclat ; `prevKey` : effet d'avant
-    this.fxLocal = { key: fxKeyOf(0, -1, 0), fx: FX_NONE, own: -1, start: -Infinity, mine: false, quiet: false, prevKey: fxKeyOf(0, -1, 0) };
-    this.fxShown = { key: fxKeyOf(0, -1, 0), fx: FX_NONE, own: -1, air: 0, start: -Infinity };
+    this.fxSeq = 0;
+    this.fxLocal = { key: fxKeyOf(0, -1, 0), fx: FX_NONE, own: -1, start: -Infinity, seq: 0, mine: false, quiet: false, pred: false, prevKey: fxKeyOf(0, -1, 0), hitN: 0, confirm: false, cap: 0 };
+    this.fxShown = { key: fxKeyOf(0, -1, 0), fx: FX_NONE, own: -1, air: 0, start: -Infinity, seq: 0 };
+    // Dernière frappe acceptée par le serveur (`acc`), heure (serveur) du dernier choc de mon joueur,
+    // chrono de camping de mon joueur (foulClock, tenu par le téléphone)
+    this.lastAcc = 0;
+    this.lastCollideAt = -Infinity;
+    this.campMine = 0;
     this.view = { ball: { ...this.ball, ...NO_FX }, opp: null };
+    // Image : cages qui bougent (null, ou [bas, haut] réutilisé), tableaux et objets réutilisés
+    this.goalOff = null;
+    this.goalOffArr = [0, 0];
+    this.fv = {
+      paddles: [this.me, null], warn: [0, 0], camp: [0, 0], pin: [0, 0], next: { left: 0, total: 0 },
+      pen: { k: 'pen', s: 0, left: 0 }, gold: { k: 'gold', left: 0 },
+    };
   }
 
   /** Les messages de jeu (`in`, `hit`, `react`) peuvent partir : compte accepté, pas de reprise ni d'abandon. */
@@ -952,7 +1022,13 @@ export class OnlineMatch {
   _step(slow) {
     const me = this.me;
     const b = this.ball;
-    const mode = this.engMode;
+    const v2 = this.rules === RULES_V2;
+    const fld = v2 && this.fld.length ? this.fld : undefined;
+    const t = this.simNow - STEP_MS;
+    // Mode du moteur à l'heure du pas : penalty, but en or, ou ligne de but interdite pendant des
+    // cages qui bougent (`modeAt`) ; cages décalées à cette heure
+    const gx = fld ? goalOffsets(fld, t) : undefined;
+    const mode = v2 ? modeAt(this.engMode, fld, t) || undefined : undefined;
     if (this.target) { me.tx = this.target.x; me.ty = this.target.y; } else { me.tx = me.x; me.ty = me.y; }
     if (movePaddle(me, 0, STEP, HUMAN_SPEED, mode)) {
       this.flash = 0.5;
@@ -961,34 +1037,50 @@ export class OnlineMatch {
     const ph = this.phase;
     if (ph === 'count' || ph === 'ready' || ph === 'pause' || ph === 'pen') { unpin(b, me, 0, mode); return; }
     if (ph === 'over') return;
-    const v2 = this.rules === RULES_V2;
-    const fld = v2 && this.fld.length ? this.fld : undefined;
-    const t = this.simNow - STEP_MS;
     stepBall(b, STEP * slow, this._wallFx, fld, t);
-    if (v2) this._noteLocalFx(false, false);
+    if (v2) this._noteLocalFx(false, false, true, 0, CONFIRM_MS);
     if (ph !== 'live') return; // but : le ballon finit sa course au fond des filets, au ralenti
     // Joueur tel qu'il est au moment du choc (avant d'être reculé par `unpin`)
     const pad = { x: me.x, y: me.y, vx: me.vx, vy: me.vy };
     const v = collidePaddle(b, me, 0); // son propre joueur seulement
     // Règlement v2 : feu allumé par une frappe très forte, feu ou charge de l'adversaire éteints
     const touched = v > 0 && v2 ? touchBall(b, 0, v) : null;
-    walls(b, null, fld ? goalOffsets(fld, t) : undefined); // ballon poussé contre un bord : remis dans le terrain
+    walls(b, null, gx); // ballon poussé contre un bord : remis dans le terrain
     unpin(b, me, 0, mode);
-    if (v2) this._noteLocalFx(touched !== null, false);
     if (v > 0) this._onLocalHit(v, pad);
+    if (v2) {
+      // Feu allumé (ou feu adverse éteint) pendant une poussée, contre un bord ou derrière des
+      // frappes pas encore acquittées : le serveur, qui refait le choc, le refuse ou le juge
+      // autrement assez souvent ; montré seulement confirmé par le serveur (voir _noteLocalFx)
+      const n = this.seq + (this.pendingHit ? 1 : 0); // numéro de la frappe qui porte ce choc
+      // (ou après d'autres frappes pas encore acquittées : un refus de l'une entraîne les suivantes)
+      const risky = touched !== null
+        && (this.simNow - this.lastCollideAt < PUSH_GAP_MS || nearBorder(b) || this.ackedSeq < n - 1);
+      this._noteLocalFx(touched !== null, false, true, touched !== null ? n : 0, risky ? RISKY_MS : 0);
+    }
+    if (v > 0) this.lastCollideAt = this.simNow;
     this._flushHit();
   }
 
-  // Effet du ballon local changé (prédiction, recalage) : noté avec son heure (serveur) et l'effet
-  // d'avant (`prevKey`)
-  _noteLocalFx(mine, quiet) {
+  // Effet du ballon local changé (prédiction, recalage) : noté avec un numéro croissant (`seq`, qui
+  // ordonne les changements locaux entre eux), son heure (serveur) et l'effet d'avant (`prevKey`).
+  // `pred` : venu de la prédiction locale (un pas de physique), pas d'un recalage ; `hitN` : numéro
+  // de ma frappe qui l'a fait ; `confirmMs` (> 0) : à faire confirmer par le serveur avant de le
+  // montrer (recalage suivant : le ballon du serveur amené à maintenant a le même effet), au plus
+  // `confirmMs` ms : prévision du terrain (gel, foudre, eau : une trajectoire à peine différente de
+  // celle du serveur ne l'aurait pas) ou frappe risquée
+  _noteLocalFx(mine, quiet, pred = true, hitN = 0, confirmMs = 0) {
     const b = this.ball;
     const fx = b.fx || FX_NONE;
     const own = fx ? (b.own === 0 || b.own === 1 ? b.own : -1) : -1;
     const key = fxKeyOf(fx, own, b.air);
     const L = this.fxLocal;
     if (key === L.key) return;
-    this.fxLocal = { key, fx, own, start: this.simNow > 0 ? this.simNow : this.serverNow(), mine, quiet, prevKey: L.key };
+    this.fxSeq += 1;
+    this.fxLocal = {
+      key, fx, own, start: this.simNow > 0 ? this.simNow : this.serverNow(), seq: this.fxSeq, mine, quiet, pred, prevKey: L.key,
+      hitN, confirm: confirmMs > 0, cap: confirmMs,
+    };
   }
 
   // Envoi des frappes. Chaque `hit` est l'instantané d'un choc : position et vitesse de son joueur.
@@ -1020,6 +1112,8 @@ export class OnlineMatch {
 
   _onLocalHit(v, pad) {
     const b = this.ball;
+    // Camping : remis à zéro par une frappe de son joueur (comme chez le serveur)
+    this.campMine = 0;
     const now = performance.now();
     if (now - this.lastHitFx >= 60) {
       this.lastHitFx = now;
@@ -1100,13 +1194,25 @@ export class OnlineMatch {
     this.gate += (gateTarget - this.gate) * Math.min(1, dt / GATE_TAU);
     if (this.gate < 0.001) this.gate = 0;
     const opp = this._oppAt(tView);
+    // Cages qui bougent (règlement v2) : celle du bas à l'heure présente, celle du haut à l'heure de
+    // la vue adverse ; une fois par image, pour la ligne de but du ballon affiché et pour l'image
+    this.goalOff = null;
+    if (this.fldGoals) {
+      const gB = goalOffsets(this.fld, tView + this.viewDelay);
+      const gT = goalOffsets(this.fld, tView);
+      if (gB || gT) {
+        this.goalOffArr[0] = gB ? gB[0] : 0;
+        this.goalOffArr[1] = gT ? gT[1] : 0;
+        this.goalOff = this.goalOffArr;
+      }
+    }
     let d = null;
     let w = 0;
     if (live) {
       d = this.gate > 0 ? this._ballAt(tView) : null;
       if (d) {
         const band = Math.max(BAND_MIN, (this.viewDelay / 1000) * BAND_PER_S);
-        w = this._oppWeight(x, y, band, opp) * this.gate; // 1 chez l'adversaire
+        w = this._oppWeight(x, y, band, opp, d) * this.gate; // 1 chez l'adversaire
         x += (d.x - x) * w;
         y += (d.y - y) * w;
       }
@@ -1123,8 +1229,10 @@ export class OnlineMatch {
         // Vers une ligne de but : le ballon affiché y va (dy), ou le ballon local y file (vy)
         const down = dy > 0 || b.vy > 0;
         const up = dy < 0 || b.vy < 0;
-        const nearGoal = (down && (y > H - URGENT_DIST || prev.y > H - URGENT_DIST))
-          || (up && (y < URGENT_DIST || prev.y < URGENT_DIST));
+        // (penalty : le limiteur reste partout, la vue du gardien rattrape le présent sans saut)
+        const pen = this.engMode && this.engMode.k === 'pen';
+        const nearGoal = !pen && ((down && (y > H - URGENT_DIST || prev.y > H - URGENT_DIST))
+          || (up && (y < URGENT_DIST || prev.y < URGENT_DIST)));
         if (dist > allowed && dist < SHOW_SNAP && !nearGoal) {
           x = prev.x + (dx * allowed) / dist;
           y = prev.y + (dy * allowed) / dist;
@@ -1132,22 +1240,29 @@ export class OnlineMatch {
       }
       // Ligne de but : le ballon affiché n'entre dans une cage qu'au `goal` du serveur (cages qui
       // bougent : celle du bas à l'heure présente, celle du haut à l'heure de la vue adverse)
-      let dB = 0;
-      let dT = 0;
-      if (this.fld.length) {
-        const gB = goalOffsets(this.fld, this.serverNow());
-        const gT = goalOffsets(this.fld, tView);
-        dB = gB ? gB[0] : 0;
-        dT = gT ? gT[1] : 0;
-      }
+      const g = this.goalOff;
+      const dB = g ? g[0] : 0;
+      const dT = g ? g[1] : 0;
       if ((y > H && x > GL + dB && x < GR + dB) || (y < 0 && x > GL + dT && x < GR + dT)) y = clampN(y, 0, H);
-      this.shownPrev = { x, y };
+      const sp = this.shownPrevObj || (this.shownPrevObj = { x, y });
+      sp.x = x;
+      sp.y = y;
+      this.shownPrev = sp;
     } else {
       this.shownPrev = null;
       this.viewWeight = 0;
     }
     const fx = this.rules === RULES_V2 ? this._shownFx(live, w, d, dt, x, y) : NO_FX;
-    this.view.ball = { x, y, vx: b.vx, vy: b.vy, roll: b.roll, fx: fx.fx, own: fx.own, air: fx.air };
+    // Ballon affiché : le même objet d'une image à l'autre (comme LocalMatch)
+    const vb = this.view.ball;
+    vb.x = x;
+    vb.y = y;
+    vb.vx = b.vx;
+    vb.vy = b.vy;
+    vb.roll = b.roll;
+    vb.fx = fx.fx;
+    vb.own = fx.own;
+    vb.air = fx.air;
     this.view.opp = opp;
   }
 
@@ -1158,12 +1273,21 @@ export class OnlineMatch {
    * penalty. But en or : selon le joueur le plus proche (soi au présent, l'adversaire affiché) ; avec
    * deux joueurs chacun dans sa moitié, c'est la ligne médiane.
    */
-  _oppWeight(x, y, band, opp) {
+  _oppWeight(x, y, band, opp, d = null) {
     const mode = this.engMode;
     if (mode && mode.k === 'gold' && opp) {
       const dMe = Math.hypot(x - this.me.x, y - this.me.y);
       const dOp = Math.hypot(x - opp.x, y - opp.y);
       return smooth(clampN(((dMe - dOp) / 2 + band) / (2 * band), 0, 1));
+    }
+    if (mode && mode.k === 'pen' && mode.s === 1) {
+      // Gardien : le tir est montré tel que le tireur l'a vu, en entier et à sa vitesse (d'après la
+      // place du ballon dans cette vue : le ballon prédit, lui, est déjà presque sur le gardien quand
+      // le tir arrive par le réseau) ; à la portée de son joueur, le ballon prédit au présent reprend
+      // la main
+      const reach = keeperLine(0) - (PR + BR);
+      const yv = d ? d.y : y;
+      return 1 - smooth(clampN((yv - (reach - 2 * PEN_BAND)) / (2 * PEN_BAND), 0, 1));
     }
     const u = clampN((y - (this._midY() - band)) / (2 * band), 0, 1);
     return 1 - smooth(u);
@@ -1193,35 +1317,53 @@ export class OnlineMatch {
   _shownFx(live, w, d, dt, x, y) {
     const shown = this.fxShown;
     const L = this.fxLocal;
+    const air = this.ball.air > 0 ? this.ball.air : 0;
     if (!live) {
-      const b = this.ball;
-      const air = b.air > 0 ? b.air : 0;
-      if (shown.key !== L.key) this.fxShown = { key: L.key, fx: L.fx, own: L.own, air, start: Math.max(shown.start, L.start) };
-      else shown.air = air;
+      if (shown.key !== L.key) this._setShown(L.key, L.fx, L.own, air, Math.max(shown.start, L.start), L.seq);
+      else { shown.air = air; shown.seq = L.seq; }
       return this.fxShown;
     }
-    const src = w >= 0.5 && d && d.fxKey !== undefined
-      ? { key: d.fxKey, fx: d.fx, own: d.own, air: d.air, start: d.fxStart, quiet: false }
-      : { key: L.key, fx: L.fx, own: L.own, air: this.ball.air > 0 ? this.ball.air : 0, start: L.start, quiet: L.quiet };
-    if (src.key !== shown.key && src.start > shown.start) {
-      const next = { key: src.key, fx: src.fx, own: src.own, air: src.air, start: src.start };
-      this.fxShown = next;
-      if (!src.quiet) this._emitFx(shown, next, x, y);
-      return next;
+    // Ballon local : plus récent que l'état montré s'il a changé depuis (numéro croissant : son heure
+    // peut reculer d'une fraction de pas quand la simulation se recale sur la grille du serveur), et
+    // pas une prévision qui attend la confirmation du serveur
+    const held = L.confirm && (this.simNow > 0 ? this.simNow : this.serverNow()) - L.start < L.cap;
+    const localNewer = L.seq > shown.seq && !held;
+    if (w >= 0.5 && d && d.fxKey !== undefined) {
+      // Vue adverse : plus récente si son changement est plus tardif (heure du serveur)
+      if (d.fxKey !== shown.key && d.fxStart > shown.start) {
+        this._showFx(shown, d.fxKey, d.fx, d.own, d.air, d.fxStart, L.key === d.fxKey ? L.seq : shown.seq, false, x, y);
+        return this.fxShown;
+      }
+    } else if (L.key !== shown.key && localNewer) {
+      this._showFx(shown, L.key, L.fx, L.own, air, Math.max(shown.start, L.start), L.seq, L.quiet, x, y);
+      return this.fxShown;
     }
-    if (src.key === shown.key) {
-      shown.air = src.air;
+    // Les deux horloges d'accord sur un autre effet que celui montré : c'est lui
+    if (d && d.fxKey === L.key && L.key !== shown.key && !held) {
+      this._showFx(shown, L.key, L.fx, L.own, air, Math.max(shown.start, L.start, d.fxStart), L.seq, L.quiet, x, y);
+      return this.fxShown;
+    }
+    const srcKey = w >= 0.5 && d && d.fxKey !== undefined ? d.fxKey : L.key;
+    if (srcKey === shown.key) {
+      shown.air = srcKey === L.key ? air : d.air;
       return shown;
     }
     // Source en retard : l'état montré reste ; un bond montré retombe tout seul au bout de HOP_S
     if (shown.key % 2 === 1) {
       shown.air = Math.max(0, shown.air - dt);
-      if (shown.air <= 0) {
-        this.fxShown = { key: fxKeyOf(FX_NONE, -1, 0), fx: FX_NONE, own: -1, air: 0, start: shown.start + HOP_S * 1000 };
-        return this.fxShown;
-      }
+      if (shown.air <= 0) this._setShown(fxKeyOf(FX_NONE, -1, 0), FX_NONE, -1, 0, shown.start + HOP_S * 1000, shown.seq);
     }
-    return shown;
+    return this.fxShown;
+  }
+
+  _setShown(key, fx, own, air, start, seq) {
+    this.fxShown = { key, fx, own, air, start, seq };
+  }
+
+  // Effet montré qui change : son événement (sauf correction d'une frappe refusée)
+  _showFx(prev, key, fx, own, air, start, seq, quiet, x, y) {
+    this._setShown(key, fx, own, air, start, seq);
+    if (!quiet) this._emitFx(prev, this.fxShown, x, y);
   }
 
   // Événements nés d'un changement de l'effet du ballon affiché (contrat du règlement v2, section 6)
@@ -1384,6 +1526,7 @@ export class OnlineMatch {
     list.push(e);
     while (list.length > FLD_MAX) list.shift();
     this.fld = list;
+    this._fldChanged();
     this.emit('event', { e });
   }
 
@@ -1397,6 +1540,7 @@ export class OnlineMatch {
     const now = this.serverNow();
     if (now < e.until) {
       this.fld = this.fld.map((x) => (x.id === id ? { ...x, until: Math.max(x.an, now), at: Math.min(x.at, Math.max(x.an, now)) } : x));
+      this._fldChanged();
     }
     this.emit('event_end', { id });
   }
@@ -1423,23 +1567,73 @@ export class OnlineMatch {
 
   _onGold() {
     if (!this._v2Live()) return;
+    this._clearTimeLeft();
     this.emit('gold', {});
+  }
+
+  // But en or : le temps de jeu des 5 minutes est fini, son compte à rebours (`time_left`) aussi ;
+  // le temps du but en or est celui du mode (`mode.left`)
+  _clearTimeLeft() {
+    this.timeLeftMs = null;
+    if (this.ui.timeWarn) this._set({ timeWarn: false });
   }
 
   // Événements à l'heure `now` (serveur) : éclairs annoncés une fois, événements finis oubliés
   _tickEvents(now) {
-    for (const e of this.fld) {
-      if (e.k !== 'storm' || now < e.an) continue;
-      e.b.forEach((s, i) => {
-        if (now < s[2]) return;
-        const id = `${e.id}:${i}`;
-        if (this.bolts.has(id)) return;
-        this.bolts.add(id);
-        if (now - s[2] < BOLT_LATE_MS) this.emit('bolt', { x: s[0], y: s[1] });
-      });
+    if (this.fldStorm) {
+      for (const e of this.fld) {
+        if (e.k !== 'storm' || now < e.an) continue;
+        const done = this.boltMask.get(e.id) || 0;
+        let mask = done;
+        for (let i = 0; i < e.b.length; i++) {
+          const s = e.b[i];
+          if (mask & (1 << i) || now < s[2]) continue;
+          mask |= 1 << i;
+          // Éclair prévu après la fin de son orage (fini plus tôt par `ev_end` : penalty, but en or) :
+          // il n'a jamais lieu
+          if (s[2] < e.until && now - s[2] < BOLT_LATE_MS) this.emit('bolt', { x: s[0], y: s[1] });
+        }
+        if (mask !== done) this.boltMask.set(e.id, mask);
+      }
     }
-    const cut = now - FLD_KEEP_MS;
-    if (this.fld.some((e) => e.until <= cut)) this.fld = liveEvents(this.fld, cut);
+    if (now - FLD_KEEP_MS >= this.fldEnd) {
+      this.fld = liveEvents(this.fld, now - FLD_KEEP_MS);
+      this._fldChanged();
+    }
+  }
+
+  // Liste des événements changée : ce qu'il faut savoir sans la parcourir à chaque image (orage,
+  // cages qui bougent, première fin), image des événements à refaire
+  _fldChanged() {
+    let end = Infinity;
+    let storm = false;
+    let goals = false;
+    for (const e of this.fld) {
+      if (e.until < end) end = e.until;
+      if (e.k === 'storm') storm = true;
+      else if (e.k === 'goals') goals = true;
+    }
+    this.fldEnd = end;
+    this.fldStorm = storm;
+    this.fldGoals = goals;
+    this.evCache = null;
+    for (const id of this.boltMask.keys()) if (!this.fld.some((e) => e.id === id)) this.boltMask.delete(id);
+  }
+
+  // Événements de l'image (annoncés ou en cours, now < until) : la même liste tant que rien ne change
+  _frameEvents(now) {
+    const c = this.evCache;
+    if (c && now >= c.from && now < c.next) return c.list;
+    const list = [];
+    let next = Infinity;
+    for (const e of this.fld) {
+      if (now < e.until) {
+        list.push(e);
+        if (e.until < next) next = e.until;
+      }
+    }
+    this.evCache = { list, from: now, next };
+    return list;
   }
 
   _onPong(m) {
@@ -1606,11 +1800,13 @@ export class OnlineMatch {
   // `start.evs` (reprise en règlement v2) : événements dont la fin n'est pas passée chez le serveur
   _eventsFromStart(m) {
     this.fld = [];
-    if (this.rules !== RULES_V2 || !Array.isArray(m.evs)) return;
-    for (const raw of m.evs.slice(0, FLD_MAX)) {
-      const e = this._eventIn(raw);
-      if (e && !this.fld.some((x) => x.id === e.id)) this.fld.push(e);
+    if (this.rules === RULES_V2 && Array.isArray(m.evs)) {
+      for (const raw of m.evs.slice(0, FLD_MAX)) {
+        const e = this._eventIn(raw);
+        if (e && !this.fld.some((x) => x.id === e.id)) this.fld.push(e);
+      }
     }
+    this._fldChanged();
   }
 
   // Champs du règlement v2 d'un état (heure `s`) : mode, avertissements, chronos des fautes,
@@ -1624,7 +1820,10 @@ export class OnlineMatch {
       if (!this.engMode || this.engMode.k !== 'pen' || this.engMode.s !== sh) this.engMode = { k: 'pen', s: sh };
     } else if (md && md[0] === 'gold') {
       this.md = { k: 'gold', left: clampN(num(md[1]), 0, 600) };
-      if (!this.engMode || this.engMode.k !== 'gold') this.engMode = { k: 'gold' };
+      if (!this.engMode || this.engMode.k !== 'gold') {
+        this.engMode = { k: 'gold' };
+        this._clearTimeLeft();
+      }
     } else {
       this.md = null;
       this.engMode = undefined;
@@ -1693,6 +1892,7 @@ export class OnlineMatch {
   _onAck(ack, acc = null) {
     if (acc != null) {
       this.hasAcc = true;
+      if (acc > this.lastAcc) this.lastAcc = acc;
       if (ack > acc && ack > this.refusedUpTo) {
         this.refused += Math.max(0, ack - Math.max(acc, this.refusedUpTo, this.ackedSeq));
         this.refusedUpTo = ack;
@@ -1850,7 +2050,7 @@ export class OnlineMatch {
       this._setBall(copy);
       this.offsetBall.x = 0;
       this.offsetBall.y = 0;
-      if (this.rules === RULES_V2) this._noteLocalFx(false, false);
+      if (this.rules === RULES_V2) this._noteLocalFx(false, false, false);
       return;
     }
 
@@ -1860,20 +2060,30 @@ export class OnlineMatch {
     const check = this.ackCheck;
     this.ackCheck = false;
     // Règlement v2 : l'effet du ballon (feu, charge, bond) suit le serveur même quand la position
-    // concorde. Sans éclat seulement quand le serveur défait exactement ce que ma dernière frappe
-    // venait de faire (frappe refusée, ou jugée autrement : premier état après son acquittement)
+    // concorde. Sans éclat quand le serveur défait exactement ce que la prédiction locale venait de
+    // faire (frappe refusée ou jugée autrement, charge ou feu prédits que le serveur n'a pas) : ce
+    // n'était qu'une prévision
     if (this.rules === RULES_V2) {
       const b = this.ball;
       if ((b.fx || 0) !== copy.fx || (copy.fx && b.own !== copy.own) || (b.air > 0) !== (copy.air > 0)) {
+        // Ma touche : correction si elle n'est pas acceptée (refusée), ou au premier état après son
+        // acquittement (jugée autrement) ; plus tard, c'est l'adversaire qui a rallumé. Prévision du
+        // terrain (gel, foudre, eau) : correction si aucune frappe adverse n'est vue depuis
         const L = this.fxLocal;
-        const undoMine = L.mine && L.prevKey === fxKeyOf(copy.fx, copy.own, copy.air)
+        const undo = L.pred && L.prevKey === fxKeyOf(copy.fx, copy.own, copy.air)
           && (this.simNow > 0 ? this.simNow : this.serverNow()) - L.start < this._ackWait() + 200;
-        const quiet = (force || check) && undoMine;
+        const quiet = undo && (L.mine
+          ? force || check || this.lastAcc < L.hitN
+          : this.lastOppHitS < L.start - STATE_GAP_MS);
         b.fx = copy.fx;
         b.own = copy.own;
         b.air = copy.air;
-        this._noteLocalFx(false, quiet);
-      } else if (copy.air > 0) b.air = copy.air;
+        this._noteLocalFx(false, quiet, false);
+      } else {
+        if (copy.air > 0) b.air = copy.air;
+        // Même effet que le serveur amené à maintenant : la prévision du terrain est confirmée
+        this.fxLocal.confirm = false;
+      }
     }
     if (err <= SNAP_EPS) return;
     // Le ballon du serveur a changé de vitesse dans la moitié adverse (à la portée de l'adversaire),
@@ -2072,6 +2282,7 @@ export class OnlineMatch {
   _onError(code) {
     const kind = errorKind(code);
     if (this.abandoning) return; // la fin du match (ou son repli) arrive
+    if (kind === 'update_required' && this._fallbackProto()) return;
     const r = this.resuming;
     if (r?.kind === 'room') {
       if (kind === 'no_room' || kind === 'room_expired') {
@@ -2112,11 +2323,27 @@ export class OnlineMatch {
     if (kind !== 'server') this._fail(kind, code);
   }
 
+  /**
+   * Serveur plus ancien qui n'accepte que la v2 (`update_required` après un `auth` v3 : site déployé
+   * avant le serveur, ou serveur revenu en arrière) : une seule nouvelle connexion en v2, sans rien
+   * montrer ; le match se joue alors à la règle d'aujourd'hui (pas de `start.rules`). Rend true si
+   * elle part.
+   */
+  _fallbackProto() {
+    if (this.proto <= 2 || this.abandoning) return false;
+    this.proto = 2;
+    this._teardown();
+    this._connect();
+    return true;
+  }
+
   _onClose(e) {
     const status = this.ui.status;
     const opened = this.opened;
     const kind = CLOSE_KINDS[e?.code];
     const fatal = !!kind && FATAL_KINDS.has(kind);
+    // Fermeture 4426 arrivée seule (sans `error update_required`) : même repli en v2
+    if (kind === 'update_required' && this._fallbackProto()) return;
     this._teardown();
     // Abandon en cours : le serveur a détaché ce téléphone sans fin du match, on la fait ici
     if (this.abandoning) { this._abandonFallback(); return; }
@@ -2317,7 +2544,7 @@ export class OnlineMatch {
       clearTimeout(this.timers.connect);
       // Jeton jamais dans l'adresse (journaux du routeur Heroku) : premier message, avec la
       // version du protocole. Rien d'autre avant `hello` (le serveur fermerait).
-      this._send({ t: 'auth', v: PROTOCOL_VERSION, token: this.getToken() || '' });
+      this._send({ t: 'auth', v: this.proto, token: this.getToken() || '' });
       this.timers.reply = setTimeout(() => {
         if (this.ws !== ws || this.helloSeen) return;
         if (this.resuming) { this._teardown(); this._scheduleResume(); } else if (this.ui.status === 'connecting') this._fail('unreachable');

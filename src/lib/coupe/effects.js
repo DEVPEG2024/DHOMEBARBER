@@ -32,7 +32,7 @@
  * de gouttes, fumée posée, bulles immobiles, arcs figés, presque pas d'étincelles).
  */
 import {
-  W, H, GL, GR, GW, GD, BBW, BBD, BR, PR, POST, FX_FIRE, FX_ELEC, HOP_S, CHARGE_R, CHARGE_MS, JET_MIN,
+  W, H, GL, GR, GW, GD, SBD, BBW, BBD, BR, PR, POST, FX_FIRE, FX_ELEC, HOP_S, CHARGE_R, CHARGE_MS, JET_MIN,
   CAMP_S, BLOCK_S, PEN_SHOT_S, jetAngle, rng, inLobes, penaltySpot, keeperLine,
 } from './engine.js';
 // Chemin relatif (pas l'alias `@/`) : les vérifications de bout en bout chargent ce fichier dans Node
@@ -46,7 +46,7 @@ const WET_FADE_MS = 900;
 const MAX_PARTS = 200; // étincelles, flammes, vapeur, éclaboussures…
 const MAX_RAIN = 90;
 const MAX_DROPS = 150;
-const MAX_PUFFS = 120;
+const MAX_PUFFS = 90;
 const MAX_BUBBLES = 170;
 const MAX_RIPPLES = 12;
 // Image du stade : place du terrain (mêmes valeurs que stadium.js, qui importe le renderer : pas
@@ -68,6 +68,10 @@ const CHALK_A = 219 / 255;
 const MID_HALF = 2.6;
 const MID_SHIFT = 24;
 const MID_SPANS = [[2.6, 131.4], [228.6, 357.4]];
+// Points de penalty peints dans l'image (à 72 de chaque ligne de but) : recouverts pendant un
+// penalty, le jeu pose le sien plus loin (PEN_D) ; un seul point à chaque bout
+const PAINTED_SPOT = 72;
+const SPOT_PATCH_R = 6;
 // But en or : la ligne brille 0,8 s puis s'efface en 0,6 s
 const GOLD_GLOW_S = 0.8;
 const GOLD_FADE_S = 0.6;
@@ -541,6 +545,31 @@ function midlinePatch(img) {
   return { canvas: cv, x: (sx - IX0) / IK, y: (sy - IY0) / IK, w: sw / IK, h: sh / IK };
 }
 
+/**
+ * Raccords des deux points de penalty peints : pelouse des mêmes rangées, 16 unités à côté (rien
+ * d'autre n'y est tracé), fondue en rond. Rend [{ canvas, x, y, w, h }, …] (unités).
+ */
+function spotPatches(img) {
+  return [PAINTED_SPOT, H - PAINTED_SPOT].map((y) => {
+    const sx = Math.floor(IX0 + (W / 2 - SPOT_PATCH_R) * IK);
+    const sy = Math.floor(IY0 + (y - SPOT_PATCH_R) * IK);
+    const sw = Math.ceil(2 * SPOT_PATCH_R * IK);
+    const cv = document.createElement('canvas');
+    cv.width = sw;
+    cv.height = sw;
+    const g = cv.getContext('2d');
+    g.drawImage(img, sx + 16 * IK, sy, sw, sw, 0, 0, sw, sw);
+    // Plein jusqu'à 3,6 unités (le point fait 2,6), fondu jusqu'au bord
+    const fade = g.createRadialGradient(sw / 2, sw / 2, sw * 0.3, sw / 2, sw / 2, sw / 2);
+    fade.addColorStop(0, '#000');
+    fade.addColorStop(1, 'rgba(0,0,0,0)');
+    g.globalCompositeOperation = 'destination-in';
+    g.fillStyle = fade;
+    g.fillRect(0, 0, sw, sw);
+    return { canvas: cv, x: (sx - IX0) / IK, y: (sy - IY0) / IK, w: sw / IK, h: sw / IK };
+  });
+}
+
 /** Cage dessinée comme celles de l'image (gazon_neuf.py) : voile, filet tous les 6, cadre, poteaux. */
 function drawImageGoal(c, dx, top, gold) {
   const x0 = GL + dx;
@@ -634,6 +663,9 @@ export function createEffects({ reducedMotion = false } = {}) {
   let img = null; // image du stade (raccords, loupe du gel)
   let covers = null; // raccords des deux cages [bas, haut]
   let midPatch = null;
+  let spots = null; // raccords des points de penalty peints
+  let penOn = false; // penalty en cours (points peints recouverts)
+  let lineA = 0; // ligne de but interdite (cages qui bougent) : 0 à 1, en fondu
   let scale = 1; // px du canvas par unité du terrain (caches du gel)
   const bounds = { x0: -16, y0: -36, x1: W + 16, y1: H + 36 }; // canvas, en unités du terrain
   let clock = 0;
@@ -835,11 +867,12 @@ export function createEffects({ reducedMotion = false } = {}) {
     }
   }
 
-  function drawFoam(c, inst, ph) {
+  // Ombre et voile crémeux, une fois par ellipse : au sol, SOUS le ballon et les joueurs (par-dessus,
+  // le voile cachait un ballon arrêté dans la flaque pendant 6 s, contre-expertise du 31 oct. 2026)
+  function drawFoamBase(c, inst, ph) {
     if (ph.p === 'an') return;
     const k = ph.k;
     const grow = ph.p === 'on' ? ease(ph.u / 0.5) : 1;
-    // Ombre et voile crémeux sous les bulles, une fois par ellipse
     c.save();
     for (const [x, y, rx, ry, a] of inst.e.l) {
       c.save();
@@ -853,6 +886,12 @@ export function createEffects({ reducedMotion = false } = {}) {
       c.restore();
     }
     c.restore();
+  }
+
+  // Bulles par-dessus le ballon : il les écarte (sillon), il se voit donc toujours dans la mousse
+  function drawFoam(c, inst, ph) {
+    if (ph.p === 'an') return;
+    const k = ph.k;
     c.globalAlpha = k;
     for (const q of inst.bubbles) {
       if (q.dead) continue;
@@ -1113,7 +1152,9 @@ export function createEffects({ reducedMotion = false } = {}) {
             // Flash : le terrain s'éclaire d'un coup
             c.globalAlpha = 0.42 * f;
             c.fillStyle = 'rgb(225,238,255)';
-            c.fillRect(bounds.x0, bounds.y0, bounds.x1 - bounds.x0, bounds.y1 - bounds.y0);
+            // Sur le terrain et ses filets seulement, comme le ciel sombre (le reste du stade est
+            // sous le voile des tribunes ; tout le canvas faisait un rectangle gris sur ordinateur)
+            c.fillRect(0, -GD, W, H + 2 * GD);
             c.globalCompositeOperation = 'lighter';
             c.globalAlpha = f;
             c.drawImage(SPR.glowB, s.x - 90, s.y - 90, 180, 180);
@@ -1356,7 +1397,7 @@ export function createEffects({ reducedMotion = false } = {}) {
     const t = now / 1000;
     const gust = 0.7 + 0.5 * Math.sin(t * 1.3) + 0.2 * Math.sin(t * 3.1);
     if (ph.p === 'on' && inst.lit > 0.05) {
-      inst.acc += dt * 30;
+      inst.acc += dt * 24;
       while (inst.acc >= 1) {
         inst.acc -= 1;
         const q = take(inst.puffs);
@@ -1386,7 +1427,7 @@ export function createEffects({ reducedMotion = false } = {}) {
       q.y += (q.vy + e.w[1] * gust * w) * dt;
       q.z += q.vz * dt;
       q.vz *= fz;
-      q.s = Math.min(75, q.s + q.g * dt);
+      q.s = Math.min(60, q.s + q.g * dt);
       q.vx *= fv;
       q.vy *= fv;
     }
@@ -1404,29 +1445,6 @@ export function createEffects({ reducedMotion = false } = {}) {
     c.globalAlpha = 0.45 * ph.k;
     c.drawImage(SPR.shadow, can.x - 10 + can.z * 0.3, can.y - 10 + can.z * 0.5, 20, 20);
     c.globalAlpha = 1;
-  }
-
-  // Bouffées de fumée dessinées à mi-résolution dans un calque (douces : la différence ne se voit
-  // pas), posé en une fois : quatre fois moins de pixels à mélanger, c'est l'effet le plus lourd
-  let smokeBuf = null;
-  let smokeCtx = null;
-  function smokeLayer() {
-    if (typeof document === 'undefined') return null;
-    const k = scale / 2;
-    const w = Math.max(1, Math.ceil((bounds.x1 - bounds.x0) * k));
-    const h = Math.max(1, Math.ceil((bounds.y1 - bounds.y0) * k));
-    if (!smokeBuf) {
-      smokeBuf = document.createElement('canvas');
-      smokeCtx = smokeBuf.getContext('2d');
-    }
-    if (smokeBuf.width !== w || smokeBuf.height !== h) {
-      smokeBuf.width = w;
-      smokeBuf.height = h;
-    }
-    smokeCtx.setTransform(1, 0, 0, 1, 0, 0);
-    smokeCtx.clearRect(0, 0, w, h);
-    smokeCtx.setTransform(k, 0, 0, k, -bounds.x0 * k, -bounds.y0 * k);
-    return smokeCtx;
   }
 
   function drawSmokeOver(c, inst, ph, now) {
@@ -1458,53 +1476,27 @@ export function createEffects({ reducedMotion = false } = {}) {
       c.globalAlpha = 1;
       return;
     }
+    // Bouffées dessinées directement, une seule image chacune : rouge vif près du fumigène, grise en
+    // vieillissant (le calque hors écran d'avant coûtait 10,9 ms par image, processeur ralenti 4 fois)
     const pf = inst.puffs;
-    if (!pf.n) return;
-    const g = smokeLayer() || c;
-    // Rectangle touché (unités) : seul lui est reposé sur le canvas
-    let x0 = Infinity;
-    let y0 = Infinity;
-    let x1 = -Infinity;
-    let y1 = -Infinity;
     for (let i = 0; i < pf.n; i++) {
       const q = pf.a[i];
       const t = q.age / q.life;
       const a = Math.min(1, q.age / 0.35) * (1 - t) ** 1.3 * k;
-      const x = q.x;
-      const y = q.y - q.z * 0.3;
       const s = q.s;
-      const ar = a * 0.78 * (1 - t * 0.7);
+      const ar = a * 0.8 * (1 - t * 0.7);
       const ag = a * 0.55 * t;
-      if (ar <= 0.02 && ag <= 0.02) continue;
-      if (ar > 0.02) {
-        g.globalAlpha = Math.min(1, ar);
-        g.drawImage(SPR.smokeR, x - s, y - s, s * 2, s * 2);
+      if (ar >= ag) {
+        if (ar <= 0.02) continue;
+        c.globalAlpha = Math.min(1, ar + ag * 0.3);
+        c.drawImage(SPR.smokeR, q.x - s, q.y - q.z * 0.3 - s, s * 2, s * 2);
+      } else {
+        if (ag <= 0.02) continue;
+        c.globalAlpha = Math.min(1, ag + ar * 0.3);
+        c.drawImage(SPR.smoke, q.x - s, q.y - q.z * 0.3 - s, s * 2, s * 2);
       }
-      if (ag > 0.02) {
-        g.globalAlpha = ag;
-        g.drawImage(SPR.smoke, x - s, y - s, s * 2, s * 2);
-      }
-      if (x - s < x0) x0 = x - s;
-      if (y - s < y0) y0 = y - s;
-      if (x + s > x1) x1 = x + s;
-      if (y + s > y1) y1 = y + s;
     }
-    g.globalAlpha = 1;
     c.globalAlpha = 1;
-    if (g === c || x1 <= x0) return;
-    // Calque → canvas : le rectangle touché, dans les bords du canvas
-    const kk = scale / 2;
-    const ax = Math.max(bounds.x0, x0 - 1);
-    const ay = Math.max(bounds.y0, y0 - 1);
-    const bx = Math.min(bounds.x1, x1 + 1);
-    const by = Math.min(bounds.y1, y1 + 1);
-    if (bx <= ax || by <= ay) return;
-    const sx = Math.max(0, Math.floor((ax - bounds.x0) * kk));
-    const sy = Math.max(0, Math.floor((ay - bounds.y0) * kk));
-    const sw = Math.min(smokeBuf.width - sx, Math.ceil((bx - ax) * kk) + 1);
-    const sh = Math.min(smokeBuf.height - sy, Math.ceil((by - ay) * kk) + 1);
-    if (sw <= 0 || sh <= 0) return;
-    c.drawImage(smokeBuf, sx, sy, sw, sh, bounds.x0 + sx / kk, bounds.y0 + sy / kk, sw / kk, sh / kk);
   }
 
   // ─── Cages qui bougent ──────────────────────────────────────────
@@ -1528,6 +1520,10 @@ export function createEffects({ reducedMotion = false } = {}) {
     }
     goalsOn = on || goalShow[0] !== 0 || goalShow[1] !== 0;
     goalsGold = goldA;
+    // Ligne de but interdite tant que les cages bougent (LINE_MODE du moteur : goalOffsets non nul)
+    const want = off ? 1 : 0;
+    lineA = reduced ? want : lineA + (want - lineA) * Math.min(1, dt / 0.2);
+    if (lineA < 0.01) lineA = 0;
   }
 
   function drawGoals(c, stadium) {
@@ -1564,6 +1560,30 @@ export function createEffects({ reducedMotion = false } = {}) {
       c.stroke();
       c.restore();
     }
+    c.restore();
+  }
+
+  // Cages qui bougent : chacun a sa ligne de but interdite jusqu'à la profondeur de la petite surface,
+  // sur toute la largeur (LINE_MODE) ; un trait discret et une bande à peine teintée le montrent, pour
+  // qu'un joueur repoussé comprenne pourquoi
+  function drawGoalLines(c) {
+    if (lineA <= 0) return;
+    c.save();
+    c.fillStyle = GOLD;
+    c.globalAlpha = 0.08 * lineA;
+    c.fillRect(0, 0, W, SBD);
+    c.fillRect(0, H - SBD, W, SBD);
+    c.strokeStyle = GOLD;
+    c.globalAlpha = 0.7 * lineA;
+    c.lineWidth = 1.6;
+    c.setLineDash(DASH_LINE);
+    c.beginPath();
+    c.moveTo(0, SBD);
+    c.lineTo(W, SBD);
+    c.moveTo(0, H - SBD);
+    c.lineTo(W, H - SBD);
+    c.stroke();
+    c.setLineDash(NO_DASH);
     c.restore();
   }
 
@@ -1875,6 +1895,8 @@ export function createEffects({ reducedMotion = false } = {}) {
     goalsOn = false;
     goalsGold = 0;
     gold = { on: false, t: 0, seen: false };
+    penOn = false;
+    lineA = 0;
     prev.ok = false;
     prevNow = null;
     wetA = 0;
@@ -1887,14 +1909,17 @@ export function createEffects({ reducedMotion = false } = {}) {
       img = image || null;
       covers = null;
       midPatch = null;
+      spots = null;
       for (const inst of insts) inst.cacheK = 0;
       if (!img) return;
       try {
         covers = [goalCover(img, false), goalCover(img, true)];
         midPatch = midlinePatch(img);
+        spots = spotPatches(img);
       } catch {
         covers = null;
         midPatch = null;
+        spots = null;
       }
     },
     /** Échelle du canvas (px par unité) et ses bords en unités du terrain, au redimensionnement. */
@@ -1906,9 +1931,12 @@ export function createEffects({ reducedMotion = false } = {}) {
       bounds.y1 = y1;
     },
     reset: clear,
-    /** Terrain dessiné de secours : calque à refaire sans filets (cages qui bougent) ni ligne du milieu. */
+    /**
+     * Terrain dessiné de secours : calque à refaire sans filets (cages qui bougent), sans ligne du
+     * milieu (but en or), sans points de penalty peints (penalty).
+     */
     fieldFlags() {
-      return { nets: !goalsOn, midline: !(gold.on && (reduced ? gold.t > GOLD_GLOW_S : midGone() >= 1)) };
+      return { nets: !goalsOn, midline: !(gold.on && (reduced ? gold.t > GOLD_GLOW_S : midGone() >= 1)), spots: !penOn };
     },
     /** Hauteur du ballon en l'air (0 à 1, bond du court-circuit). */
     hop(ball) {
@@ -1947,6 +1975,7 @@ export function createEffects({ reducedMotion = false } = {}) {
       stepDrops(dt);
       stepGoals(frame, dt, now);
       stepGold(frame, dt);
+      penOn = !!(frame.mode && frame.mode.k === 'pen');
       stepBall(frame, dt);
       stepParts(dt);
       prevNow = now;
@@ -1960,7 +1989,9 @@ export function createEffects({ reducedMotion = false } = {}) {
       if (!frame) return;
       const now = frame.now;
       drawGoals(c, stadium);
+      drawGoalLines(c);
       drawGoldLine(c, stadium);
+      if (stadium && penOn && spots) for (const sp of spots) c.drawImage(sp.canvas, sp.x, sp.y, sp.w, sp.h);
       if (wetUsed && wet && wetA > 0) {
         c.globalAlpha = wetA;
         c.drawImage(wet, 0, 0, W, H);
@@ -1968,7 +1999,8 @@ export function createEffects({ reducedMotion = false } = {}) {
       }
       for (const inst of insts) {
         const ph = phaseOf(inst, now);
-        if (inst.k === 'gel') drawGel(c, inst, ph);
+        if (inst.k === 'foam') drawFoamBase(c, inst, ph);
+        else if (inst.k === 'gel') drawGel(c, inst, ph);
         else if (inst.k === 'water') drawWaterGround(c, inst, ph, now);
         else if (inst.k === 'smoke') drawSmokeGround(c, inst, ph, now);
       }
