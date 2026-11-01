@@ -61,6 +61,14 @@ Source : `docs/fonctions/fil-new-gang.md`, `fil-new-gang-contrat.md`.
 - **Coupure d'urgence** : `heroku config:set FEED_V2=off --app dhomebarber-api` (l'app relit l'ancien fil ; les tâches du fil continuent de tourner).
 - **Test e2e instable, antérieur au fil v2** (constaté le 30 oct. 2026) : `e2e/looks-editeur.spec.js:106` (« la croix et Échap ne ferment que la recherche ») échoue 3 fois sur 4 au second Échap, sur le code d'avant le chantier comme après (vérifié sur une copie du commit 1b8e8c2) ; la fenêtre « Prestations du look » rouverte ne se ferme pas à Échap. À regarder dans l'éditeur des looks (`Dialog` shadcn), sans lien avec le fil.
 
+## Tableau de bord (refonte du 1er nov. 2026)
+
+- **Encaissements d'avant le 1er nov. 2026** : `paid_at` vide, la caisse du soir les range au jour du RDV (repli). Un rattrapage ponctuel (`app_migrations`) est possible mais pas fait : aucune date d'encaissement fiable n'existe pour ces lignes.
+- **Deux mois lus seulement** : un RDV non clôturé depuis plus d'un mois sort de « À faire », et un RDV plus ancien encaissé aujourd'hui manque à la caisse du soir. Source : contre-expertise du 1er nov. 2026.
+- **`paid_at` et deux appareils** : si un appareil rouvre un RDV pendant qu'un autre corrige son encaissement, la ligne peut rester encaissée sans `paid_at` (repli sur le jour du RDV). Correction possible : calculer la valeur en SQL dans l'`UPDATE`. Rare, non fait.
+- **Croix des fenêtres annoncée « Close »** aux lecteurs d'écran (`src/components/ui/dialog.jsx`, partagé) : à traduire en « Fermer » avec les tests qui la cherchent sous ce nom (`e2e/audit-rendez-vous.spec.js`).
+- **Export comptable** : laissé tel quel (décision du 1er nov. 2026) ; l'audit a signalé qu'il s'arrête au montant saisi (pas le CA réel du mois) et que son mois par défaut suit la date de l'appareil, pas celle de Paris.
+
 ## Échéances
 
 - **Certificat Pass Type ID** `pass.fr.dhomebarber.giftcard` valable jusqu'au **16 nov. 2027** : le renouveler avant (passé cette date, le serveur éteint seul `features.appleWallet`). Source : `docs/fonctions/cartes-cadeau-wallet.md`.

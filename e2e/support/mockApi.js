@@ -91,6 +91,46 @@ function avecBlocage(rdv) {
   return { ...rdv, blocks_client: !libre };
 }
 
+/**
+ * Règles de lecture du serveur (`applyReadPolicy`, lib/accessControl.js) reprises ici quand un écran en
+ * dépend ; les autres entités sont lues telles quelles :
+ *  - SalonSettings : `monthly_revenue_goal` et `admin_alerts` renvoyés à l'admin seul ;
+ *  - Event (privatisations), hors admin : ses propres demandes en filtrant sur `client_email`, sinon
+ *    les privatisations confirmées / acceptées réduites au créneau (`id`, `date`, `time_slot`, `status`).
+ * Rend `{ filtres, projeter }` : filtres appliqués (ceux de la requête, corrigés) et forme de chaque ligne.
+ */
+const COLONNES_ADMIN_PARAMETRES = ['admin_alerts', 'monthly_revenue_goal'];
+const FILTRES_CRENEAU_PRIVATISATION = ['id', 'date', 'status', 'time_slot'];
+const COLONNES_CRENEAU_PRIVATISATION = ['id', 'date', 'time_slot', 'status'];
+const STATUTS_BLOQUANTS = ['confirmed', 'accepted'];
+function politiqueDeLecture(nom, compte, q) {
+  const admin = compte?.role === 'admin';
+  const telQuel = (l) => l;
+  if (nom === 'SalonSettings' && !admin) {
+    return {
+      filtres: q && Object.fromEntries(Object.entries(q).filter(([cle]) => !COLONNES_ADMIN_PARAMETRES.includes(cle))),
+      projeter: (l) => Object.fromEntries(Object.entries(l).filter(([cle]) => !COLONNES_ADMIN_PARAMETRES.includes(cle))),
+    };
+  }
+  if (nom === 'Event' && !admin) {
+    const email = String(compte?.email || '').toLowerCase();
+    if (q && 'client_email' in q) return { filtres: { ...q, client_email: compte?.email ?? null }, projeter: telQuel };
+    const filtres = Object.fromEntries(Object.entries(q || {}).filter(([cle]) => FILTRES_CRENEAU_PRIVATISATION.includes(cle)));
+    const voulus = filtres.status === undefined ? STATUTS_BLOQUANTS : [].concat(filtres.status).filter((st) => STATUTS_BLOQUANTS.includes(st));
+    filtres.status = voulus.length ? voulus : ['__aucun__'];
+    return {
+      filtres,
+      projeter: (l) => (String(l.client_email || '').toLowerCase() === email && email
+        ? l
+        : Object.fromEntries(COLONNES_CRENEAU_PRIVATISATION.filter((c) => c in l).map((c) => [c, l[c]]))),
+    };
+  }
+  return { filtres: q, projeter: telQuel };
+}
+
+/** Encaissé au sens du tableau de bord (`isCashedAppointment` du serveur) : payé, ou validé par le barber. */
+const estEncaisse = (rdv) => !!rdv && (rdv.payment_status === 'paid' || rdv.status === 'completed');
+
 /** Compte tel que `/me` le renvoie (jamais le mot de passe). */
 function compteSansSecret(compte) {
   const { motDePasse: _secret, ...reste } = compte;
@@ -129,6 +169,12 @@ export class FauxServeur {
     // Fil « New Gang » v2 (routes /feed…) : état dans `api.fil` (activité, votes, réglages, vues)
     this.donnees.fil ??= { activite: [], votes: [], likesCommentaires: [], reglages: {}, vuLe: {}, vues: {} };
     this.filRest = new FauxFil(this);
+    /**
+     * Tableau de bord (1er nov. 2026) : clients sur l'app en ce moment (`GET /analytics/live`, admin,
+     * servi seulement avec `features.analyticsLive` vrai), et chemins des WebSockets ouverts par l'app.
+     */
+    this.enCeMoment = 3;
+    this.websockets = [];
     /** Heure du faux serveur : l'heure figée des tests, qui avance avec le temps réel écoulé. */
     this.debutReel = Date.now();
     this.compteurId = 0;
@@ -193,6 +239,7 @@ export class FauxServeur {
     // serveur ; tout autre est noté et refermé.
     await context.routeWebSocket(() => true, (ws) => {
       const chemin = new URL(ws.url()).pathname;
+      this.websockets.push(chemin);
       if (/\/ws\/live$/.test(chemin)) {
         ws.send(JSON.stringify({ type: 'live_count', count: 3 }));
         return;
@@ -330,6 +377,15 @@ export class FauxServeur {
       return { json: { since: jour(-90), days: 90, entries: [] } };
     }
 
+    // Clients sur l'app en ce moment (compteur du tableau de bord, routes/analytics.js) : admin seul ;
+    // serveur d'avant (`features.analyticsLive` absent) : route inconnue, le test échoue s'il l'appelle
+    if (methode === 'GET' && chemin === '/analytics/live') {
+      if (this.donnees.parametresPublics.features?.analyticsLive !== true) return null;
+      if (!req.compte) return nonAuthentifie();
+      if (req.compte.role !== 'admin') return { status: 403, json: { error: 'Accès réservé aux administrateurs' } };
+      return { json: { sessions: this.enCeMoment } };
+    }
+
     // Vues des publications du fil (admin, ancien fil) : aucune
     if (methode === 'GET' && chemin === '/analytics/post-views') {
       if (!req.compte) return nonAuthentifie();
@@ -399,17 +455,20 @@ export class FauxServeur {
     const table = this.tables[nom] || (this.tables[nom] = []);
 
     if (lecture && !id) {
+      const { filtres, projeter } = politiqueDeLecture(nom, req.compte, req.q && typeof req.q === 'object' ? req.q : null);
       let lignes = table;
-      if (req.q && typeof req.q === 'object') {
-        lignes = lignes.filter((l) => Object.entries(req.q).every(([cle, valeur]) => correspond(l, cle, valeur)));
+      if (filtres) {
+        lignes = lignes.filter((l) => Object.entries(filtres).every(([cle, valeur]) => correspond(l, cle, valeur)));
       }
       const limite = Math.min(Math.max(parseInt(req.query.limit, 10) || LIMITE_PAR_DEFAUT, 1), LIMITE_MAX);
       const saut = Math.max(parseInt(req.query.skip, 10) || 0, 0);
-      return { json: trier(lignes, req.query.sort, nom).slice(saut, saut + limite) };
+      return { json: trier(lignes, req.query.sort, nom).slice(saut, saut + limite).map(projeter) };
     }
     if (lecture && id) {
-      const ligne = table.find((l) => String(l.id) === id);
-      return ligne ? { json: nom === 'Appointment' ? avecBlocage(ligne) : ligne } : { status: 404, json: { error: 'Introuvable' } };
+      const { filtres, projeter } = politiqueDeLecture(nom, req.compte, null);
+      const ligne = table.find((l) => String(l.id) === id
+        && (!filtres || Object.entries(filtres).every(([cle, valeur]) => correspond(l, cle, valeur))));
+      return ligne ? { json: projeter(nom === 'Appointment' ? avecBlocage(ligne) : ligne) } : { status: 404, json: { error: 'Introuvable' } };
     }
     if (methode === 'POST' && !id) {
       this.compteurId += 1;
@@ -420,13 +479,17 @@ export class FauxServeur {
         // Fil (Post, PostComment, PostLike, UserBlock, PostReport) : identité tirée du jeton
         ...this.filRest.identiteCrud(nom, req.compte),
       };
+      if (nom === 'Appointment') this.dateEncaissement(ligne, false, undefined);
       table.push(ligne);
       return { status: 201, json: nom === 'Appointment' ? avecBlocage(ligne) : ligne };
     }
     if (methode === 'PUT' && id) {
       const ligne = table.find((l) => String(l.id) === id);
       if (!ligne) return { status: 404, json: { error: 'Introuvable' } };
+      const avant = estEncaisse(ligne);
+      const dateAvant = ligne.paid_at;
       Object.assign(ligne, req.corps || {}, { updated_date: new Date().toISOString() });
+      if (nom === 'Appointment') this.dateEncaissement(ligne, avant, dateAvant);
       return { json: nom === 'Appointment' ? avecBlocage(ligne) : ligne };
     }
     if (methode === 'DELETE' && id) {
@@ -436,6 +499,20 @@ export class FauxServeur {
       return { json: { success: true } };
     }
     return null;
+  }
+
+  /**
+   * Date d'encaissement d'un RDV (`paid_at`, `withPaidAt` de routes/entities.js), avec
+   * `features.paidAt` : jamais lue dans le corps ; passage à encaissé → l'heure du serveur, retour à
+   * non encaissé → null, sinon inchangée. Sans le drapeau (serveur d'avant) : rien.
+   */
+  dateEncaissement(rdv, avant, dateAvant) {
+    if (this.donnees.parametresPublics.features?.paidAt !== true) return;
+    if (dateAvant === undefined) delete rdv.paid_at;
+    else rdv.paid_at = dateAvant;
+    const apres = estEncaisse(rdv);
+    if (!avant && apres) rdv.paid_at = this.maintenant().toISOString();
+    else if (avant && !apres) rdv.paid_at = null;
   }
 
   /** Comptes : l'admin lit tous les comptes (filtre `q` appliqué), les autres seulement le leur. */

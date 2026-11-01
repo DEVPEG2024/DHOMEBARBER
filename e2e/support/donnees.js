@@ -379,6 +379,8 @@ export function creerDonnees() {
         // Catégories masquées par l'admin (« Organiser l'accueil ») : serveur à jour, rien de masqué
         homepage_hidden: [],
         comeback_weeks: 5,
+        // Objectif de CA du mois (tableau de bord, `features.revenueGoal`) : aucun
+        monthly_revenue_goal: null,
       }],
       Employee: employes,
       Service: prestations,
@@ -459,6 +461,12 @@ export function creerDonnees() {
         feedV2: true,
         // Sondages ouverts aux clients et aux barbers ; `false` : serveur plus ancien (salon seul, 403)
         feedMemberPolls: true,
+        // Tableau de bord (1er nov. 2026), comme en production : date d'encaissement des RDV (`paid_at`,
+        // posée par le faux serveur), objectif de CA du mois, compteur « N clients sur l'app »
+        // (`GET /analytics/live`, `api.enCeMoment`). Un test les met à faux pour un serveur d'avant
+        paidAt: true,
+        revenueGoal: true,
+        analyticsLive: true,
       },
       popular_services: [],
       snap: null,

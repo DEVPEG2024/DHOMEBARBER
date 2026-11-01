@@ -81,7 +81,13 @@ test.describe('Encaissement CB + Espèces', () => {
     const nina = api.tables.Appointment.find((a) => a.id === RDV.kevinNina().id);
     Object.assign(nina, { status: 'completed', payment_method: 'mixte', cash_amount: 15, payment_status: 'paid', grand_total: 35 });
     await page.goto('/admin');
-    await expect(page.getByText('CB aujourd\'hui', { exact: true }).locator('..')).toContainText('20€');
-    await expect(page.getByText('Espèces aujourd\'hui', { exact: true }).locator('..')).toContainText('15€');
+    // Tableau « Encaissements », colonne « Aujourd'hui » (montants « 20 € », espaces normalisés)
+    const encaissements = page.getByRole('region', { name: 'Encaissements', exact: true });
+    const aujourdhui = (libelle) => encaissements.getByRole('row')
+      .filter({ has: page.getByRole('rowheader', { name: libelle, exact: true }) }).getByRole('cell').first();
+    await expect(aujourdhui('CB')).toHaveText('20 €');
+    await expect(aujourdhui('Espèces')).toHaveText('15 €');
+    await expect(page.getByRole('list', { name: 'Rendez-vous du jour' }).getByRole('listitem').filter({ hasText: 'Nina Roche' }))
+      .toContainText('Payé · CB + Espèces');
   });
 });
