@@ -274,7 +274,7 @@ export function dayStatusOf(a, nowMs) {
  * @returns {{
  *   clock: { today: string, hhmm: string, monthKey: string, prevMonthKey: string, yesterday: string },
  *   today: { money: object, active: number, toClose: { count: number, amount: number }, upcoming: { count: number, amount: number },
- *            noShow: number, cancelled: number, pending: number, trend: number|null, yesterdaySoFar: number },
+ *            noShow: number, cancelled: number, clientCancels: number, pending: number, trend: number|null, yesterdaySoFar: number },
  *   todayList: Array<{ id, kind: 'rdv'|'break', start, end, employeeId, employeeName, color, clientName, guestName, services: string,
  *                      amount: number, status: string, paymentLabel: string }>,
  *   next: object|null,
@@ -439,6 +439,7 @@ export function computeDashboard({ rows, nowMs, employees = [] }) {
       upcoming: { count: todayUpcoming.length, amount: sumOf(todayUpcoming, outsideGift) },
       noShow: todayRows.filter((a) => a.status === 'no_show').length,
       cancelled: todayRows.filter((a) => a.status === 'cancelled' && !isRescheduledCancel(a)).length,
+      clientCancels: todayRows.filter(isClientCancel).length,
       pending: todayRows.filter((a) => a.status === 'pending').length,
       trend,
       yesterdaySoFar,

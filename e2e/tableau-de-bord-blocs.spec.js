@@ -35,11 +35,6 @@ const JOUR_COURT = new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'sh
 const JOUR_SEMAINE = new Intl.DateTimeFormat('fr-FR', { weekday: 'long', timeZone: 'UTC' });
 const dateUtc = (cle) => new Date(`${cle.slice(0, 10)}T12:00:00Z`);
 const numeroDuJour = (cle) => (Number(cle.slice(8, 10)) === 1 ? '1er' : String(Number(cle.slice(8, 10))));
-/** « Novembre » : titre du bloc du mois. */
-const NOM_DU_MOIS = (() => {
-  const m = MOIS_LONG.format(dateUtc(PREMIER_DU_MOIS));
-  return m.charAt(0).toUpperCase() + m.slice(1);
-})();
 /** « jeudi 5 novembre », « dimanche 1er novembre » (libellés des cases du remplissage). */
 const jourLong = (cle) => `${JOUR_SEMAINE.format(dateUtc(cle))} ${numeroDuJour(cle)} ${MOIS_LONG.format(dateUtc(cle))}`;
 /** « 31 oct. » (précision des RDV à clôturer des jours d'avant). */
@@ -80,22 +75,38 @@ const encaisse = (moyen, extra = {}) => ({ statut: 'completed', payment_method: 
 
 const bloc = (page, nom) => page.getByRole('region', { name: nom, exact: true });
 
-/** Cellules « Aujourd'hui » et « Ce mois » d'une ligne du tableau « Encaissements ». */
-function ligneEncaissements(page, libelle) {
+/**
+ * Bloc « Chiffres » (en haut de la page) : deux grands chiffres, puis quatre tableaux « Aujourd'hui |
+ * Ce mois », nommés par leur légende (`<caption>`).
+ */
+const chiffres = (page) => bloc(page, 'Chiffres');
+const TABLEAUX = {
+  ventes: /^Ventes/, rdv: /^Rendez-vous/, encaissements: /^Encaissements des rendez-vous/, pourboires: /^Pourboires/,
+};
+/** Cellules « Aujourd'hui » et « Ce mois » d'une ligne d'un tableau de « Chiffres ». */
+function ligneChiffres(page, tableau, libelle) {
   const nom = typeof libelle === 'string' ? { name: libelle, exact: true } : { name: libelle };
-  const ligne = bloc(page, 'Encaissements').getByRole('table').getByRole('row')
+  const ligne = chiffres(page).getByRole('table', { name: tableau }).getByRole('row')
     .filter({ has: page.getByRole('rowheader', nom) });
   return { ligne, aujourdhui: ligne.getByRole('cell').nth(0), mois: ligne.getByRole('cell').nth(1) };
 }
+const ligneEncaissements = (page, libelle) => ligneChiffres(page, TABLEAUX.encaissements, libelle);
 
-async function verifierLigne(page, libelle, aujourdhui, mois) {
-  const l = ligneEncaissements(page, libelle);
+/** Vérifie les deux colonnes d'une ligne (par défaut du tableau « Encaissements des rendez-vous »). */
+async function verifierLigne(page, libelle, aujourdhui, mois, tableau = TABLEAUX.encaissements) {
+  const l = ligneChiffres(page, tableau, libelle);
   await expect(l.aujourdhui, `${libelle} · Aujourd'hui`).toHaveText(aujourdhui);
   await expect(l.mois, `${libelle} · Ce mois`).toHaveText(mois);
 }
+/** Grand chiffre de « Chiffres » (« CA aujourd'hui », « CA novembre ») : libellé, montant, comparaison. */
+const grandChiffre = (page, libelle) => chiffres(page).getByText(libelle, { exact: true }).locator('xpath=..');
+const caDuJour = (page) => grandChiffre(page, 'CA aujourd\'hui');
+const caDuMois = (page, cle = AUJ) => grandChiffre(page, `CA ${nomDuMois(cle)}`);
+/** Bloc « Fin de novembre » : fin de mois prévue et objectif (titre accepté avec ou sans élision). */
+const blocFin = (page) => page.getByRole('region', { name: /^Fin d/ });
 
-/** « Caisse du soir » : le cadre sous son titre. */
-const caisseDuSoir = (page) => bloc(page, 'Encaissements').getByRole('heading', { name: 'Caisse du soir' }).locator('xpath=..');
+/** « Caisse du soir » : son bloc. */
+const caisseDuSoir = (page) => bloc(page, 'Caisse du soir');
 /** Montant en face d'un libellé de la caisse (« CB attendue », « Espèces attendues »). */
 const montantCaisse = (page, libelle) => caisseDuSoir(page).getByText(libelle, { exact: false }).first()
   .locator('xpath=..').locator(':scope > span').nth(1);
@@ -169,25 +180,24 @@ test.describe('Tableau de bord : encaissements', () => {
     await verifierLigne(page, 'CB', '123 €', '123 €');
     await verifierLigne(page, 'Espèces', '55 €', '80 €');
     await verifierLigne(page, /^Non renseigné/, '0 €', '15 €');
-    await verifierLigne(page, /^Total rendez-vous/, '178 €', '218 €');
     // Produits hors part carte cadeau : 18 + 10 = 28
     await verifierLigne(page, /^dont produits vendus en RDV/, '28 €', '28 €');
     // Part carte cadeau : hors CA, rappelée à part
     await verifierLigne(page, /^Réglé par carte cadeau/, '25 €', '25 €');
-    await verifierLigne(page, 'Pourboires CB', '5 €', '7 €');
-    await verifierLigne(page, 'Pourboires espèces', '3 €', '3 €');
-    // Aucun pourboire sans moyen noté : la ligne n'est pas montrée
-    await expect(ligneEncaissements(page, 'Pourboires non renseignés').ligne).toHaveCount(0);
-    // Panier moyen (CA hors carte ÷ RDV encaissés) : 178 / 6 = 29,666… = 29,67 € ; ce mois 218 / 8 = 27,25 €
-    const panier = ligneEncaissements(page, /^Panier moyen/);
-    await expect(panier.aujourdhui).toHaveText(/^29,67\s€\s*6 RDV$/);
-    await expect(panier.mois).toHaveText(/^27,25\s€\s*8 RDV$/);
-
-    // « Aujourd'hui » : CA du jour (aucun autre canal) 178 €, part carte cadeau rappelée à côté, jamais ajoutée
-    const jourBloc = bloc(page, 'Aujourd\'hui');
-    await expect(jourBloc).toContainText('CA du jour · tous canaux178 €');
-    await expect(jourBloc).toContainText('hors 25 € réglés par carte cadeau');
-    await expect(bloc(page, NOM_DU_MOIS)).toContainText('CA encaissé218 €hors 25 € réglés par carte cadeau (comptés à la vente de la carte)');
+    // Rendez-vous (prestations + produits, hors carte cadeau) : 178 / 218 ; aucun autre canal
+    await verifierLigne(page, 'Rendez-vous', '178 €', '218 €', TABLEAUX.ventes);
+    await verifierLigne(page, 'Total tous canaux', '178 €', '218 €', TABLEAUX.ventes);
+    await expect(caDuJour(page)).toContainText('CA aujourd\'hui178 €');
+    await expect(caDuMois(page)).toContainText(`CA ${nomDuMois(AUJ)}218 €`);
+    // Pourboires : CB 5 / 5 + 2 ; espèces 3 ; aucun sans moyen noté (ligne cachée) ; total 8 / 10
+    await verifierLigne(page, 'CB', '5 €', '7 €', TABLEAUX.pourboires);
+    await verifierLigne(page, 'Espèces', '3 €', '3 €', TABLEAUX.pourboires);
+    await expect(ligneChiffres(page, TABLEAUX.pourboires, 'Non renseignés').ligne).toHaveCount(0);
+    await verifierLigne(page, 'Total pourboires', '8 €', '10 €', TABLEAUX.pourboires);
+    // RDV encaissés 6 / 8 ; panier moyen (CA hors carte ÷ RDV encaissés) : 178 / 6 = 29,666… = 29,67 € ;
+    // ce mois 218 / 8 = 27,25 €
+    await verifierLigne(page, 'RDV encaissés', '6', '8', TABLEAUX.rdv);
+    await verifierLigne(page, /^Panier moyen/, '29,67 €', '27,25 €', TABLEAUX.rdv);
   });
 
   test('« Caisse du soir » avec features.paidAt : un RDV d\'hier encaissé ce matin compte ce soir, cartes cadeau vendues en CB ajoutées, pourboires CB par barber', async ({ page, api }) => {
@@ -316,7 +326,7 @@ test.describe('Tableau de bord : À faire', () => {
   test('rien à faire : pas de bloc « À faire »', async ({ page }) => {
     // Données de base : RDV du jour à venir, rien à clôturer, ni carte, ni commande, ni congé
     await page.goto('/admin');
-    await expect(bloc(page, 'Aujourd\'hui').getByRole('list', { name: 'Rendez-vous du jour' })).toBeVisible();
+    await expect(bloc(page, 'Rendez-vous du jour').getByRole('list', { name: 'Rendez-vous du jour' })).toBeVisible();
     // Ventes lues (« … » tant qu'elles arrivent) : le bloc ne peut plus apparaître plus tard
     const ventes = bloc(page, 'Ventes hors rendez-vous');
     await expect(ventes.getByRole('button', { name: /^Boutique/ })).toContainText('Aucune commande en cours');
@@ -355,7 +365,7 @@ test.describe('Tableau de bord : Aujourd\'hui', () => {
     ];
     await page.goto('/admin');
 
-    const jourBloc = bloc(page, 'Aujourd\'hui');
+    const jourBloc = bloc(page, 'Rendez-vous du jour');
     const liste = jourBloc.getByRole('list', { name: 'Rendez-vous du jour' });
     const ligne = (prenom) => liste.getByRole('listitem').filter({ hasText: prenom });
     await expect(ligne('Alice')).toContainText('Payé · CB');
@@ -379,10 +389,16 @@ test.describe('Tableau de bord : Aujourd\'hui', () => {
     await expect(jourBloc).toContainText('2 à venir (60 €)');
     await expect(jourBloc).toContainText('1 absent');
     await expect(jourBloc).toContainText('2 annulés');
-    // Annulations par les clients du mois : Hugo seul (ni le salon, ni le déplacement)
-    await expect(bloc(page, 'Last Minute et absences du mois')).toContainText('Annulations par les clientsDéplacements non comptés1');
+    // Annulations par les clients : Hugo seul (ni le salon, ni le déplacement)
+    await verifierLigne(page, /^Annulations par les clients/, '1', '1', TABLEAUX.rdv);
     // Encaissé aujourd'hui 25 € contre 20 € hier à la même heure (RDV finis avant 10 h) : +25 %
-    await expect(jourBloc).toContainText('RDV : +25 % vs hier à la même heure (20 €)');
+    await expect(caDuJour(page)).toContainText('+25 %RDV vs hier même heure (20 €)');
+    // Tableau « Rendez-vous » de « Chiffres » : aujourd'hui 1 encaissé ; ce mois, plus les 3 d'hier s'il
+    // est dans le mois
+    await verifierLigne(page, 'RDV encaissés', '1', memeMois(jour(-1)) ? '4' : '1', TABLEAUX.rdv);
+    await expect(ligneChiffres(page, TABLEAUX.rdv, /^À clôturer/).aujourdhui).toHaveText(/^15\s€\s*1 RDV$/);
+    await expect(ligneChiffres(page, TABLEAUX.rdv, /^À venir/).aujourdhui).toHaveText(/^60\s€\s*2 RDV$/);
+    await verifierLigne(page, 'Absents', '1', '1', TABLEAUX.rdv);
     // RDV en cours mis en avant
     await expect(jourBloc.getByRole('link', { name: /^En cours · 09:45–10:15/ })).toBeVisible();
 
@@ -400,7 +416,7 @@ test.describe('Tableau de bord : Aujourd\'hui', () => {
     ];
     await page.goto('/admin');
 
-    const jourBloc = bloc(page, 'Aujourd\'hui');
+    const jourBloc = bloc(page, 'Rendez-vous du jour');
     const liste = jourBloc.getByRole('list', { name: 'Rendez-vous du jour' });
     await expect(liste.getByRole('listitem')).toHaveCount(8);
     const voir = jourBloc.getByRole('button', { name: 'Voir toute la liste (10 lignes)' });
@@ -437,18 +453,20 @@ test.describe('Tableau de bord : le mois et son objectif', () => {
     moisConnu(api);
     await page.goto('/admin');
 
-    const mois = bloc(page, NOM_DU_MOIS);
-    await expect(mois).toContainText('CA encaissé60 €hors 10 € réglés par carte cadeau (comptés à la vente de la carte)');
+    // CA du mois 60 € ; la part carte cadeau (10 €) à part, jamais ajoutée
+    await expect(caDuMois(page)).toContainText(`CA ${nomDuMois(AUJ)}60 €`);
+    await verifierLigne(page, /^Réglé par carte cadeau/, '10 €', '10 €');
     if (AUJ.endsWith('-01')) {
       // Le 1er : pas de comparaison (« −100 % » chaque 1er au matin)
-      await expect(mois).not.toContainText(' au 1er : ');
+      await expect(chiffres(page)).not.toContainText(' au 1er : ');
     } else {
       // (60 − 35) / 35 = +71,4 % → « +71 % »
-      await expect(mois).toContainText(`+71 %${MOIS_LONG.format(dateUtc(DERNIER_DU_MOIS_PRECEDENT))} au ${JOUR_DE_COUPURE} : 35 €`);
+      await expect(caDuMois(page)).toContainText(`+71 %${MOIS_LONG.format(dateUtc(DERNIER_DU_MOIS_PRECEDENT))} au ${JOUR_DE_COUPURE} : 35 €`);
     }
     // 60 + 15 + 35 = 110 €
-    await expect(mois).toContainText('Fin de mois prévue110 €');
-    await expect(mois).toContainText('CA encaissé + 15 € à clôturer + 35 € de RDV à venir · mois dernier : 80 €');
+    const fin = blocFin(page);
+    await expect(fin).toContainText('Fin de mois prévue110 €');
+    await expect(fin).toContainText('CA encaissé 60 € + 15 € à clôturer + 35 € de RDV à venir · mois dernier : 80 €');
   });
 
   test('CA de tous les canaux : boutique retirée, carte vendue, précommande payée, privatisation confirmée, répartition par canal', async ({ page, api, connecter }) => {
@@ -463,26 +481,21 @@ test.describe('Tableau de bord : le mois et son objectif', () => {
     api.tables.Event = [{ id: 'priv-1', status: 'confirmed', price: 200, date: AUJ, created_at: iso(jour(-20), '10:00') }]; //          200
     await page.goto('/admin');
 
-    // 25 + 18 + 50 + 30 + 200 = 323 €
-    const jourBloc = bloc(page, 'Aujourd\'hui');
-    await expect(jourBloc).toContainText('CA du jour · tous canaux323 €');
-    await expect(jourBloc).toContainText('dont rendez-vous 25 €');
-    await expect(jourBloc).toContainText('boutique 18 €· cartes cadeau vendues 50 €· textile 30 €· privatisations 200 €');
-    const mois = bloc(page, NOM_DU_MOIS);
-    await expect(mois).toContainText('CA encaissé323 €');
-    // Part de chaque canal : 25 / 323 = 7,7 % ; 18 → 5,6 % ; 50 → 15,5 % ; 200 → 61,9 % ; 30 → 9,3 %
-    const canaux = mois.getByRole('list').getByRole('listitem');
-    await expect(canaux).toHaveText([
-      /^Rendez-vous \(prestations et produits\)25\s€8\s%$/,
-      /^Boutique \(commandes retirées\)18\s€6\s%$/,
-      /^Cartes cadeau vendues50\s€15\s%$/,
-      /^Privatisations200\s€62\s%$/,
-      /^Textile \(précommandes payées\)30\s€9\s%$/,
+    // 25 + 18 + 50 + 30 + 200 = 323 €, aujourd'hui comme ce mois
+    await expect(caDuJour(page)).toContainText('CA aujourd\'hui323 €');
+    await expect(caDuMois(page)).toContainText(`CA ${nomDuMois(AUJ)}323 €`);
+    const ventes = chiffres(page).getByRole('table', { name: TABLEAUX.ventes });
+    await expect(ventes.getByRole('rowheader')).toHaveText([
+      'Rendez-vous', 'Boutique (commandes retirées)', 'Cartes cadeau vendues', 'Privatisations', 'Textile (précommandes payées)', 'Total tous canaux',
     ]);
+    for (const [ligne, montant] of [['Rendez-vous', '25 €'], ['Boutique (commandes retirées)', '18 €'], ['Cartes cadeau vendues', '50 €'],
+      ['Privatisations', '200 €'], ['Textile (précommandes payées)', '30 €'], ['Total tous canaux', '323 €']]) {
+      await verifierLigne(page, ligne, montant, montant, TABLEAUX.ventes);
+    }
     // Caisse du soir : CB = RDV 25 + carte 50 ; boutique et textile à part (moyen non noté)
     await expect(montantCaisse(page, 'CB attendue')).toHaveText('75 €');
     await expect(caisseDuSoir(page)).toContainText('Boutique retirée et précommandes textile (au jour de la commande) : 48 € (moyen de paiement non noté)');
-    await expect(mois).toContainText('Achats payés par carte cadeau hors rendez-vous (boutique, textile, privatisations) : pas déduits.');
+    await expect(chiffres(page)).toContainText('Achats payés par carte cadeau hors rendez-vous (boutique, textile, privatisations) : pas déduits.');
   });
 
   test('privatisation confirmée : comptée au CA du mois une fois passée, à venir dans la fin de mois prévue seulement', async ({ page, api, connecter }) => {
@@ -498,13 +511,12 @@ test.describe('Tableau de bord : le mois et son objectif', () => {
     ];
     await page.goto('/admin');
 
-    const titre = nomDuMois(dixDuMois).charAt(0).toUpperCase() + nomDuMois(dixDuMois).slice(1);
-    const mois = bloc(page, titre);
     // CA du mois : 25 + 200 (passée) = 225 ; fin de mois prévue : 225 + 300 (à venir) = 525
-    await expect(mois).toContainText('CA encaissé225 €');
-    await expect(mois).toContainText('Fin de mois prévue525 €');
-    await expect(mois).toContainText('CA encaissé + 300 € de privatisations à venir');
-    await expect(mois.getByRole('list').getByRole('listitem').filter({ hasText: /^Privatisations/ })).toHaveText(/^Privatisations200\s€89\s%$/);
+    await expect(caDuMois(page, dixDuMois)).toContainText(`CA ${nomDuMois(dixDuMois)}225 €`);
+    await verifierLigne(page, 'Privatisations', '0 €', '200 €', TABLEAUX.ventes);
+    const fin = blocFin(page);
+    await expect(fin).toContainText('Fin de mois prévue525 €');
+    await expect(fin).toContainText('CA encaissé 225 € + 300 € de privatisations à venir');
     await expect(bloc(page, 'Ventes hors rendez-vous').getByRole('button', { name: /^Privatisations/ })).toContainText('À venir : 300 €');
   });
 
@@ -513,7 +525,7 @@ test.describe('Tableau de bord : le mois et son objectif', () => {
     moisConnu(api);
     await page.goto('/admin');
 
-    const mois = bloc(page, NOM_DU_MOIS);
+    const mois = blocFin(page);
     await expect(mois.getByText('Aucun objectif fixé.')).toBeVisible();
     await mois.getByRole('button', { name: 'Fixer un objectif' }).click();
     const fenetre = page.getByRole('dialog', { name: 'Objectif du mois' });
@@ -560,7 +572,7 @@ test.describe('Tableau de bord : le mois et son objectif', () => {
     await connecter(compteBarber(api, ['dashboard']));
     await page.goto('/admin');
 
-    const mois = bloc(page, NOM_DU_MOIS);
+    const mois = blocFin(page);
     await expect(mois).toContainText('Fin de mois prévue110 €');
     await expect(mois.getByText('Objectif du mois')).toHaveCount(0);
     await expect(mois.getByRole('progressbar')).toHaveCount(0);
@@ -574,7 +586,7 @@ test.describe('Tableau de bord : le mois et son objectif', () => {
     api.donnees.parametresPublics.features.revenueGoal = false;
     await page.goto('/admin');
 
-    const mois = bloc(page, NOM_DU_MOIS);
+    const mois = blocFin(page);
     await expect(mois).toContainText('Fin de mois prévue110 €');
     await expect(mois.getByText('Objectif du mois')).toHaveCount(0);
     await expect(mois.getByRole('button', { name: /Modifier|Fixer un objectif/ })).toHaveCount(0);
@@ -721,7 +733,7 @@ test.describe('Tableau de bord : jour et mois de Paris', () => {
       rdv('d1', { de: client('Diane', 'Demain'), barber: BARBERS.kevin, date: jour(1), debut: '10:00' }),
     ];
     await page.goto('/admin');
-    const liste = bloc(page, 'Aujourd\'hui').getByRole('list', { name: 'Rendez-vous du jour' });
+    const liste = bloc(page, 'Rendez-vous du jour').getByRole('list', { name: 'Rendez-vous du jour' });
     await expect(liste).toContainText('Vincent');
     await expect(page.getByRole('main')).toContainText(dateEnTete(AUJ));
 
@@ -746,7 +758,7 @@ test.describe('Tableau de bord : jour et mois de Paris', () => {
     ];
     await page.goto('/admin');
 
-    await expect(bloc(page, NOM_DU_MOIS)).toContainText('CA encaissé25 €');
+    await expect(caDuMois(page, fin)).toContainText(`CA ${nomDuMois(fin)}25 €`);
     const grille = bloc(page, 'Remplissage des 7 prochains jours');
     await expect(grille.getByRole('link', { name: `Dom, ${jourLong(apres)} : 10 % réservé, 9 h libres` })).toHaveText('10');
     await expect(grille.getByRole('link', { name: `Dom, aujourd'hui, ${jourLong(fin)} : 0 % réservé, 9 h libres à partir de maintenant` })).toBeVisible();
@@ -772,15 +784,27 @@ test.describe('Tableau de bord : jour et mois de Paris', () => {
     const cloturer = bloc(page, 'À faire').getByRole('link', { name: /^1 prestation à clôturer · 25\s€/ });
     await expect(cloturer).toContainText('D\'hier');
     await expect(cloturer).toHaveAttribute('href', `/admin/agenda?view=day&date=${hier}`);
-    const titre = nomDuMois(premier).charAt(0).toUpperCase() + nomDuMois(premier).slice(1);
-    const mois = bloc(page, titre);
+    const mois = blocFin(page);
     // Le 1er au matin, une comparaison dirait « −100 % » ou presque : masquée ; le mois dernier reste
     // rappelé dans la fin de mois prévue (35 + 25 à venir = 60 ; mois dernier 25 + 45 = 70)
-    await expect(mois).toContainText('CA encaissé35 €');
-    await expect(mois).not.toContainText(`${nomDuMois(hier)} au 1er`);
-    await expect(mois.getByText(/^[+−]\d+ %$/)).toHaveCount(0);
+    await expect(caDuMois(page, premier)).toContainText(`CA ${nomDuMois(premier)}35 €`);
+    await expect(caDuMois(page, premier)).not.toContainText(`${nomDuMois(hier)} au 1er`);
+    await expect(caDuMois(page, premier).getByText(/^[+−]\d+ %$/)).toHaveCount(0);
     await expect(mois).toContainText('Fin de mois prévue60 €');
-    await expect(mois).toContainText('CA encaissé + 25 € de RDV à venir · mois dernier : 70 €');
+    await expect(mois).toContainText('CA encaissé 35 € + 25 € de RDV à venir · mois dernier : 70 €');
+  });
+
+  // Élision devant une voyelle (« Fin de octobre » avant le 1er nov. 2026 au soir)
+  test('en octobre : « Fin d\'octobre », « Chiffres d\'octobre » (élision devant une voyelle)', async ({ page, api }) => {
+    const annee = Number(AUJ.slice(0, 4)) + (Number(AUJ.slice(5, 7)) > 10 ? 1 : 0);
+    const octobre = `${annee}-10-13`;
+    await page.clock.setSystemTime(instantParis(octobre, '10:00'));
+    api.tables.Appointment = [];
+    await page.goto('/admin');
+
+    await expect(caDuMois(page, octobre)).toContainText('CA octobre');
+    await expect(page.getByRole('region', { name: 'Fin d\'octobre', exact: true })).toBeVisible({ timeout: 3_000 });
+    await expect(bloc(page, 'Last Minute et absences du mois')).toContainText(`Chiffres d'octobre ${annee}`, { timeout: 3_000 });
   });
 
   test('le 31 après un mois de 30 jours : le mois précédent, fini, compte en entier', async ({ page, api }) => {
@@ -799,10 +823,10 @@ test.describe('Tableau de bord : jour et mois de Paris', () => {
     ];
     await page.goto('/admin');
 
-    const titre = nomDuMois(jour31).charAt(0).toUpperCase() + nomDuMois(jour31).slice(1);
+
     // Le mois précédent n'a pas de 31 : il est fini, compté en entier (35 + 45 = 80).
     // (25 − 80) / 80 = −68,75 % → « −69 % » (signe moins typographique)
-    await expect(bloc(page, titre)).toContainText(`\u221269 %${nomDuMois(trente)} au 30 : 80 €`);
+    await expect(caDuMois(page, jour31)).toContainText(`\u221269 %${nomDuMois(trente)} au 30 : 80 €`);
   });
 
   test.describe('appareil réglé sur un autre fuseau (Pago Pago, la veille au soir)', () => {
@@ -818,7 +842,7 @@ test.describe('Tableau de bord : jour et mois de Paris', () => {
       await page.goto('/admin');
 
       await expect(page.getByRole('main')).toContainText(dateEnTete(AUJ));
-      const liste = bloc(page, 'Aujourd\'hui').getByRole('list', { name: 'Rendez-vous du jour' });
+      const liste = bloc(page, 'Rendez-vous du jour').getByRole('list', { name: 'Rendez-vous du jour' });
       await expect(liste.getByRole('listitem')).toHaveCount(3);
       await expect(liste.getByRole('listitem').filter({ hasText: 'Bruno' })).toContainText('À clôturer');
       await expect(liste.getByRole('listitem').filter({ hasText: 'Fanny' })).toContainText('À venir');
@@ -852,7 +876,7 @@ test.describe('Tableau de bord : relecture et erreurs', () => {
     await page.clock.runFor(60_000);
     await expect(cb).toHaveText('60 €');
     expect(api.requetesVers('GET', '/entities/Appointment').length).toBeGreaterThan(lectures);
-    await expect(bloc(page, 'Aujourd\'hui').getByRole('list', { name: 'Rendez-vous du jour' }).getByRole('listitem').filter({ hasText: 'm2' }))
+    await expect(bloc(page, 'Rendez-vous du jour').getByRole('list', { name: 'Rendez-vous du jour' }).getByRole('listitem').filter({ hasText: 'm2' }))
       .toContainText('Payé · CB');
   });
 
@@ -864,13 +888,23 @@ test.describe('Tableau de bord : relecture et erreurs', () => {
     await expect(page.getByText('Impossible de charger les rendez-vous du tableau de bord')).toHaveCount(1);
     await expect(ligneEncaissements(page, 'CB').aujourdhui).toHaveText('—');
     await expect(montantCaisse(page, 'CB attendue')).toHaveText('—');
-    for (const nom of ['Aujourd\'hui', NOM_DU_MOIS, 'Encaissements', '7 derniers jours', 'Barbers', 'Last Minute et absences du mois']) {
+    for (const nom of ['Rendez-vous du jour', 'Caisse du soir', '7 derniers jours', 'Barbers', 'Last Minute et absences du mois']) {
       await expect(bloc(page, nom), `bloc « ${nom} »`).toBeVisible();
       await expect(bloc(page, nom), `bloc « ${nom} »`).not.toContainText(ZERO_EURO);
     }
+    // « Chiffres » : tout ce qui vient des RDV ; les autres canaux, lus, valent vraiment 0 € (lignes à part)
+    for (const tableau of [TABLEAUX.rdv, TABLEAUX.encaissements, TABLEAUX.pourboires]) {
+      await expect(chiffres(page).getByRole('table', { name: tableau })).not.toContainText(ZERO_EURO);
+    }
+    await verifierLigne(page, 'Rendez-vous', '—', '—', TABLEAUX.ventes);
+    await verifierLigne(page, 'Boutique (commandes retirées)', '0 €', '0 €', TABLEAUX.ventes);
+    await expect(blocFin(page)).not.toContainText(ZERO_EURO);
     await expect(page.getByRole('region', { name: 'CA à venir, tous les mois' })).not.toContainText(ZERO_EURO);
-    await expect(bloc(page, 'Aujourd\'hui')).toContainText('CA du jour · tous canaux—');
-    await expect(bloc(page, NOM_DU_MOIS)).toContainText('CA encaissé—');
+    await expect(caDuJour(page)).toContainText('CA aujourd\'hui—');
+    await expect(caDuMois(page)).toContainText(`CA ${nomDuMois(AUJ)}—`);
+    await verifierLigne(page, 'Total tous canaux', '—', '—', TABLEAUX.ventes);
+    await verifierLigne(page, 'RDV encaissés', '—', '—', TABLEAUX.rdv);
+    await expect(blocFin(page)).toContainText('Fin de mois prévue—');
   });
 
   test('boutique illisible : total partiel « incomplet », rien qui s\'en tire (comparaison, fin de mois, %), « — » sur la boutique', async ({ page, api }) => {
@@ -889,18 +923,22 @@ test.describe('Tableau de bord : relecture et erreurs', () => {
     await expect(ventes.getByRole('button', { name: /^Boutique/ })).toContainText('En cours : —');
     await expect(ventes.getByRole('button', { name: /^Boutique/ })).not.toContainText(ZERO_EURO);
     await expect(ventes.getByRole('button', { name: /^Cartes cadeau/ })).toContainText('Reste à utiliser : 40 €');
-    // Aujourd'hui : 25 + 40 = 65, partiel, marqué
-    const jourBloc = bloc(page, 'Aujourd\'hui');
-    await expect(jourBloc).toContainText('CA du jour · tous canaux65 €incomplet');
-    await expect(jourBloc).toContainText('Ventes non chargées : boutique.');
-    // Ce mois : même total partiel ; ni comparaison, ni fin de mois prévue, ni % (objectif, canaux)
-    const mois = bloc(page, NOM_DU_MOIS);
-    await expect(mois).toContainText('CA encaissé65 €incomplet');
-    await expect(mois).toContainText('Ventes non chargées : boutique.');
-    await expect(mois).toContainText('— de 3 000 € (total incomplet)');
-    await expect(mois).not.toContainText('Fin de mois prévue');
-    await expect(mois).not.toContainText(/\d\s%/);
-    await expect(mois.getByRole('progressbar')).toHaveCount(0);
+    // Aujourd'hui et ce mois : 25 + 40 = 65, partiels, marqués ; « — » sur la boutique
+    await expect(caDuJour(page)).toContainText('CA aujourd\'hui65 €incomplet');
+    await expect(caDuMois(page)).toContainText(`CA ${nomDuMois(AUJ)}65 €incomplet`);
+    await expect(chiffres(page)).toContainText('Ventes non chargées : boutique.');
+    await verifierLigne(page, 'Boutique (commandes retirées)', '—', '—', TABLEAUX.ventes);
+    await verifierLigne(page, 'Total tous canaux', '65 €incomplet', '65 €incomplet', TABLEAUX.ventes);
+    // Ni comparaison au mois précédent (un mois précédent existe pourtant)
+    await expect(caDuMois(page).getByText(/^[+−=]/)).toHaveCount(0);
+    await expect(chiffres(page)).not.toContainText(' : 25 €');
+    // Fin de mois : ni montant ni % d'objectif tirés d'un total incomplet
+    const fin = blocFin(page);
+    await expect(fin).toContainText('Fin de mois prévue—');
+    await expect(fin).toContainText('Ventes non chargées : boutique.');
+    await expect(fin).toContainText('— de 3 000 € (total incomplet)');
+    await expect(fin).not.toContainText(/\d\s%/);
+    await expect(fin.getByRole('progressbar')).toHaveCount(0);
     // Le reste : les rendez-vous, sans bandeau
     await verifierLigne(page, 'CB', '25 €', '25 €');
     await expect(page.getByText('Impossible de charger les rendez-vous du tableau de bord')).toHaveCount(0);
@@ -923,9 +961,10 @@ test.describe('Tableau de bord : relecture et erreurs', () => {
     await expect(alertes.first()).toContainText('Pas de connexion internet', { timeout: 15_000 });
     await expect(alertes).toHaveCount(1);
     await expect(ligneEncaissements(page, 'CB').aujourdhui).toHaveText('—');
-    for (const nom of ['Aujourd\'hui', NOM_DU_MOIS, 'Encaissements', 'Ventes hors rendez-vous']) {
+    for (const nom of ['Chiffres', 'Rendez-vous du jour', 'Caisse du soir', 'Ventes hors rendez-vous']) {
       await expect(bloc(page, nom), `bloc « ${nom} »`).not.toContainText(ZERO_EURO);
     }
+    await expect(blocFin(page)).not.toContainText(ZERO_EURO);
 
     coupe = false;
     await alertes.getByRole('button', { name: 'Réessayer' }).click();
@@ -958,9 +997,15 @@ test.describe('Tableau de bord d\'un barber : droits', () => {
     await connecter(compteBarber(api, ['dashboard']));
     await page.goto('/admin');
 
-    await expect(bloc(page, 'Aujourd\'hui').getByRole('list', { name: 'Rendez-vous du jour' })).toBeVisible();
-    await expect(bloc(page, 'Aujourd\'hui')).toContainText('CA du jour · tous canaux, hors privatisations');
-    await expect(bloc(page, NOM_DU_MOIS)).toContainText('Ce mois · tous les canaux, hors privatisations');
+    await expect(bloc(page, 'Rendez-vous du jour').getByRole('list', { name: 'Rendez-vous du jour' })).toBeVisible();
+    // Ses chiffres ne contiennent pas les privatisations (non lues) : dit dans le total et les titres
+    const ventes = chiffres(page).getByRole('table', { name: TABLEAUX.ventes });
+    await expect(ventes.getByRole('rowheader')).toHaveText([
+      'Rendez-vous', 'Boutique (commandes retirées)', 'Cartes cadeau vendues', 'Textile (précommandes payées)', 'Total tous canaux, hors privatisations',
+    ]);
+    await expect(chiffres(page)).toContainText('Aujourd\'hui et ce mois · tous canaux, hors privatisations');
+    await expect(chiffres(page)).toContainText('Achats payés par carte cadeau hors rendez-vous (boutique, textile) : pas déduits.');
+    await expect(blocFin(page)).toContainText('tous les canaux, hors privatisations');
     // Aucune tâche qu'il pourrait ouvrir (clôturer = agenda, commandes, cartes…) : pas de bloc du tout
     await expect(bloc(page, 'Ventes hors rendez-vous').getByRole('button', { name: /^Boutique/ })).toContainText('En cours : 18 €');
     await expect(bloc(page, 'À faire')).toHaveCount(0);
@@ -983,7 +1028,7 @@ test.describe('Tableau de bord d\'un barber : droits', () => {
     await expect(aFaire.getByRole('link', { name: /^3 prestations à clôturer/ }))
       .toHaveAttribute('href', `/admin/agenda?view=day&date=${AVANT_LE_1ER}`);
     await expect(aFaire.getByRole('listitem')).toHaveCount(1);
-    await expect(bloc(page, 'Aujourd\'hui').getByRole('link', { name: 'Ouvrir l\'agenda' })).toHaveAttribute('href', `/admin/agenda?view=day&date=${AUJ}`);
+    await expect(bloc(page, 'Rendez-vous du jour').getByRole('link', { name: 'Ouvrir l\'agenda' })).toHaveAttribute('href', `/admin/agenda?view=day&date=${AUJ}`);
     await expect(liens(page, '/admin/agenda').first()).toBeVisible();
     for (const debut of ['/admin/orders', '/admin/gift-cards', '/admin/events', '/admin/leave']) {
       await expect(liens(page, debut), `liens vers ${debut}`).toHaveCount(0);
@@ -1014,7 +1059,7 @@ test.describe('Tableau de bord : clients sur l\'app en ce moment', () => {
   test('serveur sans features.analyticsLive : aucun compteur, aucune requête', async ({ page, api }) => {
     api.donnees.parametresPublics.features.analyticsLive = false;
     await page.goto('/admin');
-    await expect(bloc(page, 'Aujourd\'hui').getByRole('list', { name: 'Rendez-vous du jour' })).toBeVisible();
+    await expect(bloc(page, 'Rendez-vous du jour').getByRole('list', { name: 'Rendez-vous du jour' })).toBeVisible();
     await page.clock.runFor(60_000);
     await expect(page.getByText(/sur l'app$/)).toHaveCount(0);
     expect(api.requetesVers('GET', '/analytics/live')).toHaveLength(0);
@@ -1033,7 +1078,7 @@ test.describe('Tableau de bord : largeurs d\'écran', () => {
 
       await expect(bloc(page, 'À faire')).toContainText('3 prestations à clôturer');
       await expect(page.getByRole('link', { name: '3 clients sur l\'app' })).toBeVisible();
-      await expect(bloc(page, NOM_DU_MOIS).getByRole('progressbar', { name: 'Objectif du mois' })).toBeVisible();
+      await expect(blocFin(page).getByRole('progressbar', { name: 'Objectif du mois' })).toBeVisible();
       // Panneaux des ventes fermés sur téléphone : tous ouverts pour la mesure
       const ventes = bloc(page, 'Ventes hors rendez-vous');
       const fermes = ventes.getByRole('button', { expanded: false });

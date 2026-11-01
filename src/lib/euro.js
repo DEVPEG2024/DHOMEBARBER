@@ -14,6 +14,12 @@ export function euro(value) {
   return Number.isInteger(n) ? WHOLE.format(n) : CENTS.format(n);
 }
 
+/** « de mars », « d'avril », « d'août », « d'octobre » : élision devant une voyelle. */
+export function deMois(name) {
+  const n = String(name || '');
+  return /^[aeiouyàâäéèêëîïôöûùü]/i.test(n) ? `d'${n}` : `de ${n}`;
+}
+
 /** Écart en % entre deux montants (`null` si la base est nulle) : « +8 % », « −12 % ». */
 export function percentChange(current, base) {
   const b = Number(base) || 0;

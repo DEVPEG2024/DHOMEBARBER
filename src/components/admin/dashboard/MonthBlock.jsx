@@ -1,13 +1,8 @@
 /**
- * Tableau de bord, bloc « Ce mois » (titre : le nom du mois).
- *
- * De haut en bas : CA du mois de tous les canaux (part carte cadeau à côté ; hors privatisations pour
- * un barber, qui ne les lit pas), comparaison au mois précédent à la même date (pas le 1er : trop tôt),
- * fin de mois prévue (`sales.totals.projection`), objectif du mois (barre, admin : le fixer ou le
- * changer), répartition par canal.
- * Un canal de vente en échec : total partiel, pastille « incomplet », canaux manquants nommés, et rien
- * de ce qui se tire du total (comparaison, fin de mois, % de l'objectif, parts des canaux).
- * Listes coupées au plafond : signalées dans « Ventes hors rendez-vous », pas ici.
+ * Tableau de bord, bloc « Fin de {mois} » : fin de mois prévue (`sales.totals.projection`) et objectif
+ * du mois (barre, admin : le fixer ou le changer). Le CA du mois, sa comparaison au mois précédent et
+ * la répartition par canal sont dans « Chiffres » (KeyFigures.jsx), en haut de la page.
+ * Un canal de vente en échec : ni fin de mois prévue ni % d'objectif (tirés d'un total incomplet).
  * Tout vient de `d` (useDashboardData) : aucune lecture ici, seule l'écriture de l'objectif.
  */
 import React, { useId, useState } from 'react';
@@ -19,19 +14,14 @@ import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { friendlyError } from '@/components/shared/LoadError';
-import { euro, percentChange, formatPercentChange } from '@/lib/euro';
+import { euro, deMois } from '@/lib/euro';
 import { noonOf } from '@/lib/dashboardStats';
 import { useSaveRevenueGoal } from '@/lib/useDashboardData';
-import { Section, Money, Pill, Note, TONE } from '@/components/admin/dashboard/ui';
+import { Section, Money, Note, TONE } from '@/components/admin/dashboard/ui';
 
 const GOAL_MAX = 1000000;
 
-const capitalize = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 const monthName = (dayKey) => format(noonOf(dayKey), 'LLLL', { locale: fr });
-const dayNumber = (dayKey) => {
-  const n = Number(String(dayKey).slice(8, 10));
-  return n === 1 ? '1er' : String(n);
-};
 const clamp01 = (x) => (Number.isFinite(x) ? Math.min(Math.max(x, 0), 1) : 0);
 
 /**
@@ -60,27 +50,13 @@ export default function MonthBlock({ d }) {
   const salesLoading = channels.some((c) => c.key !== 'prestations' && state.sales.loading?.[c.key]);
   const missing = channels.filter((c) => c.key !== 'prestations' && state.sales.failed?.[c.key]);
 
-  // CA du mois, tous canaux : « — » sans les rendez-vous, « … » tant qu'une source arrive ; un canal
-  // de vente en échec : total partiel, marqué « incomplet », sans rien de ce qui s'en tire
+  // Total du mois (dans « Chiffres ») : « — » sans les rendez-vous, « … » tant qu'une source arrive ;
+  // un canal de vente en échec : ni fin de mois prévue ni % d'objectif, tirés d'un total incomplet
   const totalFailed = appt.failed;
   const totalLoading = !totalFailed && (appt.loading || salesLoading);
   const ready = !totalFailed && !totalLoading;
   const incomplete = ready && missing.length > 0;
-  const complete = ready && !incomplete;
   const total = sales.totals.month;
-  const gift = stats.month.money.gift;
-
-  // Seulement des rendez-vous ce mois (aucun autre canal, rien en échec ni en chargement) : pas de
-  // répartition, qui répéterait le total
-  const otherVisible = channels.some((c) => c.key !== 'prestations'
-    && (state.sales.failed?.[c.key] || state.sales.loading?.[c.key] || c.month > 0));
-
-  // Mois précédent à la même date ; pas le 1er (trop tôt : « −100 % » rouge chaque 1er au matin)
-  const isFirstDay = stats.clock.today.endsWith('-01');
-  const prevKnown = complete && !state.prevMonth.failed && !state.prevMonth.loading;
-  const pct = prevKnown && !isFirstDay ? percentChange(total, sales.totals.prevSameDay) : null;
-  const cutoff = stats.prevMonth.cutoffDay;
-  const prevName = monthName(cutoff);
 
   // Fin de mois prévue (salesChannels) : encaissé + RDV terminés à clôturer + RDV confirmés à venir du
   // mois + privatisations confirmées à venir du mois (admin)
@@ -89,68 +65,41 @@ export default function MonthBlock({ d }) {
   const privUpcoming = access.canEvents ? Number(sales.privatisations?.monthUpcoming) || 0 : 0;
   const projection = sales.totals.projection;
   const hasPending = toClose + upcoming + privUpcoming > 0;
-  const showProjection = !incomplete && (totalLoading || totalFailed || hasPending);
+  const prevKnown = ready && !incomplete && !state.prevMonth.failed && !state.prevMonth.loading;
   const prevTotal = sales.totals.prevTotal;
 
   // Objectif du mois
   const goal = Number(settings?.monthly_revenue_goal) || 0;
   const showGoal = features.revenueGoal && !!settings && (goal > 0 || (access.isAdmin && !!settings.id));
 
-  const title = capitalize(monthName(`${stats.clock.monthKey}-01`));
+  const title = `Fin ${deMois(monthName(`${stats.clock.monthKey}-01`))}`;
   // Un barber ne lit pas les privatisations : son total ne les contient pas
   const scope = access.canEvents ? 'tous les canaux' : 'tous les canaux, hors privatisations';
 
   return (
-    <Section title={title} icon={CalendarDays} hint={`Ce mois · ${scope}, hors pourboires et hors part carte cadeau`}>
-      {/* CA du mois */}
-      <div className="min-w-0">
-        <p className="text-xs text-muted-foreground">CA encaissé</p>
-        <p className="text-3xl sm:text-4xl font-bold text-foreground leading-tight">
-          <Money value={total} loading={totalLoading} failed={totalFailed} />
-          {incomplete && <Pill tone="amber" className="ml-2 align-middle">incomplet</Pill>}
-        </p>
+    <Section title={title} icon={CalendarDays} hint={`Fin de mois prévue et objectif · ${scope}, hors pourboires et hors part carte cadeau`}>
+      <div className="rounded-xl bg-secondary/50 px-3 py-2.5 min-w-0">
+        <div className="flex items-baseline justify-between gap-3">
+          <span className="text-xs text-muted-foreground min-w-0">Fin de mois prévue</span>
+          <span className="text-lg font-bold text-foreground shrink-0">
+            {incomplete
+              ? <span className="tabular-nums">—</span>
+              : <Money value={projection} loading={totalLoading} failed={totalFailed} />}
+          </span>
+        </div>
+        {ready && !incomplete && (
+          <p className="mt-0.5 text-[11px] text-muted-foreground break-words">
+            CA encaissé <span className="tabular-nums">{euro(total)}</span>
+            {toClose > 0 && <> + <span className="tabular-nums">{euro(toClose)}</span> à clôturer</>}
+            {upcoming > 0 && <> + <span className="tabular-nums">{euro(upcoming)}</span> de RDV à venir</>}
+            {privUpcoming > 0 && <> + <span className="tabular-nums">{euro(privUpcoming)}</span> de privatisations à venir</>}
+            {prevKnown && prevTotal > 0 && <> · mois dernier : <span className="tabular-nums">{euro(prevTotal)}</span></>}
+          </p>
+        )}
         {incomplete && (
-          <Note className="mt-1">Ventes non chargées : {missing.map((c) => SHORT_LABELS[c.key] || c.label).join(', ')}.</Note>
-        )}
-        {/* Part carte cadeau : hors du total (comptée à la vente de la carte), jamais ajoutée */}
-        {ready && gift > 0 && (
-          <p className="mt-1 text-xs text-muted-foreground break-words">
-            hors <span className="tabular-nums">{euro(gift)}</span> réglés par carte cadeau (comptés à la vente de la carte)
-          </p>
-        )}
-        {complete && total === 0 && gift === 0 && (
-          <p className="mt-1 text-xs text-muted-foreground">Rien encaissé ce mois-ci pour l'instant.</p>
-        )}
-        {pct != null && (
-          <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-            <Pill tone={pct > 0 ? 'green' : pct < 0 ? 'red' : 'muted'}>{formatPercentChange(pct)}</Pill>
-            <span className="min-w-0 break-words">
-              {prevName} au {dayNumber(cutoff)} : <span className="tabular-nums">{euro(sales.totals.prevSameDay)}</span>
-            </span>
-          </p>
+          <Note className="mt-0.5">Ventes non chargées : {missing.map((c) => SHORT_LABELS[c.key] || c.label).join(', ')}.</Note>
         )}
       </div>
-
-      {/* Fin de mois prévue */}
-      {showProjection && (
-        <div className="mt-4 rounded-xl bg-secondary/50 px-3 py-2.5 min-w-0">
-          <div className="flex items-baseline justify-between gap-3">
-            <span className="text-xs text-muted-foreground min-w-0">Fin de mois prévue</span>
-            <span className="text-lg font-bold text-foreground shrink-0">
-              <Money value={projection} loading={totalLoading} failed={totalFailed} />
-            </span>
-          </div>
-          {ready && (
-            <p className="mt-0.5 text-[11px] text-muted-foreground break-words">
-              CA encaissé
-              {toClose > 0 && <> + <span className="tabular-nums">{euro(toClose)}</span> à clôturer</>}
-              {upcoming > 0 && <> + <span className="tabular-nums">{euro(upcoming)}</span> de RDV à venir</>}
-              {privUpcoming > 0 && <> + <span className="tabular-nums">{euro(privUpcoming)}</span> de privatisations à venir</>}
-              {prevKnown && prevTotal > 0 && <> · mois dernier : <span className="tabular-nums">{euro(prevTotal)}</span></>}
-            </p>
-          )}
-        </div>
-      )}
 
       {/* Objectif du mois */}
       {showGoal && (
@@ -165,49 +114,6 @@ export default function MonthBlock({ d }) {
           isAdmin={access.isAdmin}
           settings={settings}
         />
-      )}
-
-      {/* Répartition par canal */}
-      {otherVisible && (
-        <div className="mt-4">
-          <h3 className="text-xs font-semibold text-muted-foreground mb-1">Par canal</h3>
-          <ul className="divide-y divide-border/60">
-            {channels.map((c) => {
-              const isRdv = c.key === 'prestations';
-              const failed = isRdv ? appt.failed : !!state.sales.failed?.[c.key];
-              const loading = !failed && (isRdv ? appt.loading : !!state.sales.loading?.[c.key]);
-              if (!isRdv && !failed && !loading && !(c.month > 0)) return null;
-              // Part du total : seulement sur un total complet
-              const share = complete && total > 0 ? c.month / total : null;
-              return (
-                <li key={c.key} className="py-2 min-w-0">
-                  <div className="flex items-baseline gap-2 min-w-0">
-                    <span className="h-2.5 w-2.5 rounded-full shrink-0 self-center" style={{ background: c.color }} aria-hidden="true" />
-                    <span className="text-xs text-foreground min-w-0 flex-1 break-words">{c.label}</span>
-                    <Money value={c.month} loading={loading} failed={failed} className="text-sm font-semibold shrink-0" />
-                    <span className="w-10 text-right text-[11px] text-muted-foreground tabular-nums shrink-0">
-                      {share != null ? `${Math.round(share * 100)} %` : ''}
-                    </span>
-                  </div>
-                  {share != null && (
-                    <div className="mt-1.5 ml-[18px] h-1 rounded-full bg-secondary overflow-hidden" aria-hidden="true">
-                      <motion.div
-                        className="h-full w-full rounded-full"
-                        style={{ background: c.color, originX: 0 }}
-                        initial={{ scaleX: 0 }}
-                        animate={{ scaleX: clamp01(share) }}
-                        transition={{ duration: 0.6, ease: 'easeOut' }}
-                      />
-                    </div>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-          <p className="mt-2 text-[11px] text-muted-foreground">
-            Achats payés par carte cadeau hors rendez-vous ({access.canEvents ? 'boutique, textile, privatisations' : 'boutique, textile'}) : pas déduits.
-          </p>
-        </div>
       )}
     </Section>
   );

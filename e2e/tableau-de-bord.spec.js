@@ -12,11 +12,8 @@ import { jour } from './support/temps.js';
 import { debordementHorizontal } from './support/outils.js';
 
 const bloc = (page) => page.getByRole('region', { name: 'CA à venir, tous les mois' });
-/** Bloc du mois en cours, titré du nom du mois (« Novembre »). */
-const blocDuMois = (page) => {
-  const m = new Intl.DateTimeFormat('fr-FR', { month: 'long', timeZone: 'UTC' }).format(new Date(`${jour(0).slice(0, 7)}-01T12:00:00Z`));
-  return page.getByRole('region', { name: m.charAt(0).toUpperCase() + m.slice(1), exact: true });
-};
+/** Bloc « Fin de novembre » : fin de mois prévue et objectif du mois en cours. */
+const blocDuMois = (page) => page.getByRole('region', { name: /^Fin d/ });
 /** « 0 € » seul (pas « 10 € » ni « 1 000 € ») : jamais à la place d'un chiffre manquant. */
 const ZERO_EURO = /(^|[^\d,\s])\s*0\s€/;
 const moisDe = (cle) => cle.slice(0, 7);
@@ -98,7 +95,7 @@ test.describe('Tableau de bord : CA à venir, tous les mois', () => {
     await expect(b).toContainText('—');
     await expect(b).not.toContainText(ZERO_EURO);
     // Le reste : RDV du jour et fin de mois prévue (25 + 35 + 15 à venir aujourd'hui), sans bandeau
-    await expect(page.getByRole('region', { name: 'Aujourd\'hui', exact: true }).getByRole('list', { name: 'Rendez-vous du jour' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Rendez-vous du jour', exact: true }).getByRole('list', { name: 'Rendez-vous du jour' })).toBeVisible();
     await expect(blocDuMois(page)).toContainText('Fin de mois prévue');
     await expect(page.getByText('Impossible de charger les rendez-vous du tableau de bord')).toHaveCount(0);
   });

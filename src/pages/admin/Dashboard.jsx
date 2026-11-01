@@ -24,6 +24,7 @@ import { APPOINTMENTS_LIMIT, comptableRows, isPaid, isRealAppt, outsideGift, noo
 import { useDashboardData } from '@/lib/useDashboardData';
 import { InlineError, Note } from '@/components/admin/dashboard/ui';
 import { isNetworkError } from '@/components/shared/LoadError';
+import KeyFigures from '@/components/admin/dashboard/KeyFigures';
 import TodoBlock from '@/components/admin/dashboard/TodoBlock';
 import TodayBlock from '@/components/admin/dashboard/TodayBlock';
 import MonthBlock from '@/components/admin/dashboard/MonthBlock';
@@ -180,6 +181,11 @@ export default function AdminDashboard() {
           {state.truncated.appointments && (
             <Note>Plus de {APPOINTMENTS_LIMIT} rendez-vous sur un mois : seuls les {APPOINTMENTS_LIMIT} premiers sont comptés, les chiffres peuvent être incomplets.</Note>
           )}
+        </div>
+
+        {/* Tous les chiffres du jour et du mois, en premier (demande du propriétaire, 1er nov. 2026) */}
+        <div className="mb-4">
+          <KeyFigures d={d} />
         </div>
 
         {/* Téléphone : une colonne, le travail du jour d'abord. Grand écran : le jour à droite */}

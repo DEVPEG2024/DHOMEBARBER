@@ -7,7 +7,7 @@
  * - Absences du mois (`d.stats.absences`) : manque à gagner, détail, rang de l'absence du client
  *   (compté sur les deux mois lus, le mois précédent et celui-ci : dit une fois sous la liste).
  * - « N créneaux libres encore à prendre aujourd'hui » : Last Minute libres dont l'heure n'est pas passée.
- * - Annulations par les clients du mois (`d.stats.month.clientCancels`).
+ * (Annulations par les clients : dans « Chiffres », KeyFigures.jsx.)
  */
 import React, { useId, useState } from 'react';
 import { format } from 'date-fns';
@@ -15,7 +15,7 @@ import { fr } from 'date-fns/locale';
 import { CalendarClock, Zap, UserX } from 'lucide-react';
 import { Section, Pill, GoLink, Row, TONE, TONE_BOX } from '@/components/admin/dashboard/ui';
 import { noonOf } from '@/lib/dashboardStats';
-import { euro } from '@/lib/euro';
+import { euro, deMois } from '@/lib/euro';
 import { staffClientLabel } from '@/lib/guest';
 
 // Absences montrées avant « Voir les N absences »
@@ -183,14 +183,11 @@ export default function LastMinuteAbsences({ d }) {
   const monthLabel = format(noonOf(`${d.stats.clock.monthKey}-01`), 'MMMM yyyy', { locale: fr });
 
   return (
-    <Section title="Last Minute et absences du mois" icon={CalendarClock} hint={`Chiffres de ${monthLabel}`}>
+    <Section title="Last Minute et absences du mois" icon={CalendarClock} hint={`Chiffres ${deMois(monthLabel)}`}>
       <div className="space-y-5">
         <LastMinutePart d={d} show={show} ready={ready} />
         <div className="border-t border-border pt-4">
           <AbsencesPart d={d} show={show} ready={ready} />
-        </div>
-        <div className="border-t border-border pt-2">
-          <Row label="Annulations par les clients" hint="Déplacements non comptés" value={show(d.stats.month.clientCancels)} />
         </div>
       </div>
     </Section>

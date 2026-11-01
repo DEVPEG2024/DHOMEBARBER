@@ -1,8 +1,7 @@
 /**
- * Tableau de bord, bloc « Encaissements » : un tableau « Aujourd'hui | Ce mois » (rendez-vous
- * encaissés, au jour du rendez-vous) à la place des 14 pavés de l'ancienne page, puis la « Caisse du
- * soir » : ce qui doit se retrouver ce soir (terminal CB, tiroir), encaissé aujourd'hui.
- * Tout vient de `d` (useDashboardData) : aucune lecture ici.
+ * Tableau de bord, bloc « Caisse du soir » : ce qui doit se retrouver ce soir (terminal CB, tiroir),
+ * encaissé aujourd'hui. Le tableau « Aujourd'hui | Ce mois » des encaissements est dans « Chiffres »
+ * (KeyFigures.jsx, 1er nov. 2026). Tout vient de `d` (useDashboardData) : aucune lecture ici.
  */
 import React from 'react';
 import { Wallet } from 'lucide-react';
@@ -10,106 +9,15 @@ import { euro } from '@/lib/euro';
 import { round2 } from '@/lib/revenue';
 import { Section, Money, Note } from '@/components/admin/dashboard/ui';
 
-/**
- * Lignes du tableau, par groupe (un `<tbody>` chacun). `optional` : masquée si nulle dans les deux
- * colonnes. `kind` : 'total' (gras), 'sub' (« dont »), 'muted' (gris), 'avg' (panier moyen).
- */
-const GROUPS = [
-  [
-    { key: 'cb', label: 'CB' },
-    { key: 'especes', label: 'Espèces' },
-    { key: 'autre', label: 'Non renseigné', hint: 'moyen de paiement non noté', optional: true },
-  ],
-  [
-    { key: 'revenue', label: 'Total rendez-vous', hint: 'hors pourboires', kind: 'total' },
-    { key: 'products', label: 'dont produits vendus en RDV', hint: 'hors part carte cadeau', kind: 'sub' },
-    { key: 'gift', label: 'Réglé par carte cadeau', hint: 'déjà compté à la vente de la carte', kind: 'muted', optional: true },
-  ],
-  [
-    { key: 'tipsCB', label: 'Pourboires CB' },
-    { key: 'tipsCash', label: 'Pourboires espèces' },
-    { key: 'tipsOther', label: 'Pourboires non renseignés', optional: true },
-  ],
-  [
-    { key: 'avg', label: 'Panier moyen', hint: 'CA hors carte cadeau ÷ RDV encaissés', kind: 'avg' },
-  ],
-];
-
-const LABEL_TONE = { total: 'text-foreground font-semibold', sub: 'text-muted-foreground pl-3', muted: 'text-muted-foreground/80' };
-const VALUE_TONE = { total: 'font-bold text-foreground', sub: 'text-muted-foreground', muted: 'text-muted-foreground' };
-
 /** « 180 € · pourboires 10 € » : seulement les parts non nulles. */
 function parts(list) {
   return list.filter(([, v]) => v > 0).map(([label, v]) => `${label} ${euro(v)}`).join(' · ');
 }
 
 export default function MoneyTable({ d }) {
-  const { stats, state } = d;
-  const appt = state.appointments;
-  const failed = appt.failed;
-  const loading = !failed && appt.loading;
-  const ready = !failed && !loading;
-  const today = stats.today.money;
-  const month = stats.month.money;
-  const cols = [today, month];
-
-  const isVisible = (row) => !row.optional || !ready || cols.some((m) => (Number(m[row.key]) || 0) !== 0);
-  const monthEmpty = ready && month.count === 0;
-
   return (
-    <Section title="Encaissements" icon={Wallet} hint="Rendez-vous encaissés, au jour du rendez-vous">
-      {/* Grand écran : la caisse du soir à droite du tableau */}
-      <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,19rem)] lg:items-start lg:gap-5">
-        <div className="min-w-0">
-          {monthEmpty ? (
-            <p className="text-xs text-muted-foreground">Aucun rendez-vous encaissé ce mois-ci.</p>
-          ) : (
-            <table className="w-full border-collapse text-xs">
-              <caption className="sr-only">Encaissements des rendez-vous, aujourd'hui et ce mois</caption>
-              <thead>
-                <tr className="border-b border-border">
-                  <th scope="col" className="w-full pb-1.5 text-left font-normal">
-                    <span className="sr-only">Ligne</span>
-                  </th>
-                  <th scope="col" className="pb-1.5 pl-2 sm:pl-3 text-right text-[11px] font-semibold text-muted-foreground whitespace-nowrap">Aujourd'hui</th>
-                  <th scope="col" className="pb-1.5 pl-2 sm:pl-3 text-right text-[11px] font-semibold text-muted-foreground whitespace-nowrap">Ce mois</th>
-                </tr>
-              </thead>
-              {GROUPS.map((group, gi) => {
-                const rows = group.filter(isVisible);
-                if (!rows.length) return null;
-                return (
-                  <tbody key={gi} className={gi > 0 ? 'border-t border-border/70' : ''}>
-                    {rows.map((row) => (
-                      <tr key={row.key}>
-                        <th scope="row" className={`py-1.5 pr-2 text-left align-baseline font-normal break-words ${LABEL_TONE[row.kind] || 'text-muted-foreground'}`}>
-                          {row.label}
-                          {row.hint && <span className="block text-[11px] font-normal text-muted-foreground">{row.hint}</span>}
-                        </th>
-                        {cols.map((m, ci) => (
-                          <td key={ci} className={`py-1.5 pl-2 sm:pl-3 text-right align-baseline whitespace-nowrap tabular-nums text-xs sm:text-sm ${VALUE_TONE[row.kind] || 'font-semibold text-foreground'}`}>
-                            {row.kind === 'avg' && ready && !m.count ? (
-                              <span className="text-[11px] font-normal text-muted-foreground">aucun RDV</span>
-                            ) : (
-                              <Money value={m[row.key]} loading={loading} failed={failed} />
-                            )}
-                            {row.kind === 'avg' && ready && m.count > 0 && (
-                              <span className="block text-[11px] font-normal text-muted-foreground">
-                                {m.count} RDV
-                              </span>
-                            )}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                );
-              })}
-            </table>
-          )}
-        </div>
-        <CashBox d={d} />
-      </div>
+    <Section title="Caisse du soir" icon={Wallet} hint="Ce qui doit se retrouver ce soir dans le terminal CB et le tiroir">
+      <CashBox d={d} />
     </Section>
   );
 }
@@ -148,8 +56,7 @@ function CashBox({ d }) {
   const nothing = ready && cbExpected === 0 && cashExpected === 0 && other === 0 && !shopFailed && !shopLoading && shop === 0;
 
   return (
-    <div className="mt-4 lg:mt-0 rounded-xl border border-border bg-secondary/40 p-3 min-w-0">
-      <h3 className="text-xs font-semibold text-foreground">Caisse du soir</h3>
+    <div className="min-w-0">
       <p className="text-[11px] text-muted-foreground">
         {dated
           ? 'Encaissements faits aujourd\'hui, quel que soit le jour du rendez-vous'
