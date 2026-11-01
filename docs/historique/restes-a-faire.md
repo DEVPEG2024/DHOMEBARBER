@@ -63,7 +63,7 @@ Source : `docs/fonctions/fil-new-gang.md`, `fil-new-gang-contrat.md`.
 
 ## Tableau de bord (refonte du 1er nov. 2026)
 
-- **Déploiement Vercel au push** : le push 34920c9 du 1er nov. 2026 n'a déclenché aucun déploiement (ni `puzzling-sharp-edge-book` ni `dhomebarber`), déployé à la main par `vercel deploy --prod`. Vérifier l'intégration GitHub de Vercel au prochain push.
+- **Déploiement Vercel au push** : le push 34920c9 du 1er nov. 2026 n'a déclenché aucun déploiement (ni `puzzling-sharp-edge-book` ni `dhomebarber`), déployé à la main par `vercel deploy --prod` ; le push suivant (b520620) a de nouveau été déployé seul. Incident ponctuel, à surveiller.
 - **Encaissements d'avant le 1er nov. 2026** : `paid_at` vide, la caisse du soir les range au jour du RDV (repli). Un rattrapage ponctuel (`app_migrations`) est possible mais pas fait : aucune date d'encaissement fiable n'existe pour ces lignes.
 - **Deux mois lus seulement** : un RDV non clôturé depuis plus d'un mois sort de « À faire », et un RDV plus ancien encaissé aujourd'hui manque à la caisse du soir. Source : contre-expertise du 1er nov. 2026.
 - **`paid_at` et deux appareils** : si un appareil rouvre un RDV pendant qu'un autre corrige son encaissement, la ligne peut rester encaissée sans `paid_at` (repli sur le jour du RDV). Correction possible : calculer la valeur en SQL dans l'`UPDATE`. Rare, non fait.
