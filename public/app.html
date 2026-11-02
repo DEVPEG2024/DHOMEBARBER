@@ -1,0 +1,77 @@
+<!doctype html>
+<!-- dhomebarber.fr/app : lien du QR code « Télécharge l'app » (affiche, docs/prototypes/qr-app/).
+     Un iPhone ou un Android est redirigé vers son store par vercel.json avant d'arriver ici ; cette page sert
+     aux ordinateurs et à l'iPad (qui se présente comme un Mac), et refait le tri au cas où. -->
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Télécharger l'app D'Home Barber</title>
+<meta name="description" content="L'application de D'Home Barber, ton barber à Douvaine : réserve 24h/24, Last Minute, carte Gang. Gratuite sur iPhone et Android.">
+<meta property="og:title" content="L'app D'Home Barber">
+<meta property="og:description" content="Ton barber dans ta poche. Gratuite sur iPhone et Android.">
+<meta property="og:image" content="https://dhomebarber.fr/logo.png">
+<meta property="og:url" content="https://dhomebarber.fr/app">
+<meta name="theme-color" content="#050505">
+<link rel="icon" href="/icons/favicon-32.png">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@700;800&family=Inter:wght@400;600&family=Kaushan+Script&display=swap" rel="stylesheet">
+<script>
+  (function () {
+    var ua = navigator.userAgent || '';
+    var ios = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+    var cible = ios ? 'https://apps.apple.com/fr/app/id6791332174'
+      : /Android/.test(ua) ? 'https://play.google.com/store/apps/details?id=fr.dhomebarber.mobile' : null;
+    if (cible) { document.documentElement.className = 'redirige'; location.replace(cible); }
+  })();
+</script>
+<style>
+  :root { --vert: #009246; --rouge: #CE2B37; --gris: #aab0b8 }
+  * { box-sizing: border-box; margin: 0; padding: 0 }
+  html { background: #050505 }
+  body {
+    min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: max(24px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
+    font-family: Inter, system-ui, sans-serif; color: #fff; text-align: center;
+    background:
+      radial-gradient(60% 40% at 0% 0%, rgba(0,146,70,.28), transparent 72%),
+      radial-gradient(60% 40% at 100% 0%, rgba(206,43,55,.26), transparent 72%),
+      #050505;
+  }
+  body::before { content: ""; position: fixed; inset: 0 0 auto 0; height: 4px; background: linear-gradient(90deg, var(--vert) 33.3%, #f4f5f0 33.3% 66.6%, var(--rouge) 66.6%) }
+  .logo { width: min(200px, 52vw); height: auto }
+  .surtitre { margin-top: 4px; font: 700 13px/1 "Barlow Condensed", sans-serif; letter-spacing: .38em; text-transform: uppercase; color: var(--gris) }
+  h1 { margin-top: 14px; display: flex; flex-direction: column; align-items: center; font-weight: 400 }
+  h1 .l1 {
+    font: 800 clamp(48px, 15vw, 76px)/.88 "Barlow Condensed", sans-serif; text-transform: uppercase;
+    background: linear-gradient(180deg, #fff 0%, #e4e7eb 34%, #9aa0a8 50%, #f3f5f7 66%, #c3c8ce 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  h1 .l2 { margin-top: 6px; font: 400 clamp(28px, 9vw, 42px)/1 "Kaushan Script", cursive; transform: rotate(-4deg);
+    text-shadow: -4px 0 18px rgba(0,146,70,.55), 4px 0 18px rgba(206,43,55,.55) }
+  .stores { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 14px; margin-top: 34px }
+  .stores a { display: block; border-radius: 10px; transition: transform .15s ease }
+  .stores a:hover { transform: translateY(-2px) }
+  .stores a:focus-visible { outline: 2px solid #fff; outline-offset: 4px }
+  .stores img { display: block; height: 54px; width: auto }
+  .stores .gp img { height: 70.3px; margin: -8.15px 0 } /* le PNG de Google a 29 px de marge transparente en haut et en bas sur 250 */
+  .gratuit { margin-top: 14px; font-size: 14px; color: var(--gris) }
+  .attente { display: none; margin-top: 18px; font-size: 14px; color: var(--gris) }
+  .redirige .attente { display: block }
+  .pied { margin-top: 40px; font: 600 12px/1.5 "Barlow Condensed", sans-serif; letter-spacing: .16em; text-transform: uppercase; color: var(--gris) }
+  .pied a { color: #fff; text-decoration: none }
+  @media (prefers-reduced-motion: reduce) { .stores a { transition: none } }
+</style>
+</head>
+<body>
+  <img class="logo" src="/logo.png" alt="D'Home Barber" width="1024" height="1024">
+  <p class="surtitre">L'application du salon</p>
+  <h1><span class="l1">Ton barber</span><span class="l2">dans ta poche</span></h1>
+  <div class="stores">
+    <a href="https://apps.apple.com/fr/app/id6791332174"><img src="/badges/app-store-fr.svg" alt="Télécharger dans l'App Store" width="152" height="48"></a>
+    <a class="gp" href="https://play.google.com/store/apps/details?id=fr.dhomebarber.mobile"><img src="/badges/google-play-fr.png" alt="Disponible sur Google Play" width="182" height="70"></a>
+  </div>
+  <p class="gratuit">Gratuite sur iPhone et Android</p>
+  <p class="attente">Ouverture du store…</p>
+  <p class="pied"><a href="/">D'Home Barber</a> · 3 rue du Bois Arquet · <span style="white-space:nowrap">74140 Douvaine</span></p>
+</body>
+</html>

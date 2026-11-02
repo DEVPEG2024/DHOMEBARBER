@@ -1,0 +1,145 @@
+<!doctype html>
+<!-- Affiche A4 « Télécharge l'app » : rendue en PDF et PNG par rendu.mjs, qui met le QR stylé à la place du repère de la zone .scan. -->
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Affiche app D'Home Barber</title>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Inter:wght@400;500;600;700&family=Kaushan+Script&display=block" rel="stylesheet">
+<style>
+  @page { size: 210mm 297mm; margin: 0 }
+  :root {
+    --vert: #009246; --rouge: #CE2B37;
+    --chrome: linear-gradient(180deg, #ffffff 0%, #e4e7eb 34%, #9aa0a8 50%, #f3f5f7 66%, #c3c8ce 100%);
+    --gris: #aab0b8;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0 }
+  html, body { width: 210mm; height: 297mm; background: #050505 }
+  body { font-family: Inter, sans-serif; color: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact }
+
+  .page {
+    position: relative; width: 210mm; height: 297mm; overflow: hidden;
+    display: flex; flex-direction: column; align-items: center;
+    background:
+      radial-gradient(55% 30% at 6% 10%, rgba(0,146,70,.30), transparent 72%),
+      radial-gradient(55% 30% at 94% 10%, rgba(206,43,55,.28), transparent 72%),
+      radial-gradient(60% 34% at 50% 57%, rgba(255,255,255,.06), transparent 70%),
+      #050505;
+  }
+  /* rayures de poteau de barbier, très discrètes, en bas de page */
+  .page::after {
+    content: ""; position: absolute; inset: auto 0 0 0; height: 70mm; pointer-events: none;
+    background: repeating-linear-gradient(-55deg, rgba(255,255,255,.035) 0 3mm, transparent 3mm 9mm);
+    -webkit-mask-image: linear-gradient(to top, #000 0%, transparent 100%);
+  }
+  .drapeau { display: flex; width: 100%; height: 2.2mm; flex: none }
+  .drapeau i { flex: 1 } .drapeau i:nth-child(1) { background: var(--vert) } .drapeau i:nth-child(2) { background: #f4f5f0 } .drapeau i:nth-child(3) { background: var(--rouge) }
+
+  .logo { width: 54mm; margin-top: 5mm; flex: none }
+
+  .surtitre {
+    display: flex; align-items: center; gap: 3mm; margin-top: -1mm;
+    font: 700 3.4mm/1 "Barlow Condensed", sans-serif; letter-spacing: .42em; color: var(--gris); text-transform: uppercase;
+  }
+  .surtitre::before, .surtitre::after { content: ""; width: 12mm; height: .3mm; background: linear-gradient(90deg, transparent, var(--gris)) }
+  .surtitre::after { transform: scaleX(-1) }
+
+  h1 { display: flex; flex-direction: column; align-items: center; margin-top: 3mm; font-weight: 400 }
+  h1 .l1 {
+    font: 800 24mm/.86 "Barlow Condensed", sans-serif; letter-spacing: .005em; text-transform: uppercase;
+    background: var(--chrome); -webkit-background-clip: text; background-clip: text; color: transparent;
+    filter: drop-shadow(0 .6mm 0 rgba(0,0,0,.9));
+  }
+  h1 .l2 {
+    font: 400 13mm/1 "Kaushan Script", cursive; color: #fff; margin-top: 2mm; transform: rotate(-4deg);
+    text-shadow: -1.2mm 0 6mm rgba(0,146,70,.55), 1.2mm 0 6mm rgba(206,43,55,.55);
+  }
+
+  .scan { position: relative; width: 88mm; padding: 6mm; margin-top: 6.5mm; flex: none }
+  .scan svg { display: block; width: 100%; height: auto; border-radius: 4.5mm;
+    box-shadow: -7mm 0 18mm rgba(0,146,70,.38), 7mm 0 18mm rgba(206,43,55,.38), 0 0 0 .5mm rgba(255,255,255,.2) }
+  .coin { position: absolute; width: 11mm; height: 11mm; border: 0 solid #e9ecef }
+  .coin.hg { top: 0; left: 0; border-width: 1.1mm 0 0 1.1mm; border-top-left-radius: 4mm }
+  .coin.hd { top: 0; right: 0; border-width: 1.1mm 1.1mm 0 0; border-top-right-radius: 4mm }
+  .coin.bg { bottom: 0; left: 0; border-width: 0 0 1.1mm 1.1mm; border-bottom-left-radius: 4mm }
+  .coin.bd { bottom: 0; right: 0; border-width: 0 1.1mm 1.1mm 0; border-bottom-right-radius: 4mm }
+  .pastille {
+    position: absolute; top: -2.6mm; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 1.8mm; padding: 1.6mm 4mm 1.6mm 3.2mm; border-radius: 99mm;
+    background: #050505; border: .35mm solid rgba(255,255,255,.55);
+    font: 700 4.2mm/1 "Barlow Condensed", sans-serif; letter-spacing: .24em; text-transform: uppercase; white-space: nowrap;
+  }
+  .pastille svg { width: 4.4mm; height: 4.4mm }
+  .adresse-web { margin-top: 2.5mm; font: 600 4.2mm/1 Inter, sans-serif; letter-spacing: .02em; color: var(--gris) }
+  .adresse-web b { color: #fff; font-weight: 700 }
+
+  .stores { display: flex; align-items: center; gap: 5mm; margin-top: 6.5mm }
+  .stores img { height: 13.5mm; width: auto; display: block }
+  .stores .gp { height: 17.58mm; margin: -2.04mm 0 } /* le PNG de Google a 29 px de marge transparente en haut et en bas sur 250 */
+  .gratuit { margin-top: 2.6mm; font: 500 3.3mm/1 Inter, sans-serif; color: var(--gris) }
+
+  .atouts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4mm; width: 182mm; margin-top: 7.5mm }
+  .atout { display: flex; flex-direction: column; align-items: center; text-align: center }
+  .atout .rond {
+    width: 12mm; height: 12mm; border-radius: 50%; display: grid; place-items: center;
+    border: .35mm solid rgba(255,255,255,.28); background: radial-gradient(circle at 50% 30%, rgba(255,255,255,.10), rgba(255,255,255,.02));
+  }
+  .atout svg { width: 5.6mm; height: 5.6mm; stroke: #fff; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round }
+  .atout h2 { margin-top: 2.4mm; font: 700 4.6mm/1 "Barlow Condensed", sans-serif; letter-spacing: .06em; text-transform: uppercase }
+  .atout p { margin-top: 1.2mm; font: 400 2.9mm/1.3 Inter, sans-serif; color: var(--gris) }
+
+  .pied { margin-top: auto; margin-bottom: 8mm; display: flex; flex-direction: column; align-items: center; gap: 2.6mm; position: relative; z-index: 1 }
+  .pied .mini { display: flex; width: 24mm; height: .8mm } .pied .mini i { flex: 1 }
+  .pied .mini i:nth-child(1) { background: var(--vert) } .pied .mini i:nth-child(2) { background: #f4f5f0 } .pied .mini i:nth-child(3) { background: var(--rouge) }
+  .pied p { font: 600 3.5mm/1 "Barlow Condensed", sans-serif; letter-spacing: .2em; text-transform: uppercase; color: var(--gris) }
+  .pied p b { color: #fff; font-weight: 700 }
+</style>
+</head>
+<body>
+<main class="page">
+  <div class="drapeau"><i></i><i></i><i></i></div>
+  <img class="logo" src="public/logo.png" alt="D'Home Barber">
+  <div class="surtitre">L'application du salon</div>
+  <h1><span class="l1">Ton barber</span><span class="l2">dans ta poche</span></h1>
+
+  <div class="scan">
+    {{QR}}
+    <i class="coin hg"></i><i class="coin hd"></i><i class="coin bg"></i><i class="coin bd"></i>
+    <div class="pastille">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>
+      Scanne-moi
+    </div>
+  </div>
+  <p class="adresse-web">ou va sur <b>dhomebarber.fr/app</b></p>
+
+  <div class="stores">
+    <img src="public/badges/app-store-fr.svg" alt="Télécharger dans l'App Store">
+    <img class="gp" src="public/badges/google-play-fr.png" alt="Disponible sur Google Play">
+  </div>
+  <p class="gratuit">Gratuite sur iPhone et Android</p>
+
+  <section class="atouts">
+    <div class="atout">
+      <div class="rond"><svg viewBox="0 0 24 24"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/><path d="m9 16 2 2 4-4"/></svg></div>
+      <h2>Réserve 24h/24</h2><p>ton barber, ton créneau,<br>en quelques secondes</p>
+    </div>
+    <div class="atout">
+      <div class="rond"><svg viewBox="0 0 24 24"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></svg></div>
+      <h2>Last Minute</h2><p>sois prévenu quand<br>une place se libère</p>
+    </div>
+    <div class="atout">
+      <div class="rond"><svg viewBox="0 0 24 24"><path d="M16 10h2"/><path d="M16 14h2"/><path d="M6.17 15a3 3 0 0 1 5.66 0"/><circle cx="9" cy="11" r="2"/><rect x="2" y="5" width="20" height="14" rx="2"/></svg></div>
+      <h2>Carte Gang</h2><p>ta carte de membre<br>qui monte à chaque visite</p>
+    </div>
+    <div class="atout">
+      <div class="rond"><svg viewBox="0 0 24 24"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg></div>
+      <h2>Coupe du Gang</h2><p>le mini-jeu de foot<br>du salon</p>
+    </div>
+  </section>
+
+  <footer class="pied">
+    <div class="mini"><i></i><i></i><i></i></div>
+    <p><b>D'Home Barber</b> · 3 rue du Bois Arquet · 74140 Douvaine</p>
+  </footer>
+</main>
+</body>
+</html>

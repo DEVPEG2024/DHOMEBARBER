@@ -1,5 +1,10 @@
 {
+  "redirects": [
+    { "source": "/app", "has": [{ "type": "header", "key": "user-agent", "value": ".*(iPhone|iPad|iPod).*" }], "destination": "https://apps.apple.com/fr/app/id6791332174", "permanent": false },
+    { "source": "/app", "has": [{ "type": "header", "key": "user-agent", "value": ".*Android.*" }], "destination": "https://play.google.com/store/apps/details?id=fr.dhomebarber.mobile", "permanent": false }
+  ],
   "rewrites": [
+    { "source": "/app", "destination": "/app.html" },
     { "source": "/lm/:id/carte.jpg", "destination": "https://dhomebarber-api-3aabb8313cb6.herokuapp.com/api/share/last-minute/:id/carte.jpg" },
     { "source": "/lm/:id", "destination": "https://dhomebarber-api-3aabb8313cb6.herokuapp.com/api/share/last-minute/:id" },
     { "source": "/agenda/rdv/:id/:sig", "destination": "https://dhomebarber-api-3aabb8313cb6.herokuapp.com/api/calendar/rdv/:id/:sig" },

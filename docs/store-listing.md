@@ -33,6 +33,18 @@ Textes et ressources utilisés pour la publication de l'app D'Home Barber. Les c
 - **Bundle à envoyer** : `android/app/build/outputs/bundle/release/app-release.aab` (version 1.0.1, versionCode 2)
 - **Formulaires à remplir dans la console** : sécurité des données (collecte email, nom, téléphone, photos facultatives ; pas de publicité), classification du contenu, accès à l'app (fournir le compte de démonstration), public cible (18 ans et plus recommandé, pas d'enfants).
 
+## Lien de téléchargement et QR code (2 nov. 2026)
+
+- **Lien unique** : `https://dhomebarber.fr/app`, imprimé sur l'affiche du salon : ne jamais le retirer ni le renommer.
+  - `redirects` de `vercel.json`, par user-agent (307, pas de cache) : iPhone, iPad, iPod → `https://apps.apple.com/fr/app/id6791332174` ; Android → `https://play.google.com/store/apps/details?id=fr.dhomebarber.mobile`.
+  - Sinon (ordinateur, iPad qui se présente comme un Mac) : `public/app.html` (réécriture `/app` → `/app.html` avant la règle générale), logo, deux badges, et le même tri refait par le script de la page.
+- **Badges officiels** dans `public/badges/` : `app-store-fr.svg` (« Télécharger dans l'App Store », noir, outil marketing d'Apple `toolbox.marketingtools.apple.com/api/v2/badges/download-on-the-app-store/black/fr-fr`) et `google-play-fr.png` (« Disponible sur Google Play », `play.google.com/intl/fr/badges/static/images/badges/fr_badge_web_generic.png`). Ne pas les redessiner ni les recolorer (règles des deux marques). Le PNG de Google a 29 px de marge transparente en haut et en bas sur 250 : pour une même hauteur visible que le badge Apple, il est affiché 250/192 fois plus haut avec une marge négative.
+- **QR code et affiche A4** : `docs/prototypes/qr-app/` (`affiche.html`, `rendu.mjs`). `node docs/prototypes/qr-app/rendu.mjs <dossier>` écrit `qr-code-app.svg`, `qr-code-app.png` (2048 px, fond transparent autour du carré blanc), `affiche-A4.pdf` (imprimeur : l’image 300 dpi sur une page A4, car les halos flous exportés en PDF vectoriel sortaient en rectangles dans Aperçu) et `affiche-A4.png` (300 dpi). Il n'écrit qu'après avoir relu le QR avec jsQR (QR seul de 100 à 1600 px, affiche entière de 800 à 2480 px).
+  - QR : version 4 (33 × 33), correction H (30 %). L'icône de l'app au centre masque 9 × 9 modules.
+  - Modules arrondis **qui se touchent**. Des points séparés (90 % du module) n'étaient plus lus en grand format (1000 px).
+  - Yeux aux pupilles vert et rouge du drapeau, assez foncées pour être lues comme noires.
+- Fichiers remis le 2 nov. 2026 : `~/Downloads/DHB-QR-app/`.
+
 ## Description longue (les deux stores)
 
 D'Home Barber, votre barbier à Douvaine, dans votre poche.
