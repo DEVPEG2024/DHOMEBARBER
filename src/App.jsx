@@ -12,7 +12,9 @@ import MusicToggle from '@/components/shared/MusicToggle';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { queryFailed } from '@/components/shared/LoadError';
 import CoupeLoadError from '@/components/coupe/CoupeLoadError';
+import SnakeLoadError from '@/components/snake/SnakeLoadError';
 import { useCoupeFlagQuery } from '@/lib/coupe/coupeApi';
+import { useSnakeFlagQuery } from '@/lib/snake/snakeApi';
 
 // Layouts
 import ClientLayout from '@/components/layout/ClientLayout';
@@ -56,6 +58,11 @@ const CoupeTest = React.lazy(() => import('@/pages/CoupeTest'));
 // La Coupe du Gang : accueil du jeu et classement (lazy, plein écran, hors des mises en page)
 const Coupe = React.lazy(() => import('@/pages/Coupe'));
 const CoupeClassement = React.lazy(() => import('@/pages/CoupeClassement'));
+// Snake du Gang : menu et partie, classement, vitesse et options, règles (lazy, plein écran)
+const Snake = React.lazy(() => import('@/pages/Snake'));
+const SnakeClassement = React.lazy(() => import('@/pages/SnakeClassement'));
+const SnakeReglages = React.lazy(() => import('@/pages/SnakeReglages'));
+const SnakeRegles = React.lazy(() => import('@/pages/SnakeRegles'));
 
 // Admin pages (lazy-loaded - only for admin/barber users)
 const AdminDashboard = React.lazy(() => import('@/pages/admin/Dashboard'));
@@ -252,6 +259,50 @@ function RequireCoupe() {
   return spinner;
 }
 
+// Garde du Snake du Gang (/snake…, contrat docs/fonctions/snake-du-gang-contrat.md) : tout compte
+// connecté, barbers et admin compris, seulement quand le serveur a ouvert le jeu (`features.snake`,
+// faux avec SNAKE=off). Même règle que la Coupe : renvoi vers l'accueil SEULEMENT si le drapeau a
+// été lu à faux ; lecture ratée (réseau, 503) : « Réessayer » sur place.
+function RequireSnake() {
+  const { isAuthenticated, isLoadingAuth, sessionExpired } = useAuth();
+  const location = useLocation();
+  const flag = useSnakeFlagQuery();
+  // Page ouverte : un drapeau relu plus tard à faux (réseau qui flanche) ne coupe pas une partie
+  const [admitted, setAdmitted] = useState(false);
+  useEffect(() => {
+    if (flag.data === true) setAdmitted(true);
+  }, [flag.data]);
+
+  // Fond sombre du jeu pendant l'attente : pas d'éclair clair avant l'écran du Snake
+  const spinner = (
+    <div className="fixed inset-0 flex items-center justify-center" style={{ background: '#0D0F12' }}>
+      <div className="w-6 h-6 border-2 border-[#3DBE7E]/30 border-t-[#3DBE7E] rounded-full animate-spin" />
+    </div>
+  );
+
+  if (isLoadingAuth) return spinner;
+
+  if (!isAuthenticated) {
+    return <Navigate to={loginPathFor(location, sessionExpired)} replace />;
+  }
+
+  if (flag.data === true || admitted) return <Outlet />;
+  if (flag.data === false) return <Navigate to="/" replace />;
+
+  if (flag.isError || queryFailed(flag)) {
+    return (
+      <div className="fixed inset-0 flex flex-col items-center justify-center gap-3 p-6" style={{ background: '#0D0F12', colorScheme: 'dark' }}>
+        <SnakeLoadError what="le Snake du Gang" error={flag.error} onRetry={() => flag.refetch()} retrying={flag.isFetching} className="w-full max-w-sm" />
+        <Link to="/" replace className="min-h-[44px] px-4 inline-flex items-center text-sm font-semibold text-[#A3ABB5] underline underline-offset-2">
+          Retour à l’accueil
+        </Link>
+      </div>
+    );
+  }
+
+  return spinner;
+}
+
 // Redirect to home if already authenticated
 // Seul endroit qui décide où aller après une connexion ou une inscription : Login se
 // contente d'ouvrir la session, cette garde redirige aussitôt (avant, les deux se
@@ -412,6 +463,14 @@ const AppRoutes = () => {
       <Route element={<RequireCoupe />}>
         <Route path="/coupe" element={<Suspense fallback={<LazyFallback />}><Coupe /></Suspense>} />
         <Route path="/coupe/classement" element={<Suspense fallback={<LazyFallback />}><CoupeClassement /></Suspense>} />
+      </Route>
+
+      {/* Snake du Gang : plein écran, hors des mises en page, tout compte connecté, drapeau features.snake */}
+      <Route element={<RequireSnake />}>
+        <Route path="/snake" element={<Suspense fallback={<LazyFallback />}><Snake /></Suspense>} />
+        <Route path="/snake/classement" element={<Suspense fallback={<LazyFallback />}><SnakeClassement /></Suspense>} />
+        <Route path="/snake/reglages" element={<Suspense fallback={<LazyFallback />}><SnakeReglages /></Suspense>} />
+        <Route path="/snake/regles" element={<Suspense fallback={<LazyFallback />}><SnakeRegles /></Suspense>} />
       </Route>
 
       <Route path="*" element={<PageNotFound />} />

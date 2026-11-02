@@ -10,6 +10,7 @@
  */
 import { queryFailed } from '@/components/shared/LoadError';
 import { useCoupeFlagQuery, useCoupeRulesV2 } from '@/lib/coupe/coupeApi';
+import { useSnakeFlagQuery } from '@/lib/snake/snakeApi';
 
 // `taglineV2` : accroche quand le serveur annonce le règlement v2 de la Coupe (premier à 5 buts)
 export const GAMES = [
@@ -20,6 +21,13 @@ export const GAMES = [
     taglineV2: 'Foot façon air hockey : premier à 5 buts.',
     to: '/coupe',
   },
+  {
+    // Snake du Gang (2 nov. 2026) : le Snake des vieux téléphones, vraies règles, sans labyrinthe
+    id: 'snake',
+    title: 'Snake du Gang',
+    tagline: 'Le Snake des vieux téléphones : mange, grandis, ne te mords pas la queue.',
+    to: '/snake',
+  },
 ];
 
 /**
@@ -27,7 +35,10 @@ export const GAMES = [
  * lus ; `failed` : la première lecture ratée (panne, hors connexion), pour « Réessayer ».
  */
 export function useGames() {
-  const flags = [{ id: 'coupe', query: useCoupeFlagQuery() }];
+  const flags = [
+    { id: 'coupe', query: useCoupeFlagQuery() },
+    { id: 'snake', query: useSnakeFlagQuery() },
+  ];
   const coupeV2 = useCoupeRulesV2();
   const open = new Set(flags.filter((f) => f.query.data === true).map((f) => f.id));
   return {

@@ -10,7 +10,8 @@
  *  - le WebSocket `/ws/live` est neutralisé (`routeWebSocket`), il envoie un compteur fictif ;
  *    `/ws/coupe` (La Coupe du Gang) est servi par un faux serveur de jeu (`support/fauxCoupe.js`) ;
  *    les routes REST de la Coupe (`/coupe/…`) par `FauxCoupeRest`, plus bas (`api.coupeRest`) ;
- *  - le fil « New Gang » v2 (`/feed…`) par `FauxFil` (`api.filRest`), état dans `api.fil`.
+ *  - le fil « New Gang » v2 (`/feed…`) par `FauxFil` (`api.filRest`), état dans `api.fil` ;
+ *  - le Snake du Gang (`/snake/…`) par `FauxSnakeRest` (`api.snakeRest`), qui rejoue chaque partie.
  *
  * Un test peut remplacer la réponse d'une route avec `surcharger(méthode, chemin, fabrique)` :
  * la fabrique reçoit la requête décodée et rend `{ status, json }`, `RESEAU_COUPE` (échec réseau)
@@ -19,6 +20,8 @@
 import { creerDonnees, CLIENT, media } from './donnees.js';
 import { FauxCoupe, CLE_LISTE_LUCAS, PHOTO_LUCAS } from './fauxCoupe.js';
 import { MAINTENANT, cleDuJourParis, instantParis, jour } from './temps.js';
+// Snake du Gang : le faux serveur rejoue chaque partie avec le vrai moteur de l'app (comme le serveur)
+import { replay as rejouerSnake, tickMs as pasSnake } from '../../src/lib/snake/engine.js';
 
 export const API_HOTE = 'dhomebarber-api-3aabb8313cb6.herokuapp.com';
 export const API_ORIGINE = `https://${API_HOTE}`;
@@ -169,6 +172,10 @@ export class FauxServeur {
     // Fil « New Gang » v2 (routes /feed…) : état dans `api.fil` (activité, votes, réglages, vues)
     this.donnees.fil ??= { activite: [], votes: [], likesCommentaires: [], reglages: {}, vuLe: {}, vues: {} };
     this.filRest = new FauxFil(this);
+    /** Snake du Gang (routes /snake/…) : records, classement, tickets ; un test le ferme avec
+     *  `api.donnees.parametresPublics.features.snake = false` (routes en 404 `disabled`). */
+    this.donnees.parametresPublics.features.snake ??= true;
+    this.snakeRest = new FauxSnakeRest(this);
     /**
      * Tableau de bord (1er nov. 2026) : clients sur l'app en ce moment (`GET /analytics/live`, admin,
      * servi seulement avec `features.analyticsLive` vrai), et chemins des WebSockets ouverts par l'app.
@@ -418,6 +425,9 @@ export class FauxServeur {
 
     // Fil « New Gang » v2 (routes/feed.js et routes/feedActivity.js du serveur)
     if (chemin === '/feed' || chemin.startsWith('/feed/')) return this.filRest.traiter(req);
+
+    // Snake du Gang : routes REST (routes/snake.js du serveur)
+    if (chemin.startsWith('/snake/')) return this.snakeRest.traiter(req);
 
     // Entités
     const m = /^\/entities\/([A-Za-z]+)(?:\/([^/]+))?$/.exec(chemin);
@@ -959,6 +969,215 @@ const resume = (texte, n) => {
   return t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t;
 };
 const erreurFil = (status, error, code) => ({ status, json: code ? { error, code } : { error } });
+
+/**
+ * Snake du Gang : routes REST du serveur (contrat docs/fonctions/snake-du-gang-contrat.md, section 2),
+ * en mémoire. Chaque fin de partie est **rejouée avec le vrai moteur** (`src/lib/snake/engine.js`) :
+ * un virage mal noté par l'app, un score qui ne correspond pas, ou une partie jouée plus vite que le
+ * temps réel répondent 422 comme le vrai serveur.
+ *
+ * État modifiable par un test (`api.snakeRest`) :
+ *  - `etats[idCompte]` : `{ opt_in, record, season_best, games }` (record et meilleur du mois :
+ *    `{ score, level, eaten, at }` ou null) ; par défaut le client de test a 312 (record) et 248 ce
+ *    mois, volontaire, 6e sur 9 ; l'admin joue sans jamais figurer au classement (`rankable` faux) ;
+ *  - `joueurs` : autres lignes du classement du mois (noms et scores de la planche) ;
+ *  - `exclus` : ids de comptes retirés par le salon (`banned`, opt-in refusé en 403) ;
+ *  - `tickets` : parties données (`POST /snake/games`), avec leur fin une fois rendue ;
+ *  - `fins` : corps reçus par `…/finish` (vérifications des tests) ;
+ *  - `toleranceMs` : marge du contrôle « trop rapide » (5 s comme le serveur ; `Infinity` pour un test
+ *    qui avance l'horloge du navigateur avec `page.clock.runFor`, plus vite que le temps réel).
+ */
+const JOUEURS_SNAKE = [
+  { nom: 'Yanis B.', role: 'user', score: 486, level: 7 },
+  { nom: 'Sarah K.', role: 'user', score: 455, level: 8 },
+  { nom: 'Nolan D.', role: 'user', score: 402, level: 9 },
+  { nom: 'Léo M.', role: 'user', score: 371, level: 6 },
+  { nom: 'Kevin', role: 'barber', score: 330, level: 6 },
+  { nom: 'Adam F.', role: 'user', score: 241, level: 5 },
+  { nom: 'Maëlys P.', role: 'user', score: 233, level: 4 },
+  { nom: 'Inès T.', role: 'user', score: 120, level: 3 },
+];
+
+export class FauxSnakeRest {
+  constructor(serveur) {
+    this.serveur = serveur;
+    Object.assign(this, saisonCoupe());
+    this.joueurs = JOUEURS_SNAKE.map((j, i) => ({ ...j, cle: `snake-${i}`, at: ilYA(600 + i * 60) }));
+    this.etats = {
+      [CLIENT.id]: {
+        opt_in: true,
+        record: { score: 312, level: 5, eaten: 38, at: ilYA(60 * 24 * 12) },
+        season_best: { score: 248, level: 5, eaten: 30, at: ilYA(90) },
+        games: 14,
+      },
+    };
+    this.exclus = new Set();
+    this.tickets = new Map();
+    this.fins = [];
+    this.toleranceMs = 5000;
+    this.compteurTicket = 0;
+  }
+
+  /** Remplace l'état d'un compte simulé (record, meilleur du mois, choix du classement). */
+  definirEtat(idCompte, etat) {
+    this.etats[idCompte] = { ...this.etatDe({ id: idCompte }), ...etat };
+  }
+
+  etatDe(compte) {
+    return this.etats[compte.id] || { opt_in: false, record: null, season_best: null, games: 0 };
+  }
+
+  classable(compte) {
+    return compte.role !== 'admin' && !this.exclus.has(compte.id);
+  }
+
+  nomDe(compte) {
+    const mots = String(compte.full_name || '').trim().split(/\s+/).filter(Boolean);
+    if (!mots.length) return 'Membre du Gang';
+    return mots.length === 1 ? mots[0] : `${mots[0]} ${mots[mots.length - 1][0].toUpperCase()}.`;
+  }
+
+  /** Classement du mois : joueurs simulés + comptes de connexion volontaires et classables. */
+  classement(lecteur) {
+    const lignes = this.joueurs.map((j) => ({ cle: j.cle, name: j.nom, role: j.role, score: j.score, level: j.level, at: j.at }));
+    for (const compte of this.serveur.comptes) {
+      const etat = this.etatDe(compte);
+      if (!etat.opt_in || !this.classable(compte) || !etat.season_best) continue;
+      lignes.push({
+        cle: compte.id, name: this.nomDe(compte), role: compte.role === 'barber' ? 'barber' : 'user',
+        score: etat.season_best.score, level: etat.season_best.level, at: etat.season_best.at,
+      });
+    }
+    lignes.sort((a, b) => b.score - a.score || String(a.at).localeCompare(String(b.at)) || a.cle.localeCompare(b.cle));
+    return lignes.map((l, i) => ({ ...l, rank: i + 1, me: !!lecteur && l.cle === lecteur.id }));
+  }
+
+  placeDe(compte) {
+    const ligne = this.classement(compte).find((l) => l.me);
+    return { rank: ligne ? ligne.rank : null, players: this.classement(compte).length };
+  }
+
+  moi(compte) {
+    const etat = this.etatDe(compte);
+    const { rank, players } = this.placeDe(compte);
+    return {
+      season: this.season,
+      season_ends_at: this.season_ends_at,
+      opt_in: this.classable(compte) && etat.opt_in === true,
+      rankable: this.classable(compte),
+      banned: this.exclus.has(compte.id),
+      record: etat.record,
+      season_best: etat.season_best,
+      rank,
+      players,
+      games: etat.games || 0,
+    };
+  }
+
+  traiter(req) {
+    const { methode, chemin, compte } = req;
+    const sous = chemin.slice('/snake'.length);
+    if (!compte) return nonAuthentifie();
+    if (this.serveur.donnees.parametresPublics.features?.snake === false) {
+      return { status: 404, json: { error: 'Le Snake du Gang est fermé pour le moment', code: 'disabled' } };
+    }
+    const corps = req.corps && typeof req.corps === 'object' ? req.corps : {};
+
+    if (methode === 'GET' && sous === '/me') return { json: this.moi(compte) };
+
+    if (methode === 'GET' && sous === '/leaderboard') {
+      if (req.query.season && !/^\d{4}-(0[1-9]|1[0-2])$/.test(req.query.season)) {
+        return { status: 400, json: { error: 'Saison inconnue', code: 'bad_season' } };
+      }
+      // Autre mois que le mois en cours : classement vide (aucune donnée simulée)
+      const lignes = req.query.season && req.query.season !== this.season ? [] : this.classement(compte);
+      const mienne = lignes.find((l) => l.me) || null;
+      return {
+        json: {
+          season: req.query.season || this.season,
+          season_ends_at: this.season_ends_at,
+          players: lignes.length,
+          rows: lignes.slice(0, 50).map((l) => ({ rank: l.rank, name: l.name, role: l.role, score: l.score, level: l.level, me: l.me })),
+          me: mienne ? { rank: mienne.rank, score: mienne.score, level: mienne.level } : null,
+          opt_in: this.classable(compte) && this.etatDe(compte).opt_in === true,
+        },
+      };
+    }
+
+    if (methode === 'PATCH' && sous === '/settings') {
+      if (typeof corps.opt_in !== 'boolean') return { status: 400, json: { error: 'Choix invalide', code: 'bad_request' } };
+      if (corps.opt_in && compte.role === 'admin') {
+        return { status: 403, json: { error: 'Le salon ne figure pas au classement du Snake', code: 'not_rankable' } };
+      }
+      if (corps.opt_in && this.exclus.has(compte.id)) {
+        return { status: 403, json: { error: 'Le salon t’a retiré du classement. Contacte-le si tu penses que c’est une erreur.', code: 'banned' } };
+      }
+      this.definirEtat(compte.id, { opt_in: corps.opt_in });
+      return { json: { opt_in: corps.opt_in } };
+    }
+
+    if (methode === 'POST' && sous === '/games') {
+      const level = corps.level;
+      if (!Number.isInteger(level) || level < 1 || level > 9) {
+        return { status: 400, json: { error: 'Niveau invalide', code: 'bad_level' } };
+      }
+      this.compteurTicket += 1;
+      const id = `00000000-0000-4000-8000-${String(this.compteurTicket).padStart(12, '0')}`;
+      // Graine fixe par ticket : parties reproductibles d'un passage à l'autre
+      const seed = (this.compteurTicket * 2654435761) >>> 0;
+      const ticket = { id, seed, level, compte: compte.id, cree: Date.now(), fin: null, refus: null };
+      this.tickets.set(id, ticket);
+      const expires = new Date(this.serveur.maintenant().getTime() + 6 * 3600_000).toISOString();
+      return { status: 201, json: { id, seed, level, rules: 1, expires_at: expires } };
+    }
+
+    const fin = /^\/games\/([^/]+)\/finish$/.exec(sous);
+    if (methode === 'POST' && fin) {
+      this.fins.push(corps);
+      const ticket = this.tickets.get(decodeURIComponent(fin[1]));
+      if (!ticket || ticket.compte !== compte.id) return { status: 404, json: { error: 'Partie introuvable', code: 'not_found' } };
+      if (ticket.fin) return { json: { ...ticket.fin, duplicate: true } };
+      if (ticket.refus) return { status: 422, json: { error: 'Score non enregistré', code: ticket.refus } };
+      const { moves, ticks, end, score } = corps;
+      const entiers = Array.isArray(moves) && moves.every((v) => Number.isInteger(v));
+      if (!entiers || !Number.isInteger(ticks) || !['bite', 'full', 'quit'].includes(end) || !Number.isInteger(score)) {
+        return { status: 400, json: { error: 'Requête invalide', code: 'bad_request' } };
+      }
+      const r = rejouerSnake({ seed: ticket.seed, level: ticket.level, moves, ticks, end });
+      let refus = null;
+      if (!r.ok || r.score !== score) refus = 'replay_mismatch';
+      // Temps réel des tests (l'horloge du navigateur est pilotée par Playwright : on mesure côté Node
+      // seulement si le test ne l'a pas désactivé avec `toleranceMs = Infinity`)
+      else if (ticks * pasSnake(ticket.level) > Date.now() - ticket.cree + this.toleranceMs) refus = 'too_fast';
+      if (refus) {
+        ticket.refus = refus;
+        return { status: 422, json: { error: 'Score non enregistré : la partie ne correspond pas', code: refus } };
+      }
+      const etat = this.etatDe(compte);
+      const ancien = etat.record ? etat.record.score : null;
+      const at = this.serveur.maintenant().toISOString();
+      const meilleur = { score: r.score, level: ticket.level, eaten: r.eaten, at };
+      const record = r.score > 0 && (ancien === null || r.score > ancien);
+      const mois = !etat.season_best || r.score > etat.season_best.score;
+      this.definirEtat(compte.id, {
+        record: record ? meilleur : etat.record,
+        season_best: mois ? meilleur : etat.season_best,
+        games: (etat.games || 0) + 1,
+      });
+      const { rank, players } = this.placeDe(compte);
+      ticket.fin = {
+        score: r.score, eaten: r.eaten, bonuses: r.bonuses, level: ticket.level,
+        ranked: this.classable(compte) && etat.opt_in === true,
+        record, previous_record: ancien,
+        season_best: this.etatDe(compte).season_best.score,
+        rank, players,
+      };
+      return { json: ticket.fin };
+    }
+
+    return null;
+  }
+}
 
 /**
  * Faux `routes/feed.js` + `routes/feedActivity.js` (contrat docs/fonctions/fil-new-gang-contrat.md,
