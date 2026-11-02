@@ -32,6 +32,12 @@ function drapeauCoupe(api, ouvert) {
   api.donnees.parametresPublics.features.coupe = ouvert;
 }
 
+/** Aucun jeu ouvert : la Coupe et le Snake du Gang (2 nov. 2026) fermés par le serveur. */
+function aucunJeu(api) {
+  drapeauCoupe(api, false);
+  api.donnees.parametresPublics.features.snake = false;
+}
+
 /** `GET /coupe/me` : client 8e de la saison, quatre derniers matchs (un amical). */
 const moi = (surcharge = {}) => ({
   season: SAISON,
@@ -253,7 +259,7 @@ test.describe('La Coupe du Gang : accueil et page « Jeux »', () => {
   });
 
   test('sans le drapeau : ni section « Jeux » ni appel aux routes de la Coupe ; la page des jeux le dit', async ({ page, api, connecter }) => {
-    drapeauCoupe(api, false);
+    aucunJeu(api);
     installerCoupe(api);
     await connecter(CLIENT);
     await page.goto('/');
@@ -411,7 +417,7 @@ test.describe('La Coupe du Gang : fil', () => {
   });
 
   test('sans le drapeau : pas d\'entrée dans le fil', async ({ page, api, connecter }) => {
-    drapeauCoupe(api, false);
+    aucunJeu(api);
     installerCarteGang(api);
     api.tables.Post.push({ id: 'p-1', author_name: 'Yanis K.', author_role: 'user', author_photo_url: null, content: 'Merci Kevin pour la coupe !', image_url: null, created_at: ilYa(30) });
     await connecter(CLIENT);
