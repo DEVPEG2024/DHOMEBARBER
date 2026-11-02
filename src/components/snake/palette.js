@@ -2,6 +2,11 @@
  * Snake du Gang : couleurs de la planche du 2 nov. 2026 (https://claude.ai/artifact/4Kf7Xxy7S45CFzckUmbT2B).
  * Pages sombres quel que soit le thème de l'app, écran vert à pixels, vert de l'app pour les boutons.
  */
+// Police à pixels de l'écran vert (Silkscreen, licence OFL) embarquée dans le bundle : l'app hors
+// connexion garde son écran rétro (Google Fonts ne répond pas sans réseau). Chargée avec le code du
+// Snake seulement (pages chargées à la demande, carte de la page Jeux).
+import '@fontsource/silkscreen/latin-400.css';
+import '@fontsource/silkscreen/latin-700.css';
 export const SNAKE_COLORS = Object.freeze({
   fond: '#0D0F12', // fond des pages
   carte: '#15181D', // cartes, lignes du classement

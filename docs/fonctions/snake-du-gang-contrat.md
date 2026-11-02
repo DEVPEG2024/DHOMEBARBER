@@ -51,19 +51,19 @@ Toutes : `requireAuth` ; 404 `{ error, code: 'disabled' }` quand `SNAKE=off` ; e
   "rows": [{ "rank": 1, "name": "Yanis B.", "role": "user", "score": 486, "level": 7, "me": false }],
   "me": { "rank": 6, "score": 312, "level": 5 }, "opt_in": true }
 ```
-50 lignes au plus ; ordre : score décroissant, puis le premier à l'avoir atteint (`reached_at`), puis l'id. `me` : null si le lecteur n'y figure pas.
+Lignes à 0 point exclues (partie quittée au premier pas). 50 lignes au plus ; ordre : score décroissant, puis le premier à l'avoir atteint (`reached_at`), puis l'id. `me` : null si le lecteur n'y figure pas.
 
 ### `PATCH /snake/settings` `{ "opt_in": true }` → `{ "opt_in": true }`
 400 `bad_request` (pas un booléen) ; 403 `not_rankable` (admin, fiche barber inactive ou cachée) ; 403 `banned` (se remettre au classement ; en sortir reste permis).
 
-### `POST /snake/games` `{ "level": 5 }` → 201 `{ "id": "<uuid>", "seed": 123456789, "level": 5, "rules": 1, "expires_at": "…" }`
-Ticket de partie : graine `crypto.randomInt(0, 2**32)`, valable 6 h. 400 `bad_level` (entier 1 à 9). Quota 120 / h par compte (429 `rate_limited`).
+### `POST /snake/games` `{ "level": 5, "rules": 1 }` → 201 `{ "id": "<uuid>", "seed": 123456789, "level": 5, "rules": 1, "expires_at": "…" }`
+Ticket de partie : graine `crypto.randomInt(0, 2**32)`, valable 6 h. 400 `bad_level` (entier 1 à 9). `rules` = `SNAKE_RULES` du moteur du téléphone (absente = 1) : une autre version que celle du serveur → 409 `update_required` (le téléphone joue sans classement ; jamais un rejeu avec le mauvais moteur). Quota 600 / h par compte (429 `rate_limited` ; relevé de 120 après la contre-expertise : un ticket par partie plus un par ouverture de l'écran de jeu).
 
 ### `POST /snake/games/:id/finish` `{ "moves": [12, 2, 30, 1], "ticks": 418, "end": "bite", "score": 248 }`
 → 200 `{ "score": 248, "eaten": 30, "bonuses": 4, "level": 5, "ranked": true, "record": true, "previous_record": 230, "season_best": 248, "rank": 6, "players": 23 }`
 - Partie de ce compte seulement, sinon 404 `not_found` (id mal formé aussi).
 - Déjà terminée : **la même réponse**, plus `"duplicate": true` (réponse perdue puis renvoyée) ; déjà refusée : 422 avec le même `code`.
-- Ticket de plus de 6 h : 410 `expired`.
+- Ticket de plus de 6 h : 410 `expired`. Ticket donné sous d'autres règles (`snake_games.rules`) : 409 `update_required`. Quota 240 / h par compte.
 - Forme : `moves` tableau d'entiers de longueur paire ≤ 2 × `MAX_MOVES`, `ticks` entier ≤ `MAX_TICKS`, `end` ∈ `bite`, `full`, `quit`, `score` entier ; sinon 400 `bad_request`.
 - Rejoue avec `replay` du moteur : erreur → 422 `replay_mismatch` ; score rejoué ≠ `score` annoncé → 422 `replay_mismatch` (bug ou triche, journalisé sans identité : `[Snake] partie refusée : <raison>`).
 - **Trop rapide** : `ticks × tickMs(level)` > temps écoulé depuis le ticket + 5 s → 422 `too_fast`.
@@ -83,7 +83,8 @@ CREATE TABLE IF NOT EXISTS snake_games (
   finished_at TIMESTAMPTZ,
   ticks INT, score INT, eaten INT, bonuses INT,
   end_reason VARCHAR(10), reject_reason VARCHAR(20),
-  result JSONB                                   -- réponse rendue (renvoi à l'identique)
+  result JSONB,                                  -- réponse rendue (renvoi à l'identique)
+  rules SMALLINT NOT NULL DEFAULT 1              -- version des règles du moteur au moment du ticket
 );
 CREATE INDEX IF NOT EXISTS idx_snake_games_user ON snake_games (user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_snake_games_created ON snake_games (created_at);
@@ -139,3 +140,11 @@ Routes de l'app (plein écran, garde `RequireSnake` : compte connecté + drapeau
 
 - Serveur : `test/test-snake-engine.js` (copies identiques, déterminisme, règles, rejeu, refus) et `test/test-snake-api.js` (routes, drapeau, quotas, trop rapide, renvoi en double, classement filtré, purge du compte) ; une mutation ciblée qui fait échouer chacun.
 - App : `e2e/snake-partie.spec.js` (constructeur « jeu ») et `e2e/snake-pages.spec.js` (constructeur « pages ») ; faux serveur `FauxSnakeRest` (`api.snakeRest`), qui **rejoue chaque partie avec le vrai moteur** : un virage mal noté par l'app fait échouer le test.
+
+## 8. Décisions du chef après les contre-expertises (2 nov. 2026)
+
+- Version des règles (`rules`) envoyée par le téléphone et rangée avec le ticket : le jour où le moteur change, les parties des apps anciennes ne sont pas refusées au rejeu, elles sont jouées sans classement (409 `update_required`) ou le serveur garde l'ancien moteur.
+- Fins non envoyées gardées sur l'appareil (`src/lib/snake/pending.js`, `localStorage` `dhb-snake-pending`) et renvoyées à la prochaine occasion ; partie fermée en cours (`pagehide`) : sa fin `quit` y entre aussi.
+- Quota des tickets relevé à 600 / h ; aucune ligne à 0 point au classement ; données du Snake effacées aussi quand l'admin supprime un compte de l'équipe (`routes/entities.js`).
+- Police Silkscreen embarquée (`@fontsource/silkscreen`) : l'écran vert reste rétro hors connexion dans les apps.
+- Gardés tels quels : 9 boutons de niveau sur une ligne (28 px de large à 320 px, au-dessus des 24 px du minimum WCAG 2.2 AA ; dessin de la planche) ; un robot qui connaît la graine peut jouer parfaitement en temps réel (limite connue, aucun lot ; recours : l'exclusion du classement par le salon).

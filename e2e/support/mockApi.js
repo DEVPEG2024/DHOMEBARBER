@@ -984,6 +984,8 @@ const erreurFil = (status, error, code) => ({ status, json: code ? { error, code
  *  - `exclus` : ids de comptes retirés par le salon (`banned`, opt-in refusé en 403) ;
  *  - `tickets` : parties données (`POST /snake/games`), avec leur fin une fois rendue ;
  *  - `fins` : corps reçus par `…/finish` (vérifications des tests) ;
+ *  - `regles` : version des règles du serveur (1) : un ticket demandé avec une autre → 409
+ *    `update_required` ; un ticket de plus de 6 h → 410 `expired` (reculer `tickets.get(id).cree`) ;
  *  - `toleranceMs` : marge du contrôle « trop rapide » (5 s comme le serveur ; `Infinity` pour un test
  *    qui avance l'horloge du navigateur avec `page.clock.runFor`, plus vite que le temps réel).
  */
@@ -1015,6 +1017,8 @@ export class FauxSnakeRest {
     this.tickets = new Map();
     this.fins = [];
     this.toleranceMs = 5000;
+    /** Version des règles du moteur du serveur (`SNAKE_RULES`) ; un test la change pour simuler un serveur plus récent. */
+    this.regles = 1;
     this.compteurTicket = 0;
   }
 
@@ -1042,7 +1046,8 @@ export class FauxSnakeRest {
     const lignes = this.joueurs.map((j) => ({ cle: j.cle, name: j.nom, role: j.role, score: j.score, level: j.level, at: j.at }));
     for (const compte of this.serveur.comptes) {
       const etat = this.etatDe(compte);
-      if (!etat.opt_in || !this.classable(compte) || !etat.season_best) continue;
+      // Comme le serveur : aucune ligne à 0 point (partie quittée au premier pas)
+      if (!etat.opt_in || !this.classable(compte) || !etat.season_best || !(etat.season_best.score > 0)) continue;
       lignes.push({
         cle: compte.id, name: this.nomDe(compte), role: compte.role === 'barber' ? 'barber' : 'user',
         score: etat.season_best.score, level: etat.season_best.level, at: etat.season_best.at,
@@ -1121,6 +1126,10 @@ export class FauxSnakeRest {
       if (!Number.isInteger(level) || level < 1 || level > 9) {
         return { status: 400, json: { error: 'Niveau invalide', code: 'bad_level' } };
       }
+      // Version des règles du téléphone (absente = 1) : une autre → 409, comme le serveur
+      if ((corps.rules === undefined ? 1 : corps.rules) !== this.regles) {
+        return { status: 409, json: { error: 'Mets l’app à jour pour que tes parties comptent au classement', code: 'update_required' } };
+      }
       this.compteurTicket += 1;
       const id = `00000000-0000-4000-8000-${String(this.compteurTicket).padStart(12, '0')}`;
       // Graine fixe par ticket : parties reproductibles d'un passage à l'autre
@@ -1138,6 +1147,10 @@ export class FauxSnakeRest {
       if (!ticket || ticket.compte !== compte.id) return { status: 404, json: { error: 'Partie introuvable', code: 'not_found' } };
       if (ticket.fin) return { json: { ...ticket.fin, duplicate: true } };
       if (ticket.refus) return { status: 422, json: { error: 'Score non enregistré', code: ticket.refus } };
+      // Ticket de plus de 6 h (temps réel côté Node ; un test vieillit un ticket en reculant `cree`)
+      if (Date.now() - ticket.cree > 6 * 3600_000) {
+        return { status: 410, json: { error: 'Partie trop ancienne : lance une nouvelle partie', code: 'expired' } };
+      }
       const { moves, ticks, end, score } = corps;
       const entiers = Array.isArray(moves) && moves.every((v) => Number.isInteger(v));
       if (!entiers || !Number.isInteger(ticks) || !['bite', 'full', 'quit'].includes(end) || !Number.isInteger(score)) {

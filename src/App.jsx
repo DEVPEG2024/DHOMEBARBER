@@ -104,6 +104,13 @@ const LazyFallback = () => (
   </div>
 );
 
+// Attente du code des pages du Snake du Gang : fond sombre du jeu (pas d'éclair clair en thème clair)
+const SnakeFallback = () => (
+  <div className="fixed inset-0 flex items-center justify-center" style={{ background: '#0D0F12' }}>
+    <div className="w-6 h-6 border-2 border-[#3DBE7E]/30 border-t-[#3DBE7E] rounded-full animate-spin" />
+  </div>
+);
+
 // Page d'arrivée d'un barber : son tableau de bord « Mon espace » (18 oct. 2026), d'où il
 // rejoint agenda, entretien, congés… Avant : la première section à laquelle il avait droit.
 function barberHomePath() {
@@ -467,10 +474,10 @@ const AppRoutes = () => {
 
       {/* Snake du Gang : plein écran, hors des mises en page, tout compte connecté, drapeau features.snake */}
       <Route element={<RequireSnake />}>
-        <Route path="/snake" element={<Suspense fallback={<LazyFallback />}><Snake /></Suspense>} />
-        <Route path="/snake/classement" element={<Suspense fallback={<LazyFallback />}><SnakeClassement /></Suspense>} />
-        <Route path="/snake/reglages" element={<Suspense fallback={<LazyFallback />}><SnakeReglages /></Suspense>} />
-        <Route path="/snake/regles" element={<Suspense fallback={<LazyFallback />}><SnakeRegles /></Suspense>} />
+        <Route path="/snake" element={<Suspense fallback={<SnakeFallback />}><Snake /></Suspense>} />
+        <Route path="/snake/classement" element={<Suspense fallback={<SnakeFallback />}><SnakeClassement /></Suspense>} />
+        <Route path="/snake/reglages" element={<Suspense fallback={<SnakeFallback />}><SnakeReglages /></Suspense>} />
+        <Route path="/snake/regles" element={<Suspense fallback={<SnakeFallback />}><SnakeRegles /></Suspense>} />
       </Route>
 
       <Route path="*" element={<PageNotFound />} />

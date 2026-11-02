@@ -25,6 +25,17 @@
   - tests sous WebKit instables avec l'horloge simulée (`page.clock.install` gèle les animations de sortie des étapes) : nos tests restent en Chromium ;
   - les créneaux proposés par « Déplacer » (Mes rendez-vous) partent d'aujourd'hui : pour reculer un RDV lointain, passer par « Choisir une autre date » ; l'événement de calendrier ne dit pas « Pour Léo ».
 
+## Snake du Gang (2 nov. 2026, jeu ouvert sur le site)
+
+Source : `docs/fonctions/snake-du-gang.md`, `snake-du-gang-contrat.md` (section 8), `snake-du-gang-stores.md`.
+
+- **Build store** (sur feu vert) : point 6 des notes de revue et nouveautés prêts dans `snake-du-gang-stores.md` ; relire l'étiquette « Confidentialité de l'app » (scores liés au compte) et la « Sécurité des données » Play ; nettoyage des comptes de démonstration (`snake_games`, `snake_scores`, voir `securite-moderation-nettoyage.md`).
+- **Sons et vibrations à essayer sur un vrai iPhone et un vrai Android** (seulement vérifiés dans Chromium) ; paysage : le pavé sort de l'écran (jeu pensé en portrait).
+- **Aucun outil admin propre au Snake** : un robot qui connaît la graine peut jouer parfaitement en temps réel (score maximal ~3 900 au niveau 9, accepté s'il est envoyé après ~37 min). Recours actuel : exclure le compte du classement (retire aussi du classement Gang et de la Coupe). À faire si besoin : remise à zéro d'un score par l'admin, comme `/coupe/admin/players/:key/reset`.
+- `EXPLAIN` du classement (`BOARD_SQL` de `lib/snakeResults.js`) en production, en `READ ONLY`, une fois les tables créées par le premier démarrage.
+- Migration du Snake en échec : les routes répondent 400 (colonne inconnue, 42703) au lieu de 500 ; seul « Migration Snake du Gang ignorée » au démarrage le signale.
+- Page chargée à la demande sans réseau (commun à toutes les pages du site) : ouvrir `/snake/regles` puis couper le réseau et revenir au menu affiche « Une erreur est survenue » sur le web (le code du menu n'était pas chargé). Les apps embarquent tout le code.
+
 ## La Coupe du Gang (29 oct. 2026, jeu ouvert sur le site)
 
 Source : `docs/fonctions/coupe-du-gang.md`, `coupe-du-gang-contrat.md` (sections 7 et 8), `coupe-du-gang-stores.md`.

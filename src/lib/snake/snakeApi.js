@@ -12,6 +12,7 @@
  */
 import { useQuery } from '@tanstack/react-query';
 import { API_SERVER_URL, resolvedAppId, apiRequest, apiUrl } from '@/api/apiClient';
+import { SNAKE_RULES } from './engine';
 
 export const SNAKE_KEY = ['snake'];
 export const SNAKE_ENABLED_KEY = ['snake', 'enabled'];
@@ -79,8 +80,12 @@ export function useSnakeLeaderboard(season, { enabled = true } = {}) {
 
 // ─── Envois ─────────────────────────────────────────────────────────
 
-/** Ticket de partie → `{ id, seed, level, rules, expires_at }`. */
-export const startSnakeGame = (level) => apiRequest('POST', apiUrl('/snake/games'), { level });
+/**
+ * Ticket de partie → `{ id, seed, level, rules, expires_at }`. Envoie la version des règles du
+ * moteur de ce bundle : un serveur aux autres règles répond 409 `update_required` (partie jouée
+ * sans classement, jamais un rejeu avec le mauvais moteur).
+ */
+export const startSnakeGame = (level) => apiRequest('POST', apiUrl('/snake/games'), { level, rules: SNAKE_RULES });
 
 /**
  * Fin de partie → `{ score, eaten, bonuses, level, ranked, record, previous_record, season_best,

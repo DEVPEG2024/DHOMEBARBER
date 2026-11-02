@@ -25,7 +25,7 @@ export const GAMES = [
     // Snake du Gang (2 nov. 2026) : le Snake des vieux téléphones, vraies règles, sans labyrinthe
     id: 'snake',
     title: 'Snake du Gang',
-    tagline: 'Le Snake des vieux téléphones : mange, grandis, ne te mords pas la queue.',
+    tagline: 'Le Snake des vieux téléphones : mange, grandis, attrape les bestioles, ne te mords pas la queue.',
     to: '/snake',
   },
 ];

@@ -30,6 +30,7 @@ Les fichiers de `fonctions/` et `historique/` (sauf `restes-a-faire.md`) reprenn
 | `carte-gang.md` | carte Gang des clients |
 | `fil-new-gang.md` | le fil « New Gang » v2 : formats, commentaires, activité, pushs groupés (contrat : `fil-new-gang-contrat.md`) |
 | `coupe-du-gang.md` | La Coupe du Gang, mini-jeu de foot façon air hockey |
+| `snake-du-gang.md` | Snake du Gang, le Snake classique sur un téléphone rétro (score rejoué par le serveur, classement du mois) |
 | `textile.md` | textile et drops |
 | `evenements-privatisation.md` | privatiser le salon, événements du salon |
 | `snap-essayage.md` | filtres Snap, essayage couleur |

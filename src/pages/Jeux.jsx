@@ -11,13 +11,17 @@ import { motion, useReducedMotion } from 'framer-motion';
 import { ArrowRight, Gamepad2 } from 'lucide-react';
 import LoadError from '@/components/shared/LoadError';
 import { CoupeGameCard, GameIcon } from '@/components/home/GamesSection';
+import SnakeGameCard from '@/components/snake/SnakeGameCard';
 import { COUPE_COLORS as C } from '@/components/coupe/palette';
 import { preloadStadium } from '@/lib/coupe/stadiumImage';
 import { useGames } from '@/lib/games';
 import { useTheme } from '@/lib/ThemeContext';
 
-/** Cartes propres à un jeu ; un jeu qui n'a pas la sienne prend `GameCard`. */
-const GAME_CARDS = { coupe: CoupeGameCard };
+/**
+ * Cartes propres à un jeu ; un jeu qui n'a pas la sienne prend `GameCard`. Snake du Gang (2 nov.
+ * 2026) : mini-écran vert, ton record, « Jouer » vers /snake, sous la carte de la Coupe.
+ */
+const GAME_CARDS = { coupe: CoupeGameCard, snake: SnakeGameCard };
 
 /** Carte simple d'un jeu : nom, accroche, « Jouer » (sombre, comme la carte de la Coupe). */
 function GameCard({ game }) {

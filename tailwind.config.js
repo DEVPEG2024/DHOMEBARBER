@@ -17,7 +17,7 @@ module.exports = {
   		fontFamily: {
   			inter: ['var(--font-inter)'],
   			display: ['var(--font-display)'],
-  			// Écran vert du Snake du Gang (police à pixels, Google Fonts : src/index.css)
+  			// Écran vert du Snake du Gang (police à pixels embarquée : @fontsource/silkscreen, src/components/snake/palette.js)
   			pixel: ['Silkscreen', 'ui-monospace', 'monospace'],
   		},
   		borderRadius: {

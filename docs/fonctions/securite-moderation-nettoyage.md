@@ -25,6 +25,7 @@
 - Recette (session du Mac, `heroku pg:psql --app dhomebarber-api`) : d'abord lister, puis supprimer seulement ces lignes, par email exact.
   `SELECT id, client_name, rating, comment, created_date FROM reviews WHERE LOWER(client_email) IN ('<compte démo>', 'snap.review@dhomebarber.fr') OR LOWER(client_email) LIKE 'qa.%@dhomebarber.fr';`
   puis `DELETE FROM reviews WHERE id IN (…)`. Même chose pour `posts` / `post_comments` (`author_email`), `post_likes` (`user_email`), `appointments` à venir (`client_email`, passer en `cancelled` plutôt que supprimer si le créneau est passé). Ou depuis l'app : Admin → Avis (corbeille), Admin → Fil (supprimer)
+  Snake du Gang (depuis le 2 nov. 2026, dès que le jeu est dans un build) : lister puis effacer les parties et scores des comptes de démonstration, `SELECT season, best FROM snake_scores WHERE user_id = (SELECT id FROM users WHERE LOWER(email) = 'reviewer@dhomebarber.fr')` puis `DELETE FROM snake_scores WHERE user_id = …` et `DELETE FROM snake_games WHERE user_id = …` (même chose pour `reviewer2@`) ; remettre `users.snake_leaderboard_opt_in` à `false` s'ils l'ont allumé.
 - Noter dans le compte rendu ce qui a été effacé (nombre de lignes par table)
 
 ### Modération du fil (exigence App Store 1.2)

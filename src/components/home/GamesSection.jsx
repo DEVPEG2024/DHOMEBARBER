@@ -35,6 +35,8 @@ import { useAuth } from '@/lib/AuthContext';
 import { useCoupeEnabled, useCoupeMe, useCoupeRulesV2 } from '@/lib/coupe/coupeApi';
 import { useGames } from '@/lib/games';
 import { useHomeSectionHidden } from '@/lib/homeSections';
+// Pictogramme à pixels du Snake du Gang (petit fichier sans le moteur du jeu)
+import { SnakeIcon } from '@/components/snake/pages/sprites';
 // Image du stade par stadiumImage.js, sans le moteur du jeu : ce fichier est dans le paquet
 // principal (accueil, fil, profil d'un barber), stadium.js y tirerait engine.js et renderer.js
 import { STADIUM_URL as stadiumUrl } from '@/lib/coupe/stadiumImage';
@@ -194,9 +196,10 @@ function StadiumBackdrop({ position, veil, lazy = false, imageStyle }) {
   );
 }
 
-/** Pictogramme d'un jeu (`id` de GAMES) : le ballon pour la Coupe, une manette sinon. */
+/** Pictogramme d'un jeu (`id` de GAMES) : le ballon pour la Coupe, le serpent à pixels pour le Snake, une manette sinon. */
 export function GameIcon({ id, className = 'w-4 h-4', style }) {
   if (id === 'coupe') return <CoupeBallIcon className={className} style={style} />;
+  if (id === 'snake') return <SnakeIcon className={className} style={style} />;
   return <Gamepad2 className={className} style={style} aria-hidden="true" />;
 }
 
@@ -483,13 +486,13 @@ export function GamesFeedEntry({ className = '' }) {
       </span>
       <span className="flex-1 min-w-0">
         <span className="block font-fut text-lg font-extrabold uppercase tracking-wide leading-none text-white">Jeux</span>
-        <span className="block mt-1 text-xs truncate" style={{ color: C.grisClair }}>
-          {games.map((g, i) => (
-            <React.Fragment key={g.id}>
-              {i > 0 && ' · '}
-              <GameIcon id={g.id} className="inline-block w-3.5 h-3.5 mr-1 align-[-0.2em]" style={{ color: VERT_CLAIR }} />
-              {g.title}
-            </React.Fragment>
+        {/* Un nom par jeu, jamais coupé au milieu : passe à la ligne quand ils ne tiennent pas côte à côte */}
+        <span className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs" style={{ color: C.grisClair }}>
+          {games.map((g) => (
+            <span key={g.id} className="inline-flex min-w-0 max-w-full items-center gap-1">
+              <GameIcon id={g.id} className="w-3.5 h-3.5 shrink-0" style={{ color: VERT_CLAIR }} />
+              <span className="truncate">{g.title}</span>
+            </span>
           ))}
         </span>
       </span>
