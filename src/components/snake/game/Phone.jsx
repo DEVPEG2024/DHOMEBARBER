@@ -7,10 +7,12 @@ import { SNAKE_COLORS as C } from '../palette';
  * de touches passés en enfants. Dessiné par nous : aucune marque de téléphone.
  *
  * Largeur : 362 px au plus (390 px d'écran moins 2 × 14 px), toute la place disponible en dessous.
+ * Les autres propriétés vont au cadre (gestes du glisser pendant la partie).
  */
-export default function Phone({ label = 'Téléphone du jeu', className = '', children }) {
+export default function Phone({ label = 'Téléphone du jeu', className = '', children, ...rest }) {
   return (
     <section
+      {...rest}
       aria-label={label}
       className={`flex w-full max-w-[362px] flex-col items-center gap-3 rounded-[40px] border px-3 pb-5 pt-3.5 ${className}`}
       style={{
@@ -20,7 +22,7 @@ export default function Phone({ label = 'Téléphone du jeu', className = '', ch
       }}
     >
       <div className="flex h-[30px] items-center gap-2.5">
-        <img src="/logo.png" alt="" width="30" height="30" className="h-[30px] w-[30px] object-contain" />
+        <img src="/logo.png" alt="" width="30" height="30" draggable={false} className="h-[30px] w-[30px] object-contain" />
         <span className="text-[11px] font-bold tracking-[0.24em]" style={{ color: C.logoTexte }}>D’HOME BARBER</span>
       </div>
       {children}

@@ -1,8 +1,9 @@
 /**
- * Snake du Gang : réglages de l'appareil (niveau, bips, vibrations), gardés dans le navigateur.
+ * Snake du Gang : réglages de l'appareil (niveau, bips, vibrations, touches à l'écran), gardés dans
+ * le navigateur.
  * Le choix du classement, lui, est sur le serveur (`PATCH /snake/settings`).
  *
- *   const [prefs, setPrefs] = useSnakePrefs();   // { level, bips, vibrations }
+ *   const [prefs, setPrefs] = useSnakePrefs();   // { level, bips, vibrations, touches }
  *   setPrefs({ level: 7 });
  *
  * Lecture et écriture jamais bloquantes (navigation privée, stockage refusé : valeurs par défaut).
@@ -13,7 +14,8 @@ import { LEVEL_DEFAULT, isLevel } from './engine';
 
 const STORAGE_KEY = 'dhb-snake-prefs';
 const EVENT = 'dhb:snake-prefs';
-export const DEFAULT_PREFS = Object.freeze({ level: LEVEL_DEFAULT, bips: true, vibrations: true });
+// `touches` : pavé 2 4 6 8 sous l'écran ; éteint, on tourne en glissant (demande du 3 nov. 2026)
+export const DEFAULT_PREFS = Object.freeze({ level: LEVEL_DEFAULT, bips: true, vibrations: true, touches: false });
 
 function clean(raw) {
   const p = raw && typeof raw === 'object' ? raw : {};
@@ -21,6 +23,7 @@ function clean(raw) {
     level: isLevel(p.level) ? p.level : DEFAULT_PREFS.level,
     bips: typeof p.bips === 'boolean' ? p.bips : DEFAULT_PREFS.bips,
     vibrations: typeof p.vibrations === 'boolean' ? p.vibrations : DEFAULT_PREFS.vibrations,
+    touches: typeof p.touches === 'boolean' ? p.touches : DEFAULT_PREFS.touches,
   };
 }
 

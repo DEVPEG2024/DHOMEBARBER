@@ -187,13 +187,26 @@ test.describe('Snake du Gang : vitesse et options', () => {
     }
   });
 
-  test('bips et vibrations : sur l\'appareil, gardés après rechargement, rien d\'envoyé au serveur', async ({ page, api, connecter }) => {
+  test('bips, vibrations et touches 2 4 6 8 : sur l\'appareil, gardés après rechargement, rien d\'envoyé au serveur', async ({ page, api, connecter }) => {
     await connecter(CLIENT);
     await page.goto('/snake/reglages');
     const bips = interrupteur(page, 'Bips du jeu');
     const vibrations = interrupteur(page, 'Vibrations');
+    const touches = interrupteur(page, 'Touches 2 4 6 8');
     await expect(bips).toHaveAttribute('aria-checked', 'true');
     await expect(vibrations).toHaveAttribute('aria-checked', 'true');
+    // Glisser par défaut : touches éteintes
+    await expect(touches).toHaveAttribute('aria-checked', 'false');
+    await touches.click();
+    await expect(touches).toHaveAttribute('aria-checked', 'true');
+    expect(await prefsDeLaPage(page)).toMatchObject({ touches: true });
+    // La partie montre alors le pavé complet
+    await page.getByRole('link', { name: 'Jouer', exact: true }).click();
+    await expect(page.locator('[data-commandes="touches"]')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Haut (2)', exact: true })).toBeVisible();
+    await page.goto('/snake/reglages');
+    await touches.click();
+    await expect(touches).toHaveAttribute('aria-checked', 'false');
 
     await bips.click();
     await expect(bips).toHaveAttribute('aria-checked', 'false');
@@ -406,7 +419,7 @@ test.describe('Snake du Gang : comment jouer', () => {
     await expect(page.getByText(`au niveau 5, de ${bonusPoints(5, 1)} à ${bonusPoints(5, BONUS_STEPS)} points`)).toBeVisible();
     await expect(page.getByText('Il n’y a pas de murs : quand tu sors d’un côté de l’écran, tu reviens par l’autre.')).toBeVisible();
     await expect(page.getByText('(niveaux 1 à 9)')).toBeVisible();
-    await expect(page.getByText(/touche 2 \(haut\), 4 \(gauche\), 6 \(droite\), 8 \(bas\)\. 5 met en pause\./)).toBeVisible();
+    await expect(page.getByText(/Glisse ton doigt n’importe où sur le téléphone : vers le haut, le bas, la gauche ou la droite\. GO lance la partie, PAUSE la met en pause\. Tu préfères des touches \? Active « Touches 2 4 6 8 » dans Vitesse et options\./)).toBeVisible();
     await expect(page.getByText('Nouvelle saison chaque 1er du mois.', { exact: false })).toBeVisible();
     await expect(page.getByRole('link', { name: 'J’ai compris' })).toHaveAttribute('href', '/snake');
     // Jamais de marque de téléphone

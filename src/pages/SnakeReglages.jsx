@@ -4,7 +4,8 @@
  *
  *  - Vitesse : écran vert (NIVEAU N, allure, points par bouchée) et 9 boutons à barres ; le niveau
  *    est gardé sur l'appareil (`useSnakePrefs`) ;
- *  - Options : « Bips du jeu » et « Vibrations » (sur l'appareil), « Figurer au classement » (sur le
+ *  - Options : « Bips du jeu », « Vibrations » et « Touches 2 4 6 8 » (sur l'appareil ; éteinte, on
+ *    tourne en glissant sur le téléphone), « Figurer au classement » (sur le
  *    serveur, `PATCH /snake/settings`, mise à jour optimiste ; grisé avec une phrase pour l'admin,
  *    une fiche barber cachée ou un compte retiré du classement) ;
  *  - « Jouer » ouvre directement la partie (`/snake?jouer=1`, lien `replace`).
@@ -114,6 +115,11 @@ export default function SnakeReglages() {
         <OptionRow label="Vibrations" help="Une petite secousse quand tu manges ou perds.">
           {({ labelId, helpId }) => (
             <SnakeSwitch checked={prefs.vibrations} onChange={(v) => setPrefs({ vibrations: v })} labelledBy={labelId} describedBy={helpId} />
+          )}
+        </OptionRow>
+        <OptionRow label="Touches 2 4 6 8" help="Des touches sous l’écran pour tourner, en plus du glisser.">
+          {({ labelId, helpId }) => (
+            <SnakeSwitch checked={prefs.touches} onChange={(v) => setPrefs({ touches: v })} labelledBy={labelId} describedBy={helpId} />
           )}
         </OptionRow>
         <OptionRow label="Figurer au classement" help={rankHelp}>

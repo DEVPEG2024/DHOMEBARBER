@@ -382,10 +382,19 @@ export function createSnakeController({
     update({ live: 'Reprise.' });
   }
 
-  /** 5, Espace, Entrée, toucher court sur l'écran : lancer, pause ou reprise. */
+  /** 5, Espace, Entrée : lancer, pause ou reprise. */
   function toggle() {
     if (status === 'ready') launch();
     else if (status === 'play') pause();
+    else if (status === 'pause') resume();
+  }
+
+  /**
+   * Toucher court sur le téléphone : lance ou reprend, jamais de pause (un glisser trop rapide pour
+   * être lu ne doit pas arrêter la partie) ; la pause passe par la touche PAUSE.
+   */
+  function tap() {
+    if (status === 'ready') launch();
     else if (status === 'pause') resume();
   }
 
@@ -596,6 +605,7 @@ export function createSnakeController({
     redraw: draw,
     launch,
     toggle,
+    tap,
     turn,
     pause,
     resume,

@@ -20,6 +20,18 @@ const PENDING = 'dhb-snake-pending';
 /** File des fins pas encore envoyées, lue dans le stockage de la page. */
 const fileEnAttente = (page) => page.evaluate((cle) => JSON.parse(localStorage.getItem(cle) || '[]'), PENDING);
 const annonce = (page) => jeu(page).locator('[aria-live="polite"]');
+const zoneGlisse = (page) => page.locator('[data-swipe-pad]');
+const fleche = (page, dir) => zoneGlisse(page).locator(`[data-swipe-dir="${dir}"]`);
+
+/** Glisse de (dx, dy) depuis le centre de `boite` (souris : même geste que le doigt). */
+async function glisserDepuis(page, boite, dx, dy) {
+  const x = boite.x + boite.width / 2;
+  const y = boite.y + boite.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + dx, y + dy, { steps: Math.max(3, Math.ceil(Math.max(Math.abs(dx), Math.abs(dy)) / 10)) });
+  await page.mouse.up();
+}
 const FIN = /^\/snake\/games\/[^/]+\/finish$/;
 
 /** Mois de la saison simulée, tel que l'app l'écrit (« de novembre », « d'août »). */
@@ -156,7 +168,7 @@ test.describe('Snake du Gang : menu du téléphone', () => {
 });
 
 test.describe('Snake du Gang : partie', () => {
-  test('`?jouer=1` : PRÊT ?, virages au pavé et au glisser, pause, reprise, Menu termine la partie', async ({ page, api, connecter, journal }) => {
+  test('`?jouer=1` : PRÊT ?, virages au glisser (zone GLISSE et écran vert), pause, reprise, Menu termine la partie', async ({ page, api, connecter, journal }) => {
     await connecter(CLIENT);
     await page.goto('/snake?jouer=1');
     await partiePrete(page);
@@ -166,20 +178,22 @@ test.describe('Snake du Gang : partie', () => {
     // Terrain de 22 × 16 cases de 14 px à 390 px
     const cadre = await terrain(page).boundingBox();
     expect([cadre.width, cadre.height]).toEqual([308, 224]);
+    // Glisser par défaut : zone GLISSE sous l'écran vert, et seulement Menu, 5 et Rejouer en touches
+    await expect(jeu(page).locator('[data-commandes="glisser"]')).toBeVisible();
+    await expect(zoneGlisse(page)).toBeVisible();
+    await expect(page.getByRole('group', { name: 'Touches' }).getByRole('button')).toHaveCount(3);
+    await expect(page.getByRole('button', { name: 'Haut (2)' })).toHaveCount(0);
+    await expect(page.getByText('Flèches du clavier ou glisse à la souris. Espace : pause.')).toBeVisible();
 
     await touche(page, '5 GO (lancer)').click();
     await expect(jeu(page)).toHaveAttribute('data-statut', 'play');
     await expect(terrain(page).getByText('PRÊT ?')).toBeHidden();
-    await touche(page, 'Haut (2)').click();
+    // Glisser vers le haut dans la zone GLISSE
+    await glisserDepuis(page, await zoneGlisse(page).boundingBox(), 0, -40);
     const apres = await pasJoues(page);
     await expect.poll(() => pasJoues(page)).toBeGreaterThan(apres);
     // Glisser vers la droite sur l'écran vert
-    const x = cadre.x + cadre.width / 2;
-    const y = cadre.y + cadre.height / 2;
-    await page.mouse.move(x, y);
-    await page.mouse.down();
-    await page.mouse.move(x + 60, y, { steps: 4 });
-    await page.mouse.up();
+    await glisserDepuis(page, cadre, 60, 0);
     const avantPause = await pasJoues(page);
     await expect.poll(() => pasJoues(page)).toBeGreaterThan(avantPause);
 
@@ -626,39 +640,69 @@ test.describe('Snake du Gang : ticket et raisons exactes', () => {
 });
 
 test.describe('Snake du Gang : gestes, focus, survol', () => {
-  test('glisser court : moins de 8 px = pause, de 8 à 13 px rien, 14 px = virage', async ({ page, api, connecter }) => {
+  test('glisser court : toucher = lancer ou reprendre, jamais pause ; de 8 à 13 px rien ; 14 px = virage', async ({ page, api, connecter }) => {
     api.snakeRest.toleranceMs = Infinity;
     await connecter(CLIENT);
     await page.goto('/snake?jouer=1');
     await partiePrete(page);
     await arreterHorloge(page);
-    await page.keyboard.press('5');
-    await expect(jeu(page)).toHaveAttribute('data-statut', 'play');
     const cadre = await terrain(page).boundingBox();
-    const x = cadre.x + cadre.width / 2;
-    const y = cadre.y + cadre.height / 2;
-    const glisser = async (dx, dy) => {
-      await page.mouse.move(x, y);
-      await page.mouse.down();
-      await page.mouse.move(x + dx, y + dy, { steps: 3 });
-      await page.mouse.up();
-    };
-    // 10 px vers le bas : ni pause ni virage (un virage en bas aurait ensuite bloqué celui en haut)
-    await glisser(0, 10);
-    expect(await statut(page)).toBe('play');
-    // 4 px : toucher, pause
-    await glisser(0, 4);
-    await expect(jeu(page)).toHaveAttribute('data-statut', 'pause');
-    await page.keyboard.press('5');
+    const zone = await zoneGlisse(page).boundingBox();
+    // Toucher sur PRÊT ? (4 px) : la partie part
+    await glisserDepuis(page, zone, 0, 4);
     await expect(jeu(page)).toHaveAttribute('data-statut', 'play');
-    // 15 px vers le haut : virage
-    await glisser(0, -15);
+    // 10 px vers le bas : ni virage (un virage en bas aurait ensuite bloqué celui en haut) ni pause
+    await glisserDepuis(page, cadre, 0, 10);
     expect(await statut(page)).toBe('play');
+    // Toucher pendant la partie : rien, la pause passe par la touche
+    await glisserDepuis(page, zone, 0, 4);
+    await glisserDepuis(page, cadre, 0, 4);
+    expect(await statut(page)).toBe('play');
+    await page.keyboard.press('5');
+    await expect(jeu(page)).toHaveAttribute('data-statut', 'pause');
+    // Toucher en pause : reprise
+    await glisserDepuis(page, zone, 0, 4);
+    await expect(jeu(page)).toHaveAttribute('data-statut', 'play');
+    // 15 px vers le haut dans la zone GLISSE : virage, sa flèche s'allume un instant
+    await glisserDepuis(page, zone, 0, -15);
+    expect(await statut(page)).toBe('play');
+    await expect(fleche(page, 0)).toHaveAttribute('data-on', '');
+    await expect(fleche(page, 1)).not.toHaveAttribute('data-on', '');
+    await page.clock.runFor(200);
+    await expect(fleche(page, 0)).not.toHaveAttribute('data-on', '');
     await avancer(page, async () => (await pasJoues(page)) >= 2, 'deux pas');
     await page.clock.resume();
     await touche(page, 'Menu').click();
     await expect.poll(() => api.snakeRest.fins.length).toBe(1);
     expect(api.snakeRest.fins[0].moves.filter((_, i) => i % 2 === 1)).toEqual([0]);
+    expect([...api.snakeRest.tickets.values()][0].refus).toBeNull();
+  });
+
+  test('option « Touches 2 4 6 8 » : pavé complet, virages aux touches et au glisser', async ({ page, api, connecter }) => {
+    api.snakeRest.toleranceMs = Infinity;
+    await page.addInitScript(() => {
+      try { localStorage.setItem('dhb-snake-prefs', JSON.stringify({ touches: true })); } catch { /* stockage indisponible */ }
+    });
+    await connecter(CLIENT);
+    await page.goto('/snake?jouer=1');
+    await partiePrete(page);
+    await expect(jeu(page).locator('[data-commandes="touches"]')).toBeVisible();
+    await expect(zoneGlisse(page)).toHaveCount(0);
+    for (const nom of ['Menu', 'Haut (2)', 'Rejouer', 'Gauche (4)', '5 GO (lancer)', 'Droite (6)', 'Bas (8)']) {
+      await expect(touche(page, nom)).toBeVisible();
+    }
+    await arreterHorloge(page);
+    await touche(page, '5 GO (lancer)').click();
+    await expect(jeu(page)).toHaveAttribute('data-statut', 'play');
+    await touche(page, 'Haut (2)').click();
+    await avancer(page, async () => (await pasJoues(page)) >= 1, 'un pas');
+    // Le glisser marche aussi
+    await glisserDepuis(page, await terrain(page).boundingBox(), -40, 0);
+    await avancer(page, async () => (await pasJoues(page)) >= 2, 'deux pas');
+    await page.clock.resume();
+    await touche(page, 'Menu').click();
+    await expect.poll(() => api.snakeRest.fins.length).toBe(1);
+    expect(api.snakeRest.fins[0].moves.filter((_, i) => i % 2 === 1)).toEqual([0, 3]);
     expect([...api.snakeRest.tickets.values()][0].refus).toBeNull();
   });
 
@@ -753,8 +797,8 @@ test.describe('Snake du Gang : gestes, focus, survol', () => {
     await expect.poll(() => fond(ok)).toBe('rgb(46, 158, 102)');
     await ok.click();
     await partiePrete(page);
-    // Partie : « Menu », « Rejouer », « 5 GO (lancer) »
-    for (const nom of ['Menu', 'Rejouer', '5 GO (lancer)', 'Haut (2)', 'Gauche (4)', 'Droite (6)', 'Bas (8)']) {
+    // Partie : « Menu », « 5 GO (lancer) », « Rejouer » (les virages se font en glissant)
+    for (const nom of ['Menu', '5 GO (lancer)', 'Rejouer']) {
       await expect(touche(page, nom)).toBeVisible();
     }
   });

@@ -55,8 +55,8 @@ function Rule({ tile, title, children }) {
 
 // Serpent qui se mord : queue en bas, tour par la droite, tête qui revient sur la case en creux
 const BITE_CELLS = [[9, 36], [16, 36], [23, 36], [30, 36], [37, 36], [37, 29], [37, 22], [37, 15], [30, 15], [23, 15], [23, 22]];
-// Pavé de touches : 2, 4, 5 (en creux), 6, 8
-const PAD_KEYS = [[20, 6], [6, 20], [20, 20, true], [34, 20], [20, 34]];
+// Glisser : un doigt (rond en creux) et ses quatre directions
+const SWIPE_ARROWS = ['M26 4l-5 5h10z', 'M48 26l-5-5v10z', 'M26 48l-5-5h10z', 'M4 26l5-5v10z'];
 
 export default function SnakeRegles() {
   const [prefs] = useSnakePrefs();
@@ -119,17 +119,14 @@ export default function SnakeRegles() {
           title="Les commandes"
           tile={(
             <Tile>
-              {PAD_KEYS.map(([x, y, hollow]) => (
-                <span
-                  key={`${x}-${y}`}
-                  className="absolute box-border h-3 w-3 rounded-[3px]"
-                  style={{ left: x, top: y, background: hollow ? 'transparent' : C.encre, border: hollow ? `2px solid ${C.encre}` : undefined }}
-                />
-              ))}
+              <svg width="52" height="52" viewBox="0 0 52 52" className="absolute left-0 top-0" fill={C.encre}>
+                {SWIPE_ARROWS.map((d) => <path key={d} d={d} />)}
+                <circle cx="26" cy="26" r="7" fill="none" stroke={C.encre} strokeWidth="2.5" />
+              </svg>
             </Tile>
           )}
         >
-          Glisse ton doigt sur l’écran, ou touche 2 (haut), 4 (gauche), 6 (droite), 8 (bas). 5 met en pause.
+          Glisse ton doigt n’importe où sur le téléphone : vers le haut, le bas, la gauche ou la droite. GO lance la partie, PAUSE la met en pause. Tu préfères des touches ? Active « Touches 2 4 6 8 » dans Vitesse et options.
           <span className="hidden [@media(hover:hover)_and_(pointer:fine)]:inline"> Au clavier : les flèches, et Espace pour la pause.</span>
         </Rule>
       </section>

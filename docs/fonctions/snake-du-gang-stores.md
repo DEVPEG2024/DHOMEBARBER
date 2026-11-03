@@ -12,10 +12,10 @@
 
 ## 1. Point à ajouter aux notes de revue Apple (anglais)
 
-Garder les notes sous 4 000 **octets** (`Buffer.byteLength`). Ce point fait environ 560 octets.
+Garder les notes sous 4 000 **octets** (`Buffer.byteLength`). Ce point fait environ 600 octets.
 
 ```
-6. "Snake du Gang" mini-game. The classic snake game on a drawn retro phone: the snake moves by itself, swipe or use the 2/4/6/8 keys to turn, eat dots to grow, catch the bonus critters, do not bite your own tail (no walls: you come out on the other side). Open it from Accueil → "Jeux" → "Snake du Gang". Free, no purchase, no prize. Each game's score is checked by our server, which replays the moves. Optional monthly leaderboard (first name + initial only, opt-in in "Vitesse et options"). Offline games are allowed but not ranked.
+6. "Snake du Gang" mini-game. The classic snake game on a drawn retro phone: the snake moves by itself, swipe anywhere on the phone to turn (2/4/6/8 keys can be turned on in "Vitesse et options"), eat dots to grow, catch the bonus critters, do not bite your own tail (no walls: you come out on the other side). Open it from Accueil → "Jeux" → "Snake du Gang". Free, no purchase, no prize. Each game's score is checked by our server, which replays the moves. Optional monthly leaderboard (first name + initial only, opt-in in "Vitesse et options"). Offline games are allowed but not ranked.
 ```
 
 ## 2. Nouveautés de la version (fr-FR, à fondre avec celles du build)

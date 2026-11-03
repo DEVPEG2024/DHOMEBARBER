@@ -14,6 +14,8 @@ import GameField from './GameField';
 import EndScreen from './EndScreen';
 import Phone from './Phone';
 import Keypad, { Key, DigitArrow, DigitWord, KeyWord } from './Keypad';
+import SwipePad, { flashArrow } from './SwipePad';
+import { useSwipe } from './swipe';
 import { SNAKE_COLORS as C } from '../palette';
 
 /**
@@ -21,6 +23,10 @@ import { SNAKE_COLORS as C } from '../palette';
  * (planches `Partie.dc.html` et `Perdu.dc.html`). Contrat : docs/fonctions/snake-du-gang-contrat.md,
  * section 6. Le déroulé est dans `controller.js` ; ici les gestes, le clavier, la pause automatique,
  * l'écran gardé allumé et ce qui s'affiche.
+ *
+ * Commandes (3 nov. 2026) : on tourne en glissant n'importe où sur le téléphone, zone « GLISSE »
+ * sous l'écran vert ; sous elle, Menu, 5 GO / PAUSE et Rejouer. Les touches 2 4 6 8 reviennent
+ * avec l'option « Touches 2 4 6 8 » de Vitesse et options (`prefs.touches`).
  *
  * Quitter l'écran (retour, Menu, page fermée par le routeur) termine la partie en cours (`quit`).
  */
@@ -39,6 +45,10 @@ function typingIn(el) {
   if (el.isContentEditable) return true;
   return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT';
 }
+
+// Texte pour le doigt, ou pour l'ordinateur (souris et clavier)
+const TOUCH_ONLY = '[@media(hover:hover)_and_(pointer:fine)]:hidden';
+const DESK_ONLY = 'hidden [@media(hover:hover)_and_(pointer:fine)]:inline';
 
 /** Bandeau « partie non classée », avec la raison exacte. */
 function LocalBanner({ reason }) {
@@ -59,6 +69,7 @@ export default function SnakeGame({ level, prefs, me, onMenu }) {
   prefsRef.current = prefs;
   const statsRef = useRef(null);
   const rootRef = useRef(null);
+  const padRef = useRef(null);
   // Place au classement avant la partie : « Tu restes 6e » ou « Tu passes 4e » à la fin
   const prevRankRef = useRef(me?.data?.rank ?? null);
 
@@ -88,6 +99,8 @@ export default function SnakeGame({ level, prefs, me, onMenu }) {
     });
   }
   const ctl = controllerRef.current;
+  const swipe = useSwipe(ctl, (dir) => flashArrow(padRef.current, dir));
+  const keys = !!prefs?.touches;
 
   useEffect(() => {
     ctl.start(level);
@@ -192,6 +205,13 @@ export default function SnakeGame({ level, prefs, me, onMenu }) {
   );
 
   const ticketState = ui.seeded ? (ui.ranked ? 'classee' : 'locale') : 'attente';
+  const menuKey = <Key key="menu" onPress={onMenu}><KeyWord>Menu</KeyWord></Key>;
+  const againKey = <Key key="again" onPress={() => ctl.restart()}><KeyWord>Rejouer</KeyWord></Key>;
+  const okKey = (
+    <Key key="ok" label={okLabel} fast green onPress={() => ctl.toggle()} disabled={status === 'dying'}>
+      <DigitWord word={okWord} />
+    </Key>
+  );
 
   return (
     <div
@@ -213,7 +233,11 @@ export default function SnakeGame({ level, prefs, me, onMenu }) {
         />
       ) : (
         <>
-          <Phone>
+          <Phone
+            {...swipe}
+            data-commandes={keys ? 'touches' : 'glisser'}
+            className="select-none [-webkit-tap-highlight-color:transparent] [-webkit-touch-callout:none] [touch-action:none]"
+          >
             <GameField
               key={ui.gen}
               controller={ctl}
@@ -223,21 +247,26 @@ export default function SnakeGame({ level, prefs, me, onMenu }) {
               waiting={ui.waiting}
               statsRef={statsRef}
             />
-            <Keypad
-              slots={[
-                <Key key="menu" onPress={onMenu}><KeyWord>Menu</KeyWord></Key>,
-                turnKey('2', 'up', UP, 'Haut (2)'),
-                <Key key="again" onPress={() => ctl.restart()}><KeyWord>Rejouer</KeyWord></Key>,
-                turnKey('4', 'left', LEFT, 'Gauche (4)'),
-                <Key key="ok" label={okLabel} fast green onPress={() => ctl.toggle()} disabled={status === 'dying'}>
-                  <DigitWord word={okWord} />
-                </Key>,
-                turnKey('6', 'right', RIGHT, 'Droite (6)'),
-                null,
-                turnKey('8', 'down', DOWN, 'Bas (8)'),
-                null,
-              ]}
-            />
+            {keys ? (
+              <Keypad
+                slots={[
+                  menuKey,
+                  turnKey('2', 'up', UP, 'Haut (2)'),
+                  againKey,
+                  turnKey('4', 'left', LEFT, 'Gauche (4)'),
+                  okKey,
+                  turnKey('6', 'right', RIGHT, 'Droite (6)'),
+                  null,
+                  turnKey('8', 'down', DOWN, 'Bas (8)'),
+                  null,
+                ]}
+              />
+            ) : (
+              <>
+                <SwipePad padRef={padRef} />
+                <Keypad slots={[menuKey, okKey, againKey]} />
+              </>
+            )}
           </Phone>
 
           <div className="flex flex-col items-center gap-1.5 text-center">
@@ -249,7 +278,10 @@ export default function SnakeGame({ level, prefs, me, onMenu }) {
                 <>Niveau {ui.level}</>
               )}
             </p>
-            <p className="text-[13px]" style={{ color: C.gris }}>Glisse sur l’écran ou touche 2 4 6 8. 5 : pause.</p>
+            <p className="text-[13px]" style={{ color: C.gris }}>
+              <span className={TOUCH_ONLY}>{keys ? 'Glisse sur le téléphone ou touche 2 4 6 8. 5 : pause.' : 'Glisse n’importe où sur le téléphone pour tourner.'}</span>
+              <span className={DESK_ONLY}>Flèches du clavier ou glisse à la souris. Espace : pause.</span>
+            </p>
           </div>
         </>
       )}

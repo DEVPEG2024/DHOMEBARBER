@@ -102,12 +102,13 @@ export function DigitWord({ digit = '5', word }) {
 }
 
 /**
- * Grille de 3 × 3 : `slots` = 9 éléments (null = case vide), dans l'ordre de lecture.
+ * Grille de 3 colonnes : `slots` = 3, 6 ou 9 éléments (null = case vide), dans l'ordre de lecture.
  * 3 × 72 px + 2 × 10 px = 236 px de large : tient à 320 px d'écran.
  */
 export default function Keypad({ slots, label = 'Touches' }) {
+  const rows = Math.ceil(slots.length / 3);
   return (
-    <div role="group" aria-label={label} className="mt-1 grid grid-cols-[repeat(3,72px)] grid-rows-[repeat(3,52px)] gap-x-2.5 gap-y-2">
+    <div role="group" aria-label={label} className="mt-1 grid grid-cols-[repeat(3,72px)] gap-x-2.5 gap-y-2" style={{ gridTemplateRows: `repeat(${rows}, 52px)` }}>
       {/* Cases fixes du pavé : leur place ne change jamais (clé = position) */}
       {slots.map((slot, i) => (
         <div key={i} className="contents">{slot || <div />}</div>
