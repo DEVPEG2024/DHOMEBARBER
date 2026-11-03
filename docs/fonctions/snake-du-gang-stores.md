@@ -1,6 +1,6 @@
 # Snake du Gang : brouillons stores
 
-> Rédigé le 2 nov. 2026. **Rien n'est publié.** Le Snake est sur le site dès sa mise en ligne, mais il n'arrive dans les apps qu'avec le prochain build (iOS build 20, Android versionCode 21), envoyé seulement sur feu vert explicite du propriétaire. Cahier des charges : `snake-du-gang.md` et `snake-du-gang-contrat.md` (même dossier).
+> Rédigé le 2 nov. 2026. **Soumis le 3 nov. 2026** avec iOS 1.0.12 (build 20) et Android 1.0.20 (code 21) : point 7 des notes de revue (texte du § 1, avec « (no walls) »), nouveautés fondues avec celles de la Coupe (`~/store-watch/envoi/whatsnew-112.txt`). Détail : `docs/historique/stores.md`. Cahier des charges : `snake-du-gang.md` et `snake-du-gang-contrat.md` (même dossier).
 
 ## 0. Avant l'envoi du build qui contient le Snake
 
