@@ -140,4 +140,6 @@ export const TIPS = {
   penLocal: 'Le tireur a 3 s, le gardien reste sur sa ligne de but',
   gold: 'Tu peux monter chez l’adversaire',
   goldLocal: 'Vous pouvez monter chez l’adversaire',
+  // En ligne, match à la règle d'aujourd'hui alors que le serveur joue le règlement v2
+  oldApp: 'Ton adversaire n’a pas encore la mise à jour : anciennes règles, premier à 3 buts',
 };

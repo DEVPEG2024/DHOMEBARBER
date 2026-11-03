@@ -4,14 +4,14 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Loader2, Smartphone, Timer } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
 import { useAndroidBack } from '@/lib/useAndroidBack';
-import { H, LEVELS, GOALS_TO_WIN, GOALS_TO_WIN_V2 } from '@/lib/coupe/engine';
+import { LEVELS, GOALS_TO_WIN, GOALS_TO_WIN_V2 } from '@/lib/coupe/engine';
 import { createRenderer, isSalonRole } from '@/lib/coupe/renderer';
 import { createSound, buzz } from '@/lib/coupe/sound';
 import { OnlineMatch, IDLE_UI, photoUrlOrNull, readPendingResume } from '@/lib/coupe/onlineMatch';
 import { LocalMatch } from '@/lib/coupe/localMatch';
-import { fingerOffset } from '@/lib/coupe/finger';
+import { fingerOffset, fingerSide } from '@/lib/coupe/finger';
 import {
-  COUPE_ENABLED_KEY, fetchCoupeEnabled, invalidateCoupe, readCoupeRulesV2, useCoupeMusic,
+  COUPE_ENABLED_KEY, COUPE_RULES_FLAG_KEY, fetchCoupeEnabled, invalidateCoupe, readCoupeRulesV2, useCoupeMusic,
 } from '@/lib/coupe/coupeApi';
 import { COUPE_PAUSED_TEXT } from './coupeErrors';
 import GameStyles from './game/GameStyles';
@@ -87,6 +87,9 @@ const later = (set, fn, ms) => {
 
 // Aucun doigt posé : camp de chaque doigt, écart doigt → joueur fixé quand il s'est posé, doigt qui
 // mène chaque camp
+// Durée d'une astuce à l'écran
+const HINT_MS = 2400;
+
 const noPointers = () => ({ map: new Map(), offsets: new Map(), active: [null, null] });
 
 // ─── Règlement v2 (docs/fonctions/coupe-du-gang-regles-v2-contrat.md, sections 6 et 8) ──────────
@@ -220,6 +223,9 @@ export default function CoupeGame({
   const outroRef = useRef([]);
   // Astuce du premier match, montrée quand le terrain apparaît (après l'avant-match)
   const firstHintRef = useRef(null);
+  // En ligne : match à la règle d'aujourd'hui alors que le serveur annonce le règlement v2 (l'adversaire
+  // a une app d'avant lui) ; dit une fois par écran, quand le terrain apparaît
+  const oldAppRef = useRef(false);
   const reduceRef = useRef(!!reduceMotion);
   reduceRef.current = !!reduceMotion;
 
@@ -265,7 +271,7 @@ export default function CoupeGame({
   const showHint = useCallback((msg, pos = null) => {
     const id = Date.now() + Math.random();
     setHint({ id, msg, pos });
-    later(timersRef.current, () => setHint((h) => (h?.id === id ? null : h)), 2400);
+    later(timersRef.current, () => setHint((h) => (h?.id === id ? null : h)), HINT_MS);
   }, []);
 
   /** Astuce du règlement v2, une fois par écran de jeu. */
@@ -357,6 +363,10 @@ export default function CoupeGame({
         const msg = firstHintRef.current;
         firstHintRef.current = null;
         if (msg) showHint(msg);
+        if (!oldAppRef.current) return;
+        oldAppRef.current = false;
+        if (msg) later(timers, () => tip('old-app', TIPS.oldApp), HINT_MS + 200);
+        else tip('old-app', TIPS.oldApp);
       },
     });
     directorRef.current = director;
@@ -496,6 +506,8 @@ export default function CoupeGame({
           setSheet(null);
           setMatchRules(data);
           clearBanners();
+          // Ni feu ni événement en ligne : sans ce mot, ça ressemblait à une panne (3 nov. 2026)
+          oldAppRef.current = online && data?.rules !== 2 && queryClient.getQueryData(COUPE_RULES_FLAG_KEY) === true;
           if (!online) {
             setOff({ status: 'match', result: null, paused: false });
             L.timeLeft = null;
@@ -989,11 +1001,13 @@ export default function CoupeGame({
     if (!canControl()) return;
     e.preventDefault();
     const w = rendererRef.current?.toWorld(e.clientX, e.clientY) || null;
-    const side = isLocal && w && w.y < H / 2 ? 1 : 0;
     const P = pointersRef.current;
+    const frame = matchRef.current?.getFrame();
+    // À deux : la moitié de l'écran (limite au point de penalty pendant un penalty, finger.js)
+    const side = isLocal && w ? fingerSide(w, frame, P.active) : 0;
     P.map.delete(e.pointerId);
     P.map.set(e.pointerId, side);
-    P.offsets.set(e.pointerId, fingerOffset(w, matchRef.current?.getFrame()?.paddles?.[side], e.pointerType, side));
+    P.offsets.set(e.pointerId, fingerOffset(w, frame?.paddles?.[side], e.pointerType, side));
     P.active[side] = e.pointerId;
     try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* capture impossible : on suit quand même */ }
     hold(side, true);

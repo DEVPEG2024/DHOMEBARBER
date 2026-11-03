@@ -12,7 +12,7 @@ import { CODE_MATCH, LIEN_MATCH, LIEN_DEFI, LIEN_INVITE, CLE_KEVIN, CLE_LISTE_LU
 import { attendreSansDebordement, toast } from './support/outils.js';
 import { LocalMatch } from '../src/lib/coupe/localMatch.js';
 import { MS, MG, viewOf, screenToWorld } from '../src/lib/coupe/renderer.js';
-import { fingerOffset, GRAB_RADIUS } from '../src/lib/coupe/finger.js';
+import { fingerOffset, fingerSide, GRAB_RADIUS } from '../src/lib/coupe/finger.js';
 
 const titre = (page) => page.getByRole('heading', { name: 'La Coupe du Gang' });
 /** Titre de l'accueil de la Coupe (/coupe). */
@@ -1037,6 +1037,32 @@ test.describe('La Coupe du Gang : le doigt et son joueur', () => {
     // Souris : le pointeur lui-même
     expect(fingerOffset({ x: 180, y: 600 }, bas, 'mouse', 0)).toEqual({ dx: 0, dy: 0 });
   });
+
+  test('à deux : un doigt va au joueur de sa moitié ; au penalty, la limite passe au point de penalty', () => {
+    // Jeu normal : la ligne du milieu (y = 320)
+    const jeuNormal = { paddles: [{ x: 180, y: 540 }, { x: 180, y: 100 }], mode: null };
+    expect(fingerSide({ x: 180, y: 330 }, jeuNormal)).toBe(0);
+    expect(fingerSide({ x: 180, y: 310 }, jeuNormal)).toBe(1);
+    // Penalty du joueur du haut : son tireur (180, 400) derrière le ballon (180, 480), dans la moitié
+    // du bas ; le gardien sur sa ligne
+    const penHaut = { paddles: [{ x: 180, y: 613 }, { x: 180, y: 400 }], mode: { k: 'pen', s: 1, left: 3 } };
+    expect(fingerSide({ x: 180, y: 400 }, penHaut)).toBe(1);
+    expect(fingerSide({ x: 40, y: 470 }, penHaut)).toBe(1);
+    expect(fingerSide({ x: 180, y: 500 }, penHaut)).toBe(0);
+    expect(fingerSide({ x: 300, y: 620 }, penHaut)).toBe(0);
+    // Penalty du joueur du bas : l'inverse
+    const penBas = { paddles: [{ x: 180, y: 240 }, { x: 180, y: 27 }], mode: { k: 'pen', s: 0, left: 3 } };
+    expect(fingerSide({ x: 180, y: 240 }, penBas)).toBe(0);
+    expect(fingerSide({ x: 180, y: 140 }, penBas)).toBe(1);
+    // But en or : un joueur passé chez l'autre est pris par un doigt posé sur lui, si aucun doigt ne le
+    // tient déjà ; plus loin, la moitié
+    const or = { paddles: [{ x: 100, y: 200 }, { x: 250, y: 120 }], mode: { k: 'gold', left: 120 } };
+    expect(fingerSide({ x: 110, y: 210 }, or, [null, null])).toBe(0);
+    expect(fingerSide({ x: 110, y: 210 }, or, [5, null])).toBe(1);
+    expect(fingerSide({ x: 100 + GRAB_RADIUS + 1, y: 200 }, or, [null, null])).toBe(1);
+    // Rien encore à l'écran : la moitié
+    expect(fingerSide({ x: 180, y: 400 }, null)).toBe(0);
+  });
 });
 
 test.describe('La Coupe du Gang : sans réseau', () => {
@@ -1102,6 +1128,35 @@ test.describe('La Coupe du Gang : sans réseau', () => {
     await expect(page.getByText('Score : Joueur du bas 0 – 1 Joueur du haut')).toBeAttached();
     await doigt('pointerup', 2, ecran(180, 300));
     await doigt('pointerup', 1, ecran(30, 600 + 34));
+  });
+
+  test('à deux, penalty du joueur du haut : le doigt posé sur son tireur, dans la moitié du bas, le fait tirer et marquer', async ({ page, api, connecter }) => {
+    // Hasard figé au-dessus de 0,5 : premier ballon au joueur du haut, premier événement à 35 s
+    await page.addInitScript(() => { Math.random = () => 0.75; });
+    await connecter(ADMIN);
+    await page.goto('/coupe-test');
+    await page.getByRole('button', { name: /^À deux sur ce téléphone/ }).click();
+    await expect(page.getByText('Chacun pose le doigt sur son joueur')).toBeVisible();
+    expect(api.coupe.connexions).toEqual([]);
+
+    const cadre = await cadreDuTerrain(page);
+    const vue = viewOf(cadre.width, cadre.height);
+    const ecran = (x, y) => ({ clientX: cadre.left + vue.ox + (x + MS) * vue.s, clientY: cadre.top + vue.oy + (y + MG) * vue.s });
+    const doigt = (type, pointerId, p) => terrain(page).dispatchEvent(type, {
+      pointerId, pointerType: 'touch', isPrimary: pointerId === 1, bubbles: true, cancelable: true, ...p,
+    });
+    // Le joueur du bas reste dans sa grande surface (son joueur en (130, 566)) : au bout de 3 s de
+    // jeu, faute, penalty pour le joueur du haut ; son doigt reste posé, son gardien garde x = 130
+    await doigt('pointerdown', 1, ecran(130, 600));
+    await expect(jeu(page)).toHaveAttribute('data-phase', 'pen', { timeout: 12000 });
+    // Le joueur du haut pose le doigt sur son tireur, placé en (180, 400) derrière le ballon (180,
+    // 480) : avant le 3 nov. 2026, ce doigt prenait le gardien et le penalty partait à la poubelle
+    await doigt('pointerdown', 2, ecran(180, 400));
+    await expect(jeu(page)).toHaveAttribute('data-phase', 'live', { timeout: 4000 });
+    await doigt('pointermove', 2, ecran(180, 560));
+    await expect(page.getByText('Score : Joueur du bas 0 – 1 Joueur du haut')).toBeAttached();
+    await doigt('pointerup', 2, ecran(180, 560));
+    await doigt('pointerup', 1, ecran(130, 600));
   });
 
   test('téléphone en paysage : « Tourne ton téléphone », puis pause et reprise', async ({ page, api, connecter }) => {

@@ -211,9 +211,30 @@ test.describe('La Coupe du Gang : règlement v2 en ligne', () => {
     await expect(bande(page)).toHaveCount(0);
     await expect(page.locator('.cdg-banner-zone')).toHaveCount(0);
     await expect(page.getByText('Prochain événement')).toHaveCount(0);
+    // Le serveur annonce le règlement v2 : la règle d'aujourd'hui vient de l'app de l'adversaire, on
+    // le dit (sinon ni feu ni événement ressemble à une panne), après l'astuce du premier match
+    await expect(page.getByRole('status').filter({ hasText: 'Ton adversaire n’a pas encore la mise à jour : anciennes règles, premier à 3 buts' }))
+      .toBeVisible({ timeout: 6000 });
     // Le ballon gardé 5 s garde son astuce d'aujourd'hui
     api.coupe.etat(cnx, { ph: 'ready' });
     await expect(page.getByRole('status').filter({ hasText: 'Ballon gardé 5 s : il change de camp' })).toBeVisible();
+  });
+
+  test('règlement v2 coupé au serveur (COUPE_RULES_V2=off) : règle d\'aujourd\'hui sans parler de l\'app de l\'adversaire', async ({ page, api, connecter }) => {
+    api.donnees.parametresPublics.features.coupeRulesV2 = false;
+    const cnx = await matchEnLigne(page, api, connecter, { regles: null });
+    api.coupe.etat(cnx, { ph: 'live', sc: [1, 0] });
+    await expect(page.getByRole('status').filter({ hasText: 'Pose ton doigt sur ton joueur' })).toBeVisible();
+    await page.waitForTimeout(3500);
+    await expect(page.getByText(/pas encore la mise à jour/)).toHaveCount(0);
+  });
+
+  test('match en règlement v2 : aucun mot sur l\'app de l\'adversaire', async ({ page, api, connecter }) => {
+    const cnx = await matchEnLigne(page, api, connecter);
+    api.coupe.etat(cnx, { ph: 'live', sc: [1, 0] });
+    await expect(bande(page)).toBeVisible();
+    await page.waitForTimeout(3500);
+    await expect(page.getByText(/pas encore la mise à jour/)).toHaveCount(0);
   });
 
   test('joueur du haut (side 1) : ses avertissements sont les siens, ceux de Kevin à droite', async ({ page, api, connecter }) => {
