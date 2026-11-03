@@ -15,8 +15,9 @@
  *   penalty. Le salon apprend le penalty (gardien qui suit le ballon sur sa ligne, tireur qui
  *   attend puis frappe fort, direct ou par la bande), le but en or (il monte chercher le ballon),
  *   ne campe jamais (il sort de sa grande surface à mi-chemin de la faute) et ne bloque pas le
- *   ballon. À deux, les mêmes règles pour les deux joueurs. Cages qui bougent : personne sur sa
- *   ligne de but (modeAt du moteur).
+ *   ballon. À deux, les mêmes règles pour les deux joueurs. Petite surface permise (3 nov. 2026 :
+ *   camper reste une faute), sauf au but en or ; cages qui bougent : personne sur sa ligne de but
+ *   (modeAt du moteur). Choc au point d'entrée (`collidePaddle`, `entry`), comme l'arbitre.
  *
  * Indépendant de React et du DOM : l'écran lui donne les cibles des joueurs et le dessine.
  *
@@ -129,7 +130,7 @@ function shotAngles(s) {
     let ok = false;
     for (let k = 0; k * STEP < PEN_END_S; k++) {
       stepBall(b, STEP);
-      if (collidePaddle(b, keeper, 1 - s) > 0) break;
+      if (collidePaddle(b, keeper, 1 - s, true) > 0) break;
       const g = goalScorer(b);
       if (g >= 0) { ok = g === s; break; }
     }
@@ -437,7 +438,7 @@ export class LocalMatch {
   _collide(i) {
     const b = this.ball;
     const p = this.pads[i];
-    const v = collidePaddle(b, p, i);
+    const v = collidePaddle(b, p, i, this.v2);
     if (!(v > 0)) return;
     if (this.v2 && this.phase === 'live') this._touched(i, v);
     if (this.cooldown[i] > 0) return;

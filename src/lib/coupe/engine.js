@@ -16,7 +16,7 @@ export const GW = 124; // largeur de la cage
 export const GL = (W - GW) / 2;
 export const GR = GL + GW;
 export const GD = 28; // profondeur du filet
-export const SBW = 150; // petite surface (interdite à son propre joueur)
+export const SBW = 150; // petite surface (interdite à son propre joueur ; permise en règlement v2, sauf au but en or)
 export const SBD = 52;
 export const BBW = 228; // grande surface (dessin seulement)
 export const BBD = 100;
@@ -134,12 +134,18 @@ function outOfBox(p, b, inward) {
 }
 
 // Garde le joueur dans sa moitié, hors de sa petite surface. Rend true si la surface l'a repoussé.
-// `mode` (règlement v2) : { k: 'pen', s: tireur } pendant un penalty (le gardien sur sa ligne, le
-// tireur derrière le point de penalty, ligne du milieu franchie), { k: 'gold' } pendant le but en
-// or (tout le terrain, sauf les deux petites surfaces), { k: 'line' } pendant les cages qui bougent
-// (modeAt) ; absent : la règle d'aujourd'hui.
+// `mode` (règlement v2, modeAt) : { k: 'open' } en jeu normal (sa moitié, petite surface permise :
+// demande du 3 nov. 2026, camper reste une faute), { k: 'pen', s: tireur } pendant un penalty (le
+// gardien sur sa ligne, le tireur derrière le point de penalty, ligne du milieu franchie),
+// { k: 'gold' } pendant le but en or (tout le terrain, sauf les deux petites surfaces : sans faute,
+// rien n'empêcherait de garer son joueur dans sa cage), { k: 'line' } pendant les cages qui bougent ;
+// absent : la règle d'aujourd'hui.
 export function constrainPaddle(p, side, mode) {
   p.x = clamp(p.x, PR, W - PR);
+  if (mode && mode.k === 'open') {
+    p.y = side === 0 ? clamp(p.y, H / 2 + PR, H - PR) : clamp(p.y, PR, H / 2 - PR);
+    return false;
+  }
   if (mode && mode.k === 'gold') {
     p.y = clamp(p.y, PR, H - PR);
     const own = outOfBox(p, boxOf(side), side === 0 ? -1 : 1);
@@ -276,8 +282,12 @@ export function stepBall(b, dt, onEvent, fld, t) {
 }
 
 // Choc ballon / joueur. Rend la vitesse d'impact (> 0) s'il y a eu frappe, sinon 0.
-// Ballon en l'air (court-circuit, règlement v2) : intouchable.
-export function collidePaddle(b, p, side) {
+// Ballon en l'air (court-circuit, règlement v2) : intouchable. `entry` (règlement v2) : le choc se
+// calcule au point où le ballon est entré dans le joueur pendant le dernier pas (mouvements en
+// ligne droite), pas là où il se trouve à la fin du pas : un joueur rapide s'enfonce de jusqu'à
+// 12 unités dans le ballon en un pas, et ce point trop loin renvoyait le ballon de travers, parfois
+// vers sa propre cage (banc d'essai du 3 nov. 2026).
+export function collidePaddle(b, p, side, entry) {
   if (b.air > 0) return 0;
   const m = BR + PR;
   let dx = b.x - p.x;
@@ -285,6 +295,21 @@ export function collidePaddle(b, p, side) {
   const d2 = dx * dx + dy * dy;
   if (d2 >= m * m) return 0;
   let d = Math.sqrt(d2);
+  if (entry) {
+    // Position relative au début du pas ; dehors : on remonte jusqu'à l'entrée (|r + v τ| = m, τ < 0)
+    const rvx = b.vx - p.vx;
+    const rvy = b.vy - p.vy;
+    const ox = dx - rvx * STEP;
+    const oy = dy - rvy * STEP;
+    if (ox * ox + oy * oy > m * m) {
+      const a = rvx * rvx + rvy * rvy;
+      const k = dx * rvx + dy * rvy;
+      const tau = (-k - Math.sqrt(k * k - a * (d2 - m * m))) / a;
+      dx += rvx * tau;
+      dy += rvy * tau;
+      d = Math.sqrt(dx * dx + dy * dy);
+    }
+  }
   if (d < 1e-4) { dx = 0; dy = side === 0 ? -1 : 1; d = 1; }
   const nx = dx / d;
   const ny = dy / d;
@@ -445,10 +470,12 @@ function slide(keys, tau) {
   return keys[keys.length - 1][1];
 }
 
-// Mode des joueurs à l'heure t : celui du match (penalty, but en or), sinon LINE_MODE pendant des
-// cages qui bougent, sinon null. À passer à movePaddle, unpin et constrainPaddle partout.
+// Mode des joueurs à l'heure t, en règlement v2 : celui du match (penalty, but en or), sinon
+// LINE_MODE pendant des cages qui bougent, sinon OPEN_MODE (petite surface permise). À passer à
+// movePaddle, unpin et constrainPaddle partout.
 export const LINE_MODE = { k: 'line' };
-export const modeAt = (mode, fld, t) => mode || (fld && fld.length && goalOffsets(fld, t) ? LINE_MODE : null);
+export const OPEN_MODE = { k: 'open' };
+export const modeAt = (mode, fld, t) => mode || (fld && fld.length && goalOffsets(fld, t) ? LINE_MODE : OPEN_MODE);
 
 // [décalage de la cage du bas, de la cage du haut] à l'heure t (ms), ou null : cages au milieu
 export function goalOffsets(fld, t) {

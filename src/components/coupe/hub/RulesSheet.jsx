@@ -22,6 +22,7 @@ const SECTIONS = [
     lead: 'Premier à 5 buts',
     items: [
       '5 minutes de jeu au plus.',
+      'Tu peux défendre jusque sur ta ligne de but : plus de zone interdite devant ta cage.',
       'Égalité au bout des 5 minutes : but en or.',
       'Dans tous les matchs : en ligne, contre le salon, à deux.',
     ],
@@ -73,7 +74,7 @@ const SECTIONS = [
     items: [
       'Le prochain but gagne, quelle que soit sa valeur.',
       'Plus aucune règle : ni faute, ni penalty, ni événement.',
-      'La ligne du milieu disparaît : tu peux monter chez l’adversaire (pas dans sa petite surface).',
+      'La ligne du milieu disparaît : tu peux monter chez l’adversaire. Les deux petites surfaces sont interdites.',
       '2 minutes sans but : match nul.',
     ],
   },

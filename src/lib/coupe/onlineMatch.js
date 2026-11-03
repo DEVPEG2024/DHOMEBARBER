@@ -57,8 +57,9 @@
  *  - état : `b` à 7 valeurs (`fx`, `own`, `air` ; `own` tourné pour le joueur 1), `md` (penalty,
  *    but en or), `w`, `cp`, `pk` (échangés pour le joueur 1), `ne` ; phase `pen` : son joueur est posé
  *    sur `penaltyPlace(0, tireur local)` à son début, comme à l'engagement ; le mode du moteur
- *    (`movePaddle`, `unpin`) est `modeAt(md, fld, t)` (ligne de but interdite pendant des cages
- *    qui bougent) ; chrono de camping de son joueur tenu par le téléphone (`foulClock`, remis à 0
+ *    (`movePaddle`, `unpin`) est `modeAt(md, fld, t)` (petite surface permise en jeu normal, ligne
+ *    de but interdite pendant des cages qui bougent) ; choc au point d'entrée (`collidePaddle`,
+ *    `entry`, comme l'arbitre) ; chrono de camping de son joueur tenu par le téléphone (`foulClock`, remis à 0
  *    par sa frappe) ; au but en or, plus de compte à rebours des 5 minutes (`timeLeft` null) ;
  *  - affichage : la frontière entre « sa » zone (ballon prédit au présent) et celle de
  *    l'adversaire (ballon au même instant que lui) suit le mode. Jeu normal : la ligne médiane.
@@ -1042,7 +1043,7 @@ export class OnlineMatch {
     if (ph !== 'live') return; // but : le ballon finit sa course au fond des filets, au ralenti
     // Joueur tel qu'il est au moment du choc (avant d'être reculé par `unpin`)
     const pad = { x: me.x, y: me.y, vx: me.vx, vy: me.vy };
-    const v = collidePaddle(b, me, 0); // son propre joueur seulement
+    const v = collidePaddle(b, me, 0, v2); // son propre joueur seulement ; v2 : choc au point d'entrée
     // Règlement v2 : feu allumé par une frappe très forte, feu ou charge de l'adversaire éteints
     const touched = v > 0 && v2 ? touchBall(b, 0, v) : null;
     walls(b, null, gx); // ballon poussé contre un bord : remis dans le terrain

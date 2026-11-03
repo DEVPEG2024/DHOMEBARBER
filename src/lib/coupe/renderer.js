@@ -296,6 +296,9 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
   let fieldNets = true;
   let fieldMid = true;
   let fieldSpots = true; // points de penalty peints (retirés pendant un penalty : le jeu pose le sien)
+  // Petites surfaces hachurées (on n'y entre pas) : règle d'aujourd'hui et but en or ; permises en
+  // règlement v2 (3 nov. 2026)
+  let fieldBoxes = true;
   let stadiumImg = null; // chargement de l'image du stade pour les raccords (une fois)
   const layer = document.createElement('canvas');
   const lctx = layer.getContext('2d');
@@ -416,7 +419,7 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
     c.fillStyle = light;
     c.fillRect(0, 0, W, H);
     // Petites surfaces hachurées : on n'y entre pas
-    [0, 1].forEach((i) => {
+    if (fieldBoxes) [0, 1].forEach((i) => {
       const b = boxOf(i);
       c.save();
       c.beginPath();
@@ -737,10 +740,12 @@ export function createRenderer(canvas, { reducedMotion = false } = {}) {
     fx.step(frame, dt);
     if (!stadium) {
       const f = fx.fieldFlags();
-      if (f.nets !== fieldNets || f.midline !== fieldMid || f.spots !== fieldSpots) {
+      const boxes = frame.rules !== 2 || !!(frame.mode && frame.mode.k === 'gold');
+      if (f.nets !== fieldNets || f.midline !== fieldMid || f.spots !== fieldSpots || boxes !== fieldBoxes) {
         fieldNets = f.nets;
         fieldMid = f.midline;
         fieldSpots = f.spots;
+        fieldBoxes = boxes;
         buildPitch();
       }
     }

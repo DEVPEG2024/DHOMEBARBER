@@ -173,16 +173,19 @@ export default function CoupeTest() {
           {last && <p className="cdg-small" role="status">{lastLine(last)}</p>}
           <ul className="cdg-rules">
             <li>Ton joueur reste dans ta moitié de terrain.</li>
-            <li>Interdit d&apos;entrer dans ta petite surface.</li>
             {rulesV2 ? (
               <>
+                <li>Tu peux défendre jusque sur ta ligne de but (sauf au but en or).</li>
                 <li>Ballon gardé 5 s : avertissement, il change de camp ; au 3e, penalty.</li>
                 <li>Plus de 3 s dans ta grande surface, ou ballon bloqué contre ton mur : penalty.</li>
                 <li>Reprise de volée très forte : balle en feu. Foudre de l&apos;orage : balle électrique, but à 2.</li>
                 <li>Un événement au hasard toutes les 20 à 40 s ; égalité à 5 min : but en or.</li>
               </>
             ) : (
-              <li>Ballon gardé 5 s dans une moitié : il change de camp.</li>
+              <>
+                <li>Interdit d&apos;entrer dans ta petite surface.</li>
+                <li>Ballon gardé 5 s dans une moitié : il change de camp.</li>
+              </>
             )}
           </ul>
         </Panel>

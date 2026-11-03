@@ -29,11 +29,15 @@ Point de départ mesuré le 31 oct. 2026 : 10 matchs en ligne depuis le 29 oct.,
   - fumigène : lancé d'une tribune au hasard, il roule, la fumée part dans le sens d'un vent tiré au hasard et cache le ballon.
   Le hasard peut avantager un camp sur un événement ; il s'équilibre sur un match (plusieurs événements) et ne touche jamais un joueur ni une cage.
 - Balle en feu ou électrique : le reste jusqu'au but, jusqu'à une touche de l'adversaire, ou jusqu'à l'eau.
-- Camper = plus de 3 s dans sa **grande surface** (la petite reste interdite, comme aujourd'hui) ; bloquer = ballon coincé plus de 1,5 s contre son propre mur par son joueur.
+- Camper = plus de 3 s dans sa **grande surface** (la petite restait interdite, comme aujourd'hui ; **permise depuis le 3 nov. 2026**, voir plus bas) ; bloquer = ballon coincé plus de 1,5 s contre son propre mur par son joueur.
 - Ballon gardé 5 s : l'avertissement s'ajoute à la règle d'aujourd'hui (le ballon change de camp, `KEEP_LIMIT`, `_keepAway` de `localMatch.js`).
 - Penalty : ballon au point de penalty devant le but fautif, **3 s pour tirer**, gardien seulement sur sa ligne ; pas tiré à temps ou arrêté = engagement du gardien.
 - But en or : la petite surface reste interdite ; balle en feu gardée (le premier but gagne, quelle que soit sa valeur).
 - Écran de match : 5 pastilles de buts par joueur, 3 pastilles d'avertissement, jauge « prochain événement », bandeau d'annonce (« ORAGE »).
+
+## Décision du 3 nov. 2026 : plus de zone interdite devant les cages
+
+« Il faut également retirer la zone interdite devant les cages » : en règlement v2, chacun peut défendre jusque sur sa ligne de but (mode `OPEN_MODE` du moteur) ; camper plus de 3 s dans sa grande surface reste une faute. Gardées, avec leur raison : les deux petites surfaces au but en or (aucune faute, sinon on garerait son joueur dans sa cage 2 minutes) et la ligne de but pendant les cages qui bougent (8 s, sinon on suivrait sa cage pour la boucher). Les apps publiées (règle d'aujourd'hui) gardent la petite surface interdite jusqu'au build 20. Avec le correctif des buts contre son camp : `coupe-du-gang.md`, « Buts contre son camp et petite surface ».
 
 ## La planche en simulation
 

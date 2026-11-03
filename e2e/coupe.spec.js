@@ -974,9 +974,12 @@ const IMAGE_S = 16 / 1000;
  */
 function simulerFrappe(depart, cible, attente, alea) {
   let marqueur = -1;
+  // Même règlement que la page (`features.coupeRulesV2` vrai par défaut dans le faux serveur) : le
+  // choc au point d'entrée du règlement v2 (3 nov. 2026) change la frappe gagnante
   const m = new LocalMatch({
     mode: 'bot',
     level: 'apprenti',
+    rules: 2,
     rnd: () => alea,
     onEvent: (type, d) => { if (type === 'goal' && marqueur < 0) marqueur = d.scorer; },
   });
