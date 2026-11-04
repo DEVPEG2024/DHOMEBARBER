@@ -8,6 +8,7 @@ import { Wallet } from 'lucide-react';
 import { euro } from '@/lib/euro';
 import { round2 } from '@/lib/revenue';
 import { Section, Money, Note } from '@/components/admin/dashboard/ui';
+import { TipsByBarber } from '@/components/admin/dashboard/KeyFigures';
 
 /** « 180 € · pourboires 10 € » : seulement les parts non nulles. */
 function parts(list) {
@@ -25,7 +26,7 @@ export default function MoneyTable({ d }) {
 /**
  * Caisse du soir : CB attendue (à comparer au ticket du terminal) et espèces attendues, encaissées
  * aujourd'hui (RDV, pourboires, cartes cadeau vendues) ; boutique et textile à part (moyen de
- * paiement non noté) ; pourboires CB à reverser à chaque barber (jour d'encaissement).
+ * paiement non noté) ; pourboires de chaque barber en CB et en espèces (jour d'encaissement).
  */
 function CashBox({ d }) {
   const { stats, sales, state, features } = d;
@@ -52,7 +53,7 @@ function CashBox({ d }) {
   const shopLoading = !shopFailed && (!!state.sales.loading?.boutique || !!state.sales.loading?.textile);
   const shop = round2(ct.boutique + ct.textile);
 
-  const tipsToGive = ready ? stats.barbers.cash.filter((b) => b.money.tipsCB > 0) : [];
+  const anyTip = ready && stats.barbers.cash.some((b) => b.money.tips > 0);
   const nothing = ready && cbExpected === 0 && cashExpected === 0 && other === 0 && !shopFailed && !shopLoading && shop === 0;
 
   return (
@@ -117,20 +118,9 @@ function CashBox({ d }) {
         </Note>
       )}
 
-      {tipsToGive.length > 0 && (
+      {anyTip && (
         <div className="mt-3 border-t border-border/70 pt-2">
-          <h4 className="text-xs font-semibold text-foreground">Pourboires CB à reverser</h4>
-          <ul className="mt-1 flex flex-col">
-            {tipsToGive.map((b) => (
-              <li key={b.id} className="flex items-baseline justify-between gap-3 py-1 min-w-0">
-                <span className="flex items-center gap-2 min-w-0 text-xs text-foreground">
-                  <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: b.color }} aria-hidden="true" />
-                  <span className="min-w-0 break-words">{b.name}</span>
-                </span>
-                <span className="text-sm font-semibold tabular-nums shrink-0">{euro(b.money.tipsCB)}</span>
-              </li>
-            ))}
-          </ul>
+          <TipsByBarber title="Pourboires par barber" hint="CB à reverser ce soir" barbers={stats.barbers.cash} state={{ failed: false, loading: false }} />
         </div>
       )}
     </div>

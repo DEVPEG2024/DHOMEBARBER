@@ -3,8 +3,9 @@
  * « plus de chiffres en haut, tous les chiffres générés, par mois global et au jour »).
  *
  * Deux grands chiffres (CA global du jour et du mois, avec leur comparaison), puis tous les chiffres
- * en colonnes « Aujourd'hui | Ce mois » : ventes par canal, encaissements des rendez-vous, pourboires,
- * rendez-vous (nombre, panier moyen, à clôturer, à venir, absents, annulations). Chaque chiffre n'est
+ * en colonnes « Aujourd'hui | Ce mois » : ventes par canal, encaissements des rendez-vous, pourboires
+ * (total, puis chaque barber en CB et en espèces, demande du 4 nov. 2026), rendez-vous (nombre, panier
+ * moyen, à clôturer, à venir, absents, annulations). Chaque chiffre n'est
  * affiché qu'ici : les blocs du dessous ne les répètent pas.
  * Rendez-vous en échec : « — » (le bandeau d'erreur est en haut de la page) ; un canal de vente en
  * échec : « — » sur sa ligne, total partiel marqué « incomplet ». Tout vient de `d` (useDashboardData).
@@ -94,6 +95,25 @@ export function FigureTable({ title, hint, rows, columns = TODAY_AND_MONTH }) {
       </table>
     </div>
   );
+}
+
+const TIP_COLUMNS = [{ key: 'cb', label: 'CB' }, { key: 'especes', label: 'Espèces' }, { key: 'total', label: 'Total' }];
+
+/**
+ * Pourboires de chaque barber en CB et en espèces (`money` de `stats.barbers`, aucun calcul ici) :
+ * seulement ceux qui en ont sur la période ; une part sans moyen noté est rappelée sous le nom.
+ */
+export function TipsByBarber({ title, hint, barbers, state }) {
+  const rows = barbers.filter((b) => b.money.tips > 0).map((b) => ({
+    key: b.id || 'sans-barber',
+    label: b.name,
+    hint: b.money.tipsOther > 0 ? `dont ${euro(b.money.tipsOther)} sans moyen noté` : '',
+    cb: { value: b.money.tipsCB },
+    especes: { value: b.money.tipsCash },
+    total: { value: b.money.tips },
+    state,
+  }));
+  return <FigureTable title={title} hint={hint} rows={rows} columns={TIP_COLUMNS} />;
 }
 
 /** Grand chiffre (CA global du jour ou du mois) avec sa comparaison. */
@@ -229,6 +249,8 @@ export default function KeyFigures({ d }) {
         <div className="flex flex-col gap-5 min-w-0">
           <FigureTable title="Encaissements des rendez-vous" hint="au jour du rendez-vous, hors carte cadeau" rows={paymentRows} />
           <FigureTable title="Pourboires" rows={tipRows} />
+          <TipsByBarber title="Pourboires par barber · aujourd'hui" barbers={stats.barbers.today} state={apptState} />
+          <TipsByBarber title="Pourboires par barber · ce mois" barbers={stats.barbers.month} state={apptState} />
           <p className="text-[11px] text-muted-foreground">
             Achats payés par carte cadeau hors rendez-vous ({access.canEvents ? 'boutique, textile, privatisations' : 'boutique, textile'}) : pas déduits.
           </p>

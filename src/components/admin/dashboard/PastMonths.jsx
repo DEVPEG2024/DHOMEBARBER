@@ -18,7 +18,7 @@ import { euro, percentChange, formatPercentChange } from '@/lib/euro';
 import { noonOf } from '@/lib/dashboardStats';
 import { CHANNEL_LIMITS } from '@/lib/salesChannels';
 import { usePastMonths } from '@/lib/useDashboardData';
-import { FigureTable, CHANNEL_LABELS } from '@/components/admin/dashboard/KeyFigures';
+import { FigureTable, TipsByBarber, CHANNEL_LABELS } from '@/components/admin/dashboard/KeyFigures';
 import { Section, Money, Pill, InlineError, Note } from '@/components/admin/dashboard/ui';
 
 const monthTitle = (key) => format(noonOf(`${key}-01`), 'LLLL yyyy', { locale: fr });
@@ -78,10 +78,7 @@ function MonthDetail({ entry, id, salesState, scope, incomplete }) {
     .map((b) => ({
       ...line(b.id || b.name, b.name, b.money.revenue),
       month: { value: b.money.revenue, count: b.money.count },
-      hint: [
-        b.money.tips > 0 ? `${euro(b.money.tips)} de pourboires` : '',
-        b.noShows > 0 ? plural(b.noShows, 'absence') : '',
-      ].filter(Boolean).join(' · '),
+      hint: b.noShows > 0 ? plural(b.noShows, 'absence') : '',
     }));
   const { team, auto } = stats.lastMinute;
   const lastMinuteRows = [
@@ -99,6 +96,7 @@ function MonthDetail({ entry, id, salesState, scope, incomplete }) {
       <div className="flex flex-col gap-5 min-w-0">
         <FigureTable title="Encaissements des rendez-vous" hint="au jour du rendez-vous, hors carte cadeau" rows={paymentRows} columns={columns} />
         <FigureTable title="Pourboires" rows={tipRows} columns={columns} />
+        <TipsByBarber title="Pourboires par barber" barbers={stats.barbers.month} state={LOADED} />
         <FigureTable title="Last Minute" rows={lastMinuteRows} columns={columns} />
       </div>
     </div>

@@ -81,8 +81,11 @@ const bloc = (page, nom) => page.getByRole('region', { name: nom, exact: true })
  */
 const chiffres = (page) => bloc(page, 'Chiffres');
 const TABLEAUX = {
-  ventes: /^Ventes/, rdv: /^Rendez-vous/, encaissements: /^Encaissements des rendez-vous/, pourboires: /^Pourboires/,
+  ventes: /^Ventes/, rdv: /^Rendez-vous/, encaissements: /^Encaissements des rendez-vous/, pourboires: /^Pourboires$/,
 };
+/** Cellules CB, Espèces et Total d'un barber dans un tableau de pourboires (hors « Chiffres » aussi). */
+const pourboiresDe = (conteneur, tableau, barber) => conteneur.getByRole('table', { name: tableau }).getByRole('row')
+  .filter({ has: conteneur.page().getByRole('rowheader', { name: new RegExp(`^${barber}`) }) }).getByRole('cell');
 /** Cellules « Aujourd'hui » et « Ce mois » d'une ligne d'un tableau de « Chiffres ». */
 function ligneChiffres(page, tableau, libelle) {
   const nom = typeof libelle === 'string' ? { name: libelle, exact: true } : { name: libelle };
@@ -200,7 +203,54 @@ test.describe('Tableau de bord : encaissements', () => {
     await verifierLigne(page, /^Panier moyen/, '29,67 €', '27,25 €', TABLEAUX.rdv);
   });
 
-  test('« Caisse du soir » avec features.paidAt : un RDV d\'hier encaissé ce matin compte ce soir, cartes cadeau vendues en CB ajoutées, pourboires CB par barber', async ({ page, api }) => {
+  test('pourboires par barber : CB et espèces de chacun, aujourd\'hui et ce mois, moyen non noté rappelé, plus dans la carte du barber', async ({ page, api }) => {
+    api.tables.Appointment = [
+      rdv('p1', { debut: '08:00', ...encaisse('cb', { tip: 5, tip_method: 'cb' }) }),
+      rdv('p2', { debut: '08:30', ...encaisse('especes', { tip: 3, tip_method: 'especes' }) }),
+      // Le moyen du pourboire compte, pas celui du RDV
+      rdv('p3', { barber: BARBERS.kevin, debut: '09:00', ...encaisse('cb', { tip: 4, tip_method: 'especes' }) }),
+      rdv('p4', { barber: BARBERS.kevin, date: AUTRE_JOUR_DU_MOIS, debut: '11:00', ...encaisse('cb', { tip: 2, tip_method: 'cb' }) }),
+      rdv('p5', { barber: BARBERS.kevin, date: AUTRE_JOUR_DU_MOIS, debut: '12:00', ...encaisse('cb', { tip: 1 }) }),
+      // Romain : un RDV encaissé, aucun pourboire
+      rdv('p6', { barber: BARBERS.romain, debut: '09:30', ...encaisse('cb') }),
+    ];
+    await page.goto('/admin');
+
+    const tableaux = chiffres(page);
+    const JOUR = /^Pourboires par barber · aujourd/;
+    const MOIS_EN_COURS = /^Pourboires par barber · ce mois/;
+    await expect(pourboiresDe(tableaux, JOUR, 'Dom')).toHaveText(['5 €', '3 €', '8 €']);
+    await expect(pourboiresDe(tableaux, JOUR, 'Kevin')).toHaveText(['0 €', '4 €', '4 €']);
+    await expect(pourboiresDe(tableaux, JOUR, 'Romain')).toHaveCount(0);
+    await expect(pourboiresDe(tableaux, MOIS_EN_COURS, 'Dom')).toHaveText(['5 €', '3 €', '8 €']);
+    await expect(pourboiresDe(tableaux, MOIS_EN_COURS, 'Kevin')).toHaveText(['2 €', '4 €', '7 €']);
+    await expect(tableaux.getByRole('table', { name: MOIS_EN_COURS }).getByRole('rowheader', { name: /^Kevin/ })).toContainText('dont 1 € sans moyen noté');
+    await expect(pourboiresDe(tableaux, MOIS_EN_COURS, 'Romain')).toHaveCount(0);
+    // Les barbers additionnés redonnent le total du salon
+    await verifierLigne(page, 'Total pourboires', '12 €', '15 €', TABLEAUX.pourboires);
+    // Un chiffre une seule fois : plus de ligne « Pourboires » dans la carte du barber
+    await expect(bloc(page, 'Barbers').getByText('Kevin', { exact: true })).toBeVisible();
+    await expect(chiffre(bloc(page, 'Barbers'), 'Pourboires')).toHaveCount(0);
+  });
+
+  test('pourboires par barber : aucun tableau sans pourboire, et 320 px tiennent avec de gros montants', async ({ page, api }) => {
+    api.tables.Appointment = [rdv('p1', { debut: '08:00', ...encaisse('cb') })];
+    await page.goto('/admin');
+    await expect(ligneChiffres(page, TABLEAUX.pourboires, 'Total pourboires').aujourdhui).toHaveText('0 €');
+    await expect(chiffres(page).getByRole('table', { name: /^Pourboires par barber/ })).toHaveCount(0);
+    await expect(caisseDuSoir(page).getByRole('table')).toHaveCount(0);
+
+    api.tables.Appointment = [
+      rdv('p2', { debut: '08:00', ...encaisse('cb', { tip: 12345.5, tip_method: 'cb' }) }),
+      rdv('p3', { debut: '08:30', ...encaisse('cb', { tip: 23456.75, tip_method: 'especes' }) }),
+    ];
+    await page.setViewportSize({ width: 320, height: 900 });
+    await page.goto('/admin');
+    await expect(pourboiresDe(chiffres(page), /· aujourd/, 'Dom')).toHaveText(['12 345,50 €', '23 456,75 €', '35 802,25 €']);
+    await attendreSansDebordement(page, 'pourboires par barber à 320 px');
+  });
+
+  test('« Caisse du soir » avec features.paidAt : un RDV d\'hier encaissé ce matin compte ce soir, cartes cadeau vendues en CB ajoutées, pourboires par barber en CB et en espèces', async ({ page, api }) => {
     api.tables.Appointment = [
       // Hier, encaissé ce matin à 9 h 15 : dans la caisse du soir, pas dans la colonne « Aujourd'hui »
       rdv('y1', { barber: BARBERS.kevin, prestations: [P.coupeBarbe], date: jour(-1), debut: '15:00', ...encaisse('cb', { tip: 4, tip_method: 'cb', paid_at: iso(AUJ, '09:15') }) }),
@@ -225,11 +275,11 @@ test.describe('Tableau de bord : encaissements', () => {
     await expect(montantCaisse(page, 'Espèces attendues')).toHaveText('46 €');
     await expect(caisse).toContainText('RDV 15 € · pourboires 1 € · cartes cadeau vendues 30 €');
     await expect(caisse).toContainText('dont 35 € de rendez-vous des jours précédents encaissés aujourd\'hui');
-    // Pourboires CB à reverser ce soir : Kevin 4 (RDV d'hier encaissé ce matin), Dom 2
-    const reverser = caisse.getByRole('list');
-    await expect(reverser.getByRole('listitem')).toHaveCount(2);
-    await expect(reverser.getByRole('listitem').filter({ hasText: 'Kevin' })).toHaveText(/^Kevin\s*4\s€$/);
-    await expect(reverser.getByRole('listitem').filter({ hasText: 'Dom' })).toHaveText(/^Dom\s*2\s€$/);
+    // Pourboires encaissés aujourd'hui : Kevin CB 4 (RDV d'hier encaissé ce matin), Dom CB 2, Romain espèces 1
+    await expect(caisse.getByRole('table', { name: /^Pourboires par barber/ })).toContainText('CB à reverser ce soir');
+    await expect(pourboiresDe(caisse, /^Pourboires par barber/, 'Kevin')).toHaveText(['4 €', '0 €', '4 €']);
+    await expect(pourboiresDe(caisse, /^Pourboires par barber/, 'Dom')).toHaveText(['2 €', '0 €', '2 €']);
+    await expect(pourboiresDe(caisse, /^Pourboires par barber/, 'Romain')).toHaveText(['0 €', '1 €', '1 €']);
     // Tableau, au jour du RDV : le RDV d'hier n'est pas dans « Aujourd'hui » ; ce mois, CB 25 + 35
     // (hier) + 25 (avant-hier), chacun seulement s'il tombe dans le mois en cours
     await verifierLigne(page, 'CB', '25 €', euros(25 + (memeMois(jour(-1)) ? 35 : 0) + (memeMois(jour(-2)) ? 25 : 0)));
@@ -252,9 +302,9 @@ test.describe('Tableau de bord : encaissements', () => {
     // CB attendue : RDV 25 + pourboire 2 + carte vendue en CB 50 = 77 (le RDV d'hier compte hier)
     await expect(montantCaisse(page, 'CB attendue')).toHaveText('77 €');
     await expect(montantCaisse(page, 'Espèces attendues')).toHaveText('16 €');
-    const reverser = caisse.getByRole('list');
-    await expect(reverser.getByRole('listitem')).toHaveCount(1);
-    await expect(reverser.getByRole('listitem')).toHaveText(/^Dom\s*2\s€$/);
+    await expect(pourboiresDe(caisse, /^Pourboires par barber/, 'Dom')).toHaveText(['2 €', '0 €', '2 €']);
+    await expect(pourboiresDe(caisse, /^Pourboires par barber/, 'Romain')).toHaveText(['0 €', '1 €', '1 €']);
+    await expect(pourboiresDe(caisse, /^Pourboires par barber/, 'Kevin')).toHaveCount(0);
     await expect(caisse).not.toContainText('jours précédents');
   });
 

@@ -100,7 +100,10 @@ test.describe('Tableau de bord : mois passés', () => {
     await expect(cellule(page, /^Encaissements/, /^CB$/)).toHaveText('25 €');
     await expect(cellule(page, /^Encaissements/, /^Espèces$/)).toHaveText('35 €');
     await expect(cellule(page, /^Encaissements/, 'Réglé par carte cadeau')).toHaveText('25 €');
-    await expect(cellule(page, /^Pourboires/, 'Total pourboires')).toHaveText('7 €');
+    await expect(cellule(page, /^Pourboires$/, 'Total pourboires')).toHaveText('7 €');
+    await expect(cellule(page, /^Pourboires par barber/, BARBERS.dom.name)).toHaveText(['5 €', '0 €', '5 €']);
+    await expect(cellule(page, /^Pourboires par barber/, BARBERS.kevin.name)).toHaveText(['0 €', '2 €', '2 €']);
+    await expect(cellule(page, /^Pourboires par barber/, BARBERS.romain.name)).toHaveCount(0);
     await expect(cellule(page, /^Barbers/, BARBERS.kevin.name)).toContainText('35 €');
     await expect(cellule(page, /^Barbers/, BARBERS.dom.name)).toContainText('2 RDV');
 

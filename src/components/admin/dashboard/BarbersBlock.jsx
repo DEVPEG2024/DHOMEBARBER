@@ -3,7 +3,8 @@
  *
  * Une carte par barber, aujourd'hui ou ce mois (`d.stats.barbers`, déjà triés par CA) : CA encaissé
  * hors pourboire et hors part carte cadeau (rappelée à côté), RDV encaissés, panier moyen, produits,
- * pourboires, absences de ses clients, RDV à clôturer, part du CA des rendez-vous de la période.
+ * absences de ses clients, RDV à clôturer, part du CA des rendez-vous de la période. Ses pourboires
+ * sont dans « Chiffres », en CB et en espèces (`TipsByBarber`) : un chiffre une seule fois.
  * Lien « Agenda » seulement pour un barber actif (une fiche désactivée menait à un agenda vide).
  * Liste des barbers illisible : note « Impossible de charger la liste des barbers » + Réessayer
  * (jamais « Aucun barber actif »), les cartes des barbers qui ont des RDV restent affichées.
@@ -25,23 +26,6 @@ function Stat({ label, value, tone = '' }) {
       <dt className="text-xs text-muted-foreground break-words">{label}</dt>
       <dd className={`text-sm font-semibold tabular-nums ${tone ? TONE[tone] : 'text-foreground'}`}>{value}</dd>
     </div>
-  );
-}
-
-/** Pourboires par moyen, une ligne chacun (« moyen non noté » seulement s'il y en a). */
-function Tips({ m }) {
-  const line = (label, amount) => (
-    <span className="block">
-      <span className="text-xs font-normal text-muted-foreground">{label} </span>
-      {euro(amount)}
-    </span>
-  );
-  return (
-    <>
-      {line('CB', m.tipsCB)}
-      {line('Espèces', m.tipsCash)}
-      {m.tipsOther > 0 && line('Non noté', m.tipsOther)}
-    </>
   );
 }
 
@@ -114,7 +98,6 @@ function BarberCard({ b, total, scope, show, loading, failed, agendaTo }) {
         <Stat label="RDV encaissés" value={show(m.count)} />
         <Stat label="Panier moyen" value={show(euro(m.avg))} />
         <Stat label="Produits vendus" value={show(euro(m.products))} />
-        <Stat label="Pourboires" value={ready ? <Tips m={m} /> : show('')} />
         <Stat label="Absences" value={show(b.noShows)} tone={ready && b.noShows > 0 ? 'red' : ''} />
         <Stat label="À clôturer" value={show(b.toClose)} tone={ready && b.toClose > 0 ? 'amber' : ''} />
       </dl>
