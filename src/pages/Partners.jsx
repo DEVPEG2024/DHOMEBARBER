@@ -34,12 +34,9 @@ function FeaturedPartner({ partner, onOpen }) {
       )}
       <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/35 to-transparent" />
       <div className="relative h-full flex flex-col justify-end p-5 gap-3" style={{ minHeight: 168 }}>
-        <div className="flex items-center justify-between gap-3">
-          <span className="inline-flex items-center gap-1 rounded-full bg-primary/20 border border-primary/40 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-primary">
-            <Sparkles className="w-3 h-3" /> Coup de cœur
-          </span>
-          {best && <PercentBadge percent={best} size="md" />}
-        </div>
+        <span className="self-start inline-flex items-center gap-1 rounded-full bg-primary/20 border border-primary/40 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-primary">
+          <Sparkles className="w-3 h-3" /> Coup de cœur
+        </span>
         <div className="flex items-center gap-3">
           <PartnerLogo partner={partner} className="w-12 h-12" rounded="rounded-xl" />
           <div className="min-w-0">
@@ -48,6 +45,7 @@ function FeaturedPartner({ partner, onOpen }) {
           </div>
         </div>
       </div>
+      {best && <PercentBadge percent={best} size="lg" className="absolute top-3 right-3" />}
     </motion.button>
   );
 }

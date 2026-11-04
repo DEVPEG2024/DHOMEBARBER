@@ -50,9 +50,18 @@ export function partnerOffers(partner) {
   return (Array.isArray(partner?.offers) ? partner.offers : []).filter(o => o && String(o.title || '').trim());
 }
 
-/** Meilleure réduction du partenaire, pour le badge « jusqu'à -20 % ». */
+/**
+ * Remise écrite dans l'accroche (« -15% sur le nettoyage ») pour un partenaire sans pourcentage dans
+ * ses offres. Signe moins exigé : « 50 % de crédit d'impôt » n'est pas une remise, « 10-15 % » non plus.
+ */
+export function taglinePercent(partner) {
+  const match = String(partner?.tagline || '').match(/(?:^|[\s(:])[-−–]\s?(\d{1,3})\s?%/);
+  return match ? offerPercent({ percent: match[1] }) : null;
+}
+
+/** Meilleure réduction du partenaire, pour le badge « jusqu'à -20 % » : ses offres, sinon son accroche. */
 export function bestPercent(partner) {
-  return partnerOffers(partner).reduce((best, o) => Math.max(best, offerPercent(o) || 0), 0) || null;
+  return partnerOffers(partner).reduce((best, o) => Math.max(best, offerPercent(o) || 0), 0) || taglinePercent(partner);
 }
 
 /** `valid_until` (YYYY-MM-DD) dépassée, comparée à la date du jour à Paris. */
