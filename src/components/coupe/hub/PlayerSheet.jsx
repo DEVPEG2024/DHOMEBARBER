@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Ban, Flag, Loader2, X } from 'lucide-react';
+import { Ban, Flag, Loader2, Medal, Trophy, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { queryFailed } from '@/components/shared/LoadError';
 import { useAndroidBack } from '@/lib/useAndroidBack';
@@ -14,7 +14,8 @@ import {
 import { COUPE_COLORS } from '../palette';
 import PlayerAvatar, { RoleMark } from './PlayerAvatar';
 import { ROLE_BARBER, ROLE_SALON, num, rankSuffix } from './coupeFormat';
-import { COUPE_VARS } from './theme';
+import { COUPE_VARS, alpha } from './theme';
+import { titleDate } from '../tournoi/tournoiFormat';
 
 /**
  * Fiche publique d'un joueur du classement (`GET /coupe/player/:keyHash`) : ses points de la
@@ -23,6 +24,9 @@ import { COUPE_VARS } from './theme';
  * Fenêtre du bas fermée par la croix uniquement (et Échap, et le retour d'Android).
  * Thème stade : fenêtre noire, points en or, boutons d'envoi en rouge ; ouverte dans un portail,
  * elle pose elle-même la palette (`COUPE_VARS`).
+ * Palmarès des tournois (3 nov. 2026, planche validée, écran 10 ; `titles` du serveur) : une
+ * petite coupe d'or à côté du nom et la liste des titres (champion, finaliste) ; rien sans titre.
+ * Jamais sur la carte Gang.
  */
 const MAX_DETAILS = 500;
 
@@ -39,6 +43,49 @@ function StatBlock({ title, stats }) {
         {num(stats?.wins)} V · {num(stats?.losses)} D
       </p>
     </div>
+  );
+}
+
+/** Titres d'un joueur (`titles` de `GET /coupe/player/:keyHash`), les plus récents d'abord. */
+function titlesOf(data) {
+  const list = Array.isArray(data?.titles) ? data.titles.filter((t) => t && (t.rank === 1 || t.rank === 2)) : [];
+  return [...list].sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+}
+
+/** « 2 tournois gagnés » (lu par les lecteurs d'écran à côté du nom). */
+export const winsLabel = (n) => `${n} ${n === 1 ? 'tournoi gagné' : 'tournois gagnés'}`;
+
+function Palmares({ titles }) {
+  const wins = titles.filter((t) => t.rank === 1).length;
+  return (
+    <section aria-labelledby="coupe-fiche-palmares" className="overflow-hidden rounded-2xl border border-white/10 bg-[color:var(--coupe-noir3)]">
+      <h3 id="coupe-fiche-palmares" className="px-3 pb-1 pt-3 text-sm font-bold">Palmarès</h3>
+      <ul>
+        {titles.map((t, i) => {
+          const champion = t.rank === 1;
+          const Icon = champion ? Trophy : Medal;
+          return (
+            <li key={`${t.tournament_id || i}-${t.rank}`} className="flex items-center gap-3 border-b border-white/6 px-3 py-2.5 last:border-0">
+              <span
+                className="grid h-[34px] w-[34px] shrink-0 place-items-center rounded-[10px]"
+                style={{ background: alpha(champion ? COUPE_COLORS.or : COUPE_COLORS.grisClair, 0.16), color: champion ? COUPE_COLORS.or : COUPE_COLORS.grisClair }}
+              >
+                <Icon className="h-5 w-5" aria-hidden="true" />
+              </span>
+              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span className="font-bold">{champion ? 'Champion' : 'Finaliste'}</span>
+                <span className="truncate text-xs text-[color:var(--coupe-gris)]">
+                  {[String(t.name || 'Tournoi'), titleDate(t.date)].filter(Boolean).join(' · ')}
+                </span>
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="border-t border-white/6 px-3 py-2.5 text-xs text-[color:var(--coupe-gris)]">
+        {wins > 0 ? `${winsLabel(wins)}. La coupe se voit aussi au classement, à côté du nom.` : 'Une finale jouée : la coupe arrive avec le premier titre.'}
+      </p>
+    </section>
   );
 }
 
@@ -115,6 +162,8 @@ export default function PlayerSheet({ player, onClose }) {
 
   const data = query.data && typeof query.data === 'object' ? query.data : null;
   const role = data?.role || player?.role;
+  const titles = titlesOf(data);
+  const wins = titles.filter((t) => t.rank === 1).length;
 
   return (
     <DialogPrimitive.Root open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
@@ -141,6 +190,9 @@ export default function PlayerSheet({ player, onClose }) {
                   <DialogPrimitive.Title className="flex items-center gap-1.5 font-fut text-[26px] font-extrabold uppercase leading-none tracking-[0.03em]">
                     <span className="truncate">{name}</span>
                     <RoleMark role={role} size={16} />
+                    {wins > 0 && (
+                      <Trophy role="img" aria-label={winsLabel(wins)} className="h-[18px] w-[18px] shrink-0 text-[color:var(--coupe-or)]" />
+                    )}
                   </DialogPrimitive.Title>
                   <DialogPrimitive.Description className="mt-1.5 text-[13px] text-[color:var(--coupe-gris)]">
                     {role === ROLE_SALON ? 'Le salon, tous comptes réunis' : role === ROLE_BARBER ? 'Barber du salon' : 'Joueur de la Coupe du Gang'}
@@ -156,10 +208,13 @@ export default function PlayerSheet({ player, onClose }) {
                   <div className="h-[104px] flex-1 rounded-2xl bg-white/6 motion-safe:animate-pulse" />
                 </div>
               ) : (
-                <div className="flex gap-2.5">
-                  <StatBlock title="Saison" stats={data.season_stats} />
-                  <StatBlock title="Général" stats={data.total_stats} />
-                </div>
+                <>
+                  <div className="flex gap-2.5">
+                    <StatBlock title="Saison" stats={data.season_stats} />
+                    <StatBlock title="Général" stats={data.total_stats} />
+                  </div>
+                  {titles.length > 0 && <Palmares titles={titles} />}
+                </>
               )}
 
               {canModerate && (

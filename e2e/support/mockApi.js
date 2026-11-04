@@ -19,6 +19,7 @@
  */
 import { creerDonnees, CLIENT, media } from './donnees.js';
 import { FauxCoupe, CLE_LISTE_LUCAS, PHOTO_LUCAS } from './fauxCoupe.js';
+import { FauxTournois } from './fauxTournois.js';
 import { MAINTENANT, cleDuJourParis, instantParis, jour } from './temps.js';
 // Snake du Gang : le faux serveur rejoue chaque partie avec le vrai moteur de l'app (comme le serveur)
 import { replay as rejouerSnake, tickMs as pasSnake } from '../../src/lib/snake/engine.js';
@@ -169,6 +170,11 @@ export class FauxServeur {
     // ligne, le faux serveur de jeu décide (`api.coupe.regles = 2` avant le coup d'envoi). Un test le
     // retire avec `api.donnees.parametresPublics.features.coupeRulesV2 = false` (règle d'aujourd'hui)
     this.donnees.parametresPublics.features.coupeRulesV2 ??= true;
+    // Tournois de la Coupe (routes /coupe/tournaments… et /coupe/admin/tournaments…, e2e/support/
+    // fauxTournois.js) : ouverts, comme en production sans COUPE_TOURNOIS=off ; aucun tournoi au
+    // départ. Un test les ferme avec `api.donnees.parametresPublics.features.coupeTournaments = false`
+    this.donnees.parametresPublics.features.coupeTournaments ??= true;
+    this.tournois = new FauxTournois(this);
     // Fil « New Gang » v2 (routes /feed…) : état dans `api.fil` (activité, votes, réglages, vues)
     this.donnees.fil ??= { activite: [], votes: [], likesCommentaires: [], reglages: {}, vuLe: {}, vues: {} };
     this.filRest = new FauxFil(this);
@@ -420,7 +426,9 @@ export class FauxServeur {
       };
     }
 
-    // La Coupe du Gang : routes REST (routes/coupe.js du serveur)
+    // La Coupe du Gang : tournois (routes/coupeTournaments.js du serveur), puis routes REST
+    // (routes/coupe.js du serveur)
+    if (/^\/coupe\/(admin\/)?tournaments(\/|$)/.test(chemin)) return this.tournois.traiter(req);
     if (chemin.startsWith('/coupe/')) return this.coupeRest.traiter(req);
 
     // Fil « New Gang » v2 (routes/feed.js et routes/feedActivity.js du serveur)
@@ -748,6 +756,7 @@ export class FauxCoupeRest {
           rows: visibles.map((l) => ({
             rank: l.rank, key_hash: l.cle, name: l.name, role: l.role, avatar_url: l.avatar_url,
             employee_id: l.employee_id, points: l.points, wins: l.wins, losses: l.losses, matches: l.matches,
+            titles: this.serveur.tournois.titres(l.cle).filter((t) => t.rank === 1).length,
             me: l.cle === cle,
           })),
           me: { rank: mienne?.rank ?? null, ...statsDe(etat[periode]), opt_in: !!etat.opt_in },
@@ -933,6 +942,7 @@ export class FauxCoupeRest {
       season_stats: { ...statsDe(etat.saison), rank: rang('saison') },
       total_stats: { ...statsDe(etat.total), rank: rang('total') },
       recent: (etat.recent || []).map((r) => ({ reason: r.cancelled ? 'cancelled' : null, ...r })),
+      titles: this.serveur.tournois.titres(cle),
     };
   }
 
@@ -945,7 +955,12 @@ export class FauxCoupeRest {
     const ligne = saison || total || (deLaListe ? { name: deLaListe.name, role: 'user' } : null);
     if (!ligne) return { status: 404, json: { error: 'Joueur introuvable', code: 'not_found' } };
     const stats = (l) => (l ? { points: l.points, rank: l.rank, wins: l.wins, losses: l.losses, matches: l.matches } : { points: 0, rank: null, wins: 0, losses: 0, matches: 0 });
-    return { json: { name: ligne.name, role: ligne.role, season_stats: stats(saison), total_stats: stats(total) } };
+    return {
+      json: {
+        name: ligne.name, role: ligne.role, season_stats: stats(saison), total_stats: stats(total),
+        titles: this.serveur.tournois.titres(cle),
+      },
+    };
   }
 }
 

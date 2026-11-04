@@ -8,12 +8,17 @@
  * - signalements des joueurs (nom, comportement, triche…) : « Traité » ou « Ignorer » ; le compte
  *   signalé (email, fiche du client) et, avec confirmation, « Exclure des classements » (Coupe et
  *   carte Gang, contrat section 7), « Réintégrer », « Remettre ses points à zéro » ;
- * - rappel de la coupure d'urgence : variable Heroku `COUPE_WS=off`.
+ * - rappel de la coupure d'urgence : variable Heroku `COUPE_WS=off` ;
+ * - tournois (3 nov. 2026, seulement avec `features.coupeTournaments`, contrat
+ *   docs/fonctions/coupe-tournois-contrat.md) : liste, créer, modifier, suivre en direct
+ *   (`?tournoi=<id>` dans l'adresse), forfait, rejouer, retirer, annuler
+ *   (src/components/admin/coupe/).
  * Données : `GET /coupe/admin/overview`, `PATCH /coupe/admin/reports/:id`,
  * `POST` / `DELETE /coupe/admin/players/:keyHash/ban`, `POST /coupe/admin/players/:keyHash/reset`
  * (src/lib/coupe/coupeApi.js). La fiche du client est celle des Cartes Gang (GangClientSheet).
  */
 import React, { useState } from 'react';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle, Ban, Check, Flag, Mail, Power, RefreshCw, RotateCcw, Trophy, UserCheck, UserCircle, Users, X,
@@ -28,9 +33,11 @@ import { useAuth } from '@/lib/AuthContext';
 import LoadError, { friendlyError, queryFailed } from '@/components/shared/LoadError';
 import GangClientSheet from '@/components/gang-admin/GangClientSheet';
 import {
-  COUPE_REPORT_REASONS, invalidateCoupe, resetCoupePlayer, setCoupePlayerBanned, setCoupeReportStatus,
-  useCoupeAdminOverview,
+  COUPE_REPORT_REASONS, invalidateCoupe, invalidateTournaments, resetCoupePlayer, setCoupePlayerBanned,
+  setCoupeReportStatus, useCoupeAdminOverview, useCoupeTournamentsFlagQuery,
 } from '@/lib/coupe/coupeApi';
+import TournamentsSection from '@/components/admin/coupe/TournamentsSection';
+import TournamentFollow from '@/components/admin/coupe/TournamentFollow';
 import {
   CoupeRoleMark, coupePlayerName, coupeSeasonLabel, currentCoupeSeason,
 } from '@/components/home/GamesSection';
@@ -318,10 +325,46 @@ export default function AdminCoupe() {
   const confirmDef = confirm ? PLAYER_ACTIONS[confirm.kind] : null;
   const confirmName = confirm ? coupePlayerName(confirm.report.reported_name) : '';
 
+  // Tournois : rien sans `features.coupeTournaments` (ni section ni lecture des tournois). Le
+  // suivi d'un tournoi est dans l'adresse (`?tournoi=<id>`) : le retour du navigateur ramène à la liste
+  const tournamentsFlag = useCoupeTournamentsFlagQuery();
+  const tournamentsOn = isAdmin && tournamentsFlag.data === true;
+  const [params, setParams] = useSearchParams();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const followId = params.get('tournoi');
+  const openTournament = (id) => {
+    const next = new URLSearchParams(params);
+    next.set('tournoi', String(id));
+    setParams(next, { state: { fromCoupeList: true } });
+  };
+  const closeTournament = () => {
+    if (location.state?.fromCoupeList) {
+      navigate(-1);
+      return;
+    }
+    const next = new URLSearchParams(params);
+    next.delete('tournoi');
+    setParams(next, { replace: true });
+  };
+
   if (user && !isAdmin) {
     return (
       <div className="rounded-2xl border border-border bg-card p-6 text-sm text-muted-foreground">
         Cette page est réservée à l'administrateur.
+      </div>
+    );
+  }
+
+  if (followId && tournamentsOn) {
+    return <TournamentFollow key={followId} id={followId} onBack={closeTournament} />;
+  }
+  if (followId && isAdmin && tournamentsFlag.data === undefined) {
+    // Drapeau pas encore lu : le suivi demandé s'affichera dans un instant
+    return (
+      <div className="min-w-0 max-w-2xl space-y-3" aria-busy="true">
+        <div className="h-16 rounded-2xl border border-border bg-card animate-pulse" />
+        <div className="h-40 rounded-2xl border border-border bg-card animate-pulse" />
       </div>
     );
   }
@@ -346,7 +389,7 @@ export default function AdminCoupe() {
         <Button
           size="icon"
           variant="ghost"
-          onClick={() => refetch()}
+          onClick={() => { refetch(); if (tournamentsOn) invalidateTournaments(queryClient); }}
           disabled={isFetching}
           aria-label="Actualiser"
           className="text-muted-foreground shrink-0"
@@ -378,6 +421,8 @@ export default function AdminCoupe() {
           </div>
         </div>
       )}
+
+      {tournamentsOn && <TournamentsSection onOpen={openTournament} />}
 
       {isPending && !failed && !notFound && (
         <div className="space-y-4" aria-busy="true">

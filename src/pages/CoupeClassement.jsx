@@ -7,7 +7,7 @@ import CoupeLoadError from '@/components/coupe/CoupeLoadError';
 import { COUPE_COLORS } from '@/components/coupe/palette';
 import CoupeShell from '@/components/coupe/hub/CoupeShell';
 import PlayerAvatar, { RoleMark } from '@/components/coupe/hub/PlayerAvatar';
-import LeaderboardRow, { RankNumber, displayName } from '@/components/coupe/hub/LeaderboardRow';
+import LeaderboardRow, { RankNumber, TitlesBadge, displayName } from '@/components/coupe/hub/LeaderboardRow';
 import OptInSwitch from '@/components/coupe/hub/OptInSwitch';
 import PlayerSheet from '@/components/coupe/hub/PlayerSheet';
 import {
@@ -77,6 +77,8 @@ function PodiumPlace({ row, place, onOpen }) {
           <span className="ml-1 inline-block align-[-1px]"><RoleMark role={row.role} size={12} /></span>
         ) : null}
       </span>
+      {/* Tournois gagnés (rien quand 0), comme sur les lignes de la liste */}
+      <TitlesBadge count={row.titles} />
     </>
   );
   return (

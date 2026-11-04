@@ -58,6 +58,9 @@ const CoupeTest = React.lazy(() => import('@/pages/CoupeTest'));
 // La Coupe du Gang : accueil du jeu et classement (lazy, plein écran, hors des mises en page)
 const Coupe = React.lazy(() => import('@/pages/Coupe'));
 const CoupeClassement = React.lazy(() => import('@/pages/CoupeClassement'));
+// Tournois de la Coupe (docs/fonctions/coupe-tournois-contrat.md) : la page elle-même cache tout sans
+// `features.coupeTournaments`
+const CoupeTournoi = React.lazy(() => import('@/pages/CoupeTournoi'));
 // Snake du Gang : menu et partie, classement, vitesse et options, règles (lazy, plein écran)
 const Snake = React.lazy(() => import('@/pages/Snake'));
 const SnakeClassement = React.lazy(() => import('@/pages/SnakeClassement'));
@@ -470,6 +473,7 @@ const AppRoutes = () => {
       <Route element={<RequireCoupe />}>
         <Route path="/coupe" element={<Suspense fallback={<LazyFallback />}><Coupe /></Suspense>} />
         <Route path="/coupe/classement" element={<Suspense fallback={<LazyFallback />}><CoupeClassement /></Suspense>} />
+        <Route path="/coupe/tournoi/:id" element={<Suspense fallback={<LazyFallback />}><CoupeTournoi /></Suspense>} />
       </Route>
 
       {/* Snake du Gang : plein écran, hors des mises en page, tout compte connecté, drapeau features.snake */}

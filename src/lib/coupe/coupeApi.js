@@ -17,6 +17,14 @@
  * Envois (promesses) : setCoupeOptIn, setCoupeChallengeOptIn, setCoupeAvailability, blockCoupePlayer, unblockCoupePlayer,
  * reportCoupePlayer, setCoupeReportStatus, setCoupePlayerBanned, resetCoupePlayer (admin). Après
  * un envoi, `invalidateCoupe(queryClient)`.
+ *
+ * Tournois (3 nov. 2026, docs/fonctions/coupe-tournois-contrat.md, section 6) :
+ *   useCoupeTournamentsFlag()      → true | false (`features.coupe` ET `features.coupeTournaments`)
+ *   useCoupeTournamentsFlagQuery() → la requête du drapeau (true, false ou null = illisible)
+ *   useTournaments()               → `GET /coupe/tournaments`
+ *   useTournament(id)              → `GET /coupe/tournaments/:id` (relu 3 s ou 30 s)
+ * Envois : registerTournament, unregisterTournament, checkinTournament, puis
+ * `invalidateTournaments(queryClient)`.
  */
 import { useQuery } from '@tanstack/react-query';
 import { API_SERVER_URL, resolvedAppId, apiRequest, apiUrl } from '@/api/apiClient';
@@ -280,3 +288,163 @@ export const resetCoupePlayer = (keyHash) =>
  */
 export const invalidateCoupe = (queryClient) =>
   queryClient.invalidateQueries({ queryKey: COUPE_KEY, predicate: (q) => q.queryKey[1] !== 'enabled' });
+
+// ─── Tournois (docs/fonctions/coupe-tournois-contrat.md, section 6) ──
+
+// Drapeau `features.coupeTournaments` : sous `enabled` pour échapper à invalidateCoupe comme le drapeau du jeu
+export const COUPE_TOURNAMENTS_FLAG_KEY = ['coupe', 'enabled', 'tournaments'];
+export const COUPE_TOURNAMENTS_KEY = ['coupe', 'tournaments'];
+export const COUPE_TOURNAMENTS_LIST_KEY = ['coupe', 'tournaments', 'list'];
+export const coupeTournamentKey = (id) => ['coupe', 'tournaments', 'one', String(id || '')];
+
+/** Délais du contrat (section 1) : présence 15 min avant, tirage montré 30 s, 2 min pour rejoindre. */
+export const TOURNAMENT_CHECKIN_MS = 15 * 60 * 1000;
+export const TOURNAMENT_DRAW_SHOW_MS = 30 * 1000;
+export const TOURNAMENT_JOIN_MS = 2 * 60 * 1000;
+
+/** Adresse publique d'un tournoi à partager (jamais `window.location.origin`). */
+export const coupeTournamentUrl = (id) => `https://dhomebarber.fr/coupe/tournoi/${encodeURIComponent(String(id || ''))}`;
+
+/**
+ * Drapeau des tournois. **Ne rejette jamais** : `true` seulement si le serveur annonce le jeu
+ * (`features.coupe`) ET les tournois (`features.coupeTournaments`) ; `false` s'il dit non ;
+ * `null` si la lecture a échoué (réseau, réponse non 2xx : illisible). Un serveur plus ancien ne
+ * connaît pas les tournois : faux, rien des tournois dans l'app.
+ */
+export async function fetchCoupeTournamentsEnabled() {
+  try {
+    const res = await fetch(`${API_SERVER_URL}/api/apps/public/prod/public-settings/by-id/${resolvedAppId}`);
+    if (!res.ok) return null;
+    const data = await res.json().catch(() => null);
+    if (!data || typeof data !== 'object') return null;
+    return data.features?.coupe === true && data.features?.coupeTournaments === true;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Requête du drapeau (cache 5 min). Une lecture illisible (`null`) n'est pas gardée : relue au
+ * prochain affichage et toutes les 20 s tant qu'un écran l'utilise (une panne ne cache pas les
+ * tournois 5 min).
+ */
+export function useCoupeTournamentsFlagQuery() {
+  return useQuery({
+    queryKey: COUPE_TOURNAMENTS_FLAG_KEY,
+    queryFn: fetchCoupeTournamentsEnabled,
+    staleTime: (q) => (q.state.data == null ? 0 : 5 * 60 * 1000),
+    refetchInterval: (q) => (q.state.data == null ? 20 * 1000 : false),
+    retry: 0,
+  });
+}
+
+/** Tournois ouverts ? Faux tant que rien n'est chargé, si le serveur dit non ou si la lecture a échoué. */
+export function useCoupeTournamentsFlag() {
+  const { data } = useCoupeTournamentsFlagQuery();
+  return data === true;
+}
+
+/**
+ * `{ items: [{ id, name, starts_at, size, status, registered, waiting,
+ *              me: { registered, waiting, checked_in } }], server_now }` : à venir et en cours,
+ * puis les 10 derniers finis ou annulés.
+ */
+export const fetchTournaments = () => apiRequest('GET', apiUrl('/coupe/tournaments'));
+
+/**
+ * `{ id, name, starts_at, size, status, cancel_reason, drawn_at, finished_at, server_now, checkin_from,
+ *    players: [{ key_hash, name, role, me, waiting, checked_in, seed }],
+ *    me: { registered, waiting, checked_in, status, match },
+ *    rounds: [{ round, label, matches: [{ id, round, slot, p, status, ready_at, forfeit_at, sc, so, winner, reason, live }] }],
+ *    champion, runner_up, thirds }` (contrat, section 3.4)
+ */
+export const fetchTournament = (id) => apiRequest('GET', apiUrl(`/coupe/tournaments/${encodeURIComponent(String(id))}`));
+
+/** Heure du serveur estimée à partir d'une réponse (`server_now`) et de l'instant où elle est arrivée. */
+export function serverNowOf(data, receivedAt, now = Date.now()) {
+  const server = Date.parse(data?.server_now);
+  if (!Number.isFinite(server) || !receivedAt) return now;
+  return server + (now - receivedAt);
+}
+
+/** Relecture d'un tournoi : 3 s pendant la présence et le tournoi, 30 s sinon (jamais après la fin). */
+export function tournamentRefetchMs(data, receivedAt, now = Date.now()) {
+  if (!data || typeof data !== 'object') return 30 * 1000;
+  if (data.status === 'finished' || data.status === 'cancelled') return false;
+  if (data.status === 'running') return 3 * 1000;
+  const serverNow = serverNowOf(data, receivedAt, now);
+  const starts = Date.parse(data.starts_at);
+  const from = Number.isFinite(Date.parse(data.checkin_from)) ? Date.parse(data.checkin_from) : starts - TOURNAMENT_CHECKIN_MS;
+  if (Number.isFinite(from) && serverNow >= from) return 3 * 1000;
+  // Avant la présence : 30 s, ou juste après son ouverture si elle arrive plus tôt
+  if (Number.isFinite(from)) return Math.max(3 * 1000, Math.min(30 * 1000, from - serverNow + 500));
+  return 30 * 1000;
+}
+
+/** Tournois de l'accueil de la Coupe (relus toutes les 30 s, onglet visible). */
+export function useTournaments({ enabled = true } = {}) {
+  return useQuery({
+    queryKey: COUPE_TOURNAMENTS_LIST_KEY,
+    queryFn: fetchTournaments,
+    enabled,
+    staleTime: 15 * 1000,
+    refetchInterval: enabled ? 30 * 1000 : false,
+  });
+}
+
+/**
+ * Un tournoi, relu toutes les 3 s quand la présence est ouverte ou le tournoi en cours, 30 s sinon ;
+ * onglet caché : pas de relecture (`refetchIntervalInBackground` faux, défaut de React Query).
+ */
+export function useTournament(id, { enabled = true } = {}) {
+  return useQuery({
+    queryKey: coupeTournamentKey(id),
+    queryFn: () => fetchTournament(id),
+    enabled: enabled && !!id,
+    staleTime: 2 * 1000,
+    refetchInterval: (q) => tournamentRefetchMs(q.state.data, q.state.dataUpdatedAt),
+  });
+}
+
+/** S'inscrire (liste d'attente au-delà des places ; pendant la présence, vaut présence) → `{ ok, waiting }`. */
+export const registerTournament = (id) =>
+  apiRequest('POST', apiUrl(`/coupe/tournaments/${encodeURIComponent(String(id))}/register`), {});
+
+/** Se désinscrire (avant le début) → `{ ok }`. */
+export const unregisterTournament = (id) =>
+  apiRequest('DELETE', apiUrl(`/coupe/tournaments/${encodeURIComponent(String(id))}/register`));
+
+/** « Je suis là » (15 min avant le début) → `{ ok }`. */
+export const checkinTournament = (id) =>
+  apiRequest('POST', apiUrl(`/coupe/tournaments/${encodeURIComponent(String(id))}/checkin`), {});
+
+/** Relit la liste et les tournois ouverts (le drapeau reste en cache). */
+export const invalidateTournaments = (queryClient) =>
+  queryClient.invalidateQueries({ queryKey: COUPE_TOURNAMENTS_KEY });
+
+// ─── Retour du jeu vers le tableau d'un tournoi ──────────────────────
+// Le jeu se ferme (Coupe.jsx) : le match quitté est retenu le temps de la session, pour que la page
+// du tournoi n'affiche jamais « Jouer mon match » sur ce match avec le tableau d'avant le match
+// (cache) : elle attend une relecture faite après le départ (CoupeTournoi.jsx).
+const LEFT_TTL_MS = 2 * 60 * 1000;
+const leftTournamentMatches = new Map();
+const finishedTournamentMatches = new Set();
+
+/** Le jeu a reçu la fin d'un match de tournoi (`onFinished`). */
+export function noteTournamentMatchFinished(matchId) {
+  if (matchId) finishedTournamentMatches.add(String(matchId));
+}
+
+/** Le jeu d'un match de tournoi se ferme (retour au tableau). */
+export function noteTournamentMatchLeft(tournamentId, matchId) {
+  if (!tournamentId || !matchId) return;
+  const mid = String(matchId);
+  leftTournamentMatches.set(String(tournamentId), { mid, at: Date.now(), finished: finishedTournamentMatches.has(mid) });
+}
+
+/** Dernier match quitté de ce tournoi (`{ mid, at, finished }`, 2 min au plus), ou null. */
+export function lastLeftTournamentMatch(tournamentId) {
+  const left = leftTournamentMatches.get(String(tournamentId || ''));
+  if (!left || Date.now() - left.at > LEFT_TTL_MS) return null;
+  return left;
+}

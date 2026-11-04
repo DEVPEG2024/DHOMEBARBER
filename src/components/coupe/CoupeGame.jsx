@@ -27,10 +27,12 @@ import StadiumStage, { createStadiumDirector } from './game/StadiumStage';
 import MatchIntro from './game/MatchIntro';
 import { offlinePlayers, onlinePlayers, seasonLabel, shownName } from './game/format';
 import { useMediaQuery, useSalonMusicPaused, useSecondsLeft, useTyping, useWakeLock } from './game/hooks';
-import { RulesBanner, RulesBar } from './game/RulesHud';
+import { RulesBanner, RulesBar, ShootoutBar } from './game/RulesHud';
 import {
-  EVENT_NAMES, GOLD_BANNER, TIPS, eventBanner, eventsBanner, foulBanner, goalBanner, penEndBanner, penaltyBanner,
+  EVENT_NAMES, GOLD_BANNER, TIPS, eventBanner, eventsBanner, foulBanner, goalBanner, penEndBanner, penaltyBanner, penaltyPos,
 } from './game/rulesV2';
+import TournamentWaiting from './game/TournamentWaiting';
+import { shotLabel, soGoals, tournamentOpponent } from './game/tournament';
 
 /*
  * Écran de jeu de La Coupe du Gang (contrat : docs/fonctions/coupe-du-gang-contrat.md, section 5.1).
@@ -39,7 +41,8 @@ import {
  *     mode="online" | "bot" | "local"
  *     level="apprenti" | "barber" | "boss"          // mode "bot"
  *     action={{ t: 'create' } | { t: 'join', code } | { t: 'defi', link } | { t: 'challenge', employeeId }
- *             | { t: 'challenge', keyHash } | { t: 'resume' }}   // keyHash : un joueur de la liste « Défier un joueur »
+ *             | { t: 'challenge', keyHash } | { t: 'resume' }   // keyHash : un joueur de la liste « Défier un joueur »
+ *             | { t: 'tournament', matchId, tournamentId, opponent? }}   // match de tournoi (opponent : { name, role })
  *     onExit={() => …}                              // croix, « Retour », « Annuler », abandon
  *     onFinished={(result) => …}                    // fin d'un match : relire points et classement
  *   />
@@ -66,7 +69,16 @@ import {
  *
  * `onFinished(result)` : { mode, won, winner (0 toi / joueur du bas, 1 l'autre), draw, score
  * [bas, haut], forfeit, cancelled, reason, points (en ligne : { ranked, reason, delta, total, rank,
- * rankBefore, oppDelta } ou null = pas encore confirmés), abandoned (tu as abandonné) }.
+ * rankBefore, oppDelta } ou null = pas encore confirmés), abandoned (tu as abandonné) } ; match de
+ * tournoi : `tour: true` et `so` (tirs au but [toi, l'adversaire] ou null).
+ *
+ * Match de tournoi (docs/fonctions/coupe-tournois-contrat.md, section 6) : salle d'attente sans
+ * code (« En attente de Kevin », compte à rebours du forfait), le tour (« Quart de finale ») sur
+ * l'affiche et dans la barre du haut, la séance de tirs au but (ShootoutBar à la place de la bande
+ * du règlement v2, même hauteur), une fin sans revanche ni partage, « Retour au tableau » (`onExit`).
+ * L'adversaire de la salle d'attente : `tour.opp` du serveur, sinon `action.opponent`, sinon le
+ * tournoi déjà lu par la page, sinon « ton adversaire ». `t_not_ready` : « Ton match n'est pas
+ * encore prêt », nouvel essai tout seul toutes les 3 s pendant 30 s (`ui.notReady`), puis « Réessayer ».
  */
 
 const LANDSCAPE_QUERY = '(orientation: landscape) and (max-height: 500px)';
@@ -263,6 +275,8 @@ export default function CoupeGame({
   const tipsRef = useRef(new Set());
   // Pause hors ligne demandée pendant que le règlement se lit (le match n'existe pas encore)
   const offPausedRef = useRef(false);
+  // Tirs au but : le tir en cours a eu son `goal` du serveur (bannière du dessin)
+  const soGoalRef = useRef(false);
 
   const status = online ? ui.status : off.status;
   const opponent = online ? (ui.names[1] || 'Adversaire') : offlinePlayers(mode, lvl)[1].name;
@@ -506,6 +520,7 @@ export default function CoupeGame({
           setSheet(null);
           setMatchRules(data);
           clearBanners();
+          soGoalRef.current = false;
           // Ni feu ni événement en ligne : sans ce mot, ça ressemblait à une panne (3 nov. 2026)
           oldAppRef.current = online && data?.rules !== 2 && queryClient.getQueryData(COUPE_RULES_FLAG_KEY) === true;
           if (!online) {
@@ -559,6 +574,16 @@ export default function CoupeGame({
           sound.post();
           break;
         case 'goal': {
+          // Tirs au but (tournoi) : un tir réussi, le score du match ne bouge pas ; ni +1 ni +2
+          if (online && matchRef.current?.ui?.shootout) {
+            soGoalRef.current = true;
+            renderer.goal(data.scorer, { value: 1, fx: 0 });
+            sound.goal();
+            buzz('goal');
+            setScore(data.score);
+            clearBanners();
+            break;
+          }
           // Règlement v2 : valeur (1 ou 2) et effet du ballon au franchissement, pour le dessin
           renderer.goal(data.scorer, { value: data.value, fx: data.fx });
           sound.goal();
@@ -625,9 +650,15 @@ export default function CoupeGame({
           // Ballon posé sur le point de penalty sans `kickoff` : plus de traînée depuis l'ancienne place
           renderer.resetTrail();
           sfx('penalty');
+          // Tirs au but (tournoi) : « À toi de tirer » / « Garde ta ligne », le numéro du tir
+          const so = online ? matchRef.current?.ui?.shootout : null;
+          if (so) soGoalRef.current = false;
           // Penalty sans faute juste avant (reprise d'un match) : son propre bandeau
           if (performance.now() - bannersRef.current.foulAt > FOUL_THEN_PENALTY_MS) {
-            pushBanner(penaltyBanner(s, whoNow()), { ms: FOUL_BANNER_MS });
+            const b = so
+              ? { kind: 'penalty', title: s === 0 ? 'À toi de tirer' : 'Garde ta ligne', sub: shotLabel(so.shots, s), pos: penaltyPos(s) }
+              : penaltyBanner(s, whoNow());
+            pushBanner(b, { ms: FOUL_BANNER_MS });
           }
           // Astuce loin de la cage visée (jamais sur le gardien), après le bandeau de la faute : sur
           // un petit écran, le terrain est trop court pour les deux
@@ -646,8 +677,33 @@ export default function CoupeGame({
         case 'pen_end': {
           const b = penEndBanner(data?.r, matchRulesRef.current.penS, whoNow());
           if (b) pushBanner(b);
+          // Tir au but réussi : le serveur n'envoie pas `goal` (phase `goal`, score inchangé), le
+          // bandeau le dit ; jamais avec la bannière « BUT ! » du dessin (`goal` déjà reçu)
+          if (data?.r === 'goal' && online && matchRef.current?.ui?.shootout && !soGoalRef.current) {
+            const shooter = matchRulesRef.current.penS;
+            pushBanner({ kind: 'so-goal', title: 'But !', sub: shooter === 0 ? 'Tir réussi' : `${whoNow()[1].name} marque`, pos: 'mid' });
+            sound.goal();
+            buzz(shooter === 0 ? 'goal' : 'light');
+          }
           if (data?.r === 'saved') sfx('save');
           if (data?.r === 'saved' || data?.r === 'missed') buzz('light');
+          break;
+        }
+        // Tournoi : égalité à la fin du but en or, séance de tirs au but
+        case 'shootout': {
+          const first = data?.first;
+          const who = whoNow();
+          pushBanner({
+            kind: 'shootout',
+            title: 'Tirs au but',
+            sub: '3 tirs chacun',
+            sub2: first === 0 ? 'Tu tires en premier' : first === 1 ? `${who[1].name} tire en premier` : null,
+            pos: first === 0 || first === 1 ? penaltyPos(first) : 'mid',
+          }, { ms: FOUL_BANNER_MS, urgent: true });
+          // Le premier tir annoncé dans ce bandeau n'a pas le sien
+          bannersRef.current.foulAt = performance.now();
+          sfx('whistle');
+          buzz('medium');
           break;
         }
         case 'gold':
@@ -745,7 +801,9 @@ export default function CoupeGame({
       else if (a.t === 'defi') match.peek(a.link);
       else if (a.t === 'challenge' && a.keyHash) match.challengePlayer(a.keyHash);
       else if (a.t === 'challenge') match.challenge(a.employeeId);
-      else match.create();
+      else if (a.t === 'tournament') {
+        match.tournament(a.matchId, { tournamentId: a.tournamentId, opponent: tournamentOpponent(queryClient, a) });
+      } else match.create();
       renderer.paint(null);
     } else {
       // Règlement du serveur (`features.coupeRulesV2`), lu dès l'accueil de la Coupe : sans
@@ -874,8 +932,8 @@ export default function CoupeGame({
     [result, online, mode, lvl, opponent],
   );
   const story = useMemo(() => {
-    // Rien à partager pour un match annulé ou abandonné
-    if (!result || result.cancelled || result.abandoned) return null;
+    // Rien à partager pour un match annulé ou abandonné, ni pour un match de tournoi (pas de partage)
+    if (!result || result.cancelled || result.abandoned || result.tour) return null;
     const t = endTexts({ mode: online ? 'online' : mode, level: lvl, opponent, result });
     const me = online ? (ui.names[0] || shownName(user)) : isLocal ? 'Joueur du bas' : shownName(user);
     const p = online && result.points?.ranked ? result.points : null;
@@ -1044,14 +1102,24 @@ export default function CoupeGame({
 
   const inMatch = status === 'match' || status === 'over';
   const endOpen = status === 'over' && endShown;
+  // Match de tournoi : `tour` du serveur ({ name, label, until, opp, oppRole }), ou l'action
+  // demandée (connexion, refus) ; tirs au but en cours
+  const tour = online ? ui.tour : null;
+  const tourScreen = online && (!!tour || action?.t === 'tournament');
+  // (gardés pendant « FIN DU MATCH » : la bande ne change pas avant l'écran de fin)
+  const shootout = online && (ui.status === 'match' || ui.status === 'over') ? ui.shootout : null;
+  const backLabel = tourScreen ? 'Retour au tableau' : 'Retour';
   const incoming = online && ui.incoming && (ui.status === 'room' || ui.status === 'over') ? ui.incoming : null;
   const showHud = online ? ui.status === 'match' || (ui.status === 'over' && !endShown) : !endShown;
   const L = LEVELS[lvl];
   const hudLabel = online
-    ? 'En ligne'
+    ? (tour ? tour.label || 'Tournoi' : 'En ligne')
     : isLocal ? 'À deux sur ce téléphone' : `Contre le salon · ${L.name}`;
   const names = online ? ['Toi', opponent] : offlinePlayers(mode, lvl).map((p) => p.name);
   const scoreText = `Score : ${names[0]} ${score[0]} – ${score[1]} ${names[1]}`;
+  const soText = shootout && ui.status === 'match'
+    ? `Tirs au but : ${names[0]} ${soGoals(shootout.shots[0])}, ${names[1]} ${soGoals(shootout.shots[1])}`
+    : null;
   const diag = diagnostic && online
     ? `Ping ${net.ping ?? '…'} ms · recalages ${net.recalages} · refusées ${net.refusees}`
     : null;
@@ -1078,10 +1146,24 @@ export default function CoupeGame({
       />
     );
   } else if (online) {
-    if (ui.status === 'connecting') {
+    if (ui.status === 'connecting' && ui.notReady) {
+      // Tournoi : match pas encore jouable (ou serveur qui vient de redémarrer) : nouvel essai tout
+      // seul toutes les 3 s, 30 s au plus, puis l'erreur avec « Réessayer »
+      screen = (
+        <Panel labelledBy="cdg-not-ready" onClose={exit} closeLabel="Fermer">
+          <p className="cdg-eyebrow">La Coupe du Gang · tournoi</p>
+          <h2 className="cdg-message" id="cdg-not-ready" role="alert">Ton match n&apos;est pas encore prêt</h2>
+          <p className="cdg-wait" role="status">
+            <span className="cdg-dot" aria-hidden="true" />
+            Nouvel essai automatique dans quelques secondes
+          </p>
+          <button type="button" className="cdg-btn cdg-ghost" onClick={exit}>Retour au tableau</button>
+        </Panel>
+      );
+    } else if (ui.status === 'connecting') {
       screen = (
         <Panel labelledBy="cdg-connecting" onClose={exit} closeLabel="Annuler">
-          <p className="cdg-eyebrow">La Coupe du Gang</p>
+          <p className="cdg-eyebrow">{tourScreen ? 'La Coupe du Gang · tournoi' : 'La Coupe du Gang'}</p>
           <h2 className="cdg-message" id="cdg-connecting">Connexion au serveur de jeu</h2>
           <Loader2 className="h-7 w-7 self-center text-[#ff3d44] cdg-spin" aria-hidden="true" />
           <button type="button" className="cdg-btn cdg-ghost" onClick={exit}>Annuler</button>
@@ -1095,6 +1177,18 @@ export default function CoupeGame({
           onAccept={() => { unlockSound(); matchRef.current?.accept(); }}
           onDecline={decline}
           onExpire={() => matchRef.current?.expireInvite()}
+        />
+      );
+    } else if (ui.status === 'room' && tour) {
+      // Tournoi : ni code ni lien, l'adversaire est désigné par le tableau
+      screen = (
+        <TournamentWaiting
+          tour={tour}
+          opponent={tour.opp ? { name: tour.opp, role: tour.oppRole || 'user' } : null}
+          me={{ name: ui.myName || shownName(user), role: user?.role || 'user', photo: myPhoto }}
+          goals={GOALS_TO_WIN_V2}
+          reconnecting={!!ui.reconnecting}
+          onExit={exit}
         />
       );
     } else if (ui.status === 'room') {
@@ -1129,7 +1223,7 @@ export default function CoupeGame({
             {canRetry && (
               <button type="button" className="cdg-btn cdg-primary" onClick={() => matchRef.current?.retry()}>Réessayer</button>
             )}
-            <button type="button" className="cdg-btn cdg-ghost" onClick={exit}>Retour</button>
+            <button type="button" className="cdg-btn cdg-ghost" onClick={exit}>{backLabel}</button>
           </div>
         </Panel>
       );
@@ -1137,10 +1231,16 @@ export default function CoupeGame({
       screen = (
         <Panel labelledBy="cdg-quit" onClose={() => setConfirmQuit(false)} closeLabel="Continuer le match" dialog soft>
           <h2 className="cdg-message" id="cdg-quit">Abandonner le match ?</h2>
-          <p className="cdg-lead">
-            Abandonner compte comme une défaite (1 Point de Coupe en moins si le match compte pour le classement).
-            Avant 20 s de jeu, le match est annulé.
-          </p>
+          {tour ? (
+            <p className="cdg-lead">
+              Abandonner te fait perdre ce match par forfait : {ui.names[1] || 'ton adversaire'} passe au tour suivant.
+            </p>
+          ) : (
+            <p className="cdg-lead">
+              Abandonner compte comme une défaite (1 Point de Coupe en moins si le match compte pour le classement).
+              Avant 20 s de jeu, le match est annulé.
+            </p>
+          )}
           <div className="cdg-row">
             <button type="button" className="cdg-btn cdg-primary" onClick={() => setConfirmQuit(false)}>Continuer</button>
             <button type="button" className="cdg-btn cdg-ghost" onClick={abandon}>Abandonner</button>
@@ -1221,11 +1321,14 @@ export default function CoupeGame({
             soundOn={soundOn}
             onToggleSound={toggleSound}
             diag={diag}
+            tour={!!tour}
           />
         )}
         {/* Règlement v2 seulement (posée au coup d'envoi, avant le zoom : le terrain ne change plus
             de taille pendant le match) */}
-        {showHud && rulesUi && (
+        {/* Tirs au but (tournoi) : à la place de la bande, à sa hauteur */}
+        {showHud && shootout && <ShootoutBar shots={shootout.shots} ui={rulesUi} names={barNames} />}
+        {showHud && rulesUi && !shootout && (
           <RulesBar ui={rulesUi} names={barNames} score={score} local={isLocal} fillRef={setGaugeEl} />
         )}
         <div className="cdg-stage">
@@ -1242,6 +1345,7 @@ export default function CoupeGame({
             onPointerCancel={onPointerEnd}
           />
           {inMatch && <p className="sr-only" aria-live="polite">{scoreText}</p>}
+          {soText && <p className="sr-only" aria-live="polite">{soText}</p>}
           {(online ? ui.status === 'match' && ui.timeWarn : off.status === 'match' && timeLeft != null) && (
             <>
               <p className="sr-only" role="status">Plus que 30 secondes de jeu</p>
@@ -1304,6 +1408,7 @@ export default function CoupeGame({
               reported={reported}
               onShare={story ? storyShare.share : null}
               sharing={storyShare.busy}
+              tournament={tour}
             />
           )}
           {sheet === 'report' && canModerate && (
@@ -1336,7 +1441,7 @@ export default function CoupeGame({
         )}
       </div>
       {/* Affiche VS de l'avant-match, « FIN DU MATCH » : sur tout l'écran, au-dessus du terrain */}
-      <MatchIntro fx={fx} mode={online ? 'online' : mode} players={introPlayers} goals={rulesUi?.gw ?? GOALS_TO_WIN} />
+      <MatchIntro fx={fx} mode={online ? 'online' : mode} players={introPlayers} goals={rulesUi?.gw ?? GOALS_TO_WIN} tour={tour} />
       {rotate && (
         <div className="cdg-rotate" role="alert">
           <Smartphone className="h-10 w-10 text-[#ff3d44]" aria-hidden="true" />

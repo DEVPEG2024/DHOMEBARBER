@@ -4,6 +4,7 @@ import { LEVELS } from '@/lib/coupe/engine';
 import { COUPE_COLORS as C } from '@/components/coupe/palette';
 import BladeRain from './BladeRain';
 import { coupePointsLabel, formatDelta, pointsWord, seasonLabel } from './format';
+import { isFinal } from './tournament';
 
 // Match amical : pourquoi le serveur n'a pas compté de points (`end.points.reason`, codes de
 // lib/coupePoints.js du serveur)
@@ -62,6 +63,9 @@ const END_CSS = `
 .cdg-fin-score { margin: 6px 0 0; display: flex; align-items: baseline; justify-content: center; flex-wrap: wrap; gap: 4px 12px; text-shadow: ${TEXT_SHADOW}; }
 .cdg-fin-score > span:first-child { font: 800 46px/1 ${DISPLAY}; font-variant-numeric: tabular-nums; color: ${C.blanc}; }
 .cdg-fin-score > span:last-child { font-size: 13px; color: ${C.grisClair}; }
+/* Match de tournoi : score des tirs au but sous celui du match */
+.cdg-fin-so { margin: 0; padding: 6px 14px; border-radius: 999px; background: rgba(11, 11, 12, .82); border: 1px solid rgba(235, 193, 94, .45);
+  font: 800 17px/1.1 ${DISPLAY}; letter-spacing: .08em; text-transform: uppercase; color: ${C.or}; font-variant-numeric: tabular-nums; }
 .cdg-fin-note { margin: 0; max-width: 340px; font-size: 13.5px; line-height: 1.45; color: ${C.grisClair}; text-shadow: ${TEXT_SHADOW}; }
 
 .cdg-fin-foot { display: flex; flex-direction: column; gap: 16px; }
@@ -175,13 +179,51 @@ function offlineNote(result) {
 }
 
 /**
+ * Fin d'un match de tournoi (`result.tour`) : toujours un vainqueur (« annulé » ne vaut que pour
+ * les points), tirs au but possibles (`result.so`), la suite sur le tableau. Le forfait passe
+ * avant les tirs au but : un départ pendant la séance porte `so` ET `forfeit` (jamais « aux tirs
+ * au but » pour un match gagné ou perdu par forfait).
+ */
+function tournamentTexts(out, { opponent, result, tournament }) {
+  const label = tournament?.label || 'Tournoi';
+  out.eyebrow = `${label} · contre ${opponent}`;
+  out.who = `Toi contre ${opponent}`;
+  out.win = !!result?.won;
+  const so = Array.isArray(result?.so) ? result.so : null;
+  if (result?.forfeit) {
+    out.title = out.win ? 'Victoire par forfait' : 'Défaite par forfait';
+    const during = so ? ' pendant les tirs au but' : '';
+    if (result?.abandoned) out.note = `Tu as abandonné le match${during}.`;
+    else if (out.win) out.note = `${opponent} a quitté le match${during}.`;
+  } else if (result?.reason === 'shootout' || so) {
+    out.title = out.win ? 'Victoire aux tirs au but' : 'Défaite aux tirs au but';
+    out.note = 'Égalité après le but en or : la séance de tirs au but a tout décidé.';
+  } else if (result?.reason === 'golden_goal') {
+    out.title = out.win ? 'Victoire au but en or' : 'Défaite au but en or';
+    out.note = 'Égalité au bout des 5 minutes : le premier but a tout décidé.';
+  } else if (result?.reason === 'time_limit') {
+    out.title = out.win ? 'Victoire au temps' : 'Défaite au temps';
+    out.note = 'Temps écoulé : 5 minutes de jeu, celui qui mène gagne.';
+  } else {
+    out.title = out.win ? 'Victoire' : 'Défaite';
+  }
+  const final = isFinal(tournament?.label);
+  if (out.win) out.info = final ? <>Tu remportes <b>{tournament?.name || 'le tournoi'}</b> !</> : <>Qualifié : <b>la suite sur le tableau</b>.</>;
+  else out.info = final ? 'Finaliste : bravo pour le parcours.' : 'Éliminé du tournoi : merci d’avoir joué.';
+  out.tone = out.win ? 'victoire' : 'defaite';
+  return out;
+}
+
+/**
  * Titre et textes de la fin, d'après le résultat (en ligne, contre le salon, à deux).
  * `tone` : 'victoire' (titre en or, pluie de lames), 'defaite' (titre blanc sur bande noire
  * soulignée de rouge, stade en gris) ou 'neutre' (match nul ou annulé, titre blanc).
+ * `tournament` : { label, name } pour un match de tournoi (`result.tour`).
  */
-export function endTexts({ mode, level, opponent, result }) {
+export function endTexts({ mode, level, opponent, result, tournament = null }) {
   const online = mode === 'online';
   const out = { eyebrow: '', title: '', win: false, tone: 'defaite', who: '', note: null, info: null };
+  if (online && result?.tour) return tournamentTexts(out, { opponent, result, tournament });
   if (online) {
     out.eyebrow = `En ligne · contre ${opponent}`;
     out.who = `Toi contre ${opponent}`;
@@ -250,18 +292,23 @@ function titleSize(title, tone) {
  * Victoire / Défaite / Match nul, score, points (+3 / −1, total, place avant → après),
  * « Revanche », « Partager en story », « Retour » ; en ligne, Signaler et Bloquer l'adversaire.
  * Victoire : pluie de lames de rasoir.
+ * Match de tournoi (`result.tour`, `tournament` : { label, name }) : ni revanche ni partage,
+ * « Retour au tableau » (`onExit`), le score des tirs au but s'il y en a eu.
  */
 export default function EndScreen({
   mode, level, opponent, result, rematchNote, canRematch, onRematch, onExit,
-  canModerate, onReport, onBlock, blocked, reported, onShare, sharing = false,
+  canModerate, onReport, onBlock, blocked, reported, onShare, sharing = false, tournament = null,
 }) {
   const rematchRef = useRef(null);
   useEffect(() => {
     rematchRef.current?.focus?.({ preventScroll: true });
   }, []);
   const online = mode === 'online';
+  const tour = online && !!result?.tour;
   const [a, b] = result?.score || [0, 0];
-  const { eyebrow, title, tone, who, note, info } = endTexts({ mode, level, opponent, result });
+  // Tirs au but : leur score, sauf pour un forfait (séance interrompue, le forfait décide)
+  const so = tour && !result?.forfeit && Array.isArray(result?.so) ? result.so : null;
+  const { eyebrow, title, tone, who, note, info } = endTexts({ mode, level, opponent, result, tournament });
 
   return (
     // Fond transparent : le stade (écran de jeu) se voit à travers le voile
@@ -276,36 +323,49 @@ export default function EndScreen({
         <div className="cdg-fin-head">
           <h2 className="cdg-fin-title" data-size={titleSize(title, tone)} id="cdg-end-title">{title}</h2>
           <p className="cdg-fin-score"><span>{a} – {b}</span><span>{who}</span></p>
+          {so && <p className="cdg-fin-so">Tirs au but : {so[0]} – {so[1]}</p>}
           {note && <p className="cdg-fin-note">{note}</p>}
         </div>
         <div className="cdg-fin-foot">
           {online && !result?.cancelled && (
             <PointsCard points={result?.points} opponent={opponent} draw={!!result?.draw} reason={result?.reason} />
           )}
+          {tour && result?.cancelled && (
+            <p className="cdg-fin-info" role="status">Match trop court pour les points : le résultat compte pour le tournoi.</p>
+          )}
           {info && <p className="cdg-fin-info">{info}</p>}
           <div className="cdg-fin-actions">
-            <button ref={rematchRef} type="button" className="cdg-btn cdg-primary cdg-fin-revanche" onClick={onRematch} disabled={!canRematch}>
-              Revanche
-              {rematchNote && <small>{rematchNote}</small>}
-            </button>
-            <div className={`cdg-fin-pair${onShare ? '' : ' cdg-fin-one'}`}>
-              {onShare && (
-                <button
-                  type="button"
-                  className="cdg-btn cdg-ghost cdg-btn-sm cdg-fin-ghost"
-                  onClick={onShare}
-                  disabled={sharing}
-                  aria-busy={sharing}
-                >
-                  {/* Sans icône au repos (maquette) : le texte tient sur une ligne ; la roue pendant la préparation */}
-                  <span className="cdg-inline">
-                    {sharing && <Loader2 className="h-4 w-4 cdg-spin" aria-hidden="true" />}
-                    Partager en story
-                  </span>
+            {tour ? (
+              // Tournoi : ni revanche ni partage, la suite se lit sur le tableau
+              <button ref={rematchRef} type="button" className="cdg-btn cdg-primary cdg-fin-revanche" onClick={onExit}>
+                Retour au tableau
+              </button>
+            ) : (
+              <>
+                <button ref={rematchRef} type="button" className="cdg-btn cdg-primary cdg-fin-revanche" onClick={onRematch} disabled={!canRematch}>
+                  Revanche
+                  {rematchNote && <small>{rematchNote}</small>}
                 </button>
-              )}
-              <button type="button" className="cdg-btn cdg-ghost cdg-btn-sm cdg-fin-ghost" onClick={onExit}>Retour</button>
-            </div>
+                <div className={`cdg-fin-pair${onShare ? '' : ' cdg-fin-one'}`}>
+                  {onShare && (
+                    <button
+                      type="button"
+                      className="cdg-btn cdg-ghost cdg-btn-sm cdg-fin-ghost"
+                      onClick={onShare}
+                      disabled={sharing}
+                      aria-busy={sharing}
+                    >
+                      {/* Sans icône au repos (maquette) : le texte tient sur une ligne ; la roue pendant la préparation */}
+                      <span className="cdg-inline">
+                        {sharing && <Loader2 className="h-4 w-4 cdg-spin" aria-hidden="true" />}
+                        Partager en story
+                      </span>
+                    </button>
+                  )}
+                  <button type="button" className="cdg-btn cdg-ghost cdg-btn-sm cdg-fin-ghost" onClick={onExit}>Retour</button>
+                </div>
+              </>
+            )}
             {online && canModerate && (
               <div className="cdg-fin-mod">
                 <button type="button" className="cdg-link" onClick={onReport} disabled={reported}>

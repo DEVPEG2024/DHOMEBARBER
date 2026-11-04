@@ -68,6 +68,32 @@
  *  - `evenements(cnx, [e1, e2…])` envoie un `ev` par descripteur, dans l'ordre : un combo du vrai
  *    serveur (`makeEvents` : orage ou gel avec l'arrosage, mêmes heures, identifiants qui se
  *    suivent) part ainsi en deux `ev` de suite, gardés ensemble.
+ *
+ * Tournois (docs/fonctions/coupe-tournois-contrat.md, section 5) :
+ *  - `tjoin {m}` (protocole v3, sinon `update_required`) : `faux.tournoi` décrit le match
+ *    (`match` : ID_MATCH_TOURNOI, `nom`, `tour`, `opp` : nom de l'adversaire dans `tour` (null :
+ *    serveur d'avant `tour.opp`), `you` : côté imposé, `forfaitDans` : échéance du forfait en ms
+ *    après le premier `tjoin` (gardée pour les suivants, comme la base ; 0 ou moins : déjà passée),
+ *    `avecLien` : la salle donne son lien, `adversairePresent` : l'adversaire attend déjà, `refus` :
+ *    code d'erreur rendu, `t_not_ready`…, `refusFois` : refus seulement aux N premiers `tjoin`, null
+ *    à tous) ; autre match → `t_not_found` ; échéance passée → `t_closed`. Sinon
+ *    `room {code, link?, side, tour: {name, label, fa, opp}}` (le code est envoyé exprès : l'app ne
+ *    doit pas le montrer), puis `start` (avec `tour`) à `rejoint()`, ou tout de suite si
+ *    `adversairePresent`. Comme le vrai serveur date `fa` de son horloge, la réponse attend le
+ *    premier `ping` de la connexion. Match en cours dont le joueur est absent : `tjoin` = reprise
+ *    (`start {resume: true}`) ; `redemarrer(cnx)` : serveur redémarré (salle perdue, socket coupée
+ *    en 1012, nouvelle échéance au prochain `tjoin`) ;
+ *  - salle d'attente d'un tournoi quittée (socket fermée, `leave`) : retirée, un nouveau `tjoin` en
+ *    rouvre une ; `rematch` → `error rematch_off` ; `leave` en plein match : fin avec `tour: true` ;
+ *  - tirs au but, dans l'ordre du serveur des salles : `gold` (but en or fini sans but), puis
+ *    `tirsAuBut(cnx, premier)` : `shootout {first}` et `so: [[], []]` dans les états, par côté du
+ *    serveur ; le test joue chaque tir avec `etat` (`ph: 'pen'` 3 s, puis `live` avec
+ *    `md: ['pen', s, …]`), puis `pen_end {r}` ; tir marqué : `ph: 'goal'` sans message `goal`, `sc`
+ *    inchangé, `so` complété ; fin : état `over`, puis `end` avec `tour: true` et `so: [a, b]`
+ *    (abandon pendant la séance : `end` forfait avec le `so` des états, par côté du serveur). Une
+ *    reprise pendant la séance renvoie `start {resume, tour}` sans `shootout` (les tirs restent dans
+ *    les états) ; `fermerTournoi(cnx, code)` : `error {code}` puis la salle fermée (forfait
+ *    prononcé, match réglé par l'admin).
  */
 export const CODE_MATCH = '4821';
 /** Lien d'un match (12 caractères [a-z0-9], contrat 4.2). */
@@ -83,6 +109,15 @@ export const CLE_LUCAS = 'cle-lucas-4567';
 export const CLE_LISTE_LUCAS = 'a1'.repeat(16);
 /** Photo de profil de Lucas M. (média de l'app), portée par `invited` d'un défi depuis la liste. */
 export const PHOTO_LUCAS = 'https://dhomebarber-api-3aabb8313cb6.herokuapp.com/api/media/0b9f0c1e-3c1f-4b8e-9a52-2f6a1c0d9e11';
+/** Tournois : un tournoi et le match de l'app (uuid du serveur), lien de la salle quand il est donné. */
+export const ID_TOURNOI = '7d1e5a20-3b4c-4f6e-9a8b-0c1d2e3f4a5b';
+export const ID_MATCH_TOURNOI = 'c3a9f0b2-6d4e-4a1f-8b7c-2e5d9f0a1b3c';
+export const LIEN_TOURNOI = 't0urn01l1en9';
+/** Match de tournoi par défaut : quart de finale contre Kevin, 1 min 42 avant le forfait. */
+export const TOURNOI_DEFAUT = Object.freeze({
+  match: ID_MATCH_TOURNOI, nom: 'Coupe de Novembre', tour: 'Quart de finale', opp: 'Kevin', you: 0,
+  forfaitDans: 102_000, avecLien: true, adversairePresent: false, refus: null, refusFois: null,
+});
 
 /** Écart fictif entre l'horloge du serveur et celle du navigateur (ms). */
 const DECALAGE_HORLOGE = 5000;
@@ -95,7 +130,7 @@ const DUREE_SALLE = 120_000;
 /** Vérification du jeton avant `hello` (le vrai serveur lit la base) : un `in` envoyé trop tôt ferme la socket. */
 const DELAI_AUTH = 30;
 /** Avant `hello`, seules ces commandes de salle sont gardées pour après (comme le serveur). */
-const EN_ATTENTE_AUTH = new Set(['create', 'join', 'peek', 'challenge', 'decline', 'resume']);
+const EN_ATTENTE_AUTH = new Set(['create', 'join', 'peek', 'challenge', 'decline', 'resume', 'tjoin']);
 
 const KEVIN = { nom: 'Kevin', role: 'barber', cle: CLE_KEVIN };
 const LUCAS = { nom: 'Lucas M.', role: 'user', cle: CLE_LUCAS };
@@ -164,6 +199,8 @@ export class FauxCoupe {
     this.delaiReprise = DELAI_REPRISE;
     /** Sockets fermées en 1008 (message de jeu avant `hello`). */
     this.fermetures1008 = 0;
+    /** Match de tournoi rejoint par `tjoin` (voir TOURNOI_DEFAUT) ; un test en change les champs. */
+    this.tournoi = { ...TOURNOI_DEFAUT };
     this.minuteries = new Set();
   }
 
@@ -272,6 +309,35 @@ export class FauxCoupe {
     }
   }
 
+  /**
+   * Tournoi : la séance de tirs au but commence (`shootout {first}`, `premier` dans le repère du
+   * serveur) ; les états portent ensuite `so` (tirs de chacun), vide au départ.
+   */
+  tirsAuBut(cnx = this.derniere(), premier = 0) {
+    const salle = cnx.salle;
+    cnx.envoyer({ t: 'shootout', first: premier });
+    if (salle) salle.etat = { ...salle.etat, so: [[], []] };
+  }
+
+  /**
+   * Tournoi : serveur redémarré en plein match ou en salle d'attente : la salle est perdue, la
+   * socket coupée (1012) ; le match redevient jouable avec une nouvelle échéance (au prochain
+   * `tjoin`). Avec `refus: 't_not_ready'` et `refusFois`, les premiers `tjoin` après le retour
+   * sont refusés, comme juste après un vrai redémarrage.
+   */
+  redemarrer(cnx = this.derniere()) {
+    const salle = cnx.salle;
+    this.couper(cnx, 1012);
+    if (salle) this.fermerSalle(salle);
+    this.tournoi.echeance = null;
+  }
+
+  /** Tournoi : salle fermée par le serveur (`error {code}` : forfait prononcé, match réglé par l'admin). */
+  fermerTournoi(cnx = this.derniere(), code = 't_closed') {
+    cnx.envoyer({ t: 'error', code });
+    if (cnx.salle) this.fermerSalle(cnx.salle);
+  }
+
   /** Arrête tout (fin du test) : plus aucun envoi. */
   arreter() {
     for (const id of this.minuteries) { clearInterval(id); clearTimeout(id); }
@@ -282,7 +348,8 @@ export class FauxCoupe {
   // ─── Branchement ─────────────────────────────────────────────────────
 
   brancher(ws) {
-    const cnx = { url: ws.url(), messages: [], compte: null, version: null, dernierPing: 0, pingRecuA: 0, ws, salle: null, ferme: false, muet: false };
+    // `envoyes` : messages partis vers l'app, sauf `state` et `pong` (30 par seconde)
+    const cnx = { url: ws.url(), messages: [], envoyes: [], compte: null, version: null, dernierPing: 0, pingRecuA: 0, ws, salle: null, ferme: false, muet: false };
     cnx.envoyer = (obj) => this.envoyer(cnx, obj);
     this.connexions.push(cnx);
     if (this.injoignable) {
@@ -311,6 +378,7 @@ export class FauxCoupe {
   envoyer(cnx, obj) {
     if (cnx.ferme) return;
     if (cnx.muet && (obj.t === 'state' || obj.t === 'pong')) return;
+    if (obj.t !== 'state' && obj.t !== 'pong') cnx.envoyes.push(obj);
     const salle = cnx.salle;
     if (salle) {
       if (obj.t === 'goal' && Array.isArray(obj.sc)) salle.etat = { ...salle.etat, ph: 'goal', pt: 0, sc: obj.sc };
@@ -417,6 +485,8 @@ export class FauxCoupe {
     if (!salle || salle.cnx !== cnx) return;
     salle.cnx = null;
     if (salle.phase === 'over') { this.fermerSalle(salle); return; }
+    // Salle d'attente d'un tournoi : retirée (un nouveau `tjoin` en rouvre une)
+    if (salle.phase === 'wait' && salle.tour) { this.fermerSalle(salle); return; }
     // Invité d'une salle d'attente : retiré (il rejoindra de nouveau par le lien)
     if (salle.phase === 'wait' && salle.you === 1) { this.fermerSalle(salle); return; }
     salle.absentDepuis = Date.now();
@@ -463,6 +533,8 @@ export class FauxCoupe {
       // (`avantMatchCd`), 3 après un retour
       ...(reprise ? { cd: 3, resume: true } : this.avantMatchCd ? { cd: this.avantMatchCd } : {}),
       ...regles,
+      // Tournoi : `tour` (nom, tour, échéance) et le lien de la salle s'il y en a un
+      ...(salle.tour ? { tour: salle.tour, ...(salle.lien ? { link: salle.lien } : {}) } : {}),
     });
   }
 
@@ -483,7 +555,7 @@ export class FauxCoupe {
     salle.absentDepuis = null;
     cnx.salle = salle;
     if (salle.phase === 'wait') {
-      cnx.envoyer({ t: 'room', code: salle.code, link: salle.lien, side: salle.you, ...(salle.invited ? { invited: salle.invited } : {}) });
+      cnx.envoyer({ t: 'room', code: salle.code, link: salle.lien, side: salle.you, ...(salle.invited ? { invited: salle.invited } : {}), ...(salle.tour ? { tour: salle.tour } : {}) });
       if (salle.adversairePret) this.coupDEnvoi(salle);
       return;
     }
@@ -554,10 +626,61 @@ export class FauxCoupe {
 
     const salle = cnx.salle;
     switch (m.t) {
-      case 'ping':
+      case 'ping': {
         cnx.dernierPing = Number(m.c) || 0;
         cnx.pingRecuA = Date.now();
         cnx.envoyer({ t: 'pong', c: m.c, s: this.heure(cnx) });
+        // `tjoin` arrivé avant l'heure de cette connexion : l'échéance `fa` est maintenant datable
+        const tjoin = cnx.tjoinEnAttente;
+        cnx.tjoinEnAttente = null;
+        if (tjoin) this.repondre(cnx, tjoin);
+        break;
+      }
+      case 'tjoin': {
+        const t = this.tournoi;
+        if (cnx.version !== 3) {
+          cnx.envoyer({ t: 'error', code: 'update_required' });
+          break;
+        }
+        if (t.refus && (t.refusFois == null || t.refusFois > 0)) {
+          if (t.refusFois != null) t.refusFois -= 1;
+          cnx.envoyer({ t: 'error', code: t.refus });
+          break;
+        }
+        if (m.m !== t.match) {
+          cnx.envoyer({ t: 'error', code: 't_not_found' });
+          break;
+        }
+        // Match en cours dont ce joueur est parti : `tjoin` le reprend, comme `resume`
+        const enCours = [...this.salles].reverse().find((sa) => sa.tourMid === m.m && sa.phase === 'match'
+          && sa.absentDepuis != null && Date.now() - sa.absentDepuis <= this.delaiReprise);
+        if (enCours) {
+          if (this.retenirReprise) { this.reprisesEnAttente.push({ cnx, salle: enCours }); break; }
+          this.reprendre(cnx, enCours);
+          break;
+        }
+        if (this.heureConnue(cnx) == null) {
+          cnx.tjoinEnAttente = m;
+          break;
+        }
+        // Échéance du forfait : posée au premier `tjoin` (la base fait foi ensuite) ; passée :
+        // personne ne rejoint plus (le vrai serveur : `t_closed`)
+        const heure = this.heure(cnx);
+        if (t.echeance == null) t.echeance = Math.round(heure + t.forfaitDans);
+        if (heure >= t.echeance) {
+          cnx.envoyer({ t: 'error', code: 't_closed' });
+          break;
+        }
+        const nouvelle = this.nouvelleSalle(cnx, { you: t.you, adversaire: KEVIN, lien: t.avecLien ? LIEN_TOURNOI : null });
+        nouvelle.tourMid = t.match;
+        nouvelle.tour = { name: t.nom, label: t.tour, fa: t.echeance, ...(t.opp ? { opp: t.opp } : {}) };
+        cnx.envoyer({ t: 'room', code: CODE_MATCH, ...(nouvelle.lien ? { link: nouvelle.lien } : {}), side: t.you, tour: nouvelle.tour });
+        if (t.adversairePresent) this.rejoint(cnx);
+        break;
+      }
+      case 'rematch':
+        // Jamais de revanche dans une salle de tournoi (une salle ordinaire : le test pousse le `start`)
+        if (salle?.tour) cnx.envoyer({ t: 'error', code: 'rematch_off' });
         break;
       case 'create':
         if (this.refusCreation) {
@@ -659,7 +782,13 @@ export class FauxCoupe {
             delta[1 - salle.you] = 3;
             fin.points = { ...fin.points, delta: fin.points.delta || delta };
           }
-          cnx.envoyer({ t: 'end', winner: fin.cancelled ? null : 1 - salle.you, sc: salle.etat.sc, ...fin });
+          // Tournoi : un abandon est toujours un forfait, jamais « annulé » ; pendant la séance de
+          // tirs au but, la fin porte aussi leur score (`so`, par côté du serveur)
+          const so = salle.tour && Array.isArray(salle.etat.so)
+            ? { so: salle.etat.so.map((l) => l.reduce((n, v) => n + (v ? 1 : 0), 0)) }
+            : {};
+          const tour = salle.tour ? { tour: true, cancelled: false, ...so } : {};
+          cnx.envoyer({ t: 'end', winner: fin.cancelled && !salle.tour ? null : 1 - salle.you, sc: salle.etat.sc, ...fin, ...tour });
         }
         if (salle) this.fermerSalle(salle);
         break;

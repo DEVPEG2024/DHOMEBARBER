@@ -141,6 +141,68 @@ export const GAME_CSS = `
   .cdg-v2-gauge[data-live] .cdg-v2-gauge-label { font-size: 12px; letter-spacing: .04em; }
 }
 
+/* Tirs au but d'un match de tournoi (ShootoutBar) : à la place de la bande du règlement v2, même
+   hauteur (47 px). Pastilles : but (or), raté (croix rouge), tir en cours (anneau rouge), à venir
+   (pointillés) ; nombre de buts à côté ; noms et tireur sur la deuxième rangée */
+.cdg-so .cdg-v2-side { gap: 6px; }
+.cdg-so-pips { flex: none; display: flex; gap: 3px; }
+.cdg-so-pip { position: relative; display: block; width: 14px; height: 14px; border-radius: 50%; box-sizing: border-box; border: 1.5px dashed ${blanc(0.3)}; }
+.cdg-so-pip[data-k="goal"] { border: 0; background: var(--cdg-or); }
+.cdg-so-pip[data-k="miss"] { border: 1.5px solid var(--cdg-gris-sombre); background: var(--cdg-noir3); }
+.cdg-so-pip[data-k="miss"]::before, .cdg-so-pip[data-k="miss"]::after { content: ""; position: absolute; left: 50%; top: 50%; width: 8px; height: 2px;
+  margin: -1px 0 0 -4px; border-radius: 1px; background: var(--cdg-rouge-vif); transform: rotate(45deg); }
+.cdg-so-pip[data-k="miss"]::after { transform: rotate(-45deg); }
+.cdg-so-pip[data-k="next"] { border: 2px solid var(--cdg-rouge); box-shadow: 0 0 0 3px ${alpha(C.rouge, 0.25)}; }
+.cdg-so-n { flex: none; min-width: 10px; text-align: center; font: 800 18px/22px var(--cdg-display); font-variant-numeric: tabular-nums; color: var(--cdg-blanc); }
+.cdg-so-n.cdg-me { color: var(--cdg-rouge-vif); }
+.cdg-so-name { flex: none; max-width: 104px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  font: 800 13px/14px var(--cdg-display); letter-spacing: .06em; text-transform: uppercase; color: var(--cdg-blanc); }
+.cdg-so-name.cdg-me { color: var(--cdg-rouge-vif); }
+@media (max-width: 359px) {
+  .cdg-so-pip { width: 11px; height: 11px; }
+  .cdg-so-pip[data-k="miss"]::before, .cdg-so-pip[data-k="miss"]::after { width: 6px; margin-left: -3px; }
+  .cdg-so-pips { gap: 2px; }
+  .cdg-so-name { max-width: 64px; font-size: 12px; letter-spacing: .03em; }
+}
+
+/* Match de tournoi : coupe d'or devant le tour, dans la barre du haut */
+.cdg-hud-label.cdg-hud-tour { display: inline-flex; align-items: center; justify-content: center; gap: 6px; color: var(--cdg-blanc); }
+.cdg-hud-tour svg { flex: none; color: var(--cdg-or); }
+.cdg-hud-tour span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* Salle d'attente d'un tournoi (TournamentWaiting, planche écran 6) : bandeau rouge du tour, les
+   deux pions face à face, compte à rebours du forfait */
+.cdg-tw { gap: 14px; }
+.cdg-tw .cdg-eyebrow { margin-top: 6px; }
+.cdg-tw-band { margin: -4px -20px 0; width: calc(100% + 40px); height: 42px; display: flex; align-items: center; justify-content: center; gap: 10px;
+  background: linear-gradient(90deg, ${alpha(C.rougeSombre, 0)}, ${C.rougeSombre} 20%, ${C.rouge} 50%, ${C.rougeSombre} 80%, ${alpha(C.rougeSombre, 0)});
+  font: 800 21px/1 var(--cdg-display); letter-spacing: .14em; text-transform: uppercase; color: var(--cdg-blanc); }
+.cdg-tw-band svg { flex: none; color: var(--cdg-or); }
+.cdg-tw-band span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cdg-tw-vs { width: 100%; display: flex; align-items: center; justify-content: center; gap: 12px; }
+.cdg-tw-side { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.cdg-tw-name { max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  font: 800 18px/1.05 var(--cdg-display); letter-spacing: .05em; text-transform: uppercase; }
+.cdg-tw .cdg-wait { font-size: 15px; letter-spacing: .06em; }
+.cdg-tw-mark { flex: none; font: 800 34px/1 var(--cdg-display); color: var(--cdg-or); }
+.cdg-tw-title { text-align: center; }
+.cdg-tw-clock { margin: 0; text-align: center; font-size: 14px; line-height: 1.45; color: var(--cdg-gris-clair); }
+.cdg-tw-left { color: var(--cdg-blanc); font-variant-numeric: tabular-nums; }
+@media (max-width: 359px) {
+  .cdg-tw-name { font-size: 16px; letter-spacing: .03em; }
+  .cdg-tw-band { font-size: 19px; letter-spacing: .1em; }
+}
+@media (max-height: 640px) {
+  .cdg-tw { gap: 10px; }
+  .cdg-tw-band { height: 36px; font-size: 18px; }
+}
+
+/* Avant-match d'un tournoi : coupe d'or et tour à la place de « Match en ligne », nom du tournoi */
+.cdg-intro-tour { margin: 0; display: flex; align-items: center; gap: 8px; font: 800 18px/1 var(--cdg-display); letter-spacing: .14em;
+  text-transform: uppercase; color: var(--cdg-blanc); }
+.cdg-intro-tour svg { flex: none; color: var(--cdg-or); }
+.cdg-intro-tname { margin: 0; font: 600 11px/1 var(--cdg-body); letter-spacing: .14em; text-transform: uppercase; color: var(--cdg-gris-clair); }
+
 /* Bandeaux du règlement v2 (RulesBanner) : un à la fois sur le terrain, jamais dans le canvas.
    Milieu du terrain par défaut ; au-dessus de la bannière « BUT ! » du dessin pour un but ou le
    but en or ; loin du point de penalty et du tireur pour une faute (--cdg-pitch-top et
@@ -158,7 +220,7 @@ export const GAME_CSS = `
   font: 600 13.5px/1.3 var(--cdg-body); color: var(--cdg-blanc); }
 .cdg-banner span.cdg-banner-sub2 { color: var(--cdg-or); font-weight: 700; }
 .cdg-banner[data-kind="foul"] strong, .cdg-banner[data-kind="warn"] strong,
-.cdg-banner[data-kind="penalty"] strong, .cdg-banner[data-kind="gold"] strong { color: var(--cdg-or); }
+.cdg-banner[data-kind="penalty"] strong, .cdg-banner[data-kind="gold"] strong, .cdg-banner[data-kind="shootout"] strong { color: var(--cdg-or); }
 .cdg-banner[data-kind="elec"] strong { color: ${C.elecClair}; text-shadow: 0 .07em 0 rgba(10, 40, 90, .95), 0 0 22px ${alpha(C.elec, 0.6)}; }
 .cdg-banner[data-kind="fire"] strong { color: ${C.feuClair}; text-shadow: 0 .07em 0 ${alpha(C.rougeSombre, 0.95)}, 0 0 22px ${alpha(C.feu, 0.55)}; }
 

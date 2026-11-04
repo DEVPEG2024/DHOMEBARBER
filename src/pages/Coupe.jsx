@@ -6,8 +6,8 @@ import { toast } from 'sonner';
 import { useAuth } from '@/lib/AuthContext';
 import { hapticFeedback } from '@/lib/capacitor';
 import {
-  COUPE_ENABLED_KEY, invalidateCoupe, useCoupeBarbers, useCoupeLeaderboard, useCoupeMe, useCoupeMusic,
-  useCoupePlayers, useCoupePlayersEnabled,
+  COUPE_ENABLED_KEY, invalidateCoupe, noteTournamentMatchFinished, noteTournamentMatchLeft, useCoupeBarbers,
+  useCoupeLeaderboard, useCoupeMe, useCoupeMusic, useCoupePlayers, useCoupePlayersEnabled,
 } from '@/lib/coupe/coupeApi';
 import { RESUME_EVENT, readPendingResume } from '@/lib/coupe/onlineMatch';
 import { preloadStadium } from '@/lib/coupe/stadiumImage';
@@ -20,6 +20,7 @@ import OpponentTabs from '@/components/coupe/hub/OpponentTabs';
 import { BotPanel, LocalPanel, MODES, ModePicker, StepTitle } from '@/components/coupe/hub/PlayModes';
 import LeaderboardPreview from '@/components/coupe/hub/LeaderboardPreview';
 import SettingsCard from '@/components/coupe/hub/SettingsCard';
+import TournamentCard from '@/components/coupe/tournoi/TournamentCard';
 import { TrophyIcon } from '@/components/coupe/hub/icons';
 import {
   BOT_LEVELS, ROLE_BARBER, ROLE_SALON, ROLE_USER, hasAppHistory, homeFor, isCoupeClosed, roleOfUser,
@@ -47,7 +48,9 @@ import {
  * Partie ouverte : l'écran de jeu (`CoupeGame`, plein écran) remplace l'accueil.
  *  - Par l'adresse (contrat 5.1) : `?defi=<lien>` (défi reçu), `?challenge=<employee_id>` (bouton
  *    « Défier » du profil d'un barber), `?player=<key_hash>` (« Défier » de la liste des joueurs),
- *    `?mode=bot&level=apprenti|barber|boss`, `?mode=local`.
+ *    `?mode=bot&level=apprenti|barber|boss`, `?mode=local`, `?tmatch=<match>&tournoi=<tournoi>`
+ *    (« Jouer mon match » d'un tournoi, docs/fonctions/coupe-tournois-contrat.md, section 6 : la
+ *    sortie revient au tableau du tournoi, `/coupe/tournoi/<tournoi>`).
  *  - Depuis l'accueil : une entrée d'historique est ajoutée (mêmes paramètres ; état `coupeAction`
  *    pour « Défier un ami » et « J'ai un code ») : le retour du navigateur (ou d'Android, quand le
  *    jeu ne l'a pas pris) ramène à l'accueil de la Coupe, pas à la page d'avant.
@@ -65,9 +68,18 @@ const LINK_RE = /^[A-Za-z0-9]{4,64}$/;
 const EMPLOYEE_RE = /^[A-Za-z0-9-]{1,64}$/;
 // Clé publique d'un joueur de la liste (GET /coupe/players)
 const PLAYER_RE = /^[0-9a-f]{32}$/;
+// Ids d'un match et d'un tournoi (UUID du serveur, un peu de marge)
+const TOURNAMENT_ID_RE = /^[A-Za-z0-9-]{1,64}$/;
 
 /** Partie demandée par l'adresse ou par l'entrée d'historique posée par l'accueil ; null sinon. */
 function gameFromLocation(params, state) {
+  const tmatch = params.get('tmatch');
+  if (tmatch !== null) {
+    const tournoi = params.get('tournoi');
+    return TOURNAMENT_ID_RE.test(tmatch) && TOURNAMENT_ID_RE.test(String(tournoi ?? ''))
+      ? { mode: 'online', action: { t: 'tournament', matchId: tmatch, tournamentId: tournoi } }
+      : { invalid: 'tournament' };
+  }
   const defi = params.get('defi');
   if (defi !== null) {
     return LINK_RE.test(defi) ? { mode: 'online', action: { t: 'defi', link: defi } } : { invalid: 'defi' };
@@ -271,6 +283,8 @@ function CoupeHub({ openGame }) {
             <ResumeBanner key={pendingResume.link} entry={pendingResume} onResume={() => openGame('', { coupeAction: { t: 'resume' } })} />
           )}
           <PointsCard query={meQuery} isSalon={isSalon} />
+          {/* Prochain tournoi ou tournoi en cours ; rien sans `features.coupeTournaments` */}
+          <TournamentCard />
           <section aria-labelledby="coupe-etape1">
             <StepTitle n={1} id="coupe-etape1">Comment tu joues ?</StepTitle>
             <ModePicker value={choice.mode} onChange={(mode) => setChoice({ mode })} eligible={eligible} labelledBy="coupe-etape1" />
@@ -332,7 +346,10 @@ export default function Coupe() {
   const invalid = game?.invalid || null;
   useEffect(() => {
     if (!invalid) return;
-    toast.error(invalid === 'defi' ? 'Ce lien de défi n’est pas valable.' : 'Ce défi n’est pas valable.');
+    toast.error({
+      defi: 'Ce lien de défi n’est pas valable.',
+      tournament: 'Ce match de tournoi n’est pas valable.',
+    }[invalid] || 'Ce défi n’est pas valable.');
     navigate('/coupe', { replace: true });
   }, [invalid, navigate]);
 
@@ -342,24 +359,45 @@ export default function Coupe() {
     navigate({ pathname: '/coupe', search }, { state: { ...state, coupeFromHub: true } });
   }, [navigate]);
 
-  // Sortie du jeu, une seule fois par partie (un double appel reculerait de deux pages)
+  // Sortie du jeu, une seule fois par partie (un double appel reculerait de deux pages). Match de
+  // tournoi : retour au tableau du tournoi (la page d'avant si on en vient, sinon son adresse) ; le
+  // match quitté est retenu : le tableau d'avant le match (cache) n'y propose jamais « Jouer mon
+  // match », la page attend sa relecture (CoupeTournoi.jsx)
   const exitedRef = useRef(null);
   const fromHub = !!location.state?.coupeFromHub;
+  const fromTournament = !!location.state?.coupeFromTournament;
+  const tournamentId = game?.action?.t === 'tournament' ? game.action.tournamentId : null;
+  const tournamentMatchId = game?.action?.t === 'tournament' ? game.action.matchId : null;
   const closeGame = useCallback(() => {
     if (exitedRef.current === location.key) return;
     exitedRef.current = location.key;
     invalidateCoupe(queryClient);
+    if (tournamentId) {
+      noteTournamentMatchLeft(tournamentId, tournamentMatchId);
+      if (fromTournament) navigate(-1);
+      else navigate(`/coupe/tournoi/${encodeURIComponent(tournamentId)}`, { replace: true });
+      return;
+    }
     if (fromHub) navigate(-1);
     else navigate('/coupe', { replace: true });
-  }, [fromHub, location.key, navigate, queryClient]);
+  }, [fromHub, fromTournament, tournamentId, tournamentMatchId, location.key, navigate, queryClient]);
 
-  const onFinished = useCallback(() => { invalidateCoupe(queryClient); }, [queryClient]);
+  const onFinished = useCallback(() => {
+    if (tournamentMatchId) noteTournamentMatchFinished(tournamentMatchId);
+    invalidateCoupe(queryClient);
+  }, [tournamentMatchId, queryClient]);
 
   if (game && !game.invalid) {
     // `data-coupe-*` : ce que l'accueil transmet au jeu, lu par e2e/coupe-accueil.spec.js (l'écran de
     // jeu lui-même est vérifié par e2e/coupe.spec.js)
     return (
-      <div data-coupe-partie={game.mode} data-coupe-action={game.action?.t} data-coupe-niveau={game.level}>
+      <div
+        data-coupe-partie={game.mode}
+        data-coupe-action={game.action?.t}
+        data-coupe-niveau={game.level}
+        data-coupe-tmatch={game.action?.matchId}
+        data-coupe-tournoi={game.action?.tournamentId}
+      >
         <Suspense fallback={<GameLoading />}>
           <CoupeGame
             key={location.key}

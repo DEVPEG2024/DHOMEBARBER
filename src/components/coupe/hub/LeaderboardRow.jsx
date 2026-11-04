@@ -2,6 +2,7 @@ import React from 'react';
 import { COUPE_COLORS } from '../palette';
 import PlayerAvatar, { RoleMark } from './PlayerAvatar';
 import { ROLE_BARBER, ROLE_SALON, num, rankSuffix } from './coupeFormat';
+import { TrophyIcon } from './icons';
 
 /**
  * Une ligne du classement de la Coupe (maquettes « Accueil de la Coupe », « CoupeAccueilRouge » et
@@ -12,12 +13,26 @@ import { ROLE_BARBER, ROLE_SALON, num, rankSuffix } from './coupeFormat';
  *
  * `variant` : `preview` (accueil, sans bilan) ou `row` (classement, avec « 24 V · 3 D »).
  * `onOpen(row)` : la ligne d'un autre joueur ouvre sa fiche (Signaler, Bloquer).
+ * Tournois gagnés (`titles`, 3 nov. 2026) : une petite coupe d'or et le nombre, à côté du nom ;
+ * rien sans titre.
  */
 // Aperçu de l'accueil : la 1re place en or, les deux suivantes en blanc (maquette)
 const PLACE_COLORS = { 1: COUPE_COLORS.or, 2: COUPE_COLORS.blanc, 3: COUPE_COLORS.blanc };
 
 export function displayName(row) {
   return row?.me && row?.role !== ROLE_SALON ? 'Toi' : String(row?.name || 'Joueur');
+}
+
+/** Petite coupe d'or et le nombre de tournois gagnés ; rien à 0. */
+export function TitlesBadge({ count, size = 13 }) {
+  const n = num(count);
+  if (n <= 0) return null;
+  return (
+    <span role="img" aria-label={`${n} ${n === 1 ? 'tournoi gagné' : 'tournois gagnés'}`} className="inline-flex shrink-0 items-center gap-0.5 text-[color:var(--coupe-or)]">
+      <TrophyIcon size={size} strokeWidth={2.2} />
+      <span className="font-fut text-[13px] font-extrabold leading-none" aria-hidden="true">{n}</span>
+    </span>
+  );
 }
 
 export function RankNumber({ rank, className = '', style }) {
@@ -50,6 +65,7 @@ export default function LeaderboardRow({ row, variant = 'row', onOpen = null, la
         <span className={`flex min-w-0 items-center gap-1.5 text-sm ${mine ? 'font-bold' : 'font-semibold'}`}>
           <span className="truncate">{displayName(row)}</span>
           <RoleMark role={row.role} size={preview ? 14 : 12} />
+          <TitlesBadge count={row.titles} size={preview ? 14 : 13} />
         </span>
         {!preview && (
           <span className={`text-[11.5px] leading-none ${mine ? 'text-[color:var(--coupe-gris-clair)]' : 'text-[color:var(--coupe-gris)]'}`}>

@@ -2,6 +2,7 @@ import React from 'react';
 import { WARN_MAX } from '@/lib/coupe/engine';
 import { EVENT_NAMES } from './rulesV2';
 import { mmss } from './format';
+import { shootoutPips, soGoals, suddenDeath } from './tournament';
 
 /*
  * Écran de match du règlement v2 (planche « Écran de match » du 31 oct. 2026, contrat :
@@ -112,6 +113,62 @@ export function RulesBar({ ui, names, score, local = false, fillRef }) {
           </span>
         )}
         <WarnPips n={ui.warn[1]} label={`Avertissements, ${names[1]} : ${ui.warn[1]} sur ${WARN_MAX}`} />
+      </div>
+    </div>
+  );
+}
+
+/** Pastilles des tirs au but d'un joueur : but (or), raté (croix rouge), en cours, à venir. */
+function ShotPips({ pips, label }) {
+  return (
+    <span className="cdg-so-pips" role="img" aria-label={label}>
+      {pips.map((k, i) => <i key={i} className="cdg-so-pip" data-k={k} />)}
+    </span>
+  );
+}
+
+const tirs = (n) => `${n} ${n > 1 ? 'tirs' : 'tir'}`;
+
+/**
+ * Bande des tirs au but d'un match de tournoi (planche des tournois, écran 7), à la place de
+ * `RulesBar` et à sa hauteur (47 px : le terrain ne bouge pas quand la séance commence) :
+ * « Tirs au but » au milieu, les tirs de chacun en pastilles (les 4 derniers tours au plus) et son
+ * nombre de buts ; dessous, son nom et qui tire (« À toi de tirer · 3 s », « Garde ta ligne »). Le
+ * score du match reste celui de l'égalité (cadre du terrain). `shots` : [mes tirs, les siens] (1
+ * but, 0 raté) ; `ui` : la bande du règlement v2 (penalty en cours, tireur, compte) ; `names` : [bas, haut].
+ */
+export function ShootoutBar({ shots, ui, names }) {
+  const pen = ui?.mode === 'pen';
+  const shooter = pen ? (ui.penS === 1 ? 1 : 0) : null;
+  const pips = shootoutPips(shots, shooter);
+  const a = Array.isArray(shots?.[0]) ? shots[0] : [];
+  const b = Array.isArray(shots?.[1]) ? shots[1] : [];
+  const ga = soGoals(a);
+  const gb = soGoals(b);
+  const secs = pen && ui.digit ? ` · ${ui.digit} s` : '';
+  let line;
+  if (shooter === 0) line = ui.shot ? 'Tir parti' : `À toi de tirer${secs}`;
+  else if (shooter === 1) line = `Garde ta ligne${secs}`;
+  else line = suddenDeath([a, b]) ? 'Mort subite : un tir chacun' : '3 tirs chacun, chacun son tour';
+  return (
+    <div className="cdg-v2 cdg-so" role="group" aria-label="Tirs au but">
+      <div className="cdg-v2-row cdg-v2-top">
+        <span className="cdg-v2-side">
+          <ShotPips pips={pips[0]} label={`${names[0]} : ${ga} ${ga > 1 ? 'buts' : 'but'} sur ${tirs(a.length)}`} />
+          <b className="cdg-so-n cdg-me" aria-hidden="true">{ga}</b>
+        </span>
+        <span className="cdg-v2-mid">
+          <span className="cdg-v2-chip cdg-v2-pen"><span>Tirs au but</span></span>
+        </span>
+        <span className="cdg-v2-side">
+          <b className="cdg-so-n" aria-hidden="true">{gb}</b>
+          <ShotPips pips={pips[1]} label={`${names[1]} : ${gb} ${gb > 1 ? 'buts' : 'but'} sur ${tirs(b.length)}`} />
+        </span>
+      </div>
+      <div className="cdg-v2-row cdg-v2-low">
+        <span className="cdg-so-name cdg-me">{names[0]}</span>
+        <span className="cdg-v2-line">{line}</span>
+        <span className="cdg-so-name">{names[1]}</span>
       </div>
     </div>
   );

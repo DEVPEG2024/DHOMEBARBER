@@ -1,4 +1,5 @@
 import React from 'react';
+import { Trophy } from 'lucide-react';
 import Pawn from './Pawn';
 
 /*
@@ -14,6 +15,8 @@ import Pawn from './Pawn';
  * `players` : [toi (ou le joueur du bas), l'adversaire (ou le joueur du haut)], chacun
  * { name, role, tag?, photo?, label } ; `label` est écrit sous la pastille, `photo` (client) dedans.
  * `goals` : buts pour gagner (3, ou 5 en règlement v2, d'après le coup d'envoi du match).
+ * `tour` : match de tournoi ({ name, label }) : le tour (« Quart de finale ») et le nom du tournoi à
+ * la place de « Match en ligne » (planche des tournois, écran 6), et ce qui se passe à égalité.
  */
 
 const MODE_LINES = {
@@ -31,7 +34,7 @@ function Side({ player, tone }) {
   );
 }
 
-export default function MatchIntro({ fx, mode = 'online', players = [], goals = 3 }) {
+export default function MatchIntro({ fx, mode = 'online', players = [], goals = 3, tour = null }) {
   if (!fx) return null;
   const out = fx.endsWith('-out') ? ' cdg-out' : '';
 
@@ -45,13 +48,23 @@ export default function MatchIntro({ fx, mode = 'online', players = [], goals = 
 
   const online = mode !== 'bot' && mode !== 'local';
   return (
-    <div className={`cdg-intro${out}`} aria-hidden="true">
+    <div className={`cdg-intro${out}`} aria-hidden="true" data-tour={tour ? '' : undefined}>
       <div className="cdg-intro-band">
         <p className="cdg-intro-title">La <span>Coupe</span> du Gang</p>
-        <p className="cdg-intro-mode">
-          <span className="cdg-intro-dot" />
-          {MODE_LINES[mode] || MODE_LINES.online}
-        </p>
+        {tour ? (
+          <>
+            <p className="cdg-intro-tour">
+              <Trophy className="h-[18px] w-[18px]" />
+              {tour.label || 'Match de tournoi'}
+            </p>
+            {tour.name && <p className="cdg-intro-tname">{tour.name}</p>}
+          </>
+        ) : (
+          <p className="cdg-intro-mode">
+            <span className="cdg-intro-dot" />
+            {MODE_LINES[mode] || MODE_LINES.online}
+          </p>
+        )}
       </div>
       <div className="cdg-vs">
         <div className="cdg-vs-row">
@@ -62,7 +75,8 @@ export default function MatchIntro({ fx, mode = 'online', players = [], goals = 
         <p className="cdg-vs-rules">
           Premier à {goals} buts ·{' '}
           {/* Les droits aux points ne sont connus qu'à la fin du match (carte Gang d'un client) */}
-          {online ? <><b>+3</b> à la victoire, −1 à la défaite quand vous y avez droit tous les deux</> : 'match amical'}
+          {tour ? 'égalité après le but en or : tirs au but'
+            : online ? <><b>+3</b> à la victoire, −1 à la défaite quand vous y avez droit tous les deux</> : 'match amical'}
         </p>
       </div>
     </div>

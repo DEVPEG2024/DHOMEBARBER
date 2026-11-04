@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pause, Volume2, VolumeX, X } from 'lucide-react';
+import { Pause, Trophy, Volume2, VolumeX, X } from 'lucide-react';
 
 export const REACTIONS = [
   { r: 0, emoji: '👏', label: 'Bravo' },
@@ -26,15 +26,23 @@ function PingBadge({ ping }) {
 
 /**
  * Barre du haut pendant un match : quitter (en ligne) ou pause (hors ligne), le mode, la
- * connexion (en ligne), le son. `diag` : ligne de diagnostic de l'écran d'essai.
+ * connexion (en ligne), le son. `diag` : ligne de diagnostic de l'écran d'essai. `tour` : match
+ * de tournoi, le tour (« Quart de finale ») à la place du mode, derrière une coupe d'or.
  */
-export function GameHud({ online, label, onLeft, ping, soundOn, onToggleSound, diag }) {
+export function GameHud({ online, label, onLeft, ping, soundOn, onToggleSound, diag, tour = false }) {
   return (
     <header className="cdg-hud">
       <button type="button" className="cdg-icon" onClick={onLeft} aria-label={online ? 'Quitter le match' : 'Pause'}>
         {online ? <X className="h-5 w-5" aria-hidden="true" /> : <Pause className="h-[18px] w-[18px]" aria-hidden="true" />}
       </button>
-      <p className="cdg-hud-label">{label}</p>
+      {tour ? (
+        <p className="cdg-hud-label cdg-hud-tour">
+          <Trophy className="h-4 w-4" aria-hidden="true" />
+          <span>{label}</span>
+        </p>
+      ) : (
+        <p className="cdg-hud-label">{label}</p>
+      )}
       {online && <PingBadge ping={ping} />}
       <button
         type="button"

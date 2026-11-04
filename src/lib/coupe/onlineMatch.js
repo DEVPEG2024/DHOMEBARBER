@@ -86,6 +86,35 @@
  *  - cages qui bougent : `getFrame().goalOff` donne la cage du bas à l'heure présente et celle du
  *    haut à l'heure de la vue adverse, celles où le ballon affiché les rencontre ; la ligne de but
  *    du ballon affiché suit ces décalages.
+ *
+ * Tournois (3 nov. 2026, docs/fonctions/coupe-tournois-contrat.md, sections 4 et 5) :
+ *  - `tournament(idMatch, { tournamentId, opponent })` : `tjoin {m}` après `hello` ; refus `t_not_found`,
+ *    `t_not_player`, `t_not_ready`, `t_closed` (match fini, exempt, échéance du forfait passée, ou
+ *    fermé par le serveur : forfait, décision de l'admin, tournoi annulé ; un texte neutre, le
+ *    résultat est sur le tableau), et ceux d'aujourd'hui (`already_playing`, `rate_limited`,
+ *    `server_full`, `server_error`, `room_expired`, `update_required`). Le premier arrivé attend
+ *    (`room` avec `tour {name, label, fa, opp}` : salle d'attente sans code à partager, compte à
+ *    rebours jusqu'au forfait `fa`, horloge du serveur comme `pong.s` et `state.s`), le second
+ *    arrivé lance le match (`start`, qui porte aussi `tour`) ;
+ *  - `t_not_ready` (match pas encore jouable, ou serveur qui vient de redémarrer) : la connexion
+ *    reste ouverte, `ui.notReady` = { until } (status 'connecting') et `tjoin` repart tout seul
+ *    toutes les 3 s, 30 s au plus depuis le premier refus ; ensuite l'erreur avec « Réessayer » (une
+ *    seule demande). Fenêtre rouverte par `room` ou `start` (un redémarrage plus tard en a une) ;
+ *  - `ui.tour` : { name, label, until (échéance du forfait, heure de l'appareil, null tant que
+ *    l'horloge n'est pas connue), opp, oppRole } ; l'adversaire : `tour.opp` du serveur d'abord, puis
+ *    celui donné par la page (action, cache du tournoi) ; `tour` absent du serveur : rien ne change ;
+ *  - coupure : la reprise d'aujourd'hui (`resume {link}` si la salle a donné son lien), sinon (ou si
+ *    `resume` répond `no_room`) un nouveau `tjoin`, que le serveur traite comme une reprise ; salle
+ *    d'attente coupée : `tjoin` aussi. Page cachée dans la salle d'attente : la connexion reste
+ *    ouverte (présence comptée au forfait) ; jamais de défi reçu par-dessus ;
+ *  - tirs au but (but en or fini sans but) : `shootout {first}`, `state.so` (tirs de chacun par
+ *    côté du serveur, 1 but, 0 raté) dès le début, puis pour chaque tir le penalty du règlement v2
+ *    (phase `pen`, `live` avec `md ['pen', s, …]`, `pen_end {r}`) ; tir marqué : phase `goal` sans
+ *    message `goal`, `sc` inchangé ; reprise : `start {resume}` sans nouveau `shootout` (les tirs
+ *    reviennent par `state.so`). `ui.shootout` = { first, shots: [mes tirs, les siens] } (repère local) ;
+ *  - fin : `end.tour` et `end.so` → `result.tour`, `result.so` [moi, l'adversaire] ; un vainqueur
+ *    toujours (« annulé » ne vaut que pour les points), jamais de revanche (`rematch_off`). Forfait
+ *    pendant la séance : `end.so` ET `end.forfeit` (l'écran de fin regarde `forfeit` d'abord).
  */
 import {
   W, H, GL, GR, BR, PR, STEP, HUMAN_SPEED, KEEP_LIMIT, BALL_MAX, GOALS_TO_WIN,
@@ -225,6 +254,17 @@ const nearBorder = (b) => b.x <= BR + PIN_BAND || b.x >= W - BR - PIN_BAND || b.
 // 2026 : avec la bande du jeu normal, 9 à 13 sauts de 40 à 80 unités par match et les 100 premières
 // unités du tir jamais montrées)
 const PEN_BAND = 40;
+// Tournois : identifiant d'un match ou d'un tournoi (uuid du serveur, même marge que l'adresse lue
+// par Coupe.jsx)
+const TOUR_ID_RE = /^[A-Za-z0-9-]{1,64}$/;
+// Échéance du forfait recalculée quand l'horloge estimée bouge de plus de 0,5 s
+const TOUR_DRIFT_MS = 500;
+// Tirs au but : au plus 30 tirs gardés par joueur (mort subite)
+const SO_MAX = 30;
+// Tournoi : `t_not_ready` (match pas encore jouable, serveur qui vient de redémarrer) : nouvel essai
+// tout seul toutes les 3 s, pendant 30 s au plus depuis le premier refus, puis « Réessayer »
+const NOT_READY_EVERY_MS = 3000;
+const NOT_READY_FOR_MS = 30000;
 // Prévision à confirmer par le serveur (voir _noteLocalFx) : montrée quand même au bout de 150 ms
 // (terrain) ou 300 ms (frappe risquée) sans démenti, les recalages pouvant être suspendus par une
 // frappe en attente
@@ -295,6 +335,18 @@ export function cleanChallengeLink(link) {
   return String(link ?? '').trim().toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, LINK_MAX);
 }
 
+// Tournoi : match fermé par le serveur (fini, exempt, échéance passée, forfait, décision de l'admin,
+// tournoi annulé). Jamais « tu passes par forfait » : l'admin a pu donner le match à l'autre, ou
+// annuler le tournoi ; le tableau dit le résultat
+const TOUR_CLOSED_TEXT = 'Ce match est terminé : le résultat est sur le tableau';
+
+/** Tournoi : salle d'attente fermée à l'échéance du forfait (texte neutre, comme `t_closed`). */
+function tourExpired(m) {
+  const t = m.ui.tour;
+  if (m.ui.status === 'room' && t?.until && Date.now() >= t.until - 1000) return TOUR_CLOSED_TEXT;
+  return 'Temps écoulé : regarde le tableau pour la suite';
+}
+
 const ERRORS = {
   unreachable: { message: 'Connexion impossible au serveur de jeu', retry: true },
   not_allowed: { message: "Le jeu en ligne n'est pas ouvert à ton compte", retry: false },
@@ -317,6 +369,8 @@ const ERRORS = {
   },
   room_expired: {
     message: (m) => {
+      // Tournoi : salle d'attente fermée à l'échéance du forfait
+      if (m.tour) return tourExpired(m);
       // Invité dont le créateur n'est pas revenu dans les 2 minutes
       if (m.ui.status === 'room' && m.ui.side === 1) return `${m.ui.waitingFor?.name || m.ui.invite?.from?.name || "L'autre joueur"} n'est pas revenu à temps`;
       return m.lastAction?.t === 'challenge' ? `${m.invitedName()} n'a pas répondu à temps` : "Personne n'a rejoint le match : le code a expiré";
@@ -340,11 +394,21 @@ const ERRORS = {
   replaced: { message: 'Ton compte a ouvert le jeu sur un autre appareil', retry: false },
   server_error: { message: 'Erreur du serveur de jeu', retry: true },
   server: { message: 'Le serveur de jeu a refusé la demande', retry: true },
+  // Tournois (`tjoin`) : retour au tableau
+  t_not_found: { message: "Ce match n'est plus disponible", retry: false },
+  t_not_player: { message: "Tu ne joues pas ce match : regarde le tableau", retry: false },
+  // Après les essais automatiques (voir _notReady) : « Réessayer »
+  t_not_ready: { message: "Ton match n'est pas encore prêt", retry: true },
+  t_closed: { message: TOUR_CLOSED_TEXT, retry: false },
+  // Salle d'attente d'un tournoi pas reprise avant l'échéance (pas un code du serveur)
+  t_lost: { message: 'Connexion perdue : regarde le tableau pour la suite', retry: false },
 };
 
 const SERVER_CODES = new Set(['not_allowed', 'disabled', 'no_room', 'own_room', 'room_expired', 'rate_limited',
   'server_full', 'update_required', 'replaced', 'server_error', 'blocked', 'barber_unavailable',
-  'player_unavailable', 'already_playing', 'idle', 'salon_vs_salon']);
+  'player_unavailable', 'already_playing', 'idle', 'salon_vs_salon',
+  't_not_found', 't_not_player', 't_not_ready', 't_closed', 'rematch_off']);
+const TOUR_CODES = new Set(['t_not_found', 't_not_player', 't_not_ready', 't_closed']);
 
 // Fermetures sans message `error` préalable (ou arrivées seules)
 const CLOSE_KINDS = {
@@ -363,6 +427,7 @@ const REMATCH_NOTES = {
   room_expired: 'Revanche expirée',
   already_playing: 'Revanche impossible : un match est déjà en cours',
   rate_limited: "Trop de matchs d'affilée : fais une pause",
+  rematch_off: 'Pas de revanche en tournoi',
 };
 // Inutile de retenter une reprise : le même jeton serait refusé de la même façon
 const FATAL_KINDS = new Set(['session', 'not_allowed', 'replaced', 'update_required', 'disabled']);
@@ -400,7 +465,50 @@ export const IDLE_UI = Object.freeze({
   rematchNote: null, // pourquoi la revanche est impossible, quand ce n'est pas un départ
   offline: false, // fin du match : connexion fermée, plus de revanche
   error: null, // { kind, code, message, retry }
+  // Match de tournoi (`room.tour`, `start.tour`) : { name, label, until, opp, oppRole }, null sinon
+  tour: null,
+  // Tournoi : `t_not_ready`, nouvel essai automatique en cours (status 'connecting') : { until }
+  // (fin des essais, heure de l'appareil, ms), null sinon
+  notReady: null,
+  // Tirs au but d'un match de tournoi : { first (tireur du premier tir, repère local, null inconnu),
+  // shots: [mes tirs, les siens] (1 but, 0 raté) }, null hors séance
+  shootout: null,
 });
+
+const cleanText = (v, max) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+
+/** `tour` d'un message du serveur (`room`, `start`) recopié champ par champ, ou null. */
+function tourOf(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const fa = Number(raw.fa);
+  return {
+    name: cleanText(raw.name, 60),
+    label: cleanText(raw.label, 40),
+    fa: Number.isFinite(fa) && fa > 0 ? fa : null,
+    opp: cleanText(raw.opp, 60) || null,
+  };
+}
+
+/** Tirs d'un côté (`state.so[i]`) : 1 but, 0 raté ; null si illisible. */
+function shotsOf(a) {
+  if (!Array.isArray(a)) return null;
+  return a.slice(-SO_MAX).map((v) => (v === 1 || v === true ? 1 : 0));
+}
+
+const sameShots = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+
+/** Match de tournoi gardé pour une reprise (entrée du stockage ou de `_remember`), ou null. */
+function tourEntry(t) {
+  if (!t || typeof t !== 'object' || !TOUR_ID_RE.test(String(t.mid || ''))) return null;
+  return {
+    mid: String(t.mid),
+    tid: TOUR_ID_RE.test(String(t.tid || '')) ? String(t.tid) : null,
+    name: cleanText(t.name, 60),
+    label: cleanText(t.label, 40),
+    opp: cleanText(t.opp, 60) || null,
+    oppRole: cleanText(t.oppRole, 20) || null,
+  };
+}
 
 // ─── Match quitté sans abandon : lien gardé pour la reprise ──────────
 
@@ -433,9 +541,12 @@ export function readPendingResume(now = Date.now()) {
     const e = JSON.parse(raw);
     const link = cleanChallengeLink(e?.link);
     const until = Number(e?.until);
-    if (link && Number.isFinite(until) && until > now) {
+    // Match de tournoi : repris par `tjoin` s'il n'a pas de lien
+    const tour = tourEntry(e?.tour);
+    if ((link || tour) && Number.isFinite(until) && until > now) {
       return {
-        link,
+        link: link || null,
+        tour,
         until,
         you: e.you === 1 ? 1 : 0,
         names: pairOf(e.names, (v) => String(v ?? '').slice(0, 60)),
@@ -502,6 +613,10 @@ export class OnlineMatch {
     // Version du protocole envoyée dans `auth` : 3, ou 2 après un `update_required` d'un serveur
     // plus ancien (gardée pour toute la vie de cet écran)
     this.proto = PROTOCOL_VERSION;
+    // Match de tournoi : { mid, tid, name, label, fa (heure du serveur), opp, oppRole }, null sinon
+    this.tour = null;
+    // Tournoi : premier `t_not_ready` de la série en cours (heure de l'appareil, ms), null sinon
+    this.notReadySince = null;
     this._resetMatch();
     // Bruits de la prédiction locale. 'fire', 'charge', 'douse' et 'short' (règlement v2) ne sortent
     // pas d'ici : ils naissent du ballon AFFICHÉ (_shownFx), une fois chacun
@@ -555,6 +670,23 @@ export class OnlineMatch {
     const key = String(keyHash ?? '').trim().toLowerCase();
     if (!/^[0-9a-f]{32}$/.test(key)) { this._failNow('player_unavailable', { t: 'challenge', key_hash: '' }); return; }
     this._begin({ t: 'challenge', key_hash: key });
+  }
+
+  /**
+   * Match de tournoi (`idMatch` : uuid du match du tableau) : `tjoin {m}` après `hello`.
+   * `opponent` : { name, role } de l'adversaire si la page du tournoi le connaît (salle d'attente
+   * « En attente de Kevin ») ; le serveur ne l'envoie qu'au coup d'envoi.
+   */
+  tournament(matchId, { tournamentId = null, opponent = null } = {}) {
+    const mid = String(matchId ?? '').trim();
+    this.tour = TOUR_ID_RE.test(mid)
+      ? {
+        ...tourEntry({ mid, tid: tournamentId, opp: opponent?.name, oppRole: opponent?.role }),
+        fa: null,
+      }
+      : null;
+    if (!this.tour) { this._failNow('t_not_found', null); return; }
+    this._begin({ t: 'tjoin', m: mid });
   }
 
   /**
@@ -612,12 +744,15 @@ export class OnlineMatch {
    */
   resumeFrom(entry) {
     const link = cleanChallengeLink(entry?.link);
-    if (!link) { this._failNow('match_over', null); return; }
+    // Match de tournoi sans lien : repris par `tjoin`
+    const tour = tourEntry(entry?.tour);
+    if (!link && !tour) { this._failNow('match_over', null); return; }
     this._endResume();
     this._teardown();
     this._resetClock();
     this.lastAction = null;
-    this.link = link;
+    this.link = link || null;
+    this.tour = tour ? { ...tour, fa: null } : null;
     this.you = entry.you === 1 ? 1 : 0;
     this._resetMatch();
     this.rules = entry.rules === RULES_V2 ? RULES_V2 : 1;
@@ -634,6 +769,7 @@ export class OnlineMatch {
       roles: Array.isArray(entry.roles) ? entry.roles.slice(0, 2) : [],
       keys: Array.isArray(entry.keys) ? entry.keys.slice(0, 2) : [],
       photos: Array.isArray(entry.photos) ? entry.photos.slice(0, 2).map(photoUrlOrNull) : [],
+      tour: this._tourUi(),
     });
     this._startResume('match', { reason: 'return', serverUntil: Number(entry.until) || null });
   }
@@ -646,7 +782,8 @@ export class OnlineMatch {
   /** Revanche : le serveur relance le match (`start`) quand les deux l'ont demandée. */
   rematch() {
     const ui = this.ui;
-    if (ui.status !== 'over' || ui.rematchAsked || ui.oppGone || ui.offline) return;
+    // Jamais de revanche dans une salle de tournoi
+    if (ui.status !== 'over' || ui.rematchAsked || ui.oppGone || ui.offline || ui.result?.tour) return;
     if (!this._send({ t: 'rematch' })) { this._set({ offline: true }); return; }
     this._set({ rematchAsked: true });
   }
@@ -990,6 +1127,8 @@ export class OnlineMatch {
     this.nextEv = null;
     this.v2At = null;
     this.penShooter = null;
+    // Tirs au but (tournoi) : { first, shots: [mes tirs, les siens] }, null hors séance
+    this.so = null;
     // Effet du ballon : celui du ballon local (prédit) et celui du ballon affiché, chacun avec
     // l'heure (serveur) où il a commencé. `mine` : donné par ma propre frappe ; `quiet` : venu d'un
     // recalage qui défait ce que ma dernière frappe venait de faire (refusée ou jugée autrement par
@@ -1501,8 +1640,80 @@ export class OnlineMatch {
       case 'foul': this._onFoul(m); break;
       case 'pen_end': this._onPenEnd(m); break;
       case 'gold': this._onGold(); break;
+      // Tournois : séance de tirs au but, tireur d'un tir (le penalty lui-même vient des états)
+      case 'shootout': this._onShootout(m); break;
+      case 'penalty': this._onPenaltyMsg(m); break;
       default: break;
     }
+  }
+
+  // ─── Tournois ────────────────────────────────────────────────────
+
+  /**
+   * Échéance du forfait sur l'horloge de l'appareil (ms), ou null tant qu'on ne sait pas la lire :
+   * `fa` est sur l'horloge du serveur de jeu (celle de `pong.s` et `state.s`), lue après un `pong`.
+   */
+  _tourUntil(fa) {
+    if (!fa || !this.hasClock) return null;
+    return Date.now() + (fa - this.serverNow());
+  }
+
+  /** `ui.tour` d'après le match de tournoi en cours (null hors tournoi). */
+  _tourUi() {
+    const t = this.tour;
+    if (!t) return null;
+    return { name: t.name || '', label: t.label || '', until: this._tourUntil(t.fa), opp: t.opp || null, oppRole: t.oppRole || null };
+  }
+
+  /**
+   * `tour` reçu (`room`, `start`) : nom, tour, échéance, adversaire. L'adversaire du serveur
+   * (`tour.opp`) passe avant celui donné par la page (action, cache du tournoi), qui ne sert que
+   * sans lui (serveur plus ancien) ; son rôle n'est gardé que pour le même nom.
+   */
+  _readTour(raw) {
+    const t = tourOf(raw);
+    if (!t) return;
+    const cur = this.tour || { mid: null, tid: null, opp: null, oppRole: null };
+    const opp = t.opp || cur.opp || null;
+    this.tour = {
+      ...cur,
+      name: t.name || cur.name || '',
+      label: t.label || cur.label || '',
+      fa: t.fa ?? cur.fa ?? null,
+      opp,
+      oppRole: opp && opp === cur.opp ? cur.oppRole : null,
+    };
+  }
+
+  // `shootout {first}` : début de la séance (égalité à la fin du but en or)
+  _onShootout(m) {
+    if (this.ui.status !== 'match') return;
+    const first = this._sideIn(m.first);
+    this.so = { first: first < 0 ? null : first, shots: [[], []] };
+    this._set({ shootout: { first: this.so.first, shots: [[], []] } });
+    this.emit('shootout', { first: this.so.first });
+  }
+
+  // `penalty {s}` : tireur du prochain tir (le penalty part avec la phase `pen` des états)
+  _onPenaltyMsg(m) {
+    if (!this._v2Live()) return;
+    const s = this._sideIn(m.s);
+    if (s >= 0) this.penShooter = s;
+  }
+
+  // `state.so` : tirs de chacun (repère du serveur), rangés [moi, l'adversaire]
+  _readShootout(m) {
+    if (!Array.isArray(m.so) || m.so.length !== 2) return;
+    const a = shotsOf(m.so[this.you]);
+    const b = shotsOf(m.so[1 - this.you]);
+    if (!a || !b) return;
+    const cur = this.so;
+    if (cur && sameShots(cur.shots[0], a) && sameShots(cur.shots[1], b)) return;
+    // Séance reprise après une coupure (pas de `shootout`) : premier tireur déduit des tirs
+    let first = cur ? cur.first : null;
+    if (first == null && a.length !== b.length) first = a.length > b.length ? 0 : 1;
+    this.so = { first, shots: [a, b] };
+    this._set({ shootout: { first, shots: [a, b] } });
   }
 
   /** Message du règlement v2 utilisable : match en cours, en règlement v2. */
@@ -1568,6 +1779,8 @@ export class OnlineMatch {
 
   _onGold() {
     if (!this._v2Live()) return;
+    // Tournoi : `gold` déjà en cours (fin du but en or sans but, avant les tirs au but) : rien de neuf
+    if (this.tour && this.engMode?.k === 'gold') return;
     this._clearTimeLeft();
     this.emit('gold', {});
   }
@@ -1655,16 +1868,48 @@ export class OnlineMatch {
     const sorted = this.samples.map((x) => x.rtt).sort((a, b) => a - b);
     const mid = sorted.length >> 1;
     this.pingMs = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+    // Salle d'attente d'un tournoi : échéance du forfait lue (ou corrigée) avec l'horloge connue
+    const t = this.ui.tour;
+    if (t && this.ui.status === 'room' && this.tour?.fa) {
+      const until = this._tourUntil(this.tour.fa);
+      if (until != null && (t.until == null || Math.abs(until - t.until) > TOUR_DRIFT_MS)) this._set({ tour: { ...t, until } });
+    }
   }
 
   _onRoom(m) {
     // Salle d'attente reprise après une coupure (`resume {link}`) : même salle, même code
     const back = this.resuming?.kind === 'room';
-    if (this.ui.status !== 'connecting' && !back) return;
+    // Tournoi : match perdu par le serveur (redémarré) pendant une coupure, puis `tjoin` : il
+    // redevient jouable, on attend de nouveau l'adversaire (le match repartira de zéro)
+    const reset = !!this.tour && this.resuming?.kind === 'match';
+    if (this.ui.status !== 'connecting' && !back && !reset) return;
     clearTimeout(this.timers.reply);
-    if (back) this._endResume();
+    if (back || reset) this._endResume();
+    if (reset) {
+      clearPendingResume();
+      this._resetMatch();
+    }
     const link = cleanChallengeLink(m.link);
     if (link) this.link = link;
+    // Tournoi : `tour` (nom, tour, échéance du forfait), sans code ni lien à partager
+    if (this.tour) {
+      this.notReadySince = null;
+      this._readTour(m.tour);
+      this._set({
+        ...(reset ? { ...IDLE_UI, myName: this.ui.myName } : {}),
+        status: 'room',
+        code: null,
+        link: this.link,
+        side: Number(m.side) === 1 ? 1 : 0,
+        invited: null,
+        roomAt: back && this.ui.roomAt ? this.ui.roomAt : Date.now(),
+        reconnecting: false,
+        waitingFor: null,
+        notReady: null,
+        tour: this._tourUi(),
+      });
+      return;
+    }
     // `photo` : celle d'un client défié depuis la liste des joueurs (jamais d'un barber)
     const inv = m.invited && typeof m.invited === 'object'
       ? { name: String(m.invited.name || '').slice(0, 60), role: String(m.invited.role || 'barber'), photo: photoUrlOrNull(m.invited.photo) }
@@ -1703,8 +1948,9 @@ export class OnlineMatch {
     }
     // Défi reçu par un barber qui a le jeu ouvert (contrat 4.4 : `invite` sur ses sockets) : dans
     // sa salle d'attente ou sur l'écran de fin, l'écran « Défi reçu » s'affiche par-dessus. Jamais
-    // en plein match (le serveur ne défie pas un barber qui joue) ni sur un autre défi.
-    if (!link || link === this.link || this.ui.incoming) return;
+    // en plein match (le serveur ne défie pas un barber qui joue) ni sur un autre défi. Jamais dans
+    // un match de tournoi (l'accepter ferait quitter sa salle)
+    if (!link || link === this.link || this.ui.incoming || this.tour) return;
     if (this.ui.status !== 'room' && this.ui.status !== 'over') return;
     this._set({ incoming: { link, from, expiresAt: Date.now() + secs * 1000 } });
     this.emit('invite', { link, from });
@@ -1727,6 +1973,8 @@ export class OnlineMatch {
 
   _onStart(m) {
     clearTimeout(this.timers.reply);
+    clearTimeout(this.timers.notReady);
+    this.notReadySince = null;
     const you = Number(m.you) === 1 ? 1 : 0;
     const both = (arr) => (Array.isArray(arr) ? [String(arr[you] ?? ''), String(arr[1 - you] ?? '')] : ['', '']);
     const info = {
@@ -1748,6 +1996,14 @@ export class OnlineMatch {
     this.rules = info.rules;
     this.goalsToWin = info.goalsToWin;
     this.lastStateAt = performance.now();
+    // Tournoi : `start.tour` (aussi pour un match repris sans l'avoir su) ; lien de la salle s'il
+    // est donné (reprise par `resume {link}`)
+    if (m.tour && typeof m.tour === 'object') this._readTour(m.tour);
+    if (this.tour) {
+      info.tour = this._tourUi();
+      const link = cleanChallengeLink(m.link);
+      if (link) this.link = link;
+    }
     // Salle d'attente reprise, puis l'adversaire qui attendait : c'est le coup d'envoi du match
     const roomBack = this.resuming?.kind === 'room';
     if (roomBack) this._endResume();
@@ -1768,7 +2024,7 @@ export class OnlineMatch {
       // Règlement v2 : événements encore en cours chez le serveur (`evs`) ; le mode, les
       // avertissements et les chronos arrivent avec le premier état
       this._eventsFromStart(m);
-      this._set({ ...info, status: 'match', reconnecting: false, away: null, error: null });
+      this._set({ ...info, status: 'match', reconnecting: false, away: null, error: null, notReady: null });
       if (wasResuming) this.emit('resumed', { ...info, score: [...this.score] });
       return;
     }
@@ -1794,8 +2050,18 @@ export class OnlineMatch {
       waitingFor: null,
       timeWarn: false,
       error: null,
+      notReady: null,
+      shootout: null,
+      ...(this.tour ? {} : { tour: null }),
     });
     this.emit('start', info);
+    // Tournoi : la salle d'attente garde sa connexion page cachée ; l'adversaire arrivé pendant ce
+    // temps lance le match : on le met en pause tout de suite (reprise au retour), comme en jeu
+    if (this.tour && typeof document !== 'undefined' && document.hidden && this._inPlay()) {
+      this._teardown();
+      this._startResume('match', { connect: false, reason: 'hidden' });
+      this._remember();
+    }
   }
 
   // `start.evs` (reprise en règlement v2) : événements dont la fin n'est pas passée chez le serveur
@@ -1859,6 +2125,8 @@ export class OnlineMatch {
     if (ph !== 'pause' && this.ui.away) this._set({ away: null });
     // Mode lu avant le changement de phase : le penalty pose son joueur d'après le tireur
     if (this.rules === RULES_V2) this._readV2State(m, s);
+    // Tournoi : tirs au but (une salle ordinaire n'envoie jamais `so`)
+    if (this.tour && m.so) this._readShootout(m);
     if (ph !== prev) this._onPhase(prev, ph, prevMode);
 
     // Adversaire : gardé ~1 s pour l'interpolation
@@ -2217,7 +2485,13 @@ export class OnlineMatch {
     const cancelled = m.cancelled === true;
     const reason = typeof m.reason === 'string' && m.reason ? m.reason.slice(0, 40) : null;
     const w = m.winner === null || m.winner === undefined ? null : Number(m.winner);
-    const winner = cancelled || (w !== 0 && w !== 1) ? null : (w === this.you ? 0 : 1);
+    // Tournoi : toujours un vainqueur, « annulé » ne vaut que pour les points
+    const tour = m.tour === true || !!this.tour;
+    const winner = (cancelled && !tour) || (w !== 0 && w !== 1) ? null : (w === this.you ? 0 : 1);
+    // Tirs au but : [moi, l'adversaire]
+    const so = Array.isArray(m.so) && m.so.length === 2 && m.so.every((v) => Number.isFinite(Number(v)))
+      ? this._pair(m.so).map((v) => clampN(Math.round(v), 0, 99))
+      : null;
     this._finish({
       won: winner === 0,
       winner,
@@ -2229,6 +2503,7 @@ export class OnlineMatch {
       reason,
       points: this._points(m.points),
       abandoned: !!this.abandoning,
+      ...(tour ? { tour: true, so } : {}),
     });
   }
 
@@ -2237,9 +2512,11 @@ export class OnlineMatch {
   _abandonFallback() {
     if (!this.abandoning || this.ui.status !== 'match') return;
     const cancelled = this.playedMs < CANCEL_PLAY_MS;
+    // Tournoi : l'abandon est toujours un forfait (jamais « annulé » pour le tableau)
+    const tour = !!this.tour;
     this._finish({
       won: false,
-      winner: cancelled ? null : 1,
+      winner: cancelled && !tour ? null : 1,
       draw: false,
       score: [...this.score],
       forfeit: true,
@@ -2247,6 +2524,7 @@ export class OnlineMatch {
       reason: cancelled ? 'cancelled' : null,
       points: null,
       abandoned: true,
+      ...(tour ? { tour: true, so: null } : {}),
     });
   }
 
@@ -2285,6 +2563,26 @@ export class OnlineMatch {
     if (this.abandoning) return; // la fin du match (ou son repli) arrive
     if (kind === 'update_required' && this._fallbackProto()) return;
     const r = this.resuming;
+    // Tournoi : reprise refusée par `tjoin` (match fini, tableau changé…), ou `resume {link}` refusé
+    // (salle perdue) : un `tjoin` d'abord, qui reprend le match ou rouvre la salle d'attente
+    if (r && this.tour) {
+      // Serveur qui vient de redémarrer : le match redevient jouable quelques secondes plus tard
+      if (kind === 't_not_ready' && this._notReady()) return;
+      if (TOUR_CODES.has(kind)) {
+        this._fail(kind, code);
+        return;
+      }
+      if (kind === 'no_room' || kind === 'room_expired') {
+        if (!r.tjoined && this.tour.mid) {
+          r.tjoined = true;
+          this._send({ t: 'tjoin', m: this.tour.mid });
+          return;
+        }
+        if (r.kind === 'match') this._fail('match_over');
+        else this._fail(kind === 'room_expired' ? kind : 't_lost', code);
+        return;
+      }
+    }
     if (r?.kind === 'room') {
       if (kind === 'no_room' || kind === 'room_expired') {
         // Invité parti un instant (sa place n'est plus gardée) : il rejoint de nouveau par le lien
@@ -2306,6 +2604,7 @@ export class OnlineMatch {
       return;
     }
     const status = this.ui.status;
+    if (kind === 't_not_ready' && status === 'connecting' && this._notReady()) return;
     if (status === 'connecting' || status === 'room' || status === 'invite') { this._fail(kind, code); return; }
     // Fin du match : l'écran de fin reste ; seule la revanche devient impossible
     if (status === 'over') {
@@ -2322,6 +2621,51 @@ export class OnlineMatch {
     // Match en cours : seuls les codes connus ferment l'écran (accès retiré, autre appareil,
     // salle expirée, panne) ; un code inconnu est ignoré
     if (kind !== 'server') this._fail(kind, code);
+  }
+
+  /**
+   * Tournoi : `t_not_ready` (match pas encore jouable, ou serveur qui vient de redémarrer : il le
+   * rend jouable quelques secondes plus tard). La connexion reste ouverte (pas de nouvel `auth`,
+   * compté par le serveur), l'écran dit « Ton match n'est pas encore prêt » (`ui.notReady`, status
+   * 'connecting' : `room` et `start` sont pris comme au premier essai) et `tjoin` repart tout seul
+   * toutes les 3 s, pendant 30 s au plus depuis le premier refus de la série. Match perdu par le
+   * serveur pendant une reprise : il repartira de zéro (salle d'attente). Rend false quand ce n'est
+   * plus le moment (fenêtre passée, « Réessayer » après elle, connexion fermée) : l'appelant
+   * affiche l'erreur, avec « Réessayer ».
+   */
+  _notReady() {
+    const mid = this.tour?.mid;
+    const ws = this.ws;
+    if (!mid || !ws || ws.readyState !== 1 || !this.helloSeen) return false;
+    const now = Date.now();
+    if (this.notReadySince == null) this.notReadySince = now;
+    if (now - this.notReadySince + NOT_READY_EVERY_MS > NOT_READY_FOR_MS) return false;
+    const fromMatch = this.resuming?.kind === 'match' || this.ui.status === 'match';
+    this._endResume();
+    clearTimeout(this.timers.reply);
+    clearTimeout(this.timers.notReady);
+    if (fromMatch) {
+      clearPendingResume();
+      this._resetMatch();
+      this.link = null;
+    }
+    // « Réessayer » (après la fenêtre) : un nouveau `tjoin`, même sans action de départ (reprise)
+    this.lastAction = { t: 'tjoin', m: mid };
+    this._set({
+      ...IDLE_UI,
+      myName: this.ui.myName,
+      status: 'connecting',
+      tour: this._tourUi(),
+      notReady: { until: this.notReadySince + NOT_READY_FOR_MS },
+    });
+    this.timers.notReady = setTimeout(() => {
+      if (this.ws !== ws || this.ui.status !== 'connecting' || !this.ui.notReady) return;
+      if (!this._send({ t: 'tjoin', m: mid })) return; // fermée : _onClose le dit
+      this.timers.reply = setTimeout(() => {
+        if (this.ws === ws && this.ui.status === 'connecting') this._fail('unreachable');
+      }, REPLY_TIMEOUT);
+    }, NOT_READY_EVERY_MS);
+    return true;
   }
 
   /**
@@ -2358,12 +2702,13 @@ export class OnlineMatch {
     if (status === 'over') { this._set({ offline: true, rematchAsked: false, incoming: null }); return; }
     if (status === 'match') {
       if (fatal) { this._fail(kind); return; }
-      if (this.link) { this._startResume('match', { reason: 'cut' }); return; }
+      if (this.link || this.tour?.mid) { this._startResume('match', { reason: 'cut' }); return; }
       this._fail('lost');
       return;
     }
-    // Salle d'attente : le serveur la garde (code et lien compris) ; on la reprend
-    if (status === 'room' && !kind && this.link) { this._startResume('room', { reason: 'cut' }); return; }
+    // Salle d'attente : le serveur la garde (code et lien compris) ; on la reprend (tournoi : par
+    // un nouveau `tjoin`)
+    if (status === 'room' && !kind && (this.link || this.tour?.mid)) { this._startResume('room', { reason: 'cut' }); return; }
     // Défi reçu : l'écran reste ; « Accepter » rouvrira une connexion avec le `join`
     if (status === 'invite' && !kind) return;
     if (kind) { this._fail(kind); return; }
@@ -2381,10 +2726,13 @@ export class OnlineMatch {
    */
   _startResume(kind, { connect = true, reason = 'cut', serverUntil = null } = {}) {
     const now = Date.now();
-    const deadline = kind === 'room'
-      ? (this.ui.roomAt || now) + ROOM_MS
-      : Math.max(now + RESUME_TRY_MS, serverUntil || 0);
-    if (deadline <= now) { this._fail(kind === 'room' ? 'room_expired' : 'match_over'); return; }
+    // Salle d'attente d'un tournoi : jusqu'à l'échéance du forfait (le serveur dit ensuite le résultat)
+    const tourUntil = kind === 'room' && this.tour ? this.ui.tour?.until : null;
+    let deadline;
+    if (kind !== 'room') deadline = Math.max(now + RESUME_TRY_MS, serverUntil || 0);
+    else if (this.tour) deadline = tourUntil ? Math.max(now + RESUME_TRY_MS, tourUntil + RESUME_RETRY_MS) : now + ROOM_MS;
+    else deadline = (this.ui.roomAt || now) + ROOM_MS;
+    if (deadline <= now) { this._fail(kind === 'room' ? this._roomGone() : 'match_over'); return; }
     this.resuming = {
       kind,
       link: this.link,
@@ -2392,6 +2740,7 @@ export class OnlineMatch {
       serverUntil: kind === 'match' ? (serverUntil || now + SERVER_RESUME_MS) : null,
       waiting: !connect,
       rejoined: false,
+      tjoined: false,
     };
     if (kind === 'match') {
       // Ballon figé sur ce téléphone jusqu'au retour
@@ -2407,12 +2756,17 @@ export class OnlineMatch {
     const r = this.resuming;
     if (!r || r.waiting) return;
     const left = r.deadline - Date.now();
-    if (left <= 0) { this._fail(r.kind === 'room' ? 'room_expired' : 'lost'); return; }
+    if (left <= 0) { this._fail(r.kind === 'room' ? this._roomGone() : 'lost'); return; }
     clearTimeout(this.resumeTimer);
     this.resumeTimer = setTimeout(() => {
       this.resumeTimer = null;
       if (this.resuming && !this.resuming.waiting) this._connect();
     }, Math.min(RESUME_RETRY_MS, left));
+  }
+
+  /** Salle d'attente pas reprise à temps : le code a expiré, ou (tournoi) l'échéance est passée. */
+  _roomGone() {
+    return this.tour ? 't_lost' : 'room_expired';
   }
 
   _endResume() {
@@ -2429,7 +2783,7 @@ export class OnlineMatch {
 
   /** Match en cours sur ce téléphone (ou en reprise), pas encore fini ni abandonné. */
   _inPlay() {
-    return this.ui.status === 'match' && this.phase !== 'over' && !!this.link && !this.abandoning;
+    return this.ui.status === 'match' && this.phase !== 'over' && (!!this.link || !!this.tour?.mid) && !this.abandoning;
   }
 
   // Lien du match gardé pour une reprise après un départ de l'écran (10 s, place gardée par le serveur)
@@ -2448,6 +2802,8 @@ export class OnlineMatch {
       score: [...this.score],
       rules: this.rules,
       goalsToWin: this.goalsToWin,
+      // Tournoi : de quoi reprendre par `tjoin` sans lien, et le bandeau du tour
+      ...(this.tour?.mid ? { tour: tourEntry(this.tour) } : {}),
     });
   }
 
@@ -2472,7 +2828,8 @@ export class OnlineMatch {
         this._remember();
         return;
       }
-      if (this.ui.status === 'room' && this.ui.side === 0 && this.link && !this.ui.incoming) {
+      // Tournoi : la connexion reste ouverte (présence comptée à l'échéance du forfait)
+      if (this.ui.status === 'room' && this.ui.side === 0 && this.link && !this.ui.incoming && !this.tour) {
         // Salle d'attente (lien partagé depuis une autre app) : le serveur la garde, un ami qui la
         // rejoint pendant ce temps attend notre retour (`waiting_opponent`)
         this._teardown();
@@ -2483,7 +2840,7 @@ export class OnlineMatch {
     const r = this.resuming;
     if (r?.waiting) {
       r.waiting = false;
-      if (Date.now() > r.deadline) { this._fail(r.kind === 'room' ? 'room_expired' : 'match_over'); return; }
+      if (Date.now() > r.deadline) { this._fail(r.kind === 'room' ? this._roomGone() : 'match_over'); return; }
       this._connect();
       return;
     }
@@ -2517,7 +2874,9 @@ export class OnlineMatch {
     this._resetClock();
     this.lastAction = action;
     this.link = action.link || null;
-    this._set({ ...IDLE_UI, status: 'connecting', ...(keep || {}) });
+    // Tournoi (« Réessayer ») : le tour reste à l'écran pendant la connexion
+    const tour = action.t === 'tjoin' && this.tour ? { tour: this._tourUi() } : {};
+    this._set({ ...IDLE_UI, status: 'connecting', ...tour, ...(keep || {}) });
     this._connect();
   }
 
@@ -2578,7 +2937,11 @@ export class OnlineMatch {
       // `resume` est réservé au créateur d'une salle d'attente (et aux deux joueurs d'un match) :
       // un invité qui a perdu sa connexion pendant l'attente a été retiré, il rejoint de nouveau
       const r = this.resuming;
-      if (r.kind === 'room' && this.ui.side === 1) {
+      if (this.tour?.mid && (r.kind === 'room' || !r.link)) {
+        // Tournoi : salle d'attente, ou match sans lien connu : un nouveau `tjoin` (reprise chez le serveur)
+        r.tjoined = true;
+        this._send({ t: 'tjoin', m: this.tour.mid });
+      } else if (r.kind === 'room' && this.ui.side === 1) {
         r.rejoined = true;
         this._send({ t: 'join', link: r.link });
       } else {
@@ -2644,6 +3007,8 @@ export class OnlineMatch {
     this._teardown();
     const def = ERRORS[kind] || ERRORS.server;
     const message = typeof def.message === 'function' ? def.message(this) : def.message;
+    // Tournoi : salle fermée à l'échéance du forfait, rien à retenter (la suite est sur le tableau)
+    const retry = def.retry && !!this.lastAction && !(this.tour && kind === 'room_expired');
     this._set({
       status: 'error',
       reconnecting: false,
@@ -2651,7 +3016,8 @@ export class OnlineMatch {
       incoming: null,
       waitingFor: null,
       timeWarn: false,
-      error: { kind, code: code ?? null, message, retry: def.retry && !!this.lastAction },
+      notReady: null,
+      error: { kind, code: code ?? null, message, retry },
     });
   }
 
@@ -2660,6 +3026,7 @@ export class OnlineMatch {
     clearTimeout(this.timers.reply);
     clearTimeout(this.timers.burst);
     clearInterval(this.timers.ping);
+    clearTimeout(this.timers.notReady);
     this.timers = {};
     const ws = this.ws;
     this.ws = null;
