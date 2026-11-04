@@ -110,7 +110,9 @@ export function FinishedView({ t, onBack, onShowBoard, onOpenPalmares }) {
         <span className={`${LABEL} relative mt-1.5 text-center`}>{t.name}</span>
         {champion ? (
           <>
-            <h1 className="relative mt-2 font-fut text-[clamp(48px,18vw,72px)] font-extrabold uppercase leading-none tracking-[0.03em] text-[color:var(--coupe-or)]" style={{ textShadow: `0 4px 0 ${COUPE_COLORS.rougeSombre}` }}>
+            {/* 14vw : « CHAMPION » tient à 320 px même dans la police de secours, plus large que Barlow
+                Condensed (police pas encore chargée : 395 px avec 18vw, vérification GitHub du 4 nov. 2026) */}
+            <h1 className="relative mt-2 whitespace-nowrap font-fut text-[clamp(40px,14vw,72px)] font-extrabold uppercase leading-none tracking-[0.03em] text-[color:var(--coupe-or)]" style={{ textShadow: `0 4px 0 ${COUPE_COLORS.rougeSombre}` }}>
               Champion
             </h1>
             <p className="relative mt-2 text-base font-semibold">Tu remportes le tournoi</p>
