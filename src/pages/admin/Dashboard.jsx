@@ -27,6 +27,7 @@ import { isNetworkError } from '@/components/shared/LoadError';
 import KeyFigures from '@/components/admin/dashboard/KeyFigures';
 import TodoBlock from '@/components/admin/dashboard/TodoBlock';
 import TodayBlock from '@/components/admin/dashboard/TodayBlock';
+import PastMonths from '@/components/admin/dashboard/PastMonths';
 import MonthBlock from '@/components/admin/dashboard/MonthBlock';
 import MoneyTable from '@/components/admin/dashboard/MoneyTable';
 import WeekBars from '@/components/admin/dashboard/WeekBars';
@@ -184,8 +185,9 @@ export default function AdminDashboard() {
         </div>
 
         {/* Tous les chiffres du jour et du mois, en premier (demande du propriétaire, 1er nov. 2026) */}
-        <div className="mb-4">
+        <div className="mb-4 flex flex-col gap-4">
           <KeyFigures d={d} />
+          <PastMonths d={d} />
         </div>
 
         {/* Téléphone : une colonne, le travail du jour d'abord. Grand écran : le jour à droite */}

@@ -17,7 +17,7 @@ import { fr } from 'date-fns/locale';
 import { noonOf } from '@/lib/dashboardStats';
 import { Section, Money, Pill, Note } from '@/components/admin/dashboard/ui';
 
-const CHANNEL_LABELS = {
+export const CHANNEL_LABELS = {
   prestations: 'Rendez-vous',
   boutique: 'Boutique (commandes retirées)',
   cartes: 'Cartes cadeau vendues',
@@ -51,8 +51,10 @@ function Cell({ cell, state }) {
   );
 }
 
-/** Un groupe de lignes, en tableau « Aujourd'hui | Ce mois ». */
-function FigureTable({ title, hint, rows }) {
+const TODAY_AND_MONTH = [{ key: 'today', label: "Aujourd'hui" }, { key: 'month', label: 'Ce mois' }];
+
+/** Un groupe de lignes, en tableau : « Aujourd'hui | Ce mois » par défaut, une colonne par `columns`. */
+export function FigureTable({ title, hint, rows, columns = TODAY_AND_MONTH }) {
   const visible = rows.filter((r) => !r.hidden);
   if (!visible.length) return null;
   return (
@@ -65,8 +67,9 @@ function FigureTable({ title, hint, rows }) {
         <thead>
           <tr className="border-b border-border">
             <th scope="col" className="w-full pb-1 text-left font-normal"><span className="sr-only">Ligne</span></th>
-            <th scope="col" className="pb-1 pl-2 sm:pl-3 text-right text-[11px] font-semibold text-muted-foreground whitespace-nowrap">Aujourd'hui</th>
-            <th scope="col" className="pb-1 pl-2 sm:pl-3 text-right text-[11px] font-semibold text-muted-foreground whitespace-nowrap">Ce mois</th>
+            {columns.map((c) => (
+              <th key={c.key} scope="col" className="pb-1 pl-2 sm:pl-3 text-right text-[11px] font-semibold text-muted-foreground whitespace-nowrap">{c.label}</th>
+            ))}
           </tr>
         </thead>
         <tbody>
@@ -76,12 +79,12 @@ function FigureTable({ title, hint, rows }) {
                 {r.label}
                 {r.hint && <span className="block text-[11px] font-normal text-muted-foreground">{r.hint}</span>}
               </th>
-              {[r.today, r.month].map((cell, i) => (
+              {columns.map((c) => (
                 <td
-                  key={i}
+                  key={c.key}
                   className={`py-1.5 pl-2 sm:pl-3 text-right align-baseline whitespace-nowrap tabular-nums text-xs sm:text-sm ${r.strong ? 'font-bold text-foreground' : r.muted ? 'text-muted-foreground' : 'font-semibold text-foreground'}`}
                 >
-                  <Cell cell={cell} state={r.state} />
+                  <Cell cell={r[c.key]} state={r.state} />
                   {r.strong && r.incomplete && <span className="block text-[11px] font-semibold text-amber-700 dark:text-amber-400">incomplet</span>}
                 </td>
               ))}

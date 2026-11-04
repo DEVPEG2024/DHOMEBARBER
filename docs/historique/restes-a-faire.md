@@ -25,6 +25,11 @@
   - tests sous WebKit instables avec l'horloge simulée (`page.clock.install` gèle les animations de sortie des étapes) : nos tests restent en Chromium ;
   - les créneaux proposés par « Déplacer » (Mes rendez-vous) partent d'aujourd'hui : pour reculer un RDV lointain, passer par « Choisir une autre date » ; l'événement de calendrier ne dit pas « Pour Léo ».
 
+## Abonnements au mois (4 nov. 2026, planche à valider)
+
+- Planche de 12 écrans et 10 décisions à valider : https://claude.ai/artifact/JeVmvZeWeZBQxiSGKYr3nZ. Rien n'est codé. Source : demande du 4 nov. 2026.
+- Une formule « 4 coupes » se réserve aujourd'hui comme un seul RDV au prix entier : encaissée à chaque visite, elle gonfle le CA. Relevé le 4 nov. 2026 : un même client a un RDV encaissé 100 € en CB le 29 oct. et un autre à 100 € le 5 nov. à 17:00 avec Kevin. À regarder avec le salon avant de clôturer.
+
 ## Snake du Gang (2 nov. 2026, jeu ouvert sur le site)
 
 Source : `docs/fonctions/snake-du-gang.md`, `snake-du-gang-contrat.md` (section 8), `snake-du-gang-stores.md`.

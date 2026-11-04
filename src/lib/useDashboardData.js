@@ -9,7 +9,7 @@
  * - Clés sous `adminAppointments` : couvertes par `invalidateAppointmentQueries` (agenda, encaissement).
  */
 import { useEffect, useMemo, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, API_SERVER_URL, resolvedAppId, apiRequest, apiUrl } from '@/api/apiClient';
 import { useAuth } from '@/lib/AuthContext';
 import { fetchAppointmentsForDates } from '@/components/agenda/agendaUtils';
@@ -20,6 +20,7 @@ import {
   APPOINTMENTS_LIMIT, parisClock, prevMonthKey, monthDays, addDaysKey, computeDashboard, buildUpcoming, computeFill,
 } from '@/lib/dashboardStats';
 import { computeChannels, CHANNEL_LIMITS } from '@/lib/salesChannels';
+import { PAST_MONTHS_SHOWN, computeMonthReport, firstMonthOf, pastMonthKeys } from '@/lib/pastMonths';
 
 export const DASHBOARD_REFRESH_MS = 60 * 1000;
 // Relu chaque minute (onglet visible seulement : React Query ne relit pas un onglet caché), au retour
@@ -278,6 +279,16 @@ export function useDashboardData() {
     canEvents: access.canEvents,
   }), [ordersQ.data, giftCardsQ.data, eventsQ.data, textileQ.data, resQ.data, stats, access.canEvents]);
 
+  // Listes lues, reprises telles quelles pour les mois passés (usePastMonths)
+  const source = useMemo(() => ({
+    orders: ordersQ.data || [],
+    giftCards: giftCardsQ.data || [],
+    events: eventsQ.data || [],
+    textile: textileQ.data || null,
+    reservations: resQ.data || [],
+    employees,
+  }), [ordersQ.data, giftCardsQ.data, eventsQ.data, textileQ.data, resQ.data, employees]);
+
   // Canal dont la source n'a pas pu se charger : « — », jamais « 0 € » ; « … » au premier chargement
   const salesFailed = {
     boutique: queryFailed(ordersQ),
@@ -353,6 +364,7 @@ export function useDashboardData() {
     // comptable s'en sert pour un mois déjà chargé
     rows,
     loadedMonths: [prevQ.data && !prevQ.data.truncated ? prevKey : null, monthQ.data && !monthQ.data.truncated ? monthKey : null].filter(Boolean),
+    source,
     refreshAll,
   };
 }
@@ -363,6 +375,62 @@ const computeTruncated = (sales) => ({
   events: !!sales.truncated.events,
   reservations: !!sales.truncated.reservations,
 });
+
+// ─── Mois passés ──────────────────────────────────────────────────────
+
+// Un mois plus ancien que le mois précédent ne bouge presque plus : relu au plus toutes les 30 min, et
+// par « Actualiser » (préfixe `dashboard` de `refreshAll`). Hors du préfixe `adminAppointments` : chaque
+// écriture de l'agenda ferait relire tous les mois au retour sur la page.
+const PAST_MONTH_OPTIONS = { staleTime: 30 * DASHBOARD_REFRESH_MS, gcTime: 2 * 60 * DASHBOARD_REFRESH_MS, refetchOnWindowFocus: false };
+
+/**
+ * Chiffres des mois passés, du plus récent au plus ancien. Lit les `PAST_MONTHS_SHOWN` derniers mois,
+ * les autres seulement avec `showAll` (un mois = deux requêtes). Le mois précédent est la lecture du
+ * tableau de bord (même clé, relue par l'agenda).
+ * @param {ReturnType<typeof useDashboardData>} d
+ * @returns {{
+ *   entries: Array<{ key: string, report: ReturnType<typeof computeMonthReport>|null, failed: boolean, loading: boolean, truncated: boolean }>,
+ *   total: number, listFailed: boolean, listError: Error|null, listLoading: boolean,
+ *   retry: () => Promise<unknown>, retrying: boolean,
+ * }}
+ */
+export function usePastMonths(d, { showAll = false } = {}) {
+  const { source, access, stats } = d;
+  const { monthKey, prevMonthKey: prevKey } = stats.clock;
+  const firstQ = useQuery({
+    queryKey: ['dashboard', 'firstAppointment'],
+    queryFn: () => api.entities.Appointment.list('date', 1),
+    ...PAST_MONTH_OPTIONS,
+  });
+  const firstDate = Array.isArray(firstQ.data) ? firstQ.data[0]?.date : null;
+  const firstKey = useMemo(() => firstMonthOf(firstDate, source), [firstDate, source]);
+  const months = useMemo(() => pastMonthKeys(firstKey, monthKey), [firstKey, monthKey]);
+  const shown = useMemo(() => (showAll ? months : months.slice(0, PAST_MONTHS_SHOWN)), [months, showAll]);
+
+  const queries = useQueries({
+    queries: shown.map((key) => (key === prevKey
+      ? { queryKey: ['adminAppointments', 'dashboard', 'month', key], queryFn: () => fetchDays(monthDays(key)) }
+      : { queryKey: ['dashboard', 'pastMonth', key], queryFn: () => fetchDays(monthDays(key)), ...PAST_MONTH_OPTIONS })),
+  });
+  // Recalculé quand une lecture revient (ou quand les ventes changent), pas à chaque minute
+  const readAt = queries.map((q) => q.dataUpdatedAt).join();
+  const reports = useMemo(() => shown.map((key, i) => (queries[i]?.data
+    ? computeMonthReport({ monthKey: key, rows: queries[i].data.rows, source, canEvents: access.canEvents })
+    : null)), [readAt, shown, source, access.canEvents]);
+
+  return {
+    entries: shown.map((key, i) => {
+      const failed = queryFailed(queries[i]);
+      return { key, report: reports[i] || null, failed, loading: !failed && !!queries[i]?.isPending, truncated: !!queries[i]?.data?.truncated };
+    }),
+    total: months.length,
+    listFailed: queryFailed(firstQ),
+    listError: firstQ.error,
+    listLoading: !queryFailed(firstQ) && firstQ.isPending,
+    retry: () => Promise.all([firstQ, ...queries].filter(queryFailed).map((q) => q.refetch())),
+    retrying: firstQ.isFetching || queries.some((q) => q.isFetching),
+  };
+}
 
 /**
  * Objectif de CA du mois (`salon_settings.monthly_revenue_goal`, `features.revenueGoal`) : admin seulement.
