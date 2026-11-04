@@ -63,7 +63,9 @@ export default function Stats() {
     const netOf = (a) => revenueOf(a) - giftPartOf(a);
     const totalRevenue = round2(completed.reduce((sum, a) => sum + netOf(a), 0));
     const giftTotal = round2(completed.reduce((sum, a) => sum + giftPartOf(a), 0));
-    const avgTicket = completed.length > 0 ? totalRevenue / completed.length : 0;
+    // Hors RDV d'abonnement : payés par leur carte, ils faisaient tomber le panier moyen vers 0
+    const plainCompleted = completed.filter((a) => !a.subscription_id);
+    const avgTicket = plainCompleted.length > 0 ? plainCompleted.reduce((sum, a) => sum + netOf(a), 0) / plainCompleted.length : 0;
 
     // Monthly trend
     const monthlyData = {};

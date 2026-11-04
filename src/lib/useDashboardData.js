@@ -19,7 +19,8 @@ import { queryFailed } from '@/components/shared/LoadError';
 import {
   APPOINTMENTS_LIMIT, parisClock, prevMonthKey, monthDays, addDaysKey, computeDashboard, buildUpcoming, computeFill,
 } from '@/lib/dashboardStats';
-import { computeChannels, CHANNEL_LIMITS } from '@/lib/salesChannels';
+import { computeChannels, CHANNEL_LIMITS, pendingSubscriptionsOf } from '@/lib/salesChannels';
+import { fetchAllSubscriptions } from '@/lib/subscriptions';
 import { PAST_MONTHS_SHOWN, computeMonthReport, firstMonthOf, pastMonthKeys } from '@/lib/pastMonths';
 
 export const DASHBOARD_REFRESH_MS = 60 * 1000;
@@ -64,11 +65,12 @@ export function dashboardAccess(user) {
 
 // ─── Drapeaux du serveur ──────────────────────────────────────────────
 
-export const DEFAULT_DASHBOARD_FEATURES = { paidAt: false, revenueGoal: false, analyticsLive: false };
+export const DEFAULT_DASHBOARD_FEATURES = { paidAt: false, revenueGoal: false, analyticsLive: false, subscriptions: false };
 
 /**
  * `features.paidAt` (jour d'encaissement), `revenueGoal` (objectif du mois), `analyticsLive`
- * (compteur « en ce moment »). Ne rejette jamais : en cas d'échec, tout éteint.
+ * (compteur « en ce moment »), `subscriptions` (abonnements au mois). Ne rejette jamais : en cas d'échec,
+ * tout éteint.
  */
 export async function fetchDashboardFeatures() {
   try {
@@ -76,7 +78,7 @@ export async function fetchDashboardFeatures() {
     if (!res.ok) return { ...DEFAULT_DASHBOARD_FEATURES };
     const data = await res.json().catch(() => null);
     const f = data?.features || {};
-    return { paidAt: f.paidAt === true, revenueGoal: f.revenueGoal === true, analyticsLive: f.analyticsLive === true };
+    return { paidAt: f.paidAt === true, revenueGoal: f.revenueGoal === true, analyticsLive: f.analyticsLive === true, subscriptions: f.subscriptions === true };
   } catch {
     return { ...DEFAULT_DASHBOARD_FEATURES };
   }
@@ -143,6 +145,7 @@ const SETTINGS_KEY = ['salonSettings'];
  *   stats: ReturnType<typeof computeDashboard>, upcoming: ReturnType<typeof buildUpcoming> & { incomplete: boolean, beyond: string|null },
  *   fill: ReturnType<typeof computeFill>, sales: ReturnType<typeof computeChannels>,
  *   settings: object|null, liveCount: number|null, pendingLeaves: number,
+ *   pendingSubscriptions: { count: number, amount: number }, pendingSubscriptionsFailed: boolean,
  *   state: object, rows: Array, loadedMonths: string[], refreshAll: () => Promise<void>,
  * }}
  */
@@ -223,6 +226,13 @@ export function useDashboardData() {
     queryFn: () => api.entities.Event.filter({ status: 'confirmed' }, '-created_at', CHANNEL_LIMITS.events),
     enabled: !access.canEvents,
     ...SLOW,
+  });
+  // Abonnements à valider (ligne « À faire ») : admin seulement, avec `features.subscriptions`
+  const pendingSubscriptionsQ = useQuery({
+    queryKey: ['subscriptions', 'dashboard', 'pending'],
+    queryFn: () => fetchAllSubscriptions('pending'),
+    enabled: access.isAdmin && features.subscriptions,
+    ...SALES,
   });
   const textileQ = useQuery({ queryKey: TEXTILE_QUERY_KEY, queryFn: fetchTextileOverview, ...SALES });
   const resQ = useQuery({
@@ -311,6 +321,7 @@ export function useDashboardData() {
   const refreshAll = () => Promise.all([
     queryClient.invalidateQueries({ queryKey: ['adminAppointments'] }),
     queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
+    queryClient.invalidateQueries({ queryKey: ['subscriptions', 'dashboard'] }),
     queryClient.invalidateQueries({ queryKey: TEXTILE_QUERY_KEY }),
     queryClient.invalidateQueries({ queryKey: ['textileReservations'] }),
     queryClient.invalidateQueries({ queryKey: ['timeOffs'] }),
@@ -329,6 +340,8 @@ export function useDashboardData() {
     settings,
     liveCount,
     pendingLeaves: access.canLeave && Array.isArray(pendingLeavesQ.data) ? pendingLeavesQ.data.length : 0,
+    pendingSubscriptions: pendingSubscriptionsOf(access.isAdmin && features.subscriptions && Array.isArray(pendingSubscriptionsQ.data) ? pendingSubscriptionsQ.data : []),
+    pendingSubscriptionsFailed: access.isAdmin && features.subscriptions && queryFailed(pendingSubscriptionsQ),
     state: {
       // Rendez-vous du mois en cours : base de presque tous les blocs
       // Réessayer relit toutes les lectures de RDV (mois précédent, jours suivants, CA à venir compris)

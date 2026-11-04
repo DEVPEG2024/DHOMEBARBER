@@ -48,6 +48,8 @@ const Textile = React.lazy(() => import('@/pages/Textile'));
 const Partners = React.lazy(() => import('@/pages/Partners'));
 const Favorites = React.lazy(() => import('@/pages/Favorites'));
 // Jeux du salon : liste des jeux ouverts (La Coupe du Gang…), lazy
+// Abonnements au mois (4 nov. 2026, docs/fonctions/abonnements-contrat.md)
+const Abonnement = React.lazy(() => import('@/pages/Abonnement'));
 const Jeux = React.lazy(() => import('@/pages/Jeux'));
 // Fil v2 : écran Activité (réactions, commentaires, réponses, sondages à voter, réglages des pushs)
 const FeedActivity = React.lazy(() => import('@/pages/FeedActivity'));
@@ -96,6 +98,7 @@ const BarberLeave = React.lazy(() => import('@/pages/admin/BarberLeave'));
 const BarberSettings = React.lazy(() => import('@/pages/admin/BarberSettings'));
 const AdminEvents = React.lazy(() => import('@/pages/admin/AdminEvents'));
 const AdminGiftCards = React.lazy(() => import('@/pages/admin/AdminGiftCards'));
+const AdminSubscriptions = React.lazy(() => import('@/pages/admin/AdminSubscriptions'));
 const AdminTextile = React.lazy(() => import('@/pages/admin/AdminTextile'));
 const AdminSalonEvents = React.lazy(() => import('@/pages/admin/AdminSalonEvents'));
 const AdminSnap = React.lazy(() => import('@/pages/admin/AdminSnap'));
@@ -419,6 +422,7 @@ const AppRoutes = () => {
           <Route path="/feed/activite" element={<Suspense fallback={<LazyFallback />}><FeedActivity /></Suspense>} />
           <Route path="/events" element={<Events />} />
           <Route path="/gift-cards" element={<GiftCards />} />
+          <Route path="/abonnement" element={<Suspense fallback={<LazyFallback />}><Abonnement /></Suspense>} />
           <Route path="/try-on" element={<Suspense fallback={<LazyFallback />}><TryOn /></Suspense>} />
           <Route path="/snap" element={<Suspense fallback={<LazyFallback />}><SnapLenses /></Suspense>} />
           <Route path="/textile" element={<Suspense fallback={<LazyFallback />}><Textile /></Suspense>} />
@@ -455,6 +459,7 @@ const AppRoutes = () => {
           <Route path="/admin/feed/activite" element={<Suspense fallback={<LazyFallback />}><FeedActivity /></Suspense>} />
           <Route path="/admin/events" element={<Suspense fallback={<LazyFallback />}><AdminEvents /></Suspense>} />
           <Route path="/admin/gift-cards" element={<Suspense fallback={<LazyFallback />}><AdminGiftCards /></Suspense>} />
+          <Route path="/admin/subscriptions" element={<Suspense fallback={<LazyFallback />}><AdminSubscriptions /></Suspense>} />
           <Route path="/admin/textile" element={<Suspense fallback={<LazyFallback />}><AdminTextile /></Suspense>} />
           <Route path="/admin/salon-events" element={<Suspense fallback={<LazyFallback />}><AdminSalonEvents /></Suspense>} />
           <Route path="/admin/snap" element={<Suspense fallback={<LazyFallback />}><AdminSnap /></Suspense>} />

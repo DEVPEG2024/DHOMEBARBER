@@ -25,9 +25,13 @@
   - tests sous WebKit instables avec l'horloge simulée (`page.clock.install` gèle les animations de sortie des étapes) : nos tests restent en Chromium ;
   - les créneaux proposés par « Déplacer » (Mes rendez-vous) partent d'aujourd'hui : pour reculer un RDV lointain, passer par « Choisir une autre date » ; l'événement de calendrier ne dit pas « Pour Léo ».
 
-## Abonnements au mois (4 nov. 2026, planche à valider)
+## Abonnements au mois (4 nov. 2026)
 
-- Planche de 12 écrans et 10 décisions à valider : https://claude.ai/artifact/JeVmvZeWeZBQxiSGKYr3nZ. Rien n'est codé. Source : demande du 4 nov. 2026.
+- Apps : au prochain build, avec une note de revue (règle 2.5.19). Jusque-là, dans les apps publiées, une formule se réserve comme un seul RDV au prix entier. Source : `docs/fonctions/abonnements.md`.
+- Jamais essayé au salon : vraie webcam et vraie douchette de l'ordinateur, vrai iPhone, push réels. Source : même document.
+- Pass Apple Wallet d'une carte d'abonnement : solde en euros et libellé « Carte cadeau ». Source : même document.
+- À confirmer avec le propriétaire : abonnement payé puis annulé, la vente reste dans le CA alors que le salon rembourse à la main (même règle que les cartes cadeau). Source : même document.
+- Compte supprimé par la route admin : les RDV ordinaires à venir restent `confirmed` si l'écran ne les a pas annulés avant (écart déjà là, ceux des abonnements sont annulés). Source : essai réel du 4 nov. 2026.
 - Une formule « 4 coupes » se réserve aujourd'hui comme un seul RDV au prix entier : encaissée à chaque visite, elle gonfle le CA. Relevé le 4 nov. 2026 : un même client a un RDV encaissé 100 € en CB le 29 oct. et un autre à 100 € le 5 nov. à 17:00 avec Kevin. À regarder avec le salon avant de clôturer.
 
 ## Snake du Gang (2 nov. 2026, jeu ouvert sur le site)

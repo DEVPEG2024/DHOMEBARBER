@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import LoadError, { isNetworkError } from '@/components/shared/LoadError';
 import {
   fetchGiftCardHistory, buildGiftCardTimeline, giftCardTransactionsKey, formatEuro, formatParisDateTime,
-  canUndoTransaction, runGiftCardUndo, attachGiftCardDebit, fetchRecentAppointmentsToCash,
+  canUndoTransaction, runGiftCardUndo, attachGiftCardDebit, fetchRecentAppointmentsToCash, appointmentFitsCard,
   giftCardRecentAppointmentsKey, parisToday, appointmentDue, appointmentPrice, appointmentServicesLabel, formatDay,
   closeAppointmentWithGiftCard, friendlyGiftCardError, round2, fetchAppointmentById,
   invalidateGiftCardQueries, ATTACH_NETWORK_MESSAGE,
@@ -40,12 +40,13 @@ function AttachPanel({ card, tx, onClose, onDone }) {
   });
   const owner = [lower(card?.recipient_email), lower(card?.sender_email), lower(card?.recipient_name), lower(card?.sender_name)].filter(Boolean);
   const isOwner = (a) => owner.includes(lower(a.client_email)) || owner.includes(lower(a.client_name));
+  // RDV d'un abonnement : seulement avec la carte de cet abonnement (le serveur refuserait)
   const list = (Array.isArray(q.data) ? q.data : [])
-    .filter((a) => appointmentDue(a) + 0.005 >= Number(tx.amount))
+    .filter((a) => appointmentFitsCard(a, card) && appointmentDue(a) + 0.005 >= Number(tx.amount))
     .sort((a, b) => Number(isOwner(b)) - Number(isOwner(a)));
 
   const paidList = (Array.isArray(paidQ.data) ? paidQ.data : [])
-    .filter((a) => appointmentDue(a) + 0.005 >= Number(tx.amount))
+    .filter((a) => appointmentFitsCard(a, card) && appointmentDue(a) + 0.005 >= Number(tx.amount))
     .sort((a, b) => Number(isOwner(b)) - Number(isOwner(a)));
 
   const attach = async (apt, { correctPaid = false } = {}) => {

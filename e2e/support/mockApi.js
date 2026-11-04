@@ -20,6 +20,7 @@
 import { creerDonnees, CLIENT, media } from './donnees.js';
 import { FauxCoupe, CLE_LISTE_LUCAS, PHOTO_LUCAS } from './fauxCoupe.js';
 import { FauxTournois } from './fauxTournois.js';
+import { FauxAbonnements, FauxDebit } from './fauxAbonnements.js';
 import { FauxDirect } from './fauxDirect.js';
 import { FauxEcran } from './fauxEcran.js';
 import { MAINTENANT, cleDuJourParis, instantParis, jour } from './temps.js';
@@ -177,6 +178,12 @@ export class FauxServeur {
     // départ. Un test les ferme avec `api.donnees.parametresPublics.features.coupeTournaments = false`
     this.donnees.parametresPublics.features.coupeTournaments ??= true;
     this.tournois = new FauxTournois(this);
+    // Abonnements au mois (routes /subscriptions…, e2e/support/fauxAbonnements.js) : ouverts, comme en
+    // production sans SUBSCRIPTIONS=off, mais aucune formule au catalogue tant qu'un test n'en ajoute
+    // pas (PRESTATIONS_ABONNEMENT). Fermés : `api.donnees.parametresPublics.features.subscriptions = false`
+    this.donnees.parametresPublics.features.subscriptions ??= true;
+    this.abonnements = new FauxAbonnements(this);
+    this.debit = new FauxDebit(this);
     // Spectateurs et écran du salon (docs/fonctions/coupe-spectateurs-contrat.md) : ouverts, comme en
     // production sans COUPE_SPECTATEURS=off ; un test les ferme avec
     // `api.donnees.parametresPublics.features.coupeSpectators = false`. Matchs en direct
@@ -440,6 +447,8 @@ export class FauxServeur {
 
     // La Coupe du Gang : tournois (routes/coupeTournaments.js du serveur), puis routes REST
     // (routes/coupe.js du serveur)
+    if (chemin === '/subscriptions' || chemin.startsWith('/subscriptions/')) return this.abonnements.traiter(req);
+    if (/^\/gift-cards\/[^/]+\/(debit|transactions)(\/|$)/.test(chemin)) return this.debit.traiter(req);
     if (/^\/coupe\/(admin\/)?tournaments(\/|$)/.test(chemin)) return this.tournois.traiter(req);
     if (chemin === '/coupe/live') return this.direct.traiter(req);
     if (chemin === '/coupe/screen' || /^\/coupe\/admin\/screens(\/|$)/.test(chemin)) return this.ecran.traiter(req);

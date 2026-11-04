@@ -7,6 +7,7 @@ import { hapticFeedback } from '@/lib/capacitor';
 import { useAndroidBack } from '@/lib/useAndroidBack';
 import { KindIcon } from './KindIcon';
 import AnimatedNumber from './AnimatedNumber';
+import { unitLabel } from '@/components/abonnement/visitLabels';
 import { formatDuration, formatPrice } from './serviceUtils';
 
 /**
@@ -32,10 +33,13 @@ import { formatDuration, formatPrice } from './serviceUtils';
  * @param {(list: object[]) => void} props.onAdd      ajouter à la sélection
  * @param {(service: object) => void} props.onRemove  retirer de la sélection
  * @param {() => void} props.onClose
+ * @param {object|null} [props.plan]      formule d'abonnement (`features.subscriptions`) : prix de la
+ *   coupe, et une seule action, « Choisir mes 4 RDV » (`onPlan`)
+ * @param {() => void} [props.onPlan]
  */
 export default function ServiceSheet({
   service, kind, rank = null, isNew = false, complements = [], pickLabel, canPick, hasSelection, selected,
-  favorite = false, onFavorite, onPick, onAdd, onRemove, onClose, reduceMotion = false,
+  favorite = false, onFavorite, onPick, onAdd, onRemove, onClose, reduceMotion = false, plan = null, onPlan,
 }) {
   const titleId = useId();
   const panelRef = useRef(null);
@@ -74,13 +78,16 @@ export default function ServiceSheet({
   };
 
   const list = [service, ...extras];
-  const primary = canPick
-    ? { label: pickLabel, run: () => onPick?.(list) }
-    : selected
-      ? null
-      : { label: 'Ajouter à ma sélection', run: () => onAdd?.(list) };
+  const primary = plan
+    ? { label: 'Choisir mes 4 RDV', run: () => onPlan?.() }
+    : canPick
+      ? { label: pickLabel, run: () => onPick?.(list) }
+      : selected
+        ? null
+        : { label: 'Ajouter à ma sélection', run: () => onAdd?.(list) };
   let secondary = null;
-  if (selected) secondary = { label: 'Retirer de ma sélection', run: () => onRemove?.(service) };
+  if (plan) secondary = null;
+  else if (selected) secondary = { label: 'Retirer de ma sélection', run: () => onRemove?.(service) };
   else if (canPick) secondary = { label: hasSelection ? 'Ajouter à ma sélection' : 'Ajouter une autre prestation', run: () => onAdd?.(list) };
 
   return createPortal(
@@ -131,8 +138,13 @@ export default function ServiceSheet({
               <h2 id={titleId} className="font-display text-2xl font-bold leading-tight text-foreground break-words">{name}</h2>
               <div className="flex flex-wrap items-center gap-1.5 mt-2">
                 <span className="inline-flex items-center gap-1 rounded-full bg-secondary px-2.5 py-0.5 text-xs text-muted-foreground">
-                  <Clock className="w-3 h-3" aria-hidden="true" /> {formatDuration(service?.duration)}
+                  <Clock className="w-3 h-3" aria-hidden="true" /> {formatDuration(service?.duration)}{plan ? ' par visite' : ''}
                 </span>
+                {plan && (
+                  <span className="inline-flex items-center rounded-full bg-primary/15 px-2.5 py-0.5 text-xs font-semibold text-primary">
+                    {unitLabel(plan)}
+                  </span>
+                )}
                 {rank && (
                   <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2.5 py-0.5 text-xs font-semibold text-amber-400">
                     <Flame className="w-3 h-3" aria-hidden="true" /> N°{rank} des réservations

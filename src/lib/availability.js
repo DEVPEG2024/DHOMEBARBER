@@ -5,6 +5,8 @@
  * du serveur : aucune règle de créneau n'est ajoutée ici.
  */
 import { addDays, format, startOfWeek } from 'date-fns';
+import { fr } from 'date-fns/locale';
+import { parisInstant } from '@/lib/calendarLinks';
 import { analyzeDay } from '@/lib/slots';
 
 /**
@@ -129,4 +131,60 @@ export function emptyDayLabel(reason) {
     case 'private': return 'privé';
     default: return 'complet';
   }
+}
+
+/** « 35 min », « 1 h », « 1 h30 ». */
+function formatMinutes(total) {
+  if (total < 60) return `${total} min`;
+  return `${Math.floor(total / 60)} h${total % 60 ? String(total % 60).padStart(2, '0') : ''}`;
+}
+
+/**
+ * Message d'une date sans créneau, selon la raison (`analyzeDay` / `mergeDayReasons`).
+ * Le conseil sur la durée n'apparaît que lorsque c'est vraiment elle qui bloque.
+ */
+export function emptyDayMessage(reason, { barberName, date, totalDuration, serviceCount, canChangeBarber }) {
+  const weekday = format(date, 'EEEE', { locale: fr });
+  const otherDate = canChangeBarber ? 'Choisissez une autre date, ou un autre barber.' : 'Choisissez une autre date.';
+  switch (reason) {
+    case 'leave':
+      return { title: `${barberName} est en congé ce jour-là`, hint: otherDate };
+    case 'off':
+      return { title: `${barberName} ne travaille pas le ${weekday}`, hint: otherDate };
+    case 'closed':
+      return { title: `Le salon est fermé le ${weekday}`, hint: 'Choisissez une autre date.' };
+    case 'nobody':
+      return { title: 'Aucun barber ne travaille ce jour-là', hint: 'Choisissez une autre date.' };
+    case 'over':
+      return { title: 'Plus aucun créneau aujourd\'hui', hint: 'La journée est terminée : choisissez une autre date.' };
+    case 'private':
+      return { title: 'Le salon est privatisé ce jour-là', hint: 'Choisissez une autre date, ou une heure en dehors de la privatisation.' };
+    case 'duration':
+      return {
+        title: 'Pas de créneau assez long ce jour-là',
+        hint: `Vos prestations durent ${formatMinutes(totalDuration)} : essayez une autre date${serviceCount > 1 ? ', ou retirez une prestation' : ''}.`,
+      };
+    default:
+      return {
+        title: barberName ? `${barberName} est complet ce jour-là` : 'Tous les barbers sont complets ce jour-là',
+        hint: barberName ? otherDate : 'Choisissez une autre date.',
+      };
+  }
+}
+
+/**
+ * Barber de la dernière visite du client (RDV confirmé ou terminé déjà commencé), s'il figure
+ * encore parmi les barbers réservables ; sinon `null`.
+ */
+export function lastVisitBarber(appointments, employees) {
+  const now = Date.now();
+  const past = (appointments || [])
+    .filter(a => a && ['confirmed', 'completed'].includes(a.status) && a.date && a.employee_id != null
+      && parisInstant(a.date, a.start_time || '00:00') <= now)
+    .sort((a, b) => `${b.date} ${b.start_time || ''}`.localeCompare(`${a.date} ${a.start_time || ''}`));
+  for (const apt of past) {
+    const emp = employees.find(e => String(e.id) === String(apt.employee_id));
+    if (emp) return emp;
+  }
+  return null;
 }

@@ -52,6 +52,14 @@ function Cell({ cell, state }) {
   );
 }
 
+/** « dont abonnements 100 € », avec les deux chiffres s'ils diffèrent et que le jour en a déjà vendu. */
+function subscriptionsHint(cartes) {
+  const { todaySubscriptions: day = 0, monthSubscriptions: month = 0 } = cartes || {};
+  if (!month && !day) return '';
+  if (day > 0 && day !== month) return `dont abonnements ${euro(day)} aujourd'hui · ${euro(month)} ce mois`;
+  return `dont abonnements ${euro(month || day)}`;
+}
+
 const TODAY_AND_MONTH = [{ key: 'today', label: "Aujourd'hui" }, { key: 'month', label: 'Ce mois' }];
 
 /** Un groupe de lignes, en tableau : « Aujourd'hui | Ce mois » par défaut, une colonne par `columns`. */
@@ -166,6 +174,7 @@ export default function KeyFigures({ d }) {
       return {
         key: c.key,
         label: CHANNEL_LABELS[c.key] || c.label,
+        hint: c.key === 'cartes' && d.features.subscriptions && !failed && !loading ? subscriptionsHint(sales.cartes) : '',
         today: { value: c.today },
         month: { value: c.month },
         state: { failed, loading },
@@ -200,7 +209,7 @@ export default function KeyFigures({ d }) {
   const count = (a, b) => ({ today: { kind: 'count', value: a }, month: { kind: 'count', value: b } });
   const rdvRows = [
     { key: 'paid', label: 'RDV encaissés', ...count(t.money.count, m.money.count) },
-    { key: 'avg', label: 'Panier moyen', hint: 'CA hors carte cadeau ÷ RDV encaissés', today: { value: t.money.avg }, month: { value: m.money.avg } },
+    { key: 'avg', label: 'Panier moyen', hint: d.features.subscriptions ? 'CA hors carte cadeau ÷ RDV encaissés, hors abonnements' : 'CA hors carte cadeau ÷ RDV encaissés', today: { value: t.money.avg }, month: { value: m.money.avg } },
     { key: 'toClose', label: 'À clôturer', hint: 'terminés, pas encore encaissés',
       today: { value: t.toClose.amount, count: t.toClose.count }, month: { value: m.toClose.amount, count: m.toClose.count } },
     { key: 'upcoming', label: 'À venir', hint: 'confirmés, pas encore passés',

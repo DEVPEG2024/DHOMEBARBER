@@ -3,6 +3,7 @@
  * barbers (jamais de vignette ronde ou carrée). Choisir un barber met les heures à jour sur le même
  * écran. Le barber de la dernière visite porte « Habituel » ; celui du look choisi sur son profil
  * (réservation depuis une photo des réalisations) porte « Ce look », qui prime.
+ * `showAny={false}` retire « Peu importe » (abonnement : un barber précis pour chaque rendez-vous).
  */
 import React, { useRef } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
@@ -27,7 +28,7 @@ function SelectedBadge() {
 }
 
 export default function BarberStrip({
-  employees = [], anyBarber, selectedId, usualId = null, lookId = null, loading = false, onAny, onSelect,
+  employees = [], anyBarber, selectedId, usualId = null, lookId = null, loading = false, showAny = true, onAny, onSelect,
 }) {
   const reduceMotion = useReducedMotion();
   const tap = reduceMotion ? undefined : { scale: 0.95 };
@@ -37,18 +38,20 @@ export default function BarberStrip({
 
   return (
     <div ref={rowRef} className="flex gap-3 overflow-x-auto scrollbar-hide -mx-4 px-4 pt-2 pb-1" role="group" aria-label="Choix du barber">
-      <motion.button type="button" whileTap={tap} onClick={onAny} aria-pressed={!!anyBarber} className={TILE}>
-        <span
-          className={`relative w-full rounded-[14px] flex items-center justify-center transition-colors duration-300 ${
-            anyBarber ? 'border-2 border-primary bg-primary/15 text-primary' : 'border border-border bg-card text-muted-foreground'
-          }`}
-          style={{ aspectRatio: BARBER_PHOTO_ASPECT }}
-        >
-          <Users className="w-6 h-6" aria-hidden="true" />
-          {anyBarber && <SelectedBadge />}
-        </span>
-        <span className={`text-xs leading-tight ${anyBarber ? 'font-bold text-primary' : 'font-semibold text-foreground'}`}>Peu importe</span>
-      </motion.button>
+      {showAny && (
+        <motion.button type="button" whileTap={tap} onClick={onAny} aria-pressed={!!anyBarber} className={TILE}>
+          <span
+            className={`relative w-full rounded-[14px] flex items-center justify-center transition-colors duration-300 ${
+              anyBarber ? 'border-2 border-primary bg-primary/15 text-primary' : 'border border-border bg-card text-muted-foreground'
+            }`}
+            style={{ aspectRatio: BARBER_PHOTO_ASPECT }}
+          >
+            <Users className="w-6 h-6" aria-hidden="true" />
+            {anyBarber && <SelectedBadge />}
+          </span>
+          <span className={`text-xs leading-tight ${anyBarber ? 'font-bold text-primary' : 'font-semibold text-foreground'}`}>Peu importe</span>
+        </motion.button>
+      )}
 
       {employees.map((emp) => {
         const selected = !anyBarber && String(selectedId) === String(emp.id);

@@ -18,6 +18,7 @@ import {
 import { isRescheduledCancel, cancellationActor } from '@/lib/cancellation';
 import { workingHoursOf, isOnLeave, privateWindow } from '@/lib/slots';
 import { parisInstant } from '@/lib/calendarLinks';
+import { isVisitLine } from '@/lib/subscriptions';
 
 // ─── Calculs purs : bloc lu tel quel par dhomebarber-api/test/test-t7-3-dashboard.js ───
 // <calculs-purs>
@@ -183,6 +184,25 @@ export const isPaid = (a) => a.payment_status === 'paid' || a.status === 'comple
 export const isRealAppt = (a) => a.status !== 'break' && a.status !== 'last_minute' && !isUnclaimedLastMinute(a) && !isClientPlaceholder(a);
 /** CA d'un RDV hors part déjà payée par carte cadeau (ce qui reste à encaisser, ou ce qui l'a été). */
 export const outsideGift = (a) => round2(revenueOf(a) - giftPartOf(a));
+/**
+ * RDV d'un abonnement pas encore encaissé : sa coupe ne rapportera rien de plus, elle est déjà payée ou se
+ * paiera à la vente de l'abonnement (« Cartes cadeau vendues »). Seule la ligne de la coupe sort de « à
+ * venir », « à clôturer » et du manque à gagner d'un absent : une barbe ajoutée (15 €) reste à encaisser ; le
+ * nombre de RDV, lui, reste. Coupe déjà débitée : plus rien à retirer, la part carte est déjà déduite.
+ * Encaissé : la règle ordinaire.
+ */
+const isUnpaidVisit = (a) => !!a.subscription_id && !isPaid(a);
+/** Part de la coupe dans le prix du RDV : sa ligne, sinon (ligne illisible) tout le RDV. */
+function visitPartOf(a) {
+  const lines = (Array.isArray(a.services) ? a.services : []).filter(isVisitLine);
+  return lines.length ? lines.reduce((s, l) => s + (Number(l?.price) || 0), 0) : revenueOf(a);
+}
+/** Ce qu'un RDV encore ouvert doit rapporter, hors part déjà payée par carte cadeau. */
+export const openAmountOf = (a) => (isUnpaidVisit(a)
+  ? round2(Math.max(0, revenueOf(a) - Math.max(giftPartOf(a), visitPartOf(a))))
+  : outsideGift(a));
+/** Prix d'un RDV pour la liste du jour et le manque à gagner d'un absent. */
+export const priceOf = (a) => (isUnpaidVisit(a) ? round2(Math.max(0, revenueOf(a) - visitPartOf(a))) : revenueOf(a));
 /** Terminé (heure de fin passée à Paris), confirmé, pas encaissé : « à clôturer » (pastille € de l'agenda). */
 export const isToClose = (a, now = Date.now()) => a.status === 'confirmed' && !isPaid(a) && needsClosing(a, now);
 /** Confirmé, pas encaissé, pas encore terminé : CA à venir. */
@@ -213,7 +233,7 @@ const sumOf = (list, fn) => round2(list.reduce((s, a) => s + (Number(fn(a)) || 0
 /**
  * Argent d'une liste de RDV encaissés : CA hors carte (`revenue` = `cb + especes + autre`), part carte
  * cadeau (`gift`), dont produits vendus en RDV (`products`), pourboires par moyen, nombre et panier
- * moyen (hors carte, comme Statistiques).
+ * moyen (hors carte et hors RDV d'abonnement, comme Statistiques).
  */
 export function moneyOf(list) {
   let cb = 0; let especes = 0; let autre = 0;
@@ -225,6 +245,9 @@ export function moneyOf(list) {
   const tips = sumOf(list, (a) => a.tip);
   const tipsCB = sumOf(list.filter((a) => a.tip_method === 'cb'), (a) => a.tip);
   const tipsCash = sumOf(list.filter((a) => a.tip_method === 'especes'), (a) => a.tip);
+  // Panier moyen hors RDV d'abonnement : payés par leur carte, ils le faisaient tomber vers 0 (déjà
+  // comptés à la vente de la carte), et le nombre de RDV encaissés les garde
+  const plain = list.filter((a) => !a.subscription_id);
   return {
     revenue,
     gift: sumOf(list, giftPartOf),
@@ -236,7 +259,7 @@ export function moneyOf(list) {
     }),
     tips, tipsCB, tipsCash, tipsOther: round2(tips - tipsCB - tipsCash),
     count: list.length,
-    avg: list.length ? round2(revenue / list.length) : 0,
+    avg: plain.length ? round2(sumOf(plain, outsideGift) / plain.length) : 0,
   };
 }
 
@@ -333,7 +356,8 @@ export function computeDashboard({ rows, nowMs, employees = [] }) {
       clientName: a.client_name || '',
       guestName: a.guest_name || '',
       services: (a.services || []).map((s) => s?.name).filter(Boolean).join(', '),
-      amount: a.status === 'break' ? 0 : revenueOf(a),
+      amount: a.status === 'break' ? 0 : priceOf(a),
+      subscriptionVisit: isUnpaidVisit(a) ? (Number(a.subscription_visit) || 0) : null,
       status: a.status === 'break' ? 'break' : dayStatusOf(a, nowMs),
       paymentLabel: isPaid(a) ? paymentLabelOf(a) : '',
     }));
@@ -345,8 +369,8 @@ export function computeDashboard({ rows, nowMs, employees = [] }) {
   const monthMoney = moneyOf(monthPaid);
   const monthToClose = monthRows.filter((a) => isToClose(a, nowMs));
   const monthUpcoming = monthRows.filter((a) => isUpcomingDue(a, nowMs));
-  const monthToCloseAmount = sumOf(monthToClose, outsideGift);
-  const monthUpcomingAmount = sumOf(monthUpcoming, outsideGift);
+  const monthToCloseAmount = sumOf(monthToClose, openAmountOf);
+  const monthUpcomingAmount = sumOf(monthUpcoming, openAmountOf);
 
   // ── Mois précédent, à la même date et à la même heure ──
   const cutoffDay = `${prevKey}-${pad(Math.min(Number(today.slice(8, 10)), daysInMonth(prevKey)))}`;
@@ -427,7 +451,7 @@ export function computeDashboard({ rows, nowMs, employees = [] }) {
     .reverse()
     .map((a) => ({
       id: a.id, date: dateOf(a), start: startOf(a), clientName: a.client_name || 'Client', guestName: a.guest_name || '',
-      employeeName: nameOf(a), amount: revenueOf(a), repeat: rank.get(String(a.id)) || 1,
+      employeeName: nameOf(a), amount: priceOf(a), repeat: rank.get(String(a.id)) || 1,
     }));
 
   return {
@@ -435,8 +459,8 @@ export function computeDashboard({ rows, nowMs, employees = [] }) {
     today: {
       money: todayMoney,
       active: todayRows.filter((a) => !isCancelledLike(a)).length,
-      toClose: { count: todayToClose.length, amount: sumOf(todayToClose, outsideGift) },
-      upcoming: { count: todayUpcoming.length, amount: sumOf(todayUpcoming, outsideGift) },
+      toClose: { count: todayToClose.length, amount: sumOf(todayToClose, openAmountOf) },
+      upcoming: { count: todayUpcoming.length, amount: sumOf(todayUpcoming, openAmountOf) },
       noShow: todayRows.filter((a) => a.status === 'no_show').length,
       cancelled: todayRows.filter((a) => a.status === 'cancelled' && !isRescheduledCancel(a)).length,
       clientCancels: todayRows.filter(isClientCancel).length,
@@ -467,7 +491,7 @@ export function computeDashboard({ rows, nowMs, employees = [] }) {
     week,
     toClose: {
       count: toCloseAll.length,
-      amount: sumOf(toCloseAll, outsideGift),
+      amount: sumOf(toCloseAll, openAmountOf),
       oldest,
       today: toCloseAll.filter((a) => dateOf(a) === today).length,
       earlier: toCloseAll.filter((a) => dateOf(a) < today).length,
@@ -488,7 +512,7 @@ export function computeDashboard({ rows, nowMs, employees = [] }) {
       auto: lmStats(lmMonth.filter(isAuto)),
       freeToday: all.filter((a) => dateOf(a) === today && isFreeLastMinute(a) && String(a.end_time || '').slice(0, 5) > hhmm).length,
     },
-    absences: { list: absences, lost: sumOf(noShowsAll.filter((a) => inMonth(a, monthKey)), revenueOf) },
+    absences: { list: absences, lost: sumOf(noShowsAll.filter((a) => inMonth(a, monthKey)), priceOf) },
   };
 }
 
@@ -506,12 +530,12 @@ export function buildUpcoming(rows, nowMs) {
   for (const a of list) {
     const key = dateOf(a).slice(0, 7);
     const m = byMonth.get(key) || { key, amount: 0, count: 0 };
-    m.amount += outsideGift(a);
+    m.amount += openAmountOf(a);
     m.count += 1;
     byMonth.set(key, m);
   }
   return {
-    amount: sumOf(list, outsideGift),
+    amount: sumOf(list, openAmountOf),
     count: list.length,
     months: [...byMonth.values()].map((m) => ({ ...m, amount: round2(m.amount) })).sort((a, b) => a.key.localeCompare(b.key)),
   };

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '@/api/apiClient';
 import { useQuery } from '@tanstack/react-query';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
@@ -6,6 +7,7 @@ import { Search, X, SearchX, Scissors, Sparkles, Plus, Gift } from 'lucide-react
 import { hapticFeedback } from '@/lib/capacitor';
 import { useFavorites } from '@/lib/favorites';
 import { usePopularServiceIds } from '@/lib/popularServices';
+import { useSubscriptionPlans } from '@/lib/subscriptions';
 import LoadError from '@/components/shared/LoadError';
 import { KindIcon } from './KindIcon';
 import CategoryChips from './CategoryChips';
@@ -41,6 +43,8 @@ const MAX_SUGGESTIONS = 3;
 /** Cartes du bloc « Les plus demandées » (grille 2 × 2) ; masqué en dessous de 2. */
 const POPULAR_SHOWN = 4;
 const FAVORITES_GROUP_ID = 'favoris';
+/** Rubrique qui contient une formule d'abonnement réservable en ligne (`features.subscriptions`). */
+const PLAN_NOTE = '4 rendez-vous réservés d\'un coup, réglés au salon.';
 
 /**
  * Catalogue des prestations, partagé par la page Prestations et l'étape 1 de la réservation :
@@ -63,6 +67,11 @@ const FAVORITES_GROUP_ID = 'favoris';
  * - coupe + barbe choisies séparément alors qu'une formule les réunit moins cher → « Passez à la
  *   formule », qui remplace les deux par la formule (économie affichée).
  *
+ * Abonnements (`features.subscriptions`, contrat : docs/fonctions/abonnements-contrat.md) : une
+ * formule reconnue par le serveur (`useSubscriptionPlans`) affiche le prix de la coupe et son action
+ * mène à `/abonnement?service=<id>`, jamais à la sélection. Drapeau faux : aucune formule reconnue,
+ * le catalogue reste celui d'avant.
+ *
  * @param {object} props
  * @param {Array} props.services            Prestations actives (déjà chargées par l'appelant)
  * @param {string[]|Set<string>} props.selectedIds
@@ -82,6 +91,13 @@ export default function ServicePicker({
   services = [], selectedIds, onToggle, onSwap, onPick, pickLabel = 'Réserver',
   loading = false, error = null, onRetry, retrying = false, suggestionsOnly = false,
 }) {
+  const navigate = useNavigate();
+  const { plans } = useSubscriptionPlans();
+  const planOf = (service) => plans.find(p => String(p.service_id) === String(service?.id)) || null;
+  const goToPlan = (service) => {
+    hapticFeedback();
+    navigate(`/abonnement?service=${encodeURIComponent(service.id)}`);
+  };
   const favorites = useFavorites();
   const toggleFavorite = useCallback((service) => favorites.toggle('services', service.id, service.name), [favorites]);
   const reduceMotion = useReducedMotion();
@@ -249,6 +265,10 @@ export default function ServicePicker({
   );
 
   const rowAction = useCallback((service) => {
+    if (planOf(service)) {
+      goToPlan(service);
+      return;
+    }
     if (mode === 'pick') {
       hapticFeedback();
       onPick?.([service]);
@@ -262,7 +282,7 @@ export default function ServicePicker({
       return;
     }
     onToggle?.(service);
-  }, [mode, onPick, onToggle, onSwap, replacedOf]);
+  }, [mode, onPick, onToggle, onSwap, replacedOf, plans]);
 
   const openSheet = useCallback((service) => { hapticFeedback(); setSheetService(service); }, []);
   const closeSheet = useCallback(() => setSheetService(null), []);
@@ -404,6 +424,7 @@ export default function ServicePicker({
           replacesOf={replaceNamesOf}
           mode={mode}
           pickLabel={pickLabel}
+          planOf={planOf}
           onOpen={openSheet}
           onAction={rowAction}
           reduceMotion={reduceMotion}
@@ -454,7 +475,9 @@ export default function ServicePicker({
               <span className="font-display text-lg font-bold text-foreground leading-tight">{group.name}</span>
               <span className="text-xs font-semibold text-muted-foreground tabular-nums">{group.services.length}</span>
             </h2>
-            {group.note && <p className="text-xs text-muted-foreground -mt-1 mb-2.5">{group.note}</p>}
+            {group.note && (
+              <p className="text-xs text-muted-foreground -mt-1 mb-2.5">{group.services.some(planOf) ? PLAN_NOTE : group.note}</p>
+            )}
             <ul className="rounded-2xl border border-border bg-card/70 overflow-hidden divide-y divide-border">
               {group.services.map(service => {
                 const id = String(service.id);
@@ -467,6 +490,7 @@ export default function ServicePicker({
                     isNew={newIds.has(id)}
                     mode={mode}
                     pickLabel={pickLabel}
+                    plan={planOf(service)}
                     onOpen={openSheet}
                     onAction={rowAction}
                     reduceMotion={reduceMotion}
@@ -518,6 +542,8 @@ export default function ServicePicker({
             onRemove={(s) => { onToggle?.(s); setSheetService(null); }}
             onClose={closeSheet}
             reduceMotion={reduceMotion}
+            plan={planOf(sheetService)}
+            onPlan={() => { setSheetService(null); goToPlan(sheetService); }}
           />
         )}
       </AnimatePresence>

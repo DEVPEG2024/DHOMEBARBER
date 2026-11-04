@@ -2,6 +2,7 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { Sparkles } from 'lucide-react';
 import ServiceActionButton from './ServiceActionButton';
+import { unitLabel } from '@/components/abonnement/visitLabels';
 import { descriptionLead, formatDuration, formatPrice } from './serviceUtils';
 
 /**
@@ -9,8 +10,10 @@ import { descriptionLead, formatDuration, formatPrice } from './serviceUtils';
  * « durée · début de la description » sur une ligne, prix, puis le bouton d'action à droite.
  * La zone texte + prix est un vrai bouton qui ouvre la fiche ; l'action est un second bouton à côté.
  * Une prestation choisie est soulignée d'un fond vert léger (couleur seulement, rien ne bouge).
+ * `plan` : formule d'abonnement (`features.subscriptions`, `useSubscriptionPlans`) : le prix de la
+ * coupe sur la ligne, et l'action mène toujours au parcours de l'abonnement, jamais à une sélection.
  */
-export default function ServiceRow({ service, selected = false, replaces, isNew = false, mode, pickLabel, onOpen, onAction, reduceMotion = false }) {
+export default function ServiceRow({ service, selected = false, replaces, isNew = false, mode, pickLabel, plan = null, onOpen, onAction, reduceMotion = false }) {
   const name = String(service?.name || '').trim();
   const lead = descriptionLead(service);
   return (
@@ -24,15 +27,18 @@ export default function ServiceRow({ service, selected = false, replaces, isNew 
       >
         <span className="flex-1 min-w-0">
           <span className="block text-sm font-semibold leading-snug text-foreground line-clamp-2 break-words">{name}</span>
-          <span className="flex items-center gap-1.5 mt-0.5 min-w-0 text-xs text-muted-foreground">
+          {/* Formule : le prix de la coupe et la durée restent entiers, quitte à passer à la ligne */}
+          <span className={`flex items-center gap-1.5 mt-0.5 min-w-0 text-xs text-muted-foreground ${plan ? 'flex-wrap' : ''}`}>
             {isNew && (
               <span className="shrink-0 inline-flex items-center gap-0.5 rounded-full bg-primary/15 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-primary">
                 <Sparkles className="w-2.5 h-2.5" aria-hidden="true" /> Nouveau
               </span>
             )}
-            <span className="truncate">
-              {formatDuration(service?.duration)}{lead ? ` · ${lead}` : ''}
-            </span>
+            {plan ? (
+              <span>{unitLabel(plan)} · {formatDuration(plan.duration)} par visite</span>
+            ) : (
+              <span className="truncate">{formatDuration(service?.duration)}{lead ? ` · ${lead}` : ''}</span>
+            )}
           </span>
         </span>
         <span className="shrink-0 min-w-[2.5rem] text-right font-fut text-[21px] font-bold leading-none text-primary tabular-nums">
@@ -40,7 +46,7 @@ export default function ServiceRow({ service, selected = false, replaces, isNew 
         </span>
       </motion.button>
       <ServiceActionButton
-        mode={mode}
+        mode={plan ? 'pick' : mode}
         pickLabel={pickLabel}
         selected={selected}
         replaces={replaces}

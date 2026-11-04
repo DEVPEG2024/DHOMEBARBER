@@ -2,7 +2,7 @@ import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { Outlet, Link, useLocation, Navigate } from 'react-router-dom';
 import {
   LayoutDashboard, Calendar, Users, Scissors, UserCircle,
-  BarChart3, Settings, Menu, X, ChevronLeft, ChevronDown, ShoppingBag, Star, Bell, Brain, Sun, Moon, ClipboardList, ShieldCheck, Sparkles, CalendarDays, Newspaper, Warehouse, PartyPopper, LogOut, Gift, GripVertical, Shirt, Camera, Handshake, Volume2, VolumeX, Bug, Activity, IdCard, Home, TrendingUp, Trophy } from 'lucide-react';
+  BarChart3, Settings, Menu, X, ChevronLeft, ChevronDown, ShoppingBag, Star, Bell, Brain, Sun, Moon, ClipboardList, ShieldCheck, Sparkles, CalendarDays, Newspaper, Warehouse, PartyPopper, LogOut, Gift, GripVertical, Shirt, Camera, Handshake, Volume2, VolumeX, Bug, Activity, IdCard, Home, TrendingUp, Trophy, Repeat } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { useTheme } from '@/lib/ThemeContext';
 import { useAuth } from '@/lib/AuthContext';
@@ -13,6 +13,7 @@ import { useUnreadActivity, useActivityToasts } from '@/lib/adminActivity';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/api/apiClient';
 import { useCoupeEnabled } from '@/lib/coupe/coupeApi';
+import { useSubscriptionsFeature } from '@/lib/subscriptions';
 
 // All nav items with their default category
 const allNavItems = [
@@ -42,6 +43,9 @@ const allNavItems = [
   { path: '/admin/stock', icon: Warehouse, label: 'Stock Produits', adminOnly: true, category: 'Commerce' },
   { path: '/admin/orders', icon: ClipboardList, label: 'Commandes', perm: 'orders', category: 'Commerce' },
   { path: '/admin/gift-cards', icon: Gift, label: 'Cartes Cadeau', adminOnly: true, category: 'Commerce' },
+  // Abonnements au mois (4 nov. 2026) : à valider, en cours, terminés ; admin seulement, cachés tant que
+  // le serveur ne les ouvre pas (`features.subscriptions`, variable SUBSCRIPTIONS=off)
+  { path: '/admin/subscriptions', icon: Repeat, label: 'Abonnements', adminOnly: true, category: 'Commerce', subscriptions: true },
   // Textile & drops : l'admin gère drops et pièces, un barber avec la permission produits suit les retraits
   { path: '/admin/textile', icon: Shirt, label: 'Textile & Drops', perm: 'products', category: 'Commerce' },
   // Bons plans du Gang : partenaires du salon et leurs remises réservées aux clients
@@ -157,10 +161,11 @@ export default function AdminLayout() {
   const pendingLeaveCount = isAdmin && Array.isArray(pendingLeaves) ? pendingLeaves.length : 0;
   // La Coupe du Gang : entrée de menu seulement quand le jeu est ouvert (drapeau du serveur)
   const coupeOn = useCoupeEnabled();
+  const subscriptionsOn = useSubscriptionsFeature();
 
   // Filter items by role/permissions
   const filteredItems = useMemo(() => {
-    const items = allNavItems.filter(item => !item.coupe || coupeOn);
+    const items = allNavItems.filter(item => (!item.coupe || coupeOn) && (!item.subscriptions || subscriptionsOn));
     if (!user || user.role === 'admin') {
       return items.filter(item => !item.barberOnly);
     }
@@ -170,7 +175,7 @@ export default function AdminLayout() {
       if (item.alwaysShow || item.barberOnly) return true;
       return perms.includes(item.perm);
     });
-  }, [user, coupeOn]);
+  }, [user, coupeOn, subscriptionsOn]);
 
   // Build default flat list
   const defaultFlatList = useMemo(() => buildDefaultFlatList(filteredItems), [filteredItems]);

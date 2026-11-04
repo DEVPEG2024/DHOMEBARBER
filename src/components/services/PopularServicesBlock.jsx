@@ -2,6 +2,7 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { Flame } from 'lucide-react';
 import ServiceActionButton from './ServiceActionButton';
+import { unitLabel } from '@/components/abonnement/visitLabels';
 import { EASE, formatDuration, formatPrice } from './serviceUtils';
 
 /**
@@ -9,8 +10,9 @@ import { EASE, formatDuration, formatPrice } from './serviceUtils';
  * l'ancienne vitrine des formules), pastille N°1 à N°4, nom sur deux lignes, durée, prix et bouton
  * d'action. Le haut de la carte (pastille, nom, durée) est un bouton qui ouvre la fiche, l'action
  * est un second bouton. L'appelant ne la monte qu'avec au moins deux prestations.
+ * `planOf(prestation)` : formule d'abonnement de cette prestation, voir `ServiceRow`.
  */
-export default function PopularServicesBlock({ services, selectedIds, replacesOf, mode, pickLabel, onOpen, onAction, reduceMotion = false }) {
+export default function PopularServicesBlock({ services, selectedIds, replacesOf, mode, pickLabel, planOf, onOpen, onAction, reduceMotion = false }) {
   if (!services || services.length < 2) return null;
   return (
     <section aria-labelledby="popular-services" className="mb-5">
@@ -29,6 +31,7 @@ export default function PopularServicesBlock({ services, selectedIds, replacesOf
           const id = String(service.id);
           const selected = selectedIds.has(id);
           const name = String(service.name || '').trim();
+          const plan = planOf?.(service) || null;
           return (
             <motion.div
               key={id}
@@ -54,12 +57,12 @@ export default function PopularServicesBlock({ services, selectedIds, replacesOf
                   N°{i + 1}
                 </span>
                 <span className="text-sm font-semibold leading-snug line-clamp-2 min-h-[2.6rem] break-words">{name}</span>
-                <span className="text-xs text-white/60">{formatDuration(service.duration)}</span>
+                <span className="text-xs text-white/60">{plan ? unitLabel(plan) : formatDuration(service.duration)}</span>
               </motion.button>
               <div className="relative mt-auto pt-2 flex items-center justify-between gap-1">
                 <span className="font-fut text-[26px] font-bold leading-none text-primary tabular-nums whitespace-nowrap">{formatPrice(service.price)}</span>
                 <ServiceActionButton
-                  mode={mode}
+                  mode={plan ? 'pick' : mode}
                   pickLabel={pickLabel}
                   selected={selected}
                   replaces={replacesOf?.(service)}

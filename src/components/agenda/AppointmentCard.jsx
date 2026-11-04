@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Coffee, Zap, Check, X, UserX, Euro, ShoppingBag } from 'lucide-react';
 import { needsClosing, isCancelledLike, START_HOUR, END_HOUR, STATUS_META, minutesToTime } from './agendaUtils';
 import { agendaClientName, guestOf, staffClientLabel } from '@/lib/guest';
+import { SUBSCRIPTION_VISITS, useSubscriptionsFeature } from '@/lib/subscriptions';
 
 const activate = (fn) => ({
   role: 'button',
@@ -26,6 +27,21 @@ function describe(apt, hasProducts = false) {
     STATUS_META[apt.status]?.label,
     hasProducts ? 'Produit à remettre' : null,
   ].filter(Boolean).join(' · ');
+}
+
+/** Pastille « Abo 1/4 » d'un RDV d'abonnement ; rien tant que le serveur n'ouvre pas les abonnements. */
+function SubscriptionChip({ apt, dense }) {
+  const on = useSubscriptionsFeature();
+  if (!on) return null;
+  const visit = apt.subscription_visit;
+  return (
+    <span
+      className={`inline-block rounded-full bg-violet-500/25 px-1.5 font-semibold text-violet-200 whitespace-nowrap ${dense ? 'text-[9px]' : 'text-[10px]'}`}
+      aria-label={visit ? `Abonnement, coupe ${visit} sur ${SUBSCRIPTION_VISITS}` : 'Abonnement'}
+    >
+      {visit ? `Abo ${visit}/${SUBSCRIPTION_VISITS}` : 'Abo'}
+    </span>
+  );
 }
 
 /**
@@ -70,6 +86,8 @@ export function AppointmentCard({ apt, style, color, showBarber = false, dense =
             {agendaClientName(apt)}
           </span>
           <span className="ml-auto shrink-0 flex items-center gap-0.5">
+            {/* Carte trop courte pour la deuxième ligne : ici ; sinon le nom du client garde la place */}
+            {!twoLines && apt.subscription_id && <SubscriptionChip apt={apt} dense={dense} />}
             {apt.status === 'completed' && apt.payment_method && <Check className="w-3 h-3 text-primary" />}
             {apt.status === 'cancelled' && <X className="w-3 h-3 text-red-400" />}
             {apt.status === 'no_show' && <UserX className="w-3 h-3 text-red-400" />}
@@ -86,8 +104,11 @@ export function AppointmentCard({ apt, style, color, showBarber = false, dense =
             )}
           </span>
         </div>
-        {twoLines && services && (
-          <p className={`${dense ? 'text-[9px]' : 'text-[10px]'} text-muted-foreground truncate leading-tight mt-0.5`}>{services}</p>
+        {twoLines && (services || apt.subscription_id) && (
+          <p className={`${dense ? 'text-[9px]' : 'text-[10px]'} text-muted-foreground truncate leading-tight mt-0.5`}>
+            {apt.subscription_id && <><SubscriptionChip apt={apt} dense={dense} />{' '}</>}
+            {services}
+          </p>
         )}
         {threeLines && (showBarber || toClose) && (
           <p className={`${dense ? 'text-[9px]' : 'text-[10px]'} truncate leading-tight mt-0.5 flex items-center gap-1`}>

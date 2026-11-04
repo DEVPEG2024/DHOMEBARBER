@@ -10,6 +10,7 @@ import { Link } from 'react-router-dom';
 import { CalendarDays, ChevronRight, Coffee } from 'lucide-react';
 import { euro } from '@/lib/euro';
 import { staffClientLabel } from '@/lib/guest';
+import { SUBSCRIPTION_VISITS } from '@/lib/subscriptions';
 import { Section, Pill, GoLink } from '@/components/admin/dashboard/ui';
 
 // Au-delà, la liste se replie (« Voir toute la liste (N lignes) »)
@@ -90,7 +91,14 @@ function ApptRow({ item, to }) {
         <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
           <span className="text-xs text-muted-foreground break-words">{item.employeeName}</span>
           <Pill tone={st.tone}>{statusLabel(item)}</Pill>
-          {cancelled ? (
+          {/* RDV d'abonnement pas encore débité : sa coupe n'est pas à encaisser ; rien de plus, jamais
+              « 0 € » à côté (une prestation ajoutée garde son montant) */}
+          {item.subscriptionVisit != null && (
+            <span className={`text-xs font-semibold text-muted-foreground ${item.amount > 0 ? '' : 'ml-auto'}`}>
+              {item.subscriptionVisit ? `Abo ${item.subscriptionVisit}/${SUBSCRIPTION_VISITS}` : 'Abo'}
+            </span>
+          )}
+          {item.subscriptionVisit != null && !(item.amount > 0) ? null : cancelled ? (
             <s className="ml-auto text-sm font-semibold tabular-nums text-muted-foreground">{euro(item.amount)}</s>
           ) : (
             <span className="ml-auto text-sm font-semibold tabular-nums text-foreground">{euro(item.amount)}</span>

@@ -28,7 +28,7 @@ const pillTone = (pct) => (pct > 0 ? 'green' : pct < 0 ? 'red' : 'muted');
 const LOADED = { failed: false, loading: false };
 
 /** Tous les chiffres d'un mois : mêmes lignes que « Chiffres », plus les barbers et les Last Minute. */
-function MonthDetail({ entry, id, salesState, scope, incomplete }) {
+function MonthDetail({ entry, id, salesState, scope, incomplete, subscriptionsOn }) {
   const { stats, sales } = entry.report;
   const m = stats.month;
   const money = m.money;
@@ -41,8 +41,12 @@ function MonthDetail({ entry, id, salesState, scope, incomplete }) {
       const failed = c.key !== 'prestations' && !!salesState.failed[c.key];
       const loading = c.key !== 'prestations' && !failed && !!salesState.loading[c.key];
       const by = c.key === 'cartes' ? sales.cartes.monthBy : null;
+      const subscriptions = by && subscriptionsOn ? sales.cartes.monthSubscriptions : 0;
       const hint = by && c.month > 0
-        ? [`CB ${euro(by.cb)}`, `espèces ${euro(by.especes)}`, by.other > 0 ? `non renseigné ${euro(by.other)}` : ''].filter(Boolean).join(' · ')
+        ? [
+          `CB ${euro(by.cb)}`, `espèces ${euro(by.especes)}`, by.other > 0 ? `non renseigné ${euro(by.other)}` : '',
+          subscriptions > 0 ? `dont abonnements ${euro(subscriptions)}` : '',
+        ].filter(Boolean).join(' · ')
         : '';
       return line(c.key, CHANNEL_LABELS[c.key] || c.label, c.month, { hint, state: { failed, loading } });
     }),
@@ -55,7 +59,7 @@ function MonthDetail({ entry, id, salesState, scope, incomplete }) {
   ];
   const rdvRows = [
     count('paid', 'RDV encaissés', money.count),
-    line('avg', 'Panier moyen', money.avg, { hint: 'CA hors carte cadeau ÷ RDV encaissés' }),
+    line('avg', 'Panier moyen', money.avg, { hint: subscriptionsOn ? 'CA hors carte cadeau ÷ RDV encaissés, hors abonnements' : 'CA hors carte cadeau ÷ RDV encaissés' }),
     { ...line('toClose', 'Restés à clôturer', m.toClose.amount, { hint: 'terminés, jamais encaissés' }), month: { value: m.toClose.amount, count: m.toClose.count }, hidden: m.toClose.count === 0 },
     count('noShow', 'Absents', m.noShows),
     count('cancels', 'Annulations par les clients', m.clientCancels, { hint: 'déplacements non comptés' }),
@@ -104,7 +108,7 @@ function MonthDetail({ entry, id, salesState, scope, incomplete }) {
 }
 
 /** Ligne d'un mois : bouton de résumé (`aria-expanded`), détail en dessous. */
-function MonthRow({ entry, older, best, open, onToggle, salesState, scope, incomplete }) {
+function MonthRow({ entry, older, best, open, onToggle, salesState, scope, incomplete, subscriptionsOn }) {
   const detailId = useId();
   const { report, failed, loading } = entry;
   const total = report?.total ?? 0;
@@ -156,7 +160,7 @@ function MonthRow({ entry, older, best, open, onToggle, salesState, scope, incom
           </span>
         )}
       </button>
-      {canOpen && open && <MonthDetail entry={entry} id={detailId} salesState={salesState} scope={scope} incomplete={incomplete} />}
+      {canOpen && open && <MonthDetail entry={entry} id={detailId} salesState={salesState} scope={scope} incomplete={incomplete} subscriptionsOn={subscriptionsOn} />}
     </li>
   );
 }
@@ -211,6 +215,7 @@ export default function PastMonths({ d }) {
               salesState={salesState}
               scope={scope}
               incomplete={incomplete}
+              subscriptionsOn={d.features.subscriptions}
             />
           ))}
         </ul>

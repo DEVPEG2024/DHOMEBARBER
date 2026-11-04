@@ -12,6 +12,7 @@ import {
   LAST_MINUTE_MARKER, withLastMinuteMarker, stripLastMinuteMarker, agendaErrorMessage, invalidateAppointmentQueries,
   isFreeLastMinute, coveredLastMinuteNote, removeCoveredLastMinutes,
 } from './agendaUtils';
+import { isVisitLine } from '@/lib/subscriptions';
 
 const inputCls = 'w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-primary/50';
 const labelCls = 'text-xs text-muted-foreground mb-1 block';
@@ -197,7 +198,8 @@ export default function AppointmentEditForm({ appointment, employees, onCancel, 
     }
   };
 
-  const available = catalog.filter((c) => !services.some((s) => String(s.service_id) === String(c.id)));
+  const available = catalog.filter((c) => !services.some((s) => String(s.service_id) === String(c.id))
+    && !(appointment.subscription_id && isVisitLine(c)));
   const barberMissing = employeeId && !employee;
 
   return (
@@ -238,10 +240,13 @@ export default function AppointmentEditForm({ appointment, employees, onCancel, 
                 <span className="flex items-center gap-2 text-xs shrink-0">
                   <span className="text-muted-foreground">{s.duration} min</span>
                   <span className="font-bold text-primary">{s.price}€</span>
-                  <button type="button" onClick={() => updateServices(services.filter((_, i) => i !== idx))}
-                    className="w-6 h-6 rounded-full bg-red-500/20 flex items-center justify-center hover:bg-red-500/30" aria-label={`Retirer ${s.name}`}>
-                    <X className="w-3 h-3 text-red-400" />
-                  </button>
+                  {/* RDV d'abonnement : sa coupe reste, une prestation s'y ajoute seulement */}
+                  {!(appointment.subscription_id && isVisitLine(s)) && (
+                    <button type="button" onClick={() => updateServices(services.filter((_, i) => i !== idx))}
+                      className="w-6 h-6 rounded-full bg-red-500/20 flex items-center justify-center hover:bg-red-500/30" aria-label={`Retirer ${s.name}`}>
+                      <X className="w-3 h-3 text-red-400" />
+                    </button>
+                  )}
                 </span>
               </div>
             ))}

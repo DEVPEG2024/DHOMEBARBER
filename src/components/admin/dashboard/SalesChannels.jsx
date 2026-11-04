@@ -181,6 +181,16 @@ export default function SalesChannels({ d }) {
           {sc === 'ok' && c.outdatedBalance > 0 && (
             <Row label="Reste sur des cartes expirées" hint="hors reste à utiliser · à prolonger" value={euro(c.outdatedBalance)} tone="amber" />
           )}
+          {/* Déjà encaissés à la vente : ce qu'il reste à honorer, calculé sur les cartes lues */}
+          {d.features.subscriptions && (sc !== 'ok' || sales.subscriptions.running > 0) && (
+            <Row
+              label="Abonnements"
+              hint={sc === 'ok'
+                ? `${sales.subscriptions.running} en cours, ${plural(sales.subscriptions.visitsLeft, 'coupe')} à faire`
+                : ''}
+              value={vc(() => `${euro(sales.subscriptions.toHonor)} à honorer`)}
+            />
+          )}
         </ChannelPanel>
 
         {access.canEvents && (

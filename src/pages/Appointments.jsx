@@ -24,6 +24,8 @@ import { findRescheduleSlots, moveAppointment, currentServices, appointmentDurat
 import { openOrdersByAppointment, orderItemsLabel } from '@/lib/appointmentProducts';
 import { formatPrice } from '@/components/shop/productUtils';
 import { guestOf } from '@/lib/guest';
+import { fetchMySubscriptions, subscriptionKeys, useSubscriptionsFeature } from '@/lib/subscriptions';
+import { isSubscriptionAppointment, upcomingVisits, visitEvent, visitLabel } from '@/components/abonnement/visitLabels';
 
 /** Aucune commande : valeur stable (évite de recalculer la carte des commandes à chaque rendu). */
 const NO_ORDERS = [];
@@ -182,6 +184,33 @@ export default function Appointments() {
     retry: false,
   });
   const ordersByAppointment = useMemo(() => openOrdersByAppointment(myOrders), [myOrders]);
+
+  // Abonnements pas encore réglés : « À régler » sur leur prochain RDV. Simple bonus, comme les
+  // produits : lu seulement si la liste contient un RDV d'abonnement, rien en cas d'échec.
+  const subscriptionsEnabled = useSubscriptionsFeature();
+  const hasSubscriptionAppointment = appointments.some(isSubscriptionAppointment);
+  const { data: mySubscriptions } = useQuery({
+    queryKey: subscriptionKeys.mine,
+    queryFn: fetchMySubscriptions,
+    enabled: subscriptionsEnabled && hasSubscriptionAppointment,
+    retry: false,
+  });
+  const toPayIds = useMemo(() => new Set((mySubscriptions || [])
+    .filter(s => s.status === 'pending')
+    .map(s => String(upcomingVisits(s)[0]?.id))), [mySubscriptions]);
+  /**
+   * Annuler ce RDV d'abonnement : `keeps` la coupe reste à reprendre ; `closes` c'est le dernier d'un
+   * abonnement pas réglé, le serveur le ferme (rien n'a été payé, plus rien à reprendre). Abonnement
+   * illisible : on ne promet rien.
+   */
+  const subscriptionCancelEffect = (apt) => {
+    if (!apt?.subscription_id) return null;
+    const subscription = (mySubscriptions || []).find(s => String(s.id) === String(apt.subscription_id));
+    if (!subscription) return null;
+    const others = appointments.some(a => String(a.subscription_id) === String(apt.subscription_id)
+      && String(a.id) !== String(apt.id) && a.status !== 'cancelled');
+    return subscription.status === 'pending' && !others ? 'closes' : 'keeps';
+  };
 
   // Délai d'annulation du salon (même requête et même cache que l'accueil). Dans ce délai le
   // serveur refuse l'annulation : on affiche le téléphone du salon au lieu du bouton.
@@ -362,6 +391,21 @@ export default function Appointments() {
       // Le serveur annule avec le RDV les produits ajoutés encore à préparer (stock rendu)
       queryClient.invalidateQueries({ queryKey: ['myOrders'] });
       queryClient.invalidateQueries({ queryKey: ['products'] });
+      const cancelled = appointments.find(a => String(a.id) === String(id));
+      if (cancelled?.subscription_id) queryClient.invalidateQueries({ queryKey: ['subscriptions'] });
+      const effect = subscriptionCancelEffect(cancelled);
+      // RDV d'abonnement : la coupe reste, on la reprend sur l'abonnement (pas une réservation neuve)
+      if (effect === 'keeps') {
+        toast.success('Rendez-vous annulé : la coupe reste sur votre abonnement', {
+          action: { label: 'Reprendre un RDV', onClick: () => navigate(`/abonnement?reprendre=${encodeURIComponent(cancelled.subscription_id)}`) },
+        });
+        return;
+      }
+      // Dernier RDV d'un abonnement pas réglé : le serveur le ferme, rien n'est dû
+      if (effect === 'closes') {
+        toast.success('Rendez-vous annulé : c\'était le dernier de votre abonnement pas encore réglé, il est fermé. Rien n\'est dû.', { duration: 8000 });
+        return;
+      }
       toast.success('Rendez-vous annulé : le créneau est libéré', {
         action: { label: 'Réserver', onClick: () => navigate('/booking') },
       });
@@ -636,7 +680,8 @@ export default function Appointments() {
                 const movedTo = moved ? movedToOf(apt) : '';
                 // À venir (fin du RDV pas encore passée) et ni annulé ni terminé : proposer l'ajout au calendrier
                 const canAddToCalendar = !CLOSED_STATUSES.includes(apt.status) && endsAt(apt) > now;
-                const calendarEvent = canAddToCalendar ? appointmentEvent(apt) : null;
+                const ofSubscription = isSubscriptionAppointment(apt);
+                const calendarEvent = canAddToCalendar ? (ofSubscription ? visitEvent(apt) : appointmentEvent(apt)) : null;
                 const targets = calendarEvent ? calendarTargets(calendarEvent) : [];
                 const calendarOpen = calendarOpenId === apt.id;
                 // Produits ajoutés à ce RDV à venir, encore à remettre
@@ -687,21 +732,33 @@ export default function Appointments() {
                         </div>
                       </div>
 
-                      {/* Services */}
-                      <div className="space-y-1.5">
-                        {apt.services?.map((s, j) => (
-                          <div key={j} className="flex justify-between items-center">
-                            <div className="flex items-center gap-2">
-                              <div className="w-1.5 h-1.5 rounded-full bg-primary/50" />
-                              <span className="text-xs text-muted-foreground">{s.name}</span>
-                            </div>
-                            <span className="text-xs font-bold text-primary">{s.price}€</span>
+                      {/* Services ; RDV d'abonnement : « Coupe 2 sur 4 », jamais la formule ni son prix */}
+                      {ofSubscription ? (
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <div className="w-1.5 h-1.5 rounded-full bg-primary/50 shrink-0" />
+                            <span className="text-xs font-semibold text-foreground">{visitLabel(apt.subscription_visit)}</span>
                           </div>
-                        ))}
-                      </div>
+                          {toPayIds.has(String(apt.id)) && (
+                            <span className="shrink-0 px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 text-[11px] font-semibold">À régler</span>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="space-y-1.5">
+                          {apt.services?.map((s, j) => (
+                            <div key={j} className="flex justify-between items-center">
+                              <div className="flex items-center gap-2">
+                                <div className="w-1.5 h-1.5 rounded-full bg-primary/50" />
+                                <span className="text-xs text-muted-foreground">{s.name}</span>
+                              </div>
+                              <span className="text-xs font-bold text-primary">{s.price}€</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
 
                       {/* Total */}
-                      {apt.total_price > 0 && (
+                      {apt.total_price > 0 && !ofSubscription && (
                         <div className="mt-3 pt-3 border-t border-white/6 flex justify-between items-center">
                           <span className="text-xs text-muted-foreground">Total</span>
                           <span className="text-sm font-bold text-foreground">{apt.total_price}€</span>
@@ -860,7 +917,12 @@ export default function Appointments() {
                     : intent === 'cancel' ? 'Et si on le déplaçait ?' : 'Déplacer ce rendez-vous'}
                 </DialogTitle>
                 <DialogDescription className="text-muted-foreground text-sm">
-                  {dialogMode === 'cancel' ? 'Le créneau sera libéré.' : moveDescription}
+                  {dialogMode === 'cancel'
+                    ? ({
+                      keeps: 'Le créneau sera libéré. La coupe reste sur votre abonnement.',
+                      closes: 'Le créneau sera libéré. C\'est le dernier de votre abonnement pas encore réglé : il sera fermé, rien n\'est dû.',
+                    }[subscriptionCancelEffect(cancelApt)] || 'Le créneau sera libéré.')
+                    : moveDescription}
                 </DialogDescription>
               </DialogHeader>
 
@@ -883,13 +945,19 @@ export default function Appointments() {
                   <User className="w-3 h-3 text-primary shrink-0" />
                   <span className="truncate">{cancelApt.employee_name || 'Barber non assigné'}</span>
                 </p>
-                {Array.isArray(cancelApt.services) && cancelApt.services.length > 0 && (
-                  <p className="text-xs text-muted-foreground break-words">
-                    {cancelApt.services.map(s => s?.name).filter(Boolean).join(' + ')}
-                  </p>
-                )}
-                {totalOf(cancelApt) > 0 && (
-                  <p className="text-xs font-bold text-foreground">{totalOf(cancelApt)}€</p>
+                {isSubscriptionAppointment(cancelApt) ? (
+                  <p className="text-xs font-semibold text-foreground">{visitLabel(cancelApt.subscription_visit)}</p>
+                ) : (
+                  <>
+                    {Array.isArray(cancelApt.services) && cancelApt.services.length > 0 && (
+                      <p className="text-xs text-muted-foreground break-words">
+                        {cancelApt.services.map(s => s?.name).filter(Boolean).join(' + ')}
+                      </p>
+                    )}
+                    {totalOf(cancelApt) > 0 && (
+                      <p className="text-xs font-bold text-foreground">{totalOf(cancelApt)}€</p>
+                    )}
+                  </>
                 )}
               </div>
 

@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '@/api/apiClient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
@@ -12,7 +13,14 @@ import { isNative } from '@/lib/capacitor';
 import { formatPrice } from '@/components/services/serviceUtils';
 import LoadError, { isNetworkError, queryFailed } from '@/components/shared/LoadError';
 import WalletButtons from '@/components/giftcards/WalletButtons';
+import PendingSubscriptionCard from '@/components/abonnement/PendingSubscriptionCard';
+import RenewSubscription from '@/components/abonnement/RenewSubscription';
+import VisitsBar from '@/components/abonnement/VisitsBar';
+import { dayLabel, perUnitLabel, upcomingVisits } from '@/components/abonnement/visitLabels';
 import { useAndroidBack } from '@/lib/useAndroidBack';
+import {
+  cardVisits, fetchMySubscriptions, isSubscriptionCard, subscriptionKeys, useSubscriptionsFeatureState, visitsWord,
+} from '@/lib/subscriptions';
 
 // Logo de la carte : emblème recadré, centré dans un carré de 168 px (html2canvas ignore object-fit :
 // un carré n'est jamais déformé dans le PDF), 13 Ko, intégré au bundle en data URL (`?inline`).
@@ -143,6 +151,8 @@ function GiftCardVisual({ card, cardRef, compact = false }) {
   const amount = Number(card.amount) || 0;
   const balance = cardBalance(card);
   const partly = isValid && balance < amount - 0.004;
+  // Carte d'abonnement : le solde reste en euros, le client le lit en coupes
+  const visits = isSubscriptionCard(card) ? cardVisits(card) : null;
 
   return (
     <div
@@ -181,19 +191,26 @@ function GiftCardVisual({ card, cardRef, compact = false }) {
         {/* Top row */}
         <div className="flex items-start justify-between">
           <div>
-            <p className="text-[10px] tracking-[0.3em] uppercase text-white/40 font-medium">Carte Cadeau</p>
+            <p className="text-[10px] tracking-[0.3em] uppercase text-white/40 font-medium">{visits ? 'Abonnement' : 'Carte Cadeau'}</p>
             <p className="text-[10px] text-white/30 font-mono mt-0.5">{card.code}</p>
           </div>
           <img src={LOGO_URL} alt="D'Home Barber" width={48} height={48} decoding="sync" draggable={false} className="w-12 h-12 shrink-0 object-contain opacity-90" />
         </div>
 
         {/* Center - Amount */}
-        <div className="text-center -mt-2">
-          <p className="text-4xl font-black text-white tracking-tight">{formatPrice(partly ? balance : amount)}</p>
-          <p className="text-xs text-primary font-semibold mt-1 whitespace-nowrap">
-            {partly ? <>restants sur {formatPrice(amount)} · D'Home Barber</> : "D'Home Barber"}
-          </p>
-        </div>
+        {visits ? (
+          <div className="text-center -mt-2">
+            <p className="text-4xl font-black text-white tracking-tight">{visitsWord(visits.left)}</p>
+            <VisitsBar left={visits.left} total={visits.total} className="mt-2" />
+          </div>
+        ) : (
+          <div className="text-center -mt-2">
+            <p className="text-4xl font-black text-white tracking-tight">{formatPrice(partly ? balance : amount)}</p>
+            <p className="text-xs text-primary font-semibold mt-1 whitespace-nowrap">
+              {partly ? <>restants sur {formatPrice(amount)} · D'Home Barber</> : "D'Home Barber"}
+            </p>
+          </div>
+        )}
 
         {/* Bottom row : une seule ligne de chaque côté, sinon le recto (ratio fixe 1,6) coupait
             la date et la fin du nom sur un téléphone de 320 px, y compris dans le PDF */}
@@ -231,6 +248,7 @@ function GiftCardBack({ card, backRef }) {
   const qrUrl = `${QR_BASE_URL}?scan=${card.code}`;
   const status = cardStatus(card);
   const balance = cardBalance(card);
+  const visits = isSubscriptionCard(card) ? cardVisits(card) : null;
 
   return (
     <div
@@ -243,16 +261,22 @@ function GiftCardBack({ card, backRef }) {
       {/* QR à gauche, textes à droite : empilé, le contenu (≈ 230 px) débordait du ratio 1,6 sur un
           téléphone (170 px de haut à 320 px) et le QR était coupé, y compris dans le PDF */}
       <div className="relative h-full flex items-center gap-4 p-4">
-        <div className="bg-white rounded-xl p-1.5 shrink-0">
+        <div className="bg-white rounded-xl p-1.5 shrink-0" {...(visits ? { role: 'img', 'aria-label': 'QR code de la carte' } : {})}>
           <QRCodeSVG value={qrUrl} size={112} level="M" includeMargin />
         </div>
         <div className="min-w-0 flex-1 flex flex-col justify-center text-left">
           <p className="text-[10px] leading-tight text-white/40 uppercase tracking-[0.15em]">À présenter au salon</p>
           <p className="text-xs text-white/60 font-mono break-all mt-1">{card.code}</p>
+          {visits && card.subscription_name && (
+            <p className="text-xs leading-tight text-white/80 mt-1.5 break-words">{card.subscription_name}</p>
+          )}
           {(status === 'validated' || status === 'used' || (status === 'expired' && balance > 0)) && (
             <div className="mt-2">
               <p className="text-[10px] uppercase text-white/40">Solde</p>
               <p className={`text-sm font-bold ${balance > 0 ? 'text-primary' : 'text-muted-foreground'}`}>{formatPrice(balance)}</p>
+              {visits && visits.unit > 0 && (
+                <p className="text-[11px] leading-tight text-white/50">{perUnitLabel(visits.unit, card.subscription_name)}</p>
+              )}
             </div>
           )}
           {card.recipient_message && (
@@ -675,23 +699,57 @@ export default function GiftCards() {
   useAndroidBack(showCreate, () => setShowCreate(false));
   useAndroidBack(!!selectedId, () => setSelectedId(null));
 
+  // Abonnement à régler (lu plus bas) : sa carte n'existe pas encore, elle apparaîtra à la validation
+  const pendingSubscriptionRef = useRef(false);
   const cardsQuery = useQuery({
     queryKey: ['giftCards', user?.email],
     queryFn: () => api.entities.GiftCard.filter({ sender_email: user?.email }, '-created_at', 50),
     enabled: !!user?.email,
     // Une carte attend son paiement au salon : on suit sa validation sans recharger la page
-    refetchInterval: (query) => (Array.isArray(query.state.data) && query.state.data.some(c => c.status === 'pending')
+    refetchInterval: (query) => ((Array.isArray(query.state.data) && query.state.data.some(c => c.status === 'pending'))
+      || pendingSubscriptionRef.current
       ? PENDING_REFRESH_MS
       : false),
   });
   const { data: myCards = [], isLoading } = cardsQuery;
+
+  // Abonnements (`features.subscriptions`) : à régler, coupes à reprogrammer, prochain RDV. Sans le
+  // drapeau, rien n'est lu et la page reste celle des cartes cadeau.
+  const feature = useSubscriptionsFeatureState();
+  const subscriptionsEnabled = feature.enabled;
+  const subscriptionsQuery = useQuery({
+    queryKey: subscriptionKeys.mine,
+    queryFn: fetchMySubscriptions,
+    enabled: subscriptionsEnabled && !!user?.email,
+    // Abonnement à régler : la carte apparaît dès que le salon a validé le paiement
+    refetchInterval: (query) => (Array.isArray(query.state.data) && query.state.data.some(s => s.status === 'pending')
+      ? PENDING_REFRESH_MS
+      : false),
+  });
+  const subscriptions = subscriptionsQuery.data || [];
+  const pendingSubscriptions = subscriptions.filter(s => s.status === 'pending');
+  // Drapeau illisible (on ne sait pas s'il y a un abonnement) ou lecture en échec : « Réessayer »
+  const subscriptionsFailed = feature.failed || (subscriptionsEnabled && queryFailed(subscriptionsQuery));
+  const subscriptionsSource = feature.failed ? feature.query : subscriptionsQuery;
+  // Aucune carte : pas de « Pas encore de carte » avant de savoir s'il y a un abonnement à régler
+  const subscriptionsPending = feature.pending || subscriptionsQuery.isLoading;
+  pendingSubscriptionRef.current = pendingSubscriptions.length > 0;
 
   const handleCreated = () => {
     queryClient.invalidateQueries({ queryKey: ['giftCards'] });
   };
 
   const today = parisYmd();
-  const activeCards = myCards.filter(c => cardStatus(c, today) === 'validated');
+  const activeCards = myCards.filter(c => cardStatus(c, today) === 'validated' && !isSubscriptionCard(c));
+  const activeSubscriptionCards = myCards.filter(c => cardStatus(c, today) === 'validated' && isSubscriptionCard(c));
+  const subscriptionOf = (card) => subscriptions.find(s => String(s.id) === String(card.subscription_id)) || null;
+  const nowMs = Date.now();
+  // Plus qu'une coupe, ou terminé : le bouton pour reprendre un abonnement, une seule fois, sur le plus
+  // récent (`/subscriptions/mine`). Rien s'il y en a un à régler, ou un autre avec des coupes.
+  const activeSubscriptions = subscriptions.filter(s => s.status === 'active');
+  const toRenew = pendingSubscriptions.length === 0 && !activeSubscriptions.some(s => s.visits_left > 1 && !s.outdated)
+    ? activeSubscriptions[0] || null
+    : null;
   const pendingCards = myCards.filter(c => c.status === 'pending');
   const otherCards = myCards.filter(c => {
     const st = cardStatus(c, today);
@@ -717,13 +775,16 @@ export default function GiftCards() {
         </motion.button>
       </div>
 
-      {isLoading ? (
+      {isLoading || (myCards.length === 0 && subscriptionsPending) ? (
         <div className="space-y-3" aria-busy="true">
           {[0, 1, 2].map(i => <div key={i} className="h-24 rounded-2xl bg-white/5 animate-pulse" />)}
         </div>
       ) : queryFailed(cardsQuery) ? (
         <LoadError what="vos cartes cadeau" error={cardsQuery.error} onRetry={cardsQuery.refetch} retrying={cardsQuery.isFetching} />
-      ) : myCards.length === 0 ? (
+      ) : myCards.length === 0 && subscriptionsFailed ? (
+        // Pas de « Pas encore de carte » : un abonnement à régler a pu ne pas se charger
+        <LoadError what="vos abonnements" error={subscriptionsSource.error} onRetry={subscriptionsSource.refetch} retrying={subscriptionsSource.isFetching} />
+      ) : myCards.length === 0 && pendingSubscriptions.length === 0 ? (
         <div className="text-center py-16">
           <div className="w-16 h-16 rounded-3xl bg-primary/10 flex items-center justify-center mx-auto mb-4">
             <Gift className="w-8 h-8 text-primary" />
@@ -741,6 +802,59 @@ export default function GiftCards() {
         </div>
       ) : (
         <div className="space-y-6">
+          {/* Abonnements : lecture en échec (des cartes s'affichent quand même) */}
+          {subscriptionsFailed && (
+            <LoadError what="vos abonnements" error={subscriptionsSource.error} onRetry={subscriptionsSource.refetch} retrying={subscriptionsSource.isFetching} compact />
+          )}
+
+          {/* Plus qu'une coupe, ou abonnement terminé : là où mènent les pushs */}
+          {toRenew && <RenewSubscription subscription={toRenew} />}
+
+          {/* Abonnement pas encore réglé : montant et RDV, sans QR */}
+          {pendingSubscriptions.length > 0 && (
+            <div className="space-y-3">
+              {pendingSubscriptions.map(subscription => (
+                <PendingSubscriptionCard key={subscription.id} subscription={subscription} />
+              ))}
+            </div>
+          )}
+
+          {/* Cartes d'abonnement (planche 6) : le recto, le QR à présenter au salon, le Wallet */}
+          {activeSubscriptionCards.length > 0 && (
+            <section aria-labelledby="subscription-cards-title">
+              <h2 id="subscription-cards-title" className="font-display text-xl font-bold text-foreground mb-3">
+                {activeSubscriptionCards.length > 1 ? "Mes cartes d'abonnement" : "Ma carte d'abonnement"}
+              </h2>
+              <div className="space-y-6">
+                {activeSubscriptionCards.map(card => {
+                  const subscription = subscriptionOf(card);
+                  const next = upcomingVisits(subscription, nowMs)[0] || null;
+                  return (
+                    <div key={card.id} className="space-y-3">
+                      <GiftCardVisual card={card} />
+                      <GiftCardBack card={card} />
+                      {cardBalance(card) > 0 && <WalletButtons card={card} />}
+                      {next && (
+                        <div className="rounded-2xl border border-border bg-card px-3.5 py-2.5">
+                          <p className="text-xs text-muted-foreground">Prochain RDV</p>
+                          <p className="mt-0.5 text-sm font-bold text-foreground break-words">{dayLabel(next.date)} · {next.start_time} · {next.employee_name}</p>
+                        </div>
+                      )}
+                      {subscription?.to_rebook > 0 && (
+                        <Link
+                          to={`/abonnement?reprendre=${encodeURIComponent(subscription.id)}`}
+                          className="min-h-[44px] flex items-center justify-center rounded-xl border border-primary/40 bg-primary/10 text-sm font-semibold text-primary hover:bg-primary/15 transition-colors"
+                        >
+                          Reprendre un RDV
+                        </Link>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
           {/* Pending */}
           {pendingCards.length > 0 && (
             <div>
@@ -834,7 +948,7 @@ export default function GiftCards() {
                         <div className="flex items-center gap-3 min-w-0">
                           <Gift className="w-4 h-4 text-muted-foreground shrink-0" />
                           <div className="min-w-0">
-                            <p className="text-sm font-medium text-foreground truncate">{card.recipient_name}</p>
+                            <p className="text-sm font-medium text-foreground truncate">{isSubscriptionCard(card) ? card.subscription_name : card.recipient_name}</p>
                             <p className="text-xs text-muted-foreground">{card.code}</p>
                           </div>
                         </div>

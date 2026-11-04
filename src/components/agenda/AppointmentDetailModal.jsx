@@ -19,6 +19,9 @@ import { gangPalette } from '@/components/gang/gangTheme';
 import { paymentSplitOf, SPLIT_PAYMENT } from '@/lib/revenue';
 import { usePaymentFeatures } from '@/lib/paymentFeatures';
 import { guestOf } from '@/lib/guest';
+import { useSubscriptionsFeatureState } from '@/lib/subscriptions';
+import AppointmentSubscriptionBlock, { useAppointmentSubscription } from '@/components/subscriptions-admin/AppointmentSubscriptionBlock';
+import { hasNoVisitLeft, visitKeptMessage } from '@/components/subscriptions-admin/subscriptionAdmin';
 
 /** Pastille « Or · 12 visites » du client (carte Gang) ; rien sans données ou en cas d'erreur. */
 function GangClientBadge({ email }) {
@@ -268,6 +271,18 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
   const savedPriceCents = Math.round(((Number(appointment.total_price) || 0) + savedProd) * 100);
   const giftExcess = giftCents > priceNowCents ? (giftCents - priceNowCents) / 100 : 0;
   const giftExcessBlocks = !locked && giftExcess > 0 && priceNowCents < savedPriceCents;
+  // RDV d'un abonnement (drapeau du serveur) : la coupe se paie par la carte de l'abonnement, scannée sur
+  // l'ordinateur du salon. Tant qu'elle n'est pas débitée, ni pourboire ni moyen de paiement ici : le
+  // serveur refuserait l'encaissement (409 `subscription_appointment`). Abonnement annulé ou plus aucune
+  // coupe : RDV ordinaire. Drapeau illisible : encore un RDV d'abonnement, seul « faux » le retire.
+  const subscriptionsFlag = useSubscriptionsFeatureState();
+  const subscriptionRdv = !subscriptionsFlag.disabled && !!appointment.subscription_id;
+  const subscriptionQuery = useAppointmentSubscription(appointment, subscriptionRdv && !subscriptionsFlag.pending);
+  const subscriptionUndebited = subscriptionRdv && giftCents === 0 && !appointment.payment_method
+    && subscriptionQuery.data?.status !== 'cancelled' && !hasNoVisitLeft(subscriptionQuery.data);
+  // Coupe débitée et prestation ajoutée : ce reste ne se paie jamais par la carte (une coupe de moins)
+  const subscriptionRest = subscriptionRdv && giftCents > 0 && !giftCovered && appointment.payment_method !== 'carte_cadeau';
+  const visitKept = subscriptionRdv && giftCents === 0 ? visitKeptMessage(subscriptionQuery.data) : '';
   // Last minute non pris (« Absent » posé par l'agenda ou « Personne n'a pris le créneau ») : pas
   // d'encaissement à 0 € sans client ni prestation ; « Un client l'a pris » d'abord (tour 7)
   const unclaimedLastMinute = isClosedOut && wasLastMinuteRow(appointment);
@@ -288,7 +303,7 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
   // cadeau qu'une fois confirmé avec un nom et une prestation (tour 7)
   const lmNeedsSave = isLastMinute && !isCompleted && !appointment.client_email && !assignedClient
     && (appointment.status === 'last_minute' || !appointment.services?.length);
-  const canValidate = !locked && !tipInvalid && state.paymentMethod && (tipValue === 0 || state.tipMethod) && !giftCardNeedsDebit && !giftShortOnCorrection && !needsService && !giftExcessBlocks && !unclaimedLastMinute && splitValid;
+  const canValidate = !locked && !subscriptionUndebited && !tipInvalid && state.paymentMethod && (tipValue === 0 || state.tipMethod) && !giftCardNeedsDebit && !giftShortOnCorrection && !needsService && !giftExcessBlocks && !unclaimedLastMinute && splitValid;
   // 14 : RDV d'un client encore à venir : on l'annule (le client peut être prévenu), on ne le supprime pas
   const upcomingClient = !!appointment.client_email && ['confirmed', 'pending'].includes(appointment.status)
     && parisInstant(String(appointment.date || '').slice(0, 10), String(appointment.start_time || '00:00').slice(0, 5)) > Date.now();
@@ -557,6 +572,8 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
           {appointment.date} · {appointment.start_time} – {appointment.end_time}
         </span>
       </div>
+
+      {subscriptionRdv && <AppointmentSubscriptionBlock appointment={appointment} isAdmin={isAdmin} query={subscriptionQuery} />}
 
       {/* Modifier à tout moment : horaire, barber, prestations, client ; corriger un encaissement ; rétablir */}
       <div className="flex flex-wrap gap-2">
@@ -943,6 +960,7 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
       ) : (
         <>
           {/* Tip */}
+          {!subscriptionUndebited && (
           <div className="space-y-2">
             <label className="text-xs text-muted-foreground flex items-center gap-1.5">
               <Heart className="w-3 h-3 text-pink-400" />
@@ -986,8 +1004,10 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
             </div>
             {tipInvalid && <p className="text-[11px] text-red-400">Montant invalide (ex. 2,50)</p>}
           </div>
+          )}
 
           {/* Product */}
+          {!subscriptionUndebited && (
           <div className="space-y-2">
             <label className="text-xs text-muted-foreground flex items-center gap-1.5">
               <ShoppingBag className="w-3 h-3 text-blue-400" />
@@ -1030,8 +1050,10 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
               </p>
             )}
           </div>
+          )}
 
           {/* Total + payment */}
+          {!subscriptionUndebited && (
           <div className="bg-primary/10 rounded-xl px-4 py-3 space-y-3">
             <div className="space-y-1.5">
               <div className="flex items-center justify-between text-xs text-muted-foreground">
@@ -1098,7 +1120,7 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
                   { value: 'cb', label: 'CB', icon: CreditCard },
                   { value: 'especes', label: 'Espèces', icon: Banknote },
                   ...(canSplit ? [{ value: SPLIT_PAYMENT, label: 'CB + Espèces', icon: Coins }] : []),
-                  { value: 'carte_cadeau', label: 'Carte cadeau', icon: Gift },
+                  ...(subscriptionRest ? [] : [{ value: 'carte_cadeau', label: 'Carte cadeau', icon: Gift }]),
                 ].map(pm => (
                   <button
                     key={pm.value}
@@ -1216,6 +1238,7 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
               )}
             </div>
           </div>
+          )}
 
           {giftExcess > 0 && (
             <div role="status" className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs leading-relaxed text-amber-200 break-words min-w-0">
@@ -1261,6 +1284,7 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
                 <X className="w-4 h-4 shrink-0" />
                 Annuler ce rendez-vous ?
               </p>
+              {visitKept && <p className="text-[11px] text-muted-foreground">{visitKept}</p>}
               <input
                 type="text"
                 value={cancelReason}
@@ -1340,6 +1364,8 @@ function ModalInner({ appointment, employees = [], linkedOrders = [], onUpdate, 
                     }
                     // Comme « Client venu ? » : un tap par erreur se rattrape tout de suite
                     toast('Marqué absent', {
+                      // Abonnement : rien n'est débité à un absent (décision du 4 nov. 2026)
+                      ...(visitKept ? { description: visitKept } : {}),
                       duration: 8000,
                       action: {
                         label: 'Annuler',

@@ -8,6 +8,8 @@
  *    en cours = pending / confirmed / ready ;
  *  - Cartes cadeau : cartes `validated` / `used` (l'argent entre à la validation, date `validated_at`) ;
  *    en attente = `pending` ; solde en circulation = reste des cartes validées encore valables ;
+ *    un abonnement payé est une carte comme les autres (`subscription_id`) : compté au mois du paiement,
+ *    avec la précision « dont abonnements », les visites ne recomptent rien ;
  *  - Privatisations : événements `confirmed` (payés au salon) avec un prix, à la date de l'événement ;
  *    `accepted` (devis accepté, pas encore payé) = à encaisser ; `pending` = devis à envoyer ;
  *    `quoted` = réponse du client attendue ;
@@ -20,6 +22,7 @@ import { isValidityPassed } from '@/lib/giftCardDebit';
 import { ACTIVE_RESERVATION_STATUSES } from '@/lib/textileApi';
 import { round2 } from '@/lib/revenue';
 import { parisClock } from '@/lib/dashboardStats';
+import { cardVisits, isSubscriptionCard } from '@/lib/subscriptions';
 
 export const ORDER_OPEN = ['pending', 'confirmed', 'ready'];
 const EVENT_WON = ['confirmed'];
@@ -47,6 +50,9 @@ export function parisDayOf(value) {
 
 const sum = (rows, fn) => round2(rows.reduce((s, r) => s + (Number(fn(r)) || 0), 0));
 
+/** Abonnements à valider (`GET /subscriptions?status=pending`) : nombre et montant à encaisser. */
+export const pendingSubscriptionsOf = (rows = []) => ({ count: rows.length, amount: sum(rows, (s) => s.price) });
+
 /**
  * @param {object} p
  * @param {Array} [p.orders] @param {Array} [p.giftCards] @param {Array} [p.events] @param {object} [p.textile]
@@ -59,7 +65,7 @@ const sum = (rows, fn) => round2(rows.reduce((s, r) => s + (Number(fn(r)) || 0),
  * @returns {{
  *   channels: Array<{ key, label, today, month, prevSameDay, prevTotal, color }>,
  *   totals: { today, month, prevSameDay, prevTotal, projection },
- *   boutique, cartes, privatisations, textile,
+ *   boutique, cartes, subscriptions: { running, visitsLeft, toHonor }, privatisations, textile,
  *   todo: { ordersToPrepare, ordersReady, cardsToValidate, quotesToSend, quotesAwaitingClient, acceptedToCash, textileToPay, textileReady },
  *   cashToday: { cardsCB, cardsCash, cardsOther, boutique, textile },
  *   truncated: { orders, giftCards, events, reservations },
@@ -118,6 +124,16 @@ export function computeChannels({ orders = [], giftCards = [], events = [], text
     // Une carte dont la validité est passée n'est plus débitable : hors du solde à honorer
     balance: sum(validatedCards.filter((c) => !isValidityPassed(c, today)), cardBalance),
     outdatedBalance: sum(validatedCards.filter((c) => isValidityPassed(c, today)), cardBalance),
+    // « dont abonnements » : déjà comptés dans `today` et `month`, jamais en plus
+    todaySubscriptions: sum(soldToday.filter(isSubscriptionCard), (c) => c.amount),
+    monthSubscriptions: sum(soldMonth.filter(isSubscriptionCard), (c) => c.amount),
+  };
+  // Abonnements en cours, sur les cartes lues : encore valables, au moins une coupe à faire
+  const runningCards = validatedCards.filter((c) => isSubscriptionCard(c) && !isValidityPassed(c, today) && cardVisits(c).left > 0);
+  const subscriptions = {
+    running: runningCards.length,
+    visitsLeft: runningCards.reduce((n, c) => n + cardVisits(c).left, 0),
+    toHonor: sum(runningCards, cardBalance),
   };
 
   // ─── Privatisations ───
@@ -190,6 +206,7 @@ export function computeChannels({ orders = [], giftCards = [], events = [], text
     totals,
     boutique,
     cartes,
+    subscriptions,
     privatisations,
     textile: textileStats,
     todo: {

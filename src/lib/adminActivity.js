@@ -24,6 +24,11 @@
  *    une commande annulée garde son `order_new`, marqué `cancelled: true` (« annulée depuis »),
  *    et n'entre plus dans le chiffre du jour.
  *
+ * Abonnements au mois : les RDV pris d'un coup ne font qu'une ligne « Abonnement à encaisser » (un seul
+ * geste du client, un seul toast, +1 non lu) ; sa carte, créée quand l'admin valide le paiement, n'est pas
+ * un achat du client. Un RDV repris ou déplacé ensuite garde sa ligne, « Coupe 2 sur 4 », sans montant :
+ * il est payé par la carte.
+ *
  * Horodatages : les annulations de RDV sont datées par `cancelled_at`, les réponses aux devis par
  * `answered_at` (posé seulement par la réponse du client). Plus aucun repli sur `updated_*` :
  * une retouche de l'admin ne fait plus remonter un élément dans le fil.
@@ -37,6 +42,7 @@ import { useAuth } from '@/lib/AuthContext';
 import { cancellationActor, cleanReason, isRescheduledCancel } from '@/lib/cancellation';
 import { isClientPlaceholder } from '@/components/agenda/agendaUtils';
 import { useAdminAlertPrefs } from '@/lib/adminAlerts';
+import { SUBSCRIPTION_VISITS, fetchAllSubscriptions, fetchSubscriptionsFeature, isVisitLine } from '@/lib/subscriptions';
 
 export const ADMIN_ACTIVITY_QUERY_KEY = ['adminActivity'];
 
@@ -47,6 +53,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /** Types d'événements : libellé, emoji, page admin où agir, teinte du panneau. */
 export const ACTIVITY_TYPES = {
   appointment_new: { label: 'Nouveau rendez-vous', emoji: '📅', adminPath: '/admin/agenda', tone: 'green' },
+  // Abonnement au mois : ses 4 RDV réservés d'un coup (suit le réglage d'alerte des nouveaux RDV)
+  subscription_new: { label: 'Abonnement à encaisser', emoji: '🔁', adminPath: '/admin/subscriptions', tone: 'amber' },
   appointment_cancelled: { label: 'Rendez-vous annulé', emoji: '❌', adminPath: '/admin/agenda', tone: 'red' },
   // Déplacement fait par le client (l'ancien RDV porte « Client : déplacé au … ») : pas une annulation
   appointment_moved: { label: 'Rendez-vous déplacé', emoji: '📅', adminPath: '/admin/agenda', tone: 'amber' },
@@ -155,6 +163,52 @@ function appointmentWhen(apt) {
   return apt.employee_name ? `${when} avec ${apt.employee_name}` : when;
 }
 
+/** RDV d'un abonnement : « Coupe 2 sur 4 » à la place du nom de la formule. */
+const appointmentLabel = (apt) => (apt.subscription_visit
+  ? `Coupe ${apt.subscription_visit} sur ${SUBSCRIPTION_VISITS}`
+  : serviceNames(apt));
+
+/** Montant d'une ligne de RDV : aucun pour un RDV d'abonnement, payé par sa carte. */
+const appointmentAmount = (apt) => (apt.subscription_id ? null : toNumber(apt.grand_total) ?? toNumber(apt.total_price));
+
+// RDV pris du même geste qu'un abonnement : moins de 5 minutes après le premier
+const SUBSCRIPTION_BATCH_MS = 5 * 60_000;
+
+/**
+ * Les RDV d'abonnement réservés d'un seul geste : `{ rows }` par abonnement, et `ids`, leurs RDV, qui
+ * n'ont plus de ligne à eux. Un RDV pris plus tard sur le même abonnement reste une action à part.
+ */
+function subscriptionBatches(appointments) {
+  const bySubscription = new Map();
+  for (const apt of appointments) {
+    if (!apt?.subscription_id) continue;
+    const key = String(apt.subscription_id);
+    if (!bySubscription.has(key)) bySubscription.set(key, []);
+    bySubscription.get(key).push(apt);
+  }
+  const createdAt = (apt) => Date.parse(apt.created_date || apt.created_at) || 0;
+  const batches = new Map();
+  const ids = new Set();
+  for (const [key, rows] of bySubscription) {
+    const first = Math.min(...rows.map(createdAt));
+    const batch = rows.filter((apt) => createdAt(apt) - first <= SUBSCRIPTION_BATCH_MS);
+    batches.set(key, batch);
+    for (const apt of batch) ids.add(String(apt.id));
+  }
+  return { batches, ids };
+}
+
+/** Abonnements lus par id (montant, état), seulement si des RDV d'abonnement sont là et le drapeau ouvert. */
+async function subscriptionsForActivity(needed) {
+  if (!needed) return new Map();
+  try {
+    if (!(await fetchSubscriptionsFeature())) return new Map();
+    return new Map((await fetchAllSubscriptions()).map((s) => [String(s.id), s]));
+  } catch {
+    return new Map(); // lignes sans montant, jamais une source en échec de plus
+  }
+}
+
 // ── Chargement ───────────────────────────────────────────────────────
 
 /** Statuts d'une privatisation après la réponse du client au devis. */
@@ -252,14 +306,45 @@ export async function fetchAdminActivity({ days = DEFAULT_DAYS } = {}) {
     if (inWindow(toIso(last.created_date || last.created_at))) failed.push('Rendez-vous (plus de 300 sur la période : les plus anciens manquent)');
   }
 
+  // Union par id des requêtes d'annulations : une annulation du client sortie de la limite de 300 reste comptée
+  const cancelledById = new Map();
+  for (const apt of [...authoredCancels, ...legacyCancels, ...cancelledAppointments]) if (apt?.id != null) cancelledById.set(String(apt.id), apt);
+
+  // Abonnements au mois : une seule ligne pour les RDV réservés d'un seul geste
+  const isClientRow = (apt) => isClientAppointment(apt, staffEmails) && !isClientPlaceholder(apt);
+  const { batches, ids: batchedIds } = subscriptionBatches([...newAppointments, ...cancelledById.values()].filter(isClientRow));
+  const subscriptionsById = await subscriptionsForActivity(batches.size > 0);
+  const subscriptionCards = new Map(giftCards.filter((g) => g.subscription_id).map((g) => [String(g.subscription_id), g]));
+  for (const [subscriptionId, rows] of batches) {
+    const sub = subscriptionsById.get(subscriptionId) || null;
+    const card = subscriptionCards.get(subscriptionId) || null;
+    const chronological = [...rows].sort((a, b) => `${a.date} ${a.start_time}`.localeCompare(`${b.date} ${b.start_time}`));
+    const first = chronological[0];
+    const cancelled = sub ? sub.status === 'cancelled' : rows.every((apt) => apt.status === 'cancelled');
+    const paid = !cancelled && (sub ? sub.status === 'active' : !!card);
+    const formula = sub?.service_name || (Array.isArray(first.services) ? first.services.find(isVisitLine)?.name : '') || serviceNames(first);
+    const taken = rows.map((apt) => toIso(apt.created_date || apt.created_at)).filter(Boolean).sort()[0] || null;
+    push('subscription_new', { id: subscriptionId }, taken, {
+      ...who(first),
+      // Réglé depuis : plus rien à encaisser, le fil garde que le client l'a pris
+      ...(paid ? { title: 'Nouvel abonnement' } : {}),
+      detail: join(formula, `${rows.length} RDV`, `à partir du ${appointmentWhen(first)}`, paid ? 'réglé' : '', cancelled ? 'annulé depuis' : ''),
+      amount: toNumber(sub?.price) ?? toNumber(card?.amount),
+      // Page ouverte seulement avec le drapeau (abonnement lu) ; sinon l'agenda, comme un RDV
+      link: subscriptionsById.size > 0 ? ACTIVITY_TYPES.subscription_new.adminPath : appointmentLink(first),
+      count: rows.length,
+      cancelled,
+    });
+  }
+
   // Rendez-vous réservés encore actifs (confirmés, terminés, absents) ; les réservations annulées
   // depuis par le client sont ajoutées plus bas à partir de `cancelledAppointments`
   for (const apt of newAppointments) {
-    if (!isClientAppointment(apt, staffEmails) || isClientPlaceholder(apt)) continue;
+    if (!isClientRow(apt) || batchedIds.has(String(apt.id))) continue;
     push('appointment_new', apt, toIso(apt.created_date || apt.created_at), {
       ...who(apt),
-      detail: join(serviceNames(apt), appointmentWhen(apt)),
-      amount: toNumber(apt.grand_total) ?? toNumber(apt.total_price),
+      detail: join(appointmentLabel(apt), appointmentWhen(apt)),
+      amount: appointmentAmount(apt),
       link: appointmentLink(apt),
     });
   }
@@ -273,18 +358,15 @@ export async function fetchAdminActivity({ days = DEFAULT_DAYS } = {}) {
   }
 
   // Réservations faites puis annulées (par le client ou le salon) : la réservation a bien eu lieu
-  // (une ligne annulée n'est plus dans `newAppointments`, donc jamais en double). Union par id des
-  // trois requêtes : une annulation du client sortie de la limite de 300 reste comptée. La ligne dit
+  // (une ligne annulée n'est plus dans `newAppointments`, donc jamais en double). La ligne dit
   // que la réservation a été annulée (ou déplacée) depuis : l'agenda masque les annulés par défaut.
-  const cancelledById = new Map();
-  for (const apt of [...authoredCancels, ...legacyCancels, ...cancelledAppointments]) if (apt?.id != null) cancelledById.set(String(apt.id), apt);
   for (const apt of cancelledById.values()) {
-    if (!isClientAppointment(apt, staffEmails) || isClientPlaceholder(apt)) continue;
+    if (!isClientRow(apt) || batchedIds.has(String(apt.id))) continue;
     const moved = isRescheduledCancel(apt);
     push('appointment_new', apt, toIso(apt.created_date || apt.created_at), {
       ...who(apt),
-      detail: join(serviceNames(apt), appointmentWhen(apt), moved ? 'déplacé depuis' : 'annulé depuis'),
-      amount: toNumber(apt.grand_total) ?? toNumber(apt.total_price),
+      detail: join(appointmentLabel(apt), appointmentWhen(apt), moved ? 'déplacé depuis' : 'annulé depuis'),
+      amount: appointmentAmount(apt),
       link: appointmentLink(apt),
       cancelled: true,
     });
@@ -301,8 +383,8 @@ export async function fetchAdminActivity({ days = DEFAULT_DAYS } = {}) {
     if (isRescheduledCancel(apt)) {
       push('appointment_moved', apt, at, {
         ...who(apt),
-        detail: join(serviceNames(apt), appointmentWhen(apt), cleanReason(apt.cancellation_reason)),
-        amount: toNumber(apt.grand_total) ?? toNumber(apt.total_price),
+        detail: join(appointmentLabel(apt), appointmentWhen(apt), cleanReason(apt.cancellation_reason)),
+        amount: appointmentAmount(apt),
         link: appointmentLink(apt),
       });
       continue;
@@ -310,12 +392,12 @@ export async function fetchAdminActivity({ days = DEFAULT_DAYS } = {}) {
     push('appointment_cancelled', apt, at, {
       ...who(apt),
       detail: join(
-        serviceNames(apt),
+        appointmentLabel(apt),
         appointmentWhen(apt),
         actor === 'client' ? 'Annulé par le client' : 'Annulé (client ou salon)',
         actor === 'client' ? quotedReason(apt.cancellation_reason) : '',
       ),
-      amount: toNumber(apt.grand_total) ?? toNumber(apt.total_price),
+      amount: appointmentAmount(apt),
       link: appointmentLink(apt),
     });
   }
@@ -379,6 +461,8 @@ export async function fetchAdminActivity({ days = DEFAULT_DAYS } = {}) {
 
   for (const g of giftCards) {
     if (isStaffEmail(g.sender_email)) continue;
+    // Carte d'un abonnement : créée par l'admin qui valide le paiement, jamais un achat du client
+    if (g.subscription_id) continue;
     // Rejetée (jamais validée donc jamais payée) : reste au fil, titrée comme telle, hors du montant
     // du jour (montant gardé à droite, comme une commande annulée : le titre lève l'ambiguïté)
     const rejected = g.status === 'expired' && !g.validated_at;
@@ -625,7 +709,7 @@ export function useActivityToasts() {
     const threshold = mountedAt.current - TOAST_GRACE_MS;
     // Types réglés « sans notification » (Réglages des alertes) : notés dans le fil, sans toast
     // (un déplacement suit le réglage des annulations : pas de nouveau réglage à part)
-    const prefKey = (type) => (type === 'appointment_moved' ? 'appointment_cancelled' : type);
+    const prefKey = (type) => (type === 'appointment_moved' ? 'appointment_cancelled' : type === 'subscription_new' ? 'appointment_new' : type);
     const fresh = unseen.filter((e) => Date.parse(e.at) >= threshold && alertPrefsRef.current[prefKey(e.type)] !== false);
     if (!fresh.length) return;
 

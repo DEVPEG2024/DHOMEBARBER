@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Link, useLocation, useNavigate, useNavigationType } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate, useNavigationType } from 'react-router-dom';
 import { api } from '@/api/apiClient';
 import { fetchPublicBarbers } from '@/lib/publicBarbers';
 import { useAuth } from '@/lib/AuthContext';
@@ -15,7 +15,7 @@ import { toast } from 'sonner';
 import { format, addDays, addMonths } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import ServicePicker from '@/components/services/ServicePicker';
-import LoadError, { isNetworkError } from '@/components/shared/LoadError';
+import LoadError, { isNetworkError, queryFailed } from '@/components/shared/LoadError';
 import { hapticFeedback } from '@/lib/capacitor';
 import { blocksClient, checkOldCancelled, appointmentDuration } from '@/lib/reschedule';
 import { useAndroidBack } from '@/lib/useAndroidBack';
@@ -23,7 +23,7 @@ import { appointmentEvent, calendarTargets, openCalendar, parisInstant } from '@
 import { SALON_PHONE, SALON_PHONE_HREF, useCancelFeatures } from '@/lib/cancellation';
 import { analyzeDay, parisDay } from '@/lib/slots';
 import {
-  dateFromKey, dayOptions, pickNextOptions, rowsByDate, weekDays, weekKeyOf,
+  dateFromKey, dayOptions, emptyDayMessage, lastVisitBarber, pickNextOptions, rowsByDate, weekDays, weekKeyOf,
 } from '@/lib/availability';
 import { addonItems, addonTotal, suggestAddonProducts } from '@/lib/appointmentProducts';
 import { formatPrice } from '@/components/shop/productUtils';
@@ -31,6 +31,7 @@ import { formatDuration, serviceRubric } from '@/components/services/serviceUtil
 import ProductAddon, { addonMaxQuantity, addonProductsQuery } from '@/components/booking/ProductAddon';
 import LookHeader from '@/components/booking/LookHeader';
 import { findLook, lookLinkFor, lookServices, lookTitle, lookTotals } from '@/lib/barberGallery';
+import BladeBurst, { BURST_AT } from '@/components/booking/BladeBurst';
 import BookingSteps from '@/components/booking/BookingSteps';
 import BookingBar from '@/components/booking/BookingBar';
 import BarberStrip from '@/components/booking/BarberStrip';
@@ -42,6 +43,8 @@ import GuestPicker from '@/components/booking/GuestPicker';
 import { guestNameError, guestOf, knownGuests, normalizeGuestName, samePerson, useGuestBooking } from '@/lib/guest';
 import { track } from '@/lib/analytics';
 import { barberFirstName, forgetBookedLastMinute } from '@/lib/lastMinute';
+import { useSubscriptionPlans } from '@/lib/subscriptions';
+import { looksLikePlan, visitEvent, visitLabel } from '@/components/abonnement/visitLabels';
 
 /**
  * Étapes du parcours (refonte du 19 oct. 2026 : barber, jour et heure sur un seul écran). Les noms
@@ -77,134 +80,10 @@ const timeParam = (value) => {
 // Première lettre en majuscule seulement (« Mardi 20 octobre ») : la classe `capitalize` en met une
 // à chaque mot (« Mardi 20 Octobre À 11:00 »), contraire à l'usage français
 const upperFirst = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
-/** Pluie de lames : nombre et instant de l'éclatement (s). */
-const BLADE_COUNT = 30;
-const BURST_AT = 0.35;
 /** Note de réservation : même limite que CREATE_RULES.appointments côté serveur. */
 const NOTES_MAX = 1000;
 /** Refus 400 du serveur qui portent sur le créneau lui-même (assertSlotAvailable) : passé, horaires, fermeture, congé. */
 const SLOT_REFUSED_RE = /déjà passé|ne reçoit pas à cette heure|ferme à|absent ce jour/i;
-
-/** « 35 min », « 1 h », « 1 h30 ». */
-function formatMinutes(total) {
-  if (total < 60) return `${total} min`;
-  return `${Math.floor(total / 60)} h${total % 60 ? String(total % 60).padStart(2, '0') : ''}`;
-}
-
-/**
- * Message d'une date sans créneau, selon la raison (`analyzeDay` / `mergeDayReasons`).
- * Le conseil sur la durée n'apparaît que lorsque c'est vraiment elle qui bloque.
- */
-function emptyDayMessage(reason, { barberName, date, totalDuration, serviceCount, canChangeBarber }) {
-  const weekday = format(date, 'EEEE', { locale: fr });
-  const otherDate = canChangeBarber ? 'Choisissez une autre date, ou un autre barber.' : 'Choisissez une autre date.';
-  switch (reason) {
-    case 'leave':
-      return { title: `${barberName} est en congé ce jour-là`, hint: otherDate };
-    case 'off':
-      return { title: `${barberName} ne travaille pas le ${weekday}`, hint: otherDate };
-    case 'closed':
-      return { title: `Le salon est fermé le ${weekday}`, hint: 'Choisissez une autre date.' };
-    case 'nobody':
-      return { title: 'Aucun barber ne travaille ce jour-là', hint: 'Choisissez une autre date.' };
-    case 'over':
-      return { title: 'Plus aucun créneau aujourd\'hui', hint: 'La journée est terminée : choisissez une autre date.' };
-    case 'private':
-      return { title: 'Le salon est privatisé ce jour-là', hint: 'Choisissez une autre date, ou une heure en dehors de la privatisation.' };
-    case 'duration':
-      return {
-        title: 'Pas de créneau assez long ce jour-là',
-        hint: `Vos prestations durent ${formatMinutes(totalDuration)} : essayez une autre date${serviceCount > 1 ? ', ou retirez une prestation' : ''}.`,
-      };
-    default:
-      return {
-        title: barberName ? `${barberName} est complet ce jour-là` : 'Tous les barbers sont complets ce jour-là',
-        hint: barberName ? otherDate : 'Choisissez une autre date.',
-      };
-  }
-}
-
-
-/** Lame de rasoir métallique (double tranchant), rendu acier brossé avec reflet. */
-function SteelBlade({ width = 32 }) {
-  return (
-    <svg width={width} height={width * 0.46} viewBox="0 0 100 46" aria-hidden="true" style={{ display: 'block' }}>
-      <rect x="1.5" y="1.5" width="97" height="43" rx="5" fill="url(#sb-steel)" stroke="#5f6772" strokeWidth="1" />
-      <rect x="1.5" y="1.5" width="97" height="43" rx="5" fill="url(#sb-shine)" />
-      {/* tranchants */}
-      <path d="M6,3.2 H94" stroke="#ffffff" strokeOpacity="0.85" strokeWidth="1" strokeLinecap="round" />
-      <path d="M6,42.8 H94" stroke="#ffffff" strokeOpacity="0.6" strokeWidth="1" strokeLinecap="round" />
-      {/* découpe centrale */}
-      <circle cx="17" cy="23" r="4" fill="#0a0d11" />
-      <circle cx="83" cy="23" r="4" fill="#0a0d11" />
-      <rect x="28" y="19" width="44" height="8" rx="3" fill="#0a0d11" />
-      <rect x="42" y="11" width="16" height="24" rx="3" fill="#0a0d11" />
-      <rect x="35" y="15" width="8" height="16" rx="2.5" fill="#0a0d11" />
-      <rect x="57" y="15" width="8" height="16" rx="2.5" fill="#0a0d11" />
-    </svg>
-  );
-}
-
-/** Pluie de lames : éclatement radial depuis la coche, culbute 3D, retombée, fondu. */
-function BladeBurst({ reduceMotion }) {
-  const blades = useMemo(() => Array.from({ length: BLADE_COUNT }, (_, i) => {
-    const wave = i % 3;
-    const angle = (i / BLADE_COUNT) * Math.PI * 2 + (Math.random() - 0.5) * 0.35;
-    const dist = 130 + wave * 30 + Math.random() * 90;
-    return {
-      id: i,
-      x: Math.cos(angle) * dist,
-      y: Math.sin(angle) * dist * 0.85,
-      fall: 70 + Math.random() * 60,
-      rotate: (Math.random() > 0.5 ? 1 : -1) * (360 + Math.random() * 540),
-      flip: 360 + Math.random() * 540,
-      width: 22 + Math.random() * 18,
-      delay: BURST_AT + wave * 0.12 + Math.random() * 0.1,
-      duration: 1.9 + Math.random() * 0.5,
-    };
-  }), []);
-  if (reduceMotion) return null;
-
-  return (
-    <div className="absolute inset-0 pointer-events-none flex items-center justify-center" aria-hidden="true" style={{ perspective: 700 }}>
-      <svg width="0" height="0" style={{ position: 'absolute' }}>
-        <defs>
-          <linearGradient id="sb-steel" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stopColor="#f6f8fa" />
-            <stop offset="40%" stopColor="#b7bfca" />
-            <stop offset="65%" stopColor="#e4e8ed" />
-            <stop offset="100%" stopColor="#8c95a1" />
-          </linearGradient>
-          <linearGradient id="sb-shine" x1="0" y1="0" x2="1" y2="0.3">
-            <stop offset="0%" stopColor="#ffffff" stopOpacity="0" />
-            <stop offset="45%" stopColor="#ffffff" stopOpacity="0.45" />
-            <stop offset="55%" stopColor="#ffffff" stopOpacity="0" />
-          </linearGradient>
-        </defs>
-      </svg>
-      {blades.map(b => (
-        <motion.span
-          key={b.id}
-          initial={{ x: 0, y: 0, scale: 0.2, opacity: 1, rotate: 0, rotateX: 0 }}
-          animate={{ x: b.x, y: b.y + b.fall, scale: 1, opacity: 0, rotate: b.rotate, rotateX: b.flip }}
-          transition={{
-            duration: b.duration,
-            delay: b.delay,
-            ease: [0.16, 1, 0.3, 1],
-            y: { duration: b.duration, delay: b.delay, ease: [0.2, 0.9, 0.4, 1] },
-            rotate: { duration: b.duration, delay: b.delay, ease: 'linear' },
-            rotateX: { duration: b.duration, delay: b.delay, ease: 'linear' },
-            opacity: { duration: 0.6, delay: b.delay + b.duration - 0.7, ease: 'easeOut' },
-          }}
-          className="absolute"
-          style={{ transformStyle: 'preserve-3d', filter: 'drop-shadow(0 3px 6px rgba(0,0,0,0.55))' }}
-        >
-          <SteelBlade width={b.width} />
-        </motion.span>
-      ))}
-    </div>
-  );
-}
 
 /**
  * Écran de succès : onde de choc, coche qui se dessine, pluie de lames, barre de redirection.
@@ -403,35 +282,31 @@ function serverMessage(err, fallback) {
   return String(raw).trim().replace(/[.!\s]+$/, '');
 }
 
+/** Adresse de la réservation d'une formule, avec le barber du lien s'il y en a un. */
+const planHref = (planId, barber) => `/abonnement?service=${encodeURIComponent(planId)}${barber ? `&barber=${encodeURIComponent(barber)}` : ''}`;
+
 /** Horizon de réservation proposé au client, en mois à partir d'aujourd'hui. */
 const BOOKING_MONTHS_AHEAD = 3;
-
-/**
- * Barber de la dernière visite du client (RDV confirmé ou terminé déjà commencé), s'il figure
- * encore parmi les barbers réservables ; sinon `null`.
- */
-function lastVisitBarber(appointments, employees) {
-  const now = Date.now();
-  const past = (appointments || [])
-    .filter(a => a && ['confirmed', 'completed'].includes(a.status) && a.date && a.employee_id != null
-      && parisInstant(a.date, a.start_time || '00:00') <= now)
-    .sort((a, b) => `${b.date} ${b.start_time || ''}`.localeCompare(`${a.date} ${a.start_time || ''}`));
-  for (const apt of past) {
-    const emp = employees.find(e => String(e.id) === String(apt.employee_id));
-    if (emp) return emp;
-  }
-  return null;
-}
 
 /**
  * « Réserver aussi pour un proche » repart d'une réservation neuve à la même adresse (`chain` =
  * numéro du rendez-vous suivant) : la page est remontée de zéro, rien du précédent n'est gardé.
  * Les autres changements d'adresse (« Déplacer plutôt », « Ne pas déplacer ») gardent `chain` :
  * la sélection en cours reste.
+ *
+ * Abonnements (`features.subscriptions`, docs/fonctions/abonnements-contrat.md) : un lien vers une
+ * formule mène à `/abonnement`, qui réserve les 4 RDV d'un coup. Seul le déplacement d'un RDV déjà pris
+ * (`reschedule`) reste ici. Drapeau faux : aucune formule reconnue, la page reste celle d'avant.
  */
 export default function Booking() {
   const location = useLocation();
-  const chain = new URLSearchParams(location.search).get('chain') || '';
+  const params = new URLSearchParams(location.search);
+  const chain = params.get('chain') || '';
+  const { isPlanId } = useSubscriptionPlans();
+  const planId = params.get('reschedule')
+    ? null
+    : (params.get('services') || '').split(',').map(s => s.trim()).find(id => id && isPlanId(id));
+  if (planId) return <Navigate to={planHref(planId, params.get('barber'))} replace />;
   return <BookingFlow key={chain} />;
 }
 
@@ -563,6 +438,12 @@ function BookingFlow() {
 
   /** « Ne pas déplacer » : on garde le parcours, sans le paramètre `reschedule`. */
   const dropReschedule = () => {
+    // RDV d'un abonnement, même pas encore relu (liste illisible) : rien à réserver à la place, retour
+    // à la liste (sans `reschedule`, le lien de la formule mènerait à un nouvel abonnement)
+    if (subscriptionMove || planLink) {
+      navigate('/appointments');
+      return;
+    }
     setRescheduleId(null);
     const params = new URLSearchParams(window.location.search);
     params.delete('reschedule');
@@ -729,6 +610,24 @@ function BookingFlow() {
     && uncertainSend.time === selectedTime
     && uncertainSend.services === selectedServiceKey
     && samePerson(uncertainSend.guest, guestName);
+
+  // Déplacement d'un RDV d'abonnement : sa prestation ne change pas (le serveur la garde), rien ne
+  // propose d'en changer et le prix de la formule (celui des 4 coupes) n'apparaît jamais. Compte aussi
+  // un renvoi après une réponse perdue (l'ancien RDV n'est alors plus trouvé), et le temps de lire
+  // l'ancien RDV (ou sa lecture en échec) quand le lien porte une formule. Drapeau faux : une formule est
+  // une prestation comme une autre, comme avant.
+  const moveSource = oldApt || (uncertainMatch && uncertainSend?.previous) || null;
+  const subscriptionMove = !!moveSource?.subscription_id;
+  const { isPlanId, feature, query: plansQuery } = useSubscriptionPlans();
+  const planLink = !feature.disabled && liveSelected.some(looksLikePlan);
+  const aboMove = subscriptionMove || (!!rescheduleId && planLink && (reschedulePending || rescheduleCheckFailed));
+  const aboMoveTitle = moveSource?.subscription_visit ? visitLabel(moveSource.subscription_visit) : null;
+  const planSelected = liveSelected.some(s => isPlanId(s.id));
+  // Formule choisie alors qu'on ne sait pas encore si c'est un abonnement (drapeau ou formules
+  // illisibles) : jamais l'étape d'une seule visite au prix des quatre, `Réessayer` à la place
+  const planFailed = feature.failed || (feature.enabled && queryFailed(plansQuery));
+  const planUnknown = !rescheduleId && planLink && !planSelected
+    && (planFailed || feature.pending || (feature.enabled && plansQuery.isPending));
 
   // Lignes servant au calcul des créneaux, chargées **par semaine et pour tous les barbers** :
   // changer de barber ou de jour ne recharge rien, et les places de chaque jour se calculent
@@ -900,7 +799,10 @@ function BookingFlow() {
     return oldKey !== '' && oldKey === key(selectedServices.map(s => s.id));
   }, [oldApt, selectedServices]);
   const totalDuration = sameServicesAsOld ? Math.max(catalogDuration, appointmentDuration(oldApt)) : catalogDuration;
-  const totalPrice = liveSelected.reduce((sum, s) => sum + (s.price || 0), 0);
+  // RDV d'abonnement déplacé : le prix de la visite, jamais celui de la formule du catalogue
+  const totalPrice = subscriptionMove
+    ? Number(moveSource.total_price) || 0
+    : liveSelected.reduce((sum, s) => sum + (s.price || 0), 0);
 
   // Produits ajoutés au rendez-vous (même catalogue et même cache que la Boutique). Pas proposés
   // pour un déplacement : les produits de l'ancien RDV suivent le nouveau côté serveur
@@ -1323,8 +1225,27 @@ function BookingFlow() {
   /** Étape précédente ; depuis l'écran Créneau d'un look, retour au look (pas au catalogue). */
   const goBack = () => {
     if (step === 1 && lookActive) editLook();
+    // Déplacement d'un RDV d'abonnement : jamais le catalogue, retour à la liste
+    else if (step === 1 && aboMove) navigate('/appointments');
     else goToStep(step - 1);
   };
+
+  // Lien « Déplacer » d'un RDV qui ne se déplace plus (passé, déjà déplacé) sur une formule : ce n'est
+  // pas une nouvelle réservation d'une seule coupe au prix des quatre. Retour à la liste, avec un mot.
+  // Jamais après un déplacement réussi : l'ancien RDV, relu, est annulé (d'où `success`).
+  useEffect(() => {
+    if (success || !rescheduleUnavailable || rescheduleCheckFailed || uncertainMatch || !planSelected) return;
+    toast.info('Ce rendez-vous ne peut plus être déplacé.');
+    navigate('/appointments', { replace: true });
+  }, [success, rescheduleUnavailable, rescheduleCheckFailed, uncertainMatch, planSelected]);
+
+  // Formule choisie dans le catalogue pendant que le drapeau était illisible, reconnue depuis : elle
+  // part vers `/abonnement` (avec une formule dans l'adresse, `Booking` s'en charge)
+  useEffect(() => {
+    if (rescheduleId || success) return;
+    const plan = liveSelected.find(s => isPlanId(s.id));
+    if (plan) navigate(planHref(plan.id, preSelectedBarberId), { replace: true });
+  }, [rescheduleId, success, planSelected]);
 
   /** Écran Créneau, barber précis (quitte « peu importe ») : l'heure est gardée si ce barber l'a encore. */
   const chooseBarber = (emp) => {
@@ -1463,7 +1384,10 @@ function BookingFlow() {
         client_name: user.full_name || user.name || '',
         employee_id: (liveEmployee || selectedEmployee).id,
         employee_name: (liveEmployee || selectedEmployee).name,
-        services: liveSelected.map(s => ({ service_id: s.id, name: s.name, duration: s.duration, price: s.price })),
+        // RDV d'abonnement déplacé : ses lignes telles quelles (le serveur les garde de toute façon)
+        services: subscriptionMove && Array.isArray(moveSource.services) && moveSource.services.length > 0
+          ? moveSource.services
+          : liveSelected.map(s => ({ service_id: s.id, name: s.name, duration: s.duration, price: s.price })),
         date: format(selectedDate, 'yyyy-MM-dd'),
         start_time: selectedTime,
         end_time: endTime,
@@ -1621,6 +1545,15 @@ function BookingFlow() {
         queryClient.invalidateQueries({ queryKey: ['myAppointments'] });
         return;
       }
+      // Coupe d'abonnement déjà débitée : aucune autre heure ne passerait, seul le salon peut la changer
+      if (err?.data?.code === 'visit_already_debited') {
+        toast.error(shown, {
+          duration: 10000,
+          action: { label: 'Appeler', onClick: () => { window.location.href = SALON_PHONE_HREF; } },
+        });
+        queryClient.invalidateQueries({ queryKey: ['myAppointments'] });
+        return;
+      }
       if (oldApt && err?.status === 409) {
         // Déplacement : l'ancien RDV, encore confirmé, occupe son créneau et compte dans le
         // plafond des rendez-vous à venir. Un décalage de quelques minutes passe par le salon.
@@ -1722,6 +1655,16 @@ function BookingFlow() {
   const calendarEvent = useMemo(() => {
     if (!success || !selectedEmployee || !selectedDate || !selectedTime) return null;
     const created = createdAppointment || {};
+    if (subscriptionMove) {
+      return visitEvent({
+        id: created.id,
+        employee_name: created.employee_name || selectedEmployee.name,
+        date: created.date || format(selectedDate, 'yyyy-MM-dd'),
+        start_time: created.start_time || selectedTime,
+        end_time: created.end_time,
+        calendar_url: created.calendar_url,
+      }, { visit: moveSource?.subscription_visit, duration: created.total_duration ?? totalDuration });
+    }
     return appointmentEvent({
       id: created.id,
       employee_name: created.employee_name || selectedEmployee.name,
@@ -1733,12 +1676,12 @@ function BookingFlow() {
       total_price: created.total_price ?? totalPrice,
       calendar_url: created.calendar_url,
     });
-  }, [success, createdAppointment, selectedEmployee, selectedDate, selectedTime, liveSelected, totalDuration, totalPrice]);
+  }, [success, createdAppointment, selectedEmployee, selectedDate, selectedTime, liveSelected, totalDuration, totalPrice, subscriptionMove]);
 
   // Récapitulatifs de la barre du bas et de la confirmation
   const serviceCountLabel = `${liveSelected.length} prestation${liveSelected.length > 1 ? 's' : ''}`;
   const servicesTitle = liveSelected.length === 1 ? liveSelected[0].name : serviceCountLabel;
-  const durationPrice = `${formatDuration(totalDuration)} · ${formatPrice(totalPrice)}`;
+  const durationPrice = aboMove ? formatDuration(totalDuration) : `${formatDuration(totalDuration)} · ${formatPrice(totalPrice)}`;
   const endTime = selectedTime ? (() => {
     const [h, m] = selectedTime.split(':').map(Number);
     const end = h * 60 + m + totalDuration;
@@ -1789,6 +1732,25 @@ function BookingFlow() {
       }
     : null;
 
+  // Formule dont on ne sait pas encore si c'est un abonnement : ni créneau, ni prix, ni « Confirmer »
+  if (planUnknown && step > 0) {
+    const source = feature.failed ? feature.query : plansQuery;
+    return (
+      <div className="relative max-w-lg mx-auto px-4 pt-5 pb-48">
+        <BookingSteps step={step} onBack={goBack} />
+        <div className="mt-6">
+          {planFailed ? (
+            <LoadError what="les abonnements" error={source.error} onRetry={source.refetch} retrying={source.isFetching} />
+          ) : (
+            <div className="space-y-3" aria-busy="true" aria-label="Vérification de l'abonnement">
+              {[0, 1, 2].map(i => <div key={i} className="h-[72px] rounded-2xl bg-card border border-border animate-pulse" />)}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen relative overflow-x-clip">
       {/* Halos d'ambiance */}
@@ -1814,7 +1776,7 @@ function BookingFlow() {
             className="mt-4"
           >
             <h1 className="font-display text-[26px] leading-tight font-bold text-foreground">
-              {STEP_TITLES[step]}
+              {step === 0 && subscriptionMove ? 'Déplacer ce rendez-vous' : STEP_TITLES[step]}
             </h1>
             {/* Heure du lien encore proposée (pas « plus disponible », pas remplacée par une autre) */}
             {step === 0 && (lastMinuteLink && presetMiss !== 'gone'
@@ -1834,7 +1796,7 @@ function BookingFlow() {
                   {' '}Choisissez la prestation de votre proche : l'heure sera proposée à l'étape suivante.
                 </span>
               </p>
-            ) : (
+            ) : subscriptionMove ? null : (
               <p className="text-sm text-muted-foreground mt-1">Touchez « Choisir » : vous choisirez ensuite le barber et l'heure.</p>
             ))}
           </motion.div>
@@ -1851,7 +1813,9 @@ function BookingFlow() {
           {rescheduleUnavailable && !success && !uncertainMatch && (
             <div role="status" className="mt-4 rounded-2xl border border-amber-500/25 bg-amber-500/10 px-3.5 py-3 text-xs leading-relaxed text-amber-200/90 break-words">
               {rescheduleCheckFailed
-                ? 'Impossible de vérifier le rendez-vous à déplacer. Réessayez, ou réservez un nouveau rendez-vous : l\'ancien restera alors prévu.'
+                ? (planLink
+                  ? 'Impossible de vérifier le rendez-vous à déplacer. Réessayez dans un instant.'
+                  : 'Impossible de vérifier le rendez-vous à déplacer. Réessayez, ou réservez un nouveau rendez-vous : l\'ancien restera alors prévu.')
                 : 'Ce rendez-vous ne peut plus être déplacé : celui-ci sera un nouveau rendez-vous.'}
               {' '}
               {rescheduleCheckFailed ? (
@@ -1862,7 +1826,7 @@ function BookingFlow() {
                   </button>
                   {' · '}
                   <button type="button" onClick={dropReschedule} className="font-semibold text-primary underline underline-offset-2">
-                    Réserver un rendez-vous en plus
+                    {planLink ? 'Retour à mes rendez-vous' : 'Réserver un rendez-vous en plus'}
                   </button>
                 </>
               ) : (
@@ -1879,16 +1843,18 @@ function BookingFlow() {
               Votre rendez-vous du <span className="font-semibold">{oldAptLabel}</span> est dans moins de {cancelHours} h : pour le déplacer,{' '}
               <a href={SALON_PHONE_HREF} className="font-semibold text-primary whitespace-nowrap">appelez le salon au {SALON_PHONE}</a>.
               {' '}
-              <span className="mt-1.5 block">
-                Réserver un autre créneau ne le supprimera pas : les deux resteraient prévus.{' '}
-                <button type="button" onClick={dropReschedule} className="font-semibold text-primary underline underline-offset-2">
-                  Réserver un rendez-vous en plus (celui du {oldAptLabel} reste prévu)
-                </button>
-              </span>
+              {!subscriptionMove && !planLink && (
+                <span className="mt-1.5 block">
+                  Réserver un autre créneau ne le supprimera pas : les deux resteraient prévus.{' '}
+                  <button type="button" onClick={dropReschedule} className="font-semibold text-primary underline underline-offset-2">
+                    Réserver un rendez-vous en plus (celui du {oldAptLabel} reste prévu)
+                  </button>
+                </span>
+              )}
             </div>
           )}
 
-          {retiredNotice && !success && (
+          {retiredNotice && !success && !subscriptionMove && (
             <div role="status" className="mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-3.5 py-3 text-xs leading-relaxed text-amber-300 break-words">
               Une prestation de votre rendez-vous n'est plus proposée : vérifiez votre sélection.
             </div>
@@ -1918,19 +1884,27 @@ function BookingFlow() {
           {step === 0 && (
             <motion.div key="services" custom={direction} variants={stepVariants} initial="enter" animate="center" exit="exit" transition={stepTransition}>
               {/* Même catalogue que la page Prestations : « Choisir » mène au créneau, la sélection
-                  multiple passe par « Ajouter » et la barre du bas */}
-              <ServicePicker
-                services={services}
-                loading={servicesPending && !servicesPaused}
-                error={servicesQuery.isError && !servicesQuery.data ? servicesQuery.error : servicesPaused ? OFFLINE_ERROR : null}
-                onRetry={servicesQuery.refetch}
-                retrying={servicesQuery.isFetching}
-                selectedIds={selectedServices.map(s => String(s.id))}
-                onToggle={toggleService}
-                onSwap={swapServices}
-                onPick={pickServices}
-                pickLabel="Choisir"
-              />
+                  multiple passe par « Ajouter » et la barre du bas. RDV d'abonnement dont la formule
+                  n'est plus au catalogue : jamais une autre prestation, le salon s'en occupe */}
+              {subscriptionMove ? (
+                <div role="status" className="rounded-2xl border border-amber-500/25 bg-amber-500/10 px-3.5 py-3 text-xs leading-relaxed text-amber-200/90 break-words">
+                  Ce rendez-vous ne peut pas être déplacé en ligne pour le moment : appelez le salon au{' '}
+                  <a href={SALON_PHONE_HREF} className="font-semibold text-primary whitespace-nowrap">{SALON_PHONE}</a>.
+                </div>
+              ) : (
+                <ServicePicker
+                  services={services}
+                  loading={servicesPending && !servicesPaused}
+                  error={servicesQuery.isError && !servicesQuery.data ? servicesQuery.error : servicesPaused ? OFFLINE_ERROR : null}
+                  onRetry={servicesQuery.refetch}
+                  retrying={servicesQuery.isFetching}
+                  selectedIds={selectedServices.map(s => String(s.id))}
+                  onToggle={toggleService}
+                  onSwap={swapServices}
+                  onPick={pickServices}
+                  pickLabel="Choisir"
+                />
+              )}
             </motion.div>
           )}
 
@@ -1957,14 +1931,16 @@ function BookingFlow() {
                   </span>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-foreground line-clamp-2 break-words">
-                      {liveSelected.length > 1 ? liveSelected.map(s => s.name).join(' + ') : liveSelected[0]?.name}
+                      {aboMoveTitle || (liveSelected.length > 1 ? liveSelected.map(s => s.name).join(' + ') : liveSelected[0]?.name)}
                     </p>
                     <p className="text-xs text-muted-foreground mt-0.5">{durationPrice}</p>
                   </div>
-                  <button type="button" onClick={() => goToStep(0)}
-                    className="shrink-0 min-h-[44px] px-2 text-[13px] font-semibold text-primary hover:text-primary/80">
-                    Modifier
-                  </button>
+                  {!aboMove && (
+                    <button type="button" onClick={() => goToStep(0)}
+                      className="shrink-0 min-h-[44px] px-2 text-[13px] font-semibold text-primary hover:text-primary/80">
+                      Modifier
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -2161,7 +2137,9 @@ function BookingFlow() {
                 </div>
               )}
               <ConfirmSummary
-                services={liveSelected}
+                services={aboMove && aboMoveTitle ? [{ id: 'visite', name: aboMoveTitle }] : liveSelected}
+                canEditServices={!aboMove}
+                hidePrice={aboMove}
                 totalDuration={totalDuration}
                 totalPrice={totalPrice}
                 employee={liveEmployee || selectedEmployee}
@@ -2231,7 +2209,12 @@ function BookingFlow() {
                 </p>
               )}
 
-              {/* Total */}
+              {/* Total ; RDV d'abonnement déplacé : aucun prix, la coupe reste sur l'abonnement */}
+              {aboMove ? (
+                <p className="rounded-2xl border border-primary/25 bg-primary/10 p-4 text-sm leading-relaxed text-foreground/90">
+                  Aucun supplément : ce rendez-vous reste sur votre abonnement.
+                </p>
+              ) : (
               <div className="rounded-2xl border border-primary/25 bg-primary/10 p-4">
                 {addonLines.length > 0 && (
                   <>
@@ -2253,6 +2236,7 @@ function BookingFlow() {
                   <span className="font-fut text-[32px] font-bold leading-none text-primary tabular-nums">{formatPrice(grandTotal)}</span>
                 </div>
               </div>
+              )}
             </motion.div>
           )}
         </AnimatePresence>

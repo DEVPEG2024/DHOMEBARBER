@@ -3,6 +3,7 @@
  * date et heure) avec « Modifier » qui ramène à la bonne étape sans rien perdre du reste.
  * Réservation depuis un look (`look` = { photoUrl, title }) : la ligne des prestations montre la
  * photo du look et son titre ; son « Modifier » ramène au look (décidé par l'appelant).
+ * `hidePrice` : pas de prix sur la ligne des prestations (déplacement d'un RDV d'abonnement).
  */
 import React from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
@@ -43,7 +44,7 @@ const IconTile = ({ Icon }) => (
 
 export default function ConfirmSummary({
   services = [], totalDuration, totalPrice, employee, anyBarber = false, dateLabel, time, endTime,
-  onEditServices, onEditSlot, canEditServices = true, look = null,
+  onEditServices, onEditSlot, canEditServices = true, look = null, hidePrice = false,
 }) {
   const names = services.map(s => s.name).filter(Boolean).join(' + ');
   return (
@@ -63,7 +64,9 @@ export default function ConfirmSummary({
           {services.map(s => (
             <p key={s.id} className="text-sm font-semibold text-foreground break-words">{s.name}</p>
           ))}
-          <p className="text-xs text-muted-foreground mt-0.5">{formatDuration(totalDuration)} · {formatPrice(totalPrice)}</p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {hidePrice ? formatDuration(totalDuration) : `${formatDuration(totalDuration)} · ${formatPrice(totalPrice)}`}
+          </p>
         </Row>
       )}
       <Row

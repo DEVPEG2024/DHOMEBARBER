@@ -172,7 +172,9 @@ export async function moveAppointment({ appointment, employee, user, slot, withR
   // Prestations et durée d'aujourd'hui quand le catalogue est connu (le serveur recalcule de
   // toute façon), sinon celles enregistrées sur l'ancien RDV
   const current = currentServices(appointment, catalog);
-  const useCurrent = !current.missing && current.duration > 0;
+  // RDV d'un abonnement : ses lignes et le prix de la visite, jamais ceux de la formule du catalogue
+  // (le prix des 4 coupes) ; le serveur les garde de toute façon
+  const useCurrent = !appointment.subscription_id && !current.missing && current.duration > 0;
   // Durée allongée par le salon (note « prévoir 1 h »…) conservée : le serveur fait de même
   const duration = useCurrent ? Math.max(current.duration, appointmentDuration(appointment)) : appointmentDuration(appointment);
   const services = useCurrent ? current.services : (Array.isArray(appointment.services) ? appointment.services : []).map(s => ({

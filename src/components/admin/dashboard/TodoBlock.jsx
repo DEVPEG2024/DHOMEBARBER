@@ -106,6 +106,17 @@ function todoItems(d) {
     });
   }
 
+  // Abonnements à valider : admin seulement, lus seulement avec `features.subscriptions`
+  if (d.pendingSubscriptions?.count > 0) {
+    const n = d.pendingSubscriptions.count;
+    items.push({
+      key: 'subscriptions', tone: 'amber', count: n,
+      label: plural(n, 'abonnement à valider', 'abonnements à valider'),
+      amount: d.pendingSubscriptions.amount,
+      to: '/admin/subscriptions',
+    });
+  }
+
   if (access.canEvents && !failed.privatisations) {
     const events = '/admin/events';
     if (todo.quotesToSend > 0) {
@@ -205,7 +216,7 @@ export default function TodoBlock({ d }) {
   if (!canAny) return null;
   if (d.state.appointments.loading) return <TodoSkeleton />;
   const items = todoItems(d);
-  if (items.length === 0) return null;
+  if (items.length === 0 && !d.pendingSubscriptionsFailed) return null;
 
   return (
     <Section title="À faire" icon={ListChecks}>
@@ -220,6 +231,7 @@ export default function TodoBlock({ d }) {
       {access.canAgenda && d.state.prevMonth?.failed && !d.state.appointments.failed && (
         <Note tone="muted" className="mt-2">RDV d&apos;avant le 1er non vérifiés</Note>
       )}
+      {d.pendingSubscriptionsFailed && <Note tone="muted" className="mt-2">Abonnements à valider non vérifiés</Note>}
     </Section>
   );
 }

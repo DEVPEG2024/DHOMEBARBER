@@ -1,8 +1,10 @@
 /**
  * Barre de la réservation fixée au-dessus de la barre du bas : ce qui est choisi (titre + détail)
  * et le bouton de l'étape (« Continuer », « Confirmer le rendez-vous »), toujours à l'écran.
- * Sans titre, le bouton prend toute la largeur. Masquée quand le clavier est ouvert dans l'app
- * (`body.keyboard-open .booking-bar`, index.css) : elle recouvrirait le champ de la note.
+ * Sans titre, le bouton prend toute la largeur ; `stacked` : le titre au-dessus d'un bouton pleine
+ * largeur (libellé long, « Proposer les 3 suivants », qui ne laisserait rien au titre à 320 px).
+ * Masquée quand le clavier est ouvert dans l'app (`body.keyboard-open .booking-bar`, index.css) :
+ * elle recouvrirait le champ de la note.
  * `pulse-cta` est posé sur un `<span>` autour du bouton, jamais sur le `motion.button` (une
  * animation CSS sur transform écraserait son `whileTap`).
  */
@@ -11,7 +13,7 @@ import { motion, useReducedMotion } from 'framer-motion';
 import { ArrowRight } from 'lucide-react';
 
 export default function BookingBar({
-  title = null, subtitle = null, actionLabel, onAction, disabled = false, pulse = false, icon: Icon = ArrowRight,
+  title = null, subtitle = null, actionLabel, onAction, disabled = false, pulse = false, icon: Icon = ArrowRight, stacked = false,
 }) {
   const reduceMotion = useReducedMotion();
   const button = (
@@ -21,7 +23,7 @@ export default function BookingBar({
       onClick={onAction}
       disabled={disabled}
       className={`inline-flex items-center justify-center gap-2 rounded-[14px] text-sm font-bold transition-colors duration-300 ${
-        title ? 'h-12 px-4' : 'w-full h-[52px] px-5'
+        stacked ? 'w-full h-12 px-4' : title ? 'h-12 px-4' : 'w-full h-[52px] px-5'
       } ${
         disabled
           ? 'bg-secondary text-muted-foreground cursor-not-allowed'
@@ -43,16 +45,18 @@ export default function BookingBar({
       role="region"
       aria-label="Votre réservation"
     >
-      <div className={`rounded-2xl border border-border bg-card/95 backdrop-blur-xl shadow-2xl shadow-black/30 flex items-center gap-3 ${title ? 'p-2 pl-4' : 'p-2'}`}>
+      <div className={`rounded-2xl border border-border bg-card/95 backdrop-blur-xl shadow-2xl shadow-black/30 flex ${
+        stacked ? 'flex-col gap-2 p-2' : `items-center gap-3 ${title ? 'p-2 pl-4' : 'p-2'}`
+      }`}>
         {title && (
-          <div className="flex-1 min-w-0 leading-tight" aria-live="polite">
+          <div className={stacked ? 'min-w-0 px-2 pt-1 leading-tight' : 'flex-1 min-w-0 leading-tight'} aria-live="polite">
             <p className="text-sm font-bold text-foreground truncate first-letter:uppercase">{title}</p>
             {subtitle && <p className="text-xs text-muted-foreground mt-0.5 truncate">{subtitle}</p>}
           </div>
         )}
         {pulse && !disabled
-          ? <span className={`pulse-cta rounded-[14px] ${title ? 'shrink-0' : 'w-full'}`}>{button}</span>
-          : <span className={title ? 'shrink-0' : 'w-full'}>{button}</span>}
+          ? <span className={`pulse-cta rounded-[14px] ${title && !stacked ? 'shrink-0' : 'w-full'}`}>{button}</span>
+          : <span className={title && !stacked ? 'shrink-0' : 'w-full'}>{button}</span>}
       </div>
     </motion.div>
   );

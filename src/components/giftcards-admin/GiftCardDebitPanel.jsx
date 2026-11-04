@@ -11,9 +11,14 @@ import {
   debitGiftCard, friendlyGiftCardError, invalidateGiftCardQueries, patchGiftCardCache,
   fetchTodayAppointmentsToCash, giftCardTodayAppointmentsKey, closestAppointmentId, appointmentDue, appointmentGiftPaid,
   appointmentServicesLabel, closeAppointmentWithGiftCard, fetchGiftCard, newClientRef, runGiftCardUndo,
-  appointmentPrice, DEBIT_NETWORK_MESSAGE,
+  appointmentPrice, DEBIT_NETWORK_MESSAGE, appointmentFitsCard, isAppointmentToCash, fetchAppointmentById, parisMinutesNow,
 } from '@/lib/giftCardDebit';
 import { invalidateAppointmentQueries } from '@/components/agenda/agendaUtils';
+import {
+  SUBSCRIPTION_VISITS, cardVisits, fetchSubscription, isSubscriptionCard, subscriptionKeys, useSubscriptionsFeatureState,
+} from '@/lib/subscriptions';
+import { longDay, visitAfter, visitsLeftLabel } from '@/components/subscriptions-admin/subscriptionAdmin';
+import VisitSegments from '@/components/subscriptions-admin/VisitSegments';
 
 const lower = (v) => String(v || '').trim().toLowerCase();
 
@@ -35,13 +40,18 @@ const agendaLink = (apt) => {
   return `/admin/agenda?${params.toString()}`;
 };
 
-function AppointmentRow({ apt, selected, highlighted, onSelect }) {
+const dayOf = (apt) => String(apt?.date || '').slice(0, 10);
+
+function AppointmentRow({ apt, selected, highlighted, onSelect, showVisit = false, today }) {
   const services = appointmentServicesLabel(apt);
+  // RDV ouvert depuis l'agenda, hors du jour : la date se lit avant de débiter
+  const otherDay = !!today && !!dayOf(apt) && dayOf(apt) !== today;
   return (
     <button
       type="button"
       onClick={onSelect}
       data-testid="gc-apt-row"
+      aria-pressed={selected}
       className={`w-full text-left rounded-xl border px-3 py-2.5 transition-colors ${
         selected
           ? 'bg-primary/15 border-primary/50'
@@ -62,8 +72,13 @@ function AppointmentRow({ apt, selected, highlighted, onSelect }) {
             )}
           </p>
           <p className="text-[11px] text-muted-foreground truncate">
-            {apt.employee_name || 'Barber'}{services ? ` · ${services}` : ''}
+            {apt.employee_name || 'Barber'}{showVisit && apt.subscription_visit
+              ? ` · Coupe ${apt.subscription_visit} sur ${SUBSCRIPTION_VISITS}`
+              : services ? ` · ${services}` : ''}
           </p>
+          {otherDay && (
+            <p className="mt-0.5 text-[11px] font-semibold text-amber-300" data-testid="gc-apt-date">{longDay(dayOf(apt), { upper: true })}</p>
+          )}
         </div>
         <div className="text-right shrink-0">
           {appointmentPrice(apt) > 0
@@ -81,15 +96,75 @@ function AppointmentRow({ apt, selected, highlighted, onSelect }) {
 }
 
 /**
+ * RDV de cet abonnement dont la coupe est déjà débitée (une prestation ajoutée reste à encaisser) : plus
+ * rien à débiter ici, la carte y perdrait une coupe de plus.
+ */
+function VisitAlreadyPaid({ apt, today }) {
+  return (
+    <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5" data-testid="gc-visit-paid">
+      <p className="text-sm font-semibold text-foreground flex items-center gap-1.5 flex-wrap">
+        <span className="font-mono">{String(apt.start_time || '').slice(0, 5)}</span>
+        <span className="truncate">{apt.client_name || 'Client'}</span>
+      </p>
+      <p className="mt-0.5 text-[11px] text-amber-200 break-words">
+        {dayOf(apt) && dayOf(apt) !== today ? `${longDay(dayOf(apt), { upper: true })} · ` : ''}
+        Coupe {apt.subscription_visit || ''} déjà débitée. Reste {formatEuro(appointmentDue(apt))} à encaisser dans l'agenda, jamais par la carte.{' '}
+        <Link to={agendaLink(apt)} className="font-semibold text-primary whitespace-nowrap">Ouvrir l'agenda</Link>
+      </p>
+    </div>
+  );
+}
+
+/** Écran de succès d'une coupe débitée : « 1 coupe débitée », coupes restantes, prochain RDV. */
+function VisitDebited({ result, card, subscription }) {
+  const { left, total } = cardVisits(card);
+  const next = subscription && result.apt ? visitAfter(subscription, result.apt) : null;
+  return (
+    <div data-testid="gc-visit-success">
+      <p className="text-xl font-black text-foreground">1 coupe débitée</p>
+      {result.apt && result.closed && (
+        <p className="mt-1 text-sm text-muted-foreground break-words">RDV de {result.apt.client_name || 'ce client'} clôturé · réglé par la carte</p>
+      )}
+      <div className="mt-3 rounded-2xl border border-border bg-card p-3 text-left">
+        <div className="flex items-baseline justify-between gap-3">
+          <p className="text-lg font-black text-foreground">{left > 0 ? visitsLeftLabel(left) : 'Abonnement terminé'}</p>
+          <p className="text-sm tabular-nums text-muted-foreground whitespace-nowrap">{formatEuro(result.balance)}</p>
+        </div>
+        <VisitSegments left={left} total={total} className="mt-2" />
+        {next && (
+          <>
+            <p className="mt-3 text-xs text-muted-foreground">Prochain RDV</p>
+            <p className="text-sm font-bold text-foreground break-words" data-testid="gc-next-visit">
+              {longDay(String(next.date).slice(0, 10), { upper: true })} · {String(next.start_time).slice(0, 5)}{next.employee_name ? ` · ${next.employee_name}` : ''}
+            </p>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
  * Débit d'une carte validée : ce que la carte paie (RDV du jour à encaisser, prestations du
  * catalogue, montant libre), confirmation en deux taps, toast « Annuler », écran de succès.
  * `onCardChange(card)` reçoit la carte à jour après un débit ou une annulation ;
  * `onResultChange(bool)` dit au parent qu'un écran de succès est affiché (à garder même si la
  * carte n'est plus débitable).
+ *
+ * Carte d'un abonnement (`features.subscriptions`) : ses RDV en tête (« Coupe 1 sur 4 »), celui de
+ * maintenant présélectionné, un seul geste « Débiter 1 coupe · 25 € » (l'annulation de 10 s rattrape une
+ * erreur), écran de succès en coupes. `presetAptId` (`?apt=`, fiche d'un RDV de l'agenda) prime, même
+ * pour un RDV d'un autre jour, alors daté et débité en deux gestes. `onDebited` : débit fait, le parent
+ * oublie ce RDV ; `onWrongCard` : ce RDV n'est pas celui de cette carte, le parent le garde pour la bonne.
  */
-export default function GiftCardDebitPanel({ card, onCardChange, onResultChange, onDone }) {
+export default function GiftCardDebitPanel({ card, onCardChange, onResultChange, onDone, presetAptId = null, onDebited, onWrongCard }) {
   const queryClient = useQueryClient();
   const today = parisToday();
+  // Drapeau illisible : une carte d'abonnement le reste, seul « faux » la rend ordinaire
+  const subscriptionsFlag = useSubscriptionsFeatureState();
+  const isSubCard = !subscriptionsFlag.disabled && isSubscriptionCard(card);
+  const subscriptionId = card?.subscription_id;
+  const unitCents = Math.round(cardVisits(card).unit * 100);
   const [mode, setMode] = useState('appointments');
   const [selectedAptId, setSelectedAptId] = useState(null);
   // « Prestations » / « Montant libre » : RDV du jour auquel rattacher le débit. Sans rattachement,
@@ -122,8 +197,51 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
     queryFn: () => fetchTodayAppointmentsToCash(today),
     staleTime: 30 * 1000,
   });
-  const appointments = useMemo(() => aptQuery.data || [], [aptQuery.data]);
-  const highlightedId = useMemo(() => closestAppointmentId(appointments), [appointments]);
+  const todayRows = useMemo(() => aptQuery.data || [], [aptQuery.data]);
+  // RDV demandé par l'agenda et absent de la liste du jour (coupe d'hier oubliée) : relu à part
+  const presetQuery = useQuery({
+    queryKey: ['giftCardTodayAppointments', 'preset', String(presetAptId)],
+    queryFn: () => fetchAppointmentById(presetAptId),
+    enabled: !!presetAptId && aptQuery.isSuccess && !todayRows.some((a) => String(a.id) === String(presetAptId)),
+    staleTime: 30 * 1000,
+  });
+  const presetRow = useMemo(() => {
+    if (!presetAptId) return null;
+    const row = todayRows.find((a) => String(a.id) === String(presetAptId)) || presetQuery.data;
+    return isAppointmentToCash(row) ? row : null;
+  }, [presetAptId, todayRows, presetQuery.data]);
+  const isOwnVisit = (a) => isSubCard && !!a?.subscription_id && String(a.subscription_id) === String(subscriptionId);
+  // RDV demandé qui appartient à un autre abonnement : le serveur refuserait, on le dit
+  const presetWrongCard = !!presetRow && !appointmentFitsCard(presetRow, card);
+  useEffect(() => { if (presetWrongCard) onWrongCard?.(); }, [presetWrongCard, onWrongCard]);
+  // RDV de cet abonnement dont la coupe est déjà débitée : plus de débit par la carte (voir VisitAlreadyPaid)
+  const isPaidVisit = (a) => isOwnVisit(a) && unitCents > 0 && Math.round(appointmentGiftPaid(a) * 100) >= unitCents;
+  const fitRows = useMemo(() => {
+    const rows = presetRow && !todayRows.some((a) => String(a.id) === String(presetRow.id)) ? [presetRow, ...todayRows] : todayRows;
+    return rows.filter((a) => appointmentFitsCard(a, card));
+  }, [presetRow, todayRows, card]);
+  const paidVisits = fitRows.filter(isPaidVisit);
+  // Un RDV d'abonnement ne se paie que par sa carte : retiré des listes des autres cartes. Carte d'un
+  // abonnement : ses RDV en tête
+  const appointments = useMemo(() => {
+    if (!isSubCard) return fitRows;
+    const open = fitRows.filter((a) => !isPaidVisit(a));
+    return [...open.filter(isOwnVisit), ...open.filter((a) => !isOwnVisit(a))];
+  }, [fitRows, isSubCard, subscriptionId, unitCents]);
+  const highlightedId = useMemo(() => {
+    const ofToday = appointments.filter((a) => String(a.date || '').slice(0, 10) === today);
+    const own = ofToday.filter(isOwnVisit);
+    return closestAppointmentId(own.length ? own : ofToday);
+  }, [appointments, today, isSubCard, subscriptionId]);
+  const ownVisits = appointments.filter(isOwnVisit);
+  const otherAppointments = isSubCard ? appointments.filter((a) => !isOwnVisit(a)) : appointments;
+  // RDV de l'abonnement à moins d'une heure de maintenant, aujourd'hui
+  const isNow = (a) => {
+    if (dayOf(a) !== today) return false;
+    const [h = 0, m = 0] = String(a?.start_time || '').split(':').map(Number);
+    return Math.abs(parisMinutesNow() - ((h || 0) * 60 + (m || 0))) < 60;
+  };
+  const nowVisit = ownVisits.some((a) => String(a.id) === String(highlightedId) && isNow(a));
 
   const servicesQuery = useQuery({
     queryKey: ['services'],
@@ -141,12 +259,16 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
   let requested = 0;
   // RDV : le reste dû seulement (une part a pu être payée par une autre carte)
   const aptGiftPaid = selectedApt ? appointmentGiftPaid(selectedApt) : 0;
-  if (mode === 'appointments') requested = selectedApt ? appointmentDue(selectedApt) : 0;
+  // RDV de cet abonnement avec une prestation ajoutée dans l'agenda : la carte paie une coupe, jamais
+  // plus (sinon le client perdait sa coupe suivante), le reste s'encaisse dans l'agenda
+  const aptDue = mode === 'appointments' && selectedApt ? appointmentDue(selectedApt) : 0;
+  const coupeCap = isOwnVisit(selectedApt) ? Math.max(0, cardVisits(card).unit - aptGiftPaid) : 0;
+  if (mode === 'appointments') requested = coupeCap > 0 ? Math.min(aptDue, coupeCap) : aptDue;
   else if (mode === 'services') requested = round2(selectedServices.reduce((sum, s) => sum + (Number(s.price) || 0), 0));
   else requested = round2(Number(String(freeAmount).replace(',', '.')) || 0);
 
   const debit = round2(Math.min(requested, balance));
-  const rest = round2(Math.max(0, requested - balance));
+  const rest = round2(Math.max(0, (mode === 'appointments' ? aptDue : requested) - debit));
   const fullyCovered = requested > 0 && rest <= 0;
 
   const resetConfirm = () => setConfirming(false);
@@ -190,6 +312,42 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
             : null;
   // Un blocage apparu pendant la confirmation (liste relue, RDV encaissé ailleurs) la referme
   useEffect(() => { if (blockReason) setConfirming(false); }, [blockReason]);
+
+  // Présélection, une seule fois (l'admin peut ensuite changer) : le RDV demandé par l'agenda, sinon le
+  // RDV de l'abonnement le plus proche de maintenant
+  const preselectDone = useRef(false);
+  useEffect(() => {
+    if (preselectDone.current || !aptQuery.isSuccess) return;
+    if (presetAptId) {
+      if (presetQuery.isFetching) return;
+      if (appointments.some((a) => String(a.id) === String(presetAptId))) {
+        preselectDone.current = true;
+        setSelectedAptId(presetAptId);
+        return;
+      }
+    }
+    if (!isSubCard) return;
+    preselectDone.current = true;
+    const own = appointments.filter(isOwnVisit).filter((a) => String(a.date || '').slice(0, 10) === today);
+    if (own.length) setSelectedAptId(closestAppointmentId(own));
+  }, [presetAptId, presetQuery.isFetching, aptQuery.isSuccess, appointments, isSubCard, today]);
+
+  // Coupe payée par sa carte : un seul geste, et « 1 coupe débitée » à la fin. Moins d'une coupe due ou
+  // sur la carte (RDV déjà payé en partie, débit libre passé) : débit ordinaire en euros
+  const isOneVisit = (a) => isOwnVisit(a) && unitCents > 0 && appointmentGiftPaid(a) <= 0
+    && Math.round(appointmentDue(a) * 100) >= unitCents && Math.round(balance * 100) >= unitCents;
+  const visitDebit = isOneVisit(selectedApt) && !blockReason;
+  // Un seul geste pour le RDV du jour ; d'un autre jour, le chemin en deux gestes : la date se relit
+  const visitToday = visitDebit && dayOf(selectedApt) === today;
+  const after = isSubCard ? { ...card, remaining_balance: round2(balance - debit) } : null;
+  const visitsAfter = after ? cardVisits(after) : null;
+  // Prochain RDV de l'abonnement (écran de succès)
+  const subscriptionQuery = useQuery({
+    queryKey: subscriptionKeys.one(subscriptionId),
+    queryFn: () => fetchSubscription(subscriptionId),
+    enabled: isSubCard && !subscriptionsFlag.pending,
+    staleTime: 30 * 1000,
+  });
 
   const toggleService = (id) => {
     resetConfirm();
@@ -264,6 +422,7 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
       });
       // Débit fait : le prochain sera un autre débit (nouvelle référence)
       clientRefRef.current = { key: null, ref: null };
+      onDebited?.();
       // Garde-fou (serveur antérieur au refus `ref_undone`) : la référence désigne un débit annulé
       // depuis ; rien n'a été débité, donc ni écran de succès ni clôture du RDV
       if (replayed && transaction?.undone_at) {
@@ -296,12 +455,17 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
 
       const newBalance = giftCardBalance(fresh);
       const snapshot = { card: fresh, transaction, previousApt };
-      toast.success(`${formatEuro(debit)} débités`, {
-        description: newBalance > 0 ? `Nouveau solde : ${formatEuro(newBalance)}` : 'La carte est entièrement utilisée',
+      const isVisit = isOneVisit(apt);
+      const leftAfter = isSubCard ? cardVisits(fresh).left : 0;
+      toast.success(isVisit ? 'Coupe débitée.' : `${formatEuro(debit)} débités`, {
+        description: isVisit
+          ? visitsLeftLabel(leftAfter)
+          : newBalance > 0 ? `Nouveau solde : ${formatEuro(newBalance)}` : 'La carte est entièrement utilisée',
         duration: 10000,
         action: { label: 'Annuler', onClick: () => runUndo(snapshot) },
       });
       setResult({
+        isVisit,
         amount: debit,
         balance: newBalance,
         rest,
@@ -325,9 +489,10 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
       const noAnswer = isNetworkError(err) || (!err?.status && err?.name === 'TypeError');
       if (noAnswer) toast.error('Débit incertain', { description: DEBIT_NETWORK_MESSAGE, duration: 12000 });
       else toast.error('Débit impossible', { description: friendlyGiftCardError(err) });
+      if (err?.data?.code === 'wrong_card') onWrongCard?.();
       // RDV déjà encaissé ou déjà réglé par une autre carte : la liste du jour est relue, le RDV
       // désélectionné (son reste dû a changé)
-      if (['appointment_already_paid', 'appointment_closed', 'appointment_no_price'].includes(err?.data?.code)) {
+      if (['appointment_already_paid', 'appointment_closed', 'appointment_no_price', 'wrong_card'].includes(err?.data?.code)) {
         queryClient.invalidateQueries({ queryKey: giftCardTodayAppointmentsKey(today) });
         setSelectedAptId(null);
         setAttachAptId(undefined);
@@ -379,17 +544,23 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
           <p className="text-base font-bold text-foreground">Débit annulé</p>
         ) : (
           <>
+            {result.isVisit ? (
+              <VisitDebited result={result} card={card} subscription={subscriptionQuery.data} />
+            ) : (
+            <>
             <p className="text-lg font-black text-foreground">{formatEuro(result.amount)} débités</p>
             <p className="text-sm text-muted-foreground">
               Nouveau solde : <span className="font-semibold text-foreground">{formatEuro(result.balance)}</span>
               {result.balance <= 0 && ' · carte entièrement utilisée'}
             </p>
+            </>
+            )}
             {result.rest > 0 && (
               <p className="mt-2 text-sm font-semibold text-amber-300" data-testid="gc-success-rest">
                 Reste {formatEuro(result.rest)} à régler au comptoir
               </p>
             )}
-            {result.apt && result.closed && (
+            {result.apt && result.closed && !result.isVisit && (
               <p className="mt-2 text-xs text-green-300">RDV de {result.apt.client_name || 'ce client'} clôturé (payé par carte cadeau).</p>
             )}
             {result.apt && result.attached && (
@@ -444,10 +615,15 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
           </div>
         )}
         <div className="mt-4 flex gap-2">
-          {canContinue && (
+          {canContinue && !result.isVisit && (
             <button type="button" onClick={startOver} className="flex-1 py-2.5 rounded-xl text-xs font-semibold bg-white/5 border border-white/10 hover:bg-white/10">
               Autre débit
             </button>
+          )}
+          {result.isVisit && !result.undone && result.apt && (
+            <Link to={agendaLink(result.apt)} className="flex flex-1 items-center justify-center py-2.5 rounded-xl text-xs font-semibold bg-white/5 border border-white/10 hover:bg-white/10">
+              Retour à l'agenda
+            </Link>
           )}
           <button type="button" onClick={onDone} className="flex-1 py-2.5 rounded-xl text-xs font-semibold bg-primary text-primary-foreground">
             Terminer
@@ -479,6 +655,12 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
 
       {mode === 'appointments' && (
         <div className="space-y-1.5">
+          {presetWrongCard && (
+            <p role="status" className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200 break-words" data-testid="gc-wrong-card">
+              Le RDV de {presetRow.client_name || 'ce client'} fait partie d'un abonnement : scannez la carte de cet abonnement.
+            </p>
+          )}
+          {paidVisits.map((apt) => <VisitAlreadyPaid key={apt.id} apt={apt} today={today} />)}
           {aptQuery.isPending ? (
             <div className="space-y-1.5">
               {[0, 1].map((i) => <div key={i} className="h-14 rounded-xl bg-white/5 animate-pulse" />)}
@@ -491,11 +673,30 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
             </p>
           ) : (
             <>
-              <p className="text-[11px] text-muted-foreground">Rendez-vous d'aujourd'hui pas encore encaissés</p>
-              {appointments.map((apt) => (
+              {ownVisits.length > 0 && (
+                <p className="text-xs font-semibold text-foreground" data-testid="gc-own-title">
+                  {nowVisit ? 'Le RDV de maintenant' : ownVisits.some((a) => dayOf(a) === today) ? 'RDV du jour' : 'RDV de cet abonnement'}
+                </p>
+              )}
+              {ownVisits.map((apt) => (
                 <AppointmentRow
                   key={apt.id}
                   apt={apt}
+                  showVisit
+                  today={today}
+                  selected={String(apt.id) === String(selectedAptId)}
+                  highlighted={String(apt.id) === String(highlightedId) && isNow(apt)}
+                  onSelect={() => { setSelectedAptId(apt.id); resetConfirm(); }}
+                />
+              ))}
+              {otherAppointments.length > 0 && (
+                <p className="text-[11px] text-muted-foreground">Rendez-vous d'aujourd'hui pas encore encaissés</p>
+              )}
+              {otherAppointments.map((apt) => (
+                <AppointmentRow
+                  key={apt.id}
+                  apt={apt}
+                  today={today}
                   selected={String(apt.id) === String(selectedAptId)}
                   highlighted={String(apt.id) === String(highlightedId)}
                   onSelect={() => { setSelectedAptId(apt.id); resetConfirm(); }}
@@ -616,8 +817,37 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
         </div>
       )}
 
+      {/* Coupe payée par sa carte : la case de clôture et ce qu'il restera */}
+      {visitDebit && (
+        <div className="space-y-2" data-testid="gc-visit-recap">
+          {fullyCovered ? (
+            <label className="flex min-h-11 items-center gap-3 text-sm text-foreground cursor-pointer">
+              <input
+                type="checkbox"
+                checked={closeApt}
+                onChange={(e) => setCloseApt(e.target.checked)}
+                className="w-5 h-5 shrink-0 accent-[hsl(var(--primary))]"
+                data-testid="gc-close-apt"
+              />
+              <span>Clôturer le RDV</span>
+            </label>
+          ) : (
+            <p className="flex items-start gap-1.5 text-xs text-amber-300" data-testid="gc-rest">
+              <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+              <span>
+                Reste {formatEuro(rest)} (prestation ajoutée) à encaisser dans l'agenda.{' '}
+                <Link to={agendaLink(selectedApt)} className="font-semibold text-primary whitespace-nowrap">Ouvrir l'agenda</Link>
+              </span>
+            </p>
+          )}
+          <p className="text-center text-[13px] text-muted-foreground">
+            Après ce débit : {visitsLeftLabel(visitsAfter.left)}, solde {formatEuro(after.remaining_balance)}.
+          </p>
+        </div>
+      )}
+
       {/* Récapitulatif */}
-      {requested > 0 && (
+      {requested > 0 && !visitDebit && (
         <div className="rounded-2xl bg-white/5 border border-white/10 p-3 space-y-1.5 text-sm" data-testid="gc-recap">
           {aptGiftPaid > 0 && (
             <div className="flex justify-between text-xs"><span className="text-muted-foreground">Déjà payé par carte</span><span className="text-amber-300">{formatEuro(aptGiftPaid)}</span></div>
@@ -628,6 +858,11 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
             <p className="flex items-start gap-1.5 text-xs text-amber-300 pt-1" data-testid="gc-rest">
               <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
               <span>La carte couvre {formatEuro(debit)}, reste {formatEuro(rest)} à régler au comptoir.</span>
+            </p>
+          )}
+          {visitsAfter && debit > 0 && (
+            <p className="text-xs text-muted-foreground">
+              Après ce débit : {visitsLeftLabel(visitsAfter.left)}, solde {formatEuro(after.remaining_balance)}.
             </p>
           )}
           {selectedApt && fullyCovered && (
@@ -651,8 +886,19 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
         </div>
       )}
 
-      {/* Débit en deux taps */}
-      {!confirming ? (
+      {/* Une coupe du jour : un seul geste, l'annulation de 10 s rattrape une erreur. Sinon, débit en deux taps */}
+      {visitToday ? (
+        <button
+          type="button"
+          onClick={handleConfirm}
+          disabled={sending}
+          data-testid="gc-debit-visit"
+          className="w-full min-h-14 flex items-center justify-center gap-2 px-3 py-3 rounded-2xl bg-primary text-primary-foreground text-base font-bold hover:bg-primary/90 transition-colors disabled:opacity-60"
+        >
+          <Minus className="w-4 h-4 shrink-0" />
+          {sending ? 'Débit…' : `Débiter 1 coupe · ${formatEuro(debit)}`}
+        </button>
+      ) : !confirming ? (
         <button
           type="button"
           onClick={() => setConfirming(true)}
@@ -665,12 +911,19 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
             ? <span className="min-w-0 text-center text-xs leading-snug">{blockReason}</span>
             : (
               <span className="truncate">
-                {debit > 0 ? `Débiter ${formatEuro(debit)} de la carte ${card.code}`
+                {visitDebit ? `Débiter 1 coupe · ${formatEuro(debit)}`
+                  : debit > 0 ? `Débiter ${formatEuro(debit)} de la carte ${card.code}`
                   : selectedNoPrice ? 'Ajoutez d\'abord une prestation au RDV' : 'Choisissez ce que paie la carte'}
               </span>
             )}
         </button>
       ) : (
+        <div className="space-y-2">
+        {visitDebit && (
+          <p className="text-center text-xs font-semibold text-amber-300" data-testid="gc-confirm-day">
+            RDV du {longDay(dayOf(selectedApt))}, pas d'aujourd'hui.
+          </p>
+        )}
         <div className="flex gap-2">
           <button
             type="button"
@@ -688,8 +941,9 @@ export default function GiftCardDebitPanel({ card, onCardChange, onResultChange,
             className="flex-[2] flex items-center justify-center gap-2 py-3 rounded-2xl bg-green-500 text-white text-sm font-semibold hover:bg-green-600 disabled:opacity-60"
           >
             <CheckCircle2 className="w-4 h-4" />
-            {sending ? 'Débit…' : `Confirmer ${formatEuro(debit)}`}
+            {sending ? 'Débit…' : `Confirmer ${visitDebit ? '1 coupe · ' : ''}${formatEuro(debit)}`}
           </button>
+        </div>
         </div>
       )}
     </div>

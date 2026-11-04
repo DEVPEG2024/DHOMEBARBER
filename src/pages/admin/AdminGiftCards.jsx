@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '@/api/apiClient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Gift, CheckCircle2, XCircle, Clock, Search, X, Ban, CreditCard, Banknote, ScanLine, Camera, AlertTriangle, ChevronDown, History, LayoutList } from 'lucide-react';
+import { motion, AnimatePresence, useIsPresent } from 'framer-motion';
+import { Gift, CheckCircle2, XCircle, Clock, Search, X, Ban, CreditCard, Banknote, ScanLine, Camera, AlertTriangle, ChevronDown, History, LayoutList, Keyboard } from 'lucide-react';
 import { toast } from 'sonner';
 import jsQR from 'jsqr';
 import GiftCardSummary from '@/components/giftcards-admin/GiftCardSummary';
@@ -16,6 +16,7 @@ import {
   giftCardState, giftCardBalance, formatEuro, formatDay, invalidateGiftCardQueries, fetchGiftCardByCode, friendlyGiftCardError,
   patchGiftCardCache, fetchGiftCard, round2, parisToday, isValidityPassed,
 } from '@/lib/giftCardDebit';
+import { isSubscriptionCard, useSubscriptionsFeatureState } from '@/lib/subscriptions';
 
 const GIFT_LIST_LIMIT = 200;
 const PAYMENT_LABELS = { cb: 'CB', especes: 'Espèces' };
@@ -27,6 +28,21 @@ function oneYearFromToday() {
 }
 import LoadError, { queryFailed } from '@/components/shared/LoadError';
 import { useAndroidBack } from '@/lib/useAndroidBack';
+
+/** Fenêtre maison : Échap au clavier ferme, comme les fenêtres shadcn (poste du salon, à la souris). */
+function useEscapeToClose(onClose) {
+  const ref = useRef(onClose);
+  ref.current = onClose;
+  // Fenêtre déjà fermée, encore là le temps de son animation de sortie : Échap n'est plus pour elle
+  const present = useIsPresent();
+  const presentRef = useRef(present);
+  presentRef.current = present;
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape' && presentRef.current) ref.current?.(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+}
 
 /**
  * AAAA-MM-JJ + N mois, jour ramené au dernier du mois (31 août + 6 mois = 28 févr.). Calcul sur
@@ -231,7 +247,7 @@ function StateBanner({ tone, children }) {
   );
 }
 
-function ValidateModal({ card, onClose, onCardChange }) {
+function ValidateModal({ card, onClose, onCardChange, presetAptId = null, onDebited, onWrongCard }) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [paymentMethod, setPaymentMethod] = useState('');
@@ -243,8 +259,13 @@ function ValidateModal({ card, onClose, onCardChange }) {
   const [debitResultShown, setDebitResultShown] = useState(false);
   const state = giftCardState(card);
   const showDebit = state === 'debitable' || debitResultShown;
+  // Carte d'un abonnement : elle s'annule avec l'abonnement (RDV libérés, montant à rembourser annoncé).
+  // Drapeau illisible : c'en est encore une, seul « faux » la rend ordinaire
+  const subscriptionsFlag = useSubscriptionsFeatureState();
+  const subscriptionCard = !subscriptionsFlag.disabled && isSubscriptionCard(card);
   // Bouton retour d'Android : ferme la fenêtre (montée seulement ouverte) au lieu de quitter la page
   useAndroidBack(true, onClose);
+  useEscapeToClose(onClose);
 
   /**
    * Relit la carte avant de la valider ou de la rejeter : la liste n'est pas rechargée toute seule
@@ -385,6 +406,9 @@ function ValidateModal({ card, onClose, onCardChange }) {
             onCardChange={onCardChange}
             onResultChange={setDebitResultShown}
             onDone={onClose}
+            presetAptId={presetAptId}
+            onDebited={onDebited}
+            onWrongCard={onWrongCard}
           />
         )}
 
@@ -498,7 +522,12 @@ function ValidateModal({ card, onClose, onCardChange }) {
                 <ExtendValidity key={`debitable-${card.id}`} card={card} outdated={false} onCardChange={onCardChange} />
               </div>
             )}
-            {!confirmCancel ? (
+            {subscriptionCard ? (
+              <p className="text-center text-[11px] text-muted-foreground" data-testid="gc-cancel-subscription">
+                Cette carte appartient à un abonnement : elle s'annule depuis{' '}
+                <Link to="/admin/subscriptions?tab=active" className="font-semibold text-primary underline underline-offset-2">Abonnements</Link>.
+              </p>
+            ) : !confirmCancel ? (
               <button
                 onClick={() => setConfirmCancel(true)}
                 disabled={loading}
@@ -550,11 +579,18 @@ function extractCodeFromQR(value) {
   return null;
 }
 
-// QR Scanner using device camera + jsQR (cross-browser: iOS, Android, desktop)
-function QRScannerModal({ onClose, onScanned }) {
+// Poste du salon : l'ordinateur a une souris, et le curseur attend dans le champ (une douchette USB y
+// tape le contenu du QR puis Entrée). Jamais sur un téléphone : le clavier cacherait la caméra.
+const hasMouse = () => typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+  && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+
+// QR Scanner using device camera + jsQR (cross-browser: iOS, Android, desktop). `codeOnly` : sans caméra,
+// le champ seul (saisie du code, douchette).
+function QRScannerModal({ onClose, onScanned, codeOnly = false }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
+  const inputRef = useRef(null);
   const onScannedRef = useRef(onScanned);
   onScannedRef.current = onScanned;
   const [cameraReady, setCameraReady] = useState(false);
@@ -569,6 +605,11 @@ function QRScannerModal({ onClose, onScanned }) {
   }, []);
 
   useEffect(() => {
+    if (codeOnly || hasMouse()) inputRef.current?.focus();
+  }, [codeOnly]);
+
+  useEffect(() => {
+    if (codeOnly) return undefined;
     let cancelled = false;
     let rafId;
 
@@ -639,21 +680,24 @@ function QRScannerModal({ onClose, onScanned }) {
       if (rafId) cancelAnimationFrame(rafId);
       stopCamera();
     };
-  }, [stopCamera]);
+  }, [stopCamera, codeOnly]);
 
-  const handleManualSubmit = () => {
-    const code = manualCode.trim().toUpperCase();
-    if (code.startsWith('DHB-')) {
+  // Code tapé, ou contenu complet du QR tapé par une douchette (https://…?scan=DHB-XXXX-XXXX)
+  const handleManualSubmit = (raw = manualCode) => {
+    const typed = String(raw).trim().toUpperCase();
+    const code = extractCodeFromQR(typed) || (typed.startsWith('DHB-') ? typed : null);
+    if (code) {
       stopCamera();
       onScanned(code);
     } else {
-      toast.error('Code invalide', { description: 'Le code doit commencer par DHB-' });
+      toast.error('Code invalide', { description: 'Le code doit commencer par DHB-. Avec une douchette : réglez-la en clavier français (AZERTY).' });
     }
   };
 
   const handleClose = () => { stopCamera(); onClose(); };
   // Bouton retour d'Android : coupe la caméra puis ferme
   useAndroidBack(true, handleClose);
+  useEscapeToClose(handleClose);
 
   return (
     <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center px-4 pt-[calc(env(safe-area-inset-top)+1rem)] pb-[calc(env(safe-area-inset-bottom)+1rem)]">
@@ -665,20 +709,20 @@ function QRScannerModal({ onClose, onScanned }) {
         onClick={e => e.stopPropagation()}
         className="relative w-full max-w-sm max-h-full overflow-y-auto overscroll-contain rounded-3xl bg-card border border-border p-5 shadow-2xl"
       >
-        <button onClick={handleClose} className="absolute top-3 right-3 w-8 h-8 rounded-full flex items-center justify-center hover:bg-secondary z-10">
+        <button onClick={handleClose} aria-label="Fermer" className="absolute top-3 right-3 w-8 h-8 rounded-full flex items-center justify-center hover:bg-secondary z-10">
           <X className="w-4 h-4" />
         </button>
 
         <div className="flex items-center gap-2 mb-4">
-          <Camera className="w-5 h-5 text-primary" />
-          <h3 className="text-base font-bold text-foreground">Scanner une carte</h3>
+          {codeOnly ? <Keyboard className="w-5 h-5 text-primary" /> : <Camera className="w-5 h-5 text-primary" />}
+          <h3 className="text-base font-bold text-foreground">{codeOnly ? 'Saisir le code de la carte' : 'Scanner une carte'}</h3>
         </div>
 
         {/* Hidden canvas for jsQR processing */}
         <canvas ref={canvasRef} className="hidden" />
 
         {/* Camera preview */}
-        {!cameraError && (
+        {!cameraError && !codeOnly && (
           <div className="relative rounded-2xl overflow-hidden bg-black aspect-[4/3] mb-4">
             <video ref={videoRef} className="w-full h-full object-cover" playsInline muted autoPlay />
             {!cameraReady && (
@@ -705,7 +749,9 @@ function QRScannerModal({ onClose, onScanned }) {
         )}
 
         <p className="text-xs text-muted-foreground text-center mb-3">
-          {cameraError
+          {codeOnly
+            ? 'Tapez le code, ou scannez le QR avec la douchette : il s\'écrit ici.'
+            : cameraError
             ? 'Caméra non disponible. Entrez le code manuellement.'
             : 'Pointez la caméra vers le QR code de la carte'}
         </p>
@@ -713,15 +759,23 @@ function QRScannerModal({ onClose, onScanned }) {
         {/* Manual input (always visible) */}
         <div className="flex gap-2">
           <input
+            ref={inputRef}
             type="text"
             value={manualCode}
             onChange={e => setManualCode(e.target.value.toUpperCase())}
             placeholder="DHB-XXXX-XXXX"
-            className="flex-1 px-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-foreground text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary/50"
-            onKeyDown={e => e.key === 'Enter' && handleManualSubmit()}
+            aria-label="Code de la carte"
+            autoComplete="off"
+            spellCheck={false}
+            className="flex-1 min-w-0 px-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-foreground text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary/50"
+            onKeyDown={e => {
+              if (e.key !== 'Enter') return;
+              e.preventDefault();
+              handleManualSubmit(e.currentTarget.value);
+            }}
           />
           <button
-            onClick={handleManualSubmit}
+            onClick={() => handleManualSubmit()}
             disabled={!manualCode.trim()}
             className="shrink-0 px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold disabled:opacity-50"
           >
@@ -738,8 +792,15 @@ export default function AdminGiftCards() {
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [selectedCard, setSelectedCard] = useState(null);
-  const [showScanner, setShowScanner] = useState(false);
+  // Scanner ouvert : avec la caméra (`camera`), ou le champ seul (`code` : saisie, douchette)
+  const [scannerMode, setScannerMode] = useState(null);
   const [pendingScanCode, setPendingScanCode] = useState(null);
+  // RDV de l'agenda à payer par la carte scannée (`?apt=`) : oublié au débit et à la fermeture de la fiche
+  // ou du scanner (jamais présélectionné plus tard par surprise), sauf après une mauvaise carte, à rescanner
+  const [presetAptId, setPresetAptId] = useState(null);
+  const keepPreset = useRef(false);
+  const subscriptionsFlag = useSubscriptionsFeatureState();
+  const subscriptionsOn = subscriptionsFlag.enabled;
   const queryClient = useQueryClient();
 
   const giftCardsQuery = useQuery({
@@ -820,17 +881,61 @@ export default function AdminGiftCards() {
     }
   }, []);
 
-  // QR code lu par l'appareil photo du téléphone : ?scan=DHB-XXXX-XXXX
+  // QR code lu par l'appareil photo du téléphone : ?scan=DHB-XXXX-XXXX ; depuis la fiche d'un RDV :
+  // ?apt=<id du RDV> avec le code, ou ?open=scanner / ?open=code pour lire la carte ici
   const scanParam = searchParams.get('scan');
+  const aptParam = searchParams.get('apt');
+  const openParam = searchParams.get('open');
   useEffect(() => {
-    if (!scanParam || isLoading) return;
+    if (!scanParam && !aptParam && !openParam) return;
+    if (scanParam && isLoading) return;
     setSearchParams(prev => {
       const next = new URLSearchParams(prev);
       next.delete('scan');
+      next.delete('apt');
+      next.delete('open');
       return next;
     }, { replace: true });
-    openByCode(scanParam);
-  }, [scanParam, isLoading, openByCode, setSearchParams]);
+    if (aptParam) setPresetAptId(aptParam);
+    if (openParam === 'scanner') setScannerMode('camera');
+    if (openParam === 'code') setScannerMode('code');
+    if (scanParam) openByCode(scanParam);
+  }, [scanParam, aptParam, openParam, isLoading, openByCode, setSearchParams]);
+
+  // Douchette USB sans champ actif : elle tape le contenu du QR très vite, puis Entrée. Le texte repart
+  // de zéro après une pause. Rien avec une fenêtre ouverte ni dans un champ.
+  const windowOpen = !!selectedCard || !!scannerMode || !!pendingScanCode;
+  useEffect(() => {
+    if (!subscriptionsOn || windowOpen) return undefined;
+    let typed = '';
+    let lastAt = 0;
+    const onKey = (e) => {
+      const target = e.target;
+      if (target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.timeStamp - lastAt > 300) typed = '';
+      lastAt = e.timeStamp;
+      if (e.key === 'Enter') {
+        const code = extractCodeFromQR(typed);
+        typed = '';
+        if (code) { e.preventDefault(); openByCode(code); }
+      } else if (e.key.length === 1) {
+        typed += e.key;
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [subscriptionsOn, windowOpen, openByCode]);
+
+  // Le champ de recherche a le curseur quand la douchette part : le QR complet ouvre la carte
+  const openFromSearch = (e) => {
+    if (!subscriptionsOn || e.key !== 'Enter') return;
+    const code = extractCodeFromQR(e.currentTarget.value);
+    if (!code) return;
+    e.preventDefault();
+    setSearch('');
+    openByCode(code);
+  };
 
   // État réel de chaque carte au jour de Paris : une carte validée dont la validité est passée
   // n'est plus « active » (sa fiche dit qu'aucun débit n'est possible)
@@ -894,14 +999,26 @@ export default function AdminGiftCards() {
           </h1>
           <p className="text-xs text-muted-foreground mt-0.5">Gestion et validation des cartes cadeau</p>
         </div>
-        <motion.button
-          whileTap={{ scale: 0.95 }}
-          onClick={() => setShowScanner(true)}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-primary text-primary-foreground text-sm font-semibold shadow-lg shadow-primary/25"
-        >
-          <ScanLine className="w-4 h-4" />
-          Scanner
-        </motion.button>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {subscriptionsOn && (
+            <button
+              type="button"
+              onClick={() => setScannerMode('code')}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-card border border-border text-foreground text-sm font-semibold hover:bg-white/5"
+            >
+              <Keyboard className="w-4 h-4" />
+              Saisir le code
+            </button>
+          )}
+          <motion.button
+            whileTap={{ scale: 0.95 }}
+            onClick={() => setScannerMode('camera')}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-primary text-primary-foreground text-sm font-semibold shadow-lg shadow-primary/25"
+          >
+            <ScanLine className="w-4 h-4" />
+            Scanner
+          </motion.button>
+        </div>
       </div>
 
       {/* Onglets */}
@@ -960,6 +1077,7 @@ export default function AdminGiftCards() {
           <input
             value={search}
             onChange={e => setSearch(e.target.value)}
+            onKeyDown={openFromSearch}
             placeholder="Rechercher par nom, email, code..."
             className="w-full pl-9 pr-4 py-2.5 rounded-xl bg-card border border-border text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
           />
@@ -1011,7 +1129,12 @@ export default function AdminGiftCards() {
                     </div>
                     <div className="min-w-0 flex-1">
                       {/* Nom sur toute la largeur (à 320 px le code le réduisait à 4 lettres), code en tête de la 2e ligne */}
-                      <p className="text-sm font-semibold text-foreground truncate">{card.recipient_name}</p>
+                      <p className="text-sm font-semibold text-foreground flex items-center gap-1.5 min-w-0">
+                        <span className="truncate">{card.recipient_name}</span>
+                        {!subscriptionsFlag.disabled && isSubscriptionCard(card) && (
+                          <span className="shrink-0 rounded-full bg-violet-500/15 px-2 py-0.5 text-[10px] font-semibold text-violet-300">Abonnement</span>
+                        )}
+                      </p>
                       <p className="text-xs text-muted-foreground truncate">
                         <span className="font-mono text-[10px]">{card.code}</span> · De {card.sender_name} · {formatDay(card.created_at)}
                       </p>
@@ -1053,17 +1176,28 @@ export default function AdminGiftCards() {
           <ValidateModal
             key={liveCard.id}
             card={liveCard}
-            onClose={() => setSelectedCard(null)}
+            onClose={() => {
+              setSelectedCard(null);
+              if (!keepPreset.current) setPresetAptId(null);
+              keepPreset.current = false;
+            }}
             onCardChange={handleCardChange}
+            presetAptId={presetAptId}
+            onDebited={() => setPresetAptId(null)}
+            onWrongCard={() => { keepPreset.current = true; }}
           />
         )}
       </AnimatePresence>
       <AnimatePresence>
-        {showScanner && (
+        {scannerMode && (
           <QRScannerModal
-            onClose={() => setShowScanner(false)}
+            codeOnly={scannerMode === 'code'}
+            onClose={() => {
+              setScannerMode(null);
+              setPresetAptId(null);
+            }}
             onScanned={(code) => {
-              setShowScanner(false);
+              setScannerMode(null);
               openByCode(code);
             }}
           />

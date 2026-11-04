@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Trash2, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
@@ -29,6 +30,8 @@ export default function GiftCardDeletePanel({ card, onDeleted }) {
   const queryClient = useQueryClient();
   const [step, setStep] = useState('idle'); // idle | loading | confirm | deleting
   const [preview, setPreview] = useState(null);
+  // Carte d'un abonnement en cours (409 `subscription_card`) : le message du serveur, lien vers Abonnements
+  const [subscriptionBlock, setSubscriptionBlock] = useState('');
 
   const loadPreview = async () => {
     setStep('loading');
@@ -71,6 +74,12 @@ export default function GiftCardDeletePanel({ card, onDeleted }) {
       onDeleted?.();
     } catch (err) {
       const code = err?.data?.code;
+      if (err?.status === 409 && code === 'subscription_card') {
+        setSubscriptionBlock(friendlyGiftCardError(err));
+        setPreview(null);
+        setStep('idle');
+        return;
+      }
       if (err?.status === 409 && code === 'changed') {
         toast.error('La carte a bougé entre-temps', { description: 'Un débit vient d\'être enregistré : vérifiez le nouveau récapitulatif.' });
         invalidateGiftCardQueries(queryClient, card.id);
@@ -94,6 +103,17 @@ export default function GiftCardDeletePanel({ card, onDeleted }) {
       setStep('confirm');
     }
   };
+
+  if (subscriptionBlock) {
+    return (
+      <div className="mt-4 pt-4 border-t border-border">
+        <p role="alert" className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs leading-relaxed text-amber-200 break-words" data-testid="gc-delete-subscription">
+          {subscriptionBlock}{' '}
+          <Link to="/admin/subscriptions?tab=active" className="font-semibold text-primary underline underline-offset-2 whitespace-nowrap">Ouvrir Abonnements</Link>
+        </p>
+      </div>
+    );
+  }
 
   if (step === 'idle' || step === 'loading') {
     return (

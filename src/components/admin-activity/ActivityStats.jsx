@@ -28,6 +28,8 @@ export default function ActivityStats({ events }) {
       const amount = Number(ev.amount);
       const hasAmount = ev.amount != null && Number.isFinite(amount);
       if (ev.type === 'appointment_new') s.appointments += 1;
+      // Abonnement : ses RDV réservés, sans montant (rien n'est encore encaissé par cette ligne)
+      else if (ev.type === 'subscription_new') s.appointments += Number(ev.count) || 1;
       else if (ev.type === 'order_new') {
         s.orders += 1;
         // Une commande annulée depuis reste comptée comme commande passée, mais pas dans le chiffre

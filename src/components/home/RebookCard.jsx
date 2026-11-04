@@ -10,6 +10,8 @@ import { BARBER_PHOTO_ASPECT, BARBER_PHOTO_BG } from '@/lib/barberPhoto';
 import { parisInstant } from '@/lib/calendarLinks';
 import { formatPrice } from '@/components/services/serviceUtils';
 import { guestOf } from '@/lib/guest';
+import { isSubscriptionAppointment, visitLabel } from '@/components/abonnement/visitLabels';
+import { useSubscriptionsFeature } from '@/lib/subscriptions';
 
 // Statuts qui ne correspondent pas à une vraie visite du client (absent = pas venu)
 const IGNORED_STATUSES = ['cancelled', 'break', 'no_show'];
@@ -39,6 +41,7 @@ function todayInParis() {
  */
 export default function RebookCard({ user, employees = [], services = [] }) {
   const reduceMotion = useReducedMotion();
+  const subscriptionsEnabled = useSubscriptionsFeature();
 
   // Le serveur force le filtre sur le client connecté : on ne reçoit que ses RDV
   const { data: appointments = [] } = useQuery({
@@ -72,7 +75,9 @@ export default function RebookCard({ user, employees = [], services = [] }) {
     const activeServices = lastIds.map(id => services.find(sv => String(sv.id) === id)).filter(Boolean);
     // Catalogue lu et une prestation de la visite n'y est plus : ni prix ni durée (le total serait faux)
     const retired = services.length > 0 && activeServices.length < lastIds.length;
-    const serviceNames = items.map(s => s?.name).filter(Boolean);
+    // RDV d'abonnement : « Coupe 2 sur 4 », jamais le nom de la formule ni son prix
+    const ofSubscription = isSubscriptionAppointment(last);
+    const serviceNames = ofSubscription ? [visitLabel(last.subscription_visit)] : items.map(s => s?.name).filter(Boolean);
     const barberName = barber?.name || last.employee_name || null;
 
     // Le lien garde le barber et TOUTES les prestations de la visite, même retirés depuis : la
@@ -88,6 +93,9 @@ export default function RebookCard({ user, employees = [], services = [] }) {
 
     const parsed = parseISO(last.date);
     const isFuture = isUpcoming(last, Date.now());
+    // Dernière visite d'un abonnement : reprendre un RDV dessus, jamais un nouvel abonnement par le
+    // lien de la formule (sans coupe restante, `/abonnement?reprendre=` le dit et propose d'en reprendre un)
+    const resume = ofSubscription && !isFuture && subscriptionsEnabled && !!last.subscription_id;
     const sameYear = isValid(parsed) && parsed.getFullYear() === new Date().getFullYear();
     const dateLabel = isValid(parsed) ? format(parsed, sameYear ? 'EEE d MMM' : 'EEE d MMM yyyy', { locale: fr }) : last.date;
 
@@ -98,16 +106,20 @@ export default function RebookCard({ user, employees = [], services = [] }) {
       activeServices,
       total: activeServices.reduce((sum, s) => sum + (Number(s.price) || 0), 0),
       duration: activeServices.reduce((sum, s) => sum + (Number(s.duration) || 0), 0),
-      href: isFuture ? '/appointments' : (query ? `/booking?${query}` : '/booking'),
+      href: isFuture ? '/appointments'
+        : resume ? `/abonnement?reprendre=${encodeURIComponent(last.subscription_id)}`
+        : (query ? `/booking?${query}` : '/booking'),
+      resume,
       dateLabel: isFuture && last.start_time ? `${dateLabel} à ${last.start_time}` : dateLabel,
       isFuture,
       retired,
+      ofSubscription,
     };
-  }, [last, employees, services]);
+  }, [last, employees, services, subscriptionsEnabled]);
 
   if (!user?.email || !details) return null;
 
-  const { barber, barberName, serviceNames, activeServices, total, duration, href, dateLabel, isFuture, retired } = details;
+  const { barber, barberName, serviceNames, activeServices, total, duration, href, dateLabel, isFuture, retired, ofSubscription, resume } = details;
   const subtitle = [serviceNames.join(' + ') || 'Votre prestation', barberName ? `avec ${barberName}` : null,
     guestOf(last) ? `pour ${guestOf(last)}` : null]
     .filter(Boolean).join(' · ');
@@ -148,7 +160,7 @@ export default function RebookCard({ user, employees = [], services = [] }) {
           <p className="text-xs text-muted-foreground leading-snug line-clamp-2">{subtitle}</p>
           <p className="text-[11px] text-muted-foreground/80 mt-1 leading-snug">
             {isFuture ? '' : 'Dernière visite : '}<span className="text-foreground/80">{dateLabel}</span>
-            {!isFuture && !retired && activeServices.length > 0 && (
+            {!isFuture && !retired && !ofSubscription && activeServices.length > 0 && (
               <span className="text-foreground/60 whitespace-nowrap"> · {formatPrice(total)} · {duration} min</span>
             )}
           </p>
@@ -158,7 +170,7 @@ export default function RebookCard({ user, employees = [], services = [] }) {
               whileTap={reduceMotion ? undefined : { scale: 0.96 }}
               className="flex items-center justify-center gap-1.5 h-9 px-4 rounded-xl bg-primary text-primary-foreground text-xs font-semibold shadow-lg shadow-primary/25 hover:bg-primary/90 transition-colors"
             >
-              {isFuture ? 'Voir mes rendez-vous' : 'Réserver à nouveau'} <ArrowRight className="w-3.5 h-3.5" />
+              {isFuture ? 'Voir mes rendez-vous' : resume ? 'Reprendre un RDV' : 'Réserver à nouveau'} <ArrowRight className="w-3.5 h-3.5" />
             </motion.span>
           </Link>
         </div>

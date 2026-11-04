@@ -400,7 +400,8 @@ export async function deleteGiftCardForever(cardId, expect, queryClient) {
 
 /** Après un débit / une annulation : listes de cartes, tableau de bord, activité, historique. */
 export function invalidateGiftCardQueries(queryClient, cardId) {
-  for (const queryKey of [['adminGiftCards'], ['dashboard', 'giftCards'], ['adminActivity'], ['giftCards'], giftCardJournalKey]) {
+  // ['subscriptions'] : les coupes restantes d'un abonnement suivent le solde de sa carte
+  for (const queryKey of [['adminGiftCards'], ['dashboard', 'giftCards'], ['adminActivity'], ['giftCards'], giftCardJournalKey, ['subscriptions']]) {
     queryClient.invalidateQueries({ queryKey });
   }
   if (cardId != null) queryClient.invalidateQueries({ queryKey: giftCardTransactionsKey(cardId) });
@@ -418,18 +419,27 @@ export function patchGiftCardCache(queryClient, card) {
 
 export const giftCardTodayAppointmentsKey = (day) => ['giftCardTodayAppointments', day];
 
+/** RDV à encaisser : confirmé, sans moyen de paiement, avec un client, pas déjà entièrement réglé par carte. */
+export function isAppointmentToCash(a) {
+  if (!a || a.status !== 'confirmed' || a.payment_method) return false;
+  // Déjà entièrement réglé par carte(s) cadeau (clôture échouée après le débit) : plus rien à débiter
+  if (appointmentGiftPaid(a) > 0 && appointmentDue(a) <= 0) return false;
+  const name = String(a.client_name || '').trim();
+  return !!(a.client_email || (name && name !== 'Last Minute'));
+}
+
 /** RDV du jour (Paris) confirmés, sans moyen de paiement, avec un client : à encaisser. */
 export async function fetchTodayAppointmentsToCash(day = parisToday()) {
   const rows = await api.entities.Appointment.filter({ date: day, status: 'confirmed' }, 'start_time', 200);
-  const list = Array.isArray(rows) ? rows : [];
-  return list.filter((a) => {
-    if (a.payment_method) return false;
-    // Déjà entièrement réglé par carte(s) cadeau (clôture échouée après le débit) : plus rien à débiter
-    if (appointmentGiftPaid(a) > 0 && appointmentDue(a) <= 0) return false;
-    const name = String(a.client_name || '').trim();
-    return !!(a.client_email || (name && name !== 'Last Minute'));
-  });
+  return (Array.isArray(rows) ? rows : []).filter(isAppointmentToCash);
 }
+
+/**
+ * Cette carte peut-elle payer ce RDV ? Un RDV d'abonnement ne se paie que par la carte de cet abonnement
+ * (le serveur refuse sinon, 409 `wrong_card`) : retiré des listes des autres cartes.
+ */
+export const appointmentFitsCard = (apt, card) => !apt?.subscription_id
+  || String(apt.subscription_id) === String(card?.subscription_id || '');
 
 /** Prix encaissé d'un RDV : prestations (+ produit vendu pendant le RDV s'il y en a un). */
 export function appointmentPrice(apt) {
