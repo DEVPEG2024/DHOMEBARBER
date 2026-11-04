@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pause, Trophy, Volume2, VolumeX, X } from 'lucide-react';
+import { Eye, Pause, Trophy, Volume2, VolumeX, X } from 'lucide-react';
 
 export const REACTIONS = [
   { r: 0, emoji: '👏', label: 'Bravo' },
@@ -25,13 +25,41 @@ function PingBadge({ ping }) {
 }
 
 /**
+ * Spectateurs du match (protocole 3, `ui.watchers` ; contrat docs/fonctions/coupe-spectateurs-contrat.md,
+ * section 1.5) : un œil et leur nombre sous le mode, « Sur l'écran du salon » quand l'écran du salon
+ * montre le match ; rien sans spectateur. Posée en absolu dans la barre du haut : la barre garde ses
+ * 56 px et le terrain ne bouge pas. À 320 px, le mot « spectateurs » n'est lu que par les lecteurs
+ * d'écran (le nombre et l'écran du salon restent écrits).
+ */
+export function WatchersPill({ n, screen }) {
+  const count = Number(n) > 0 ? Math.floor(Number(n)) : 0;
+  if (!count) return null;
+  return (
+    <p className="cdg-watch">
+      <Eye className="h-[13px] w-[13px]" aria-hidden="true" />
+      <span className="cdg-watch-n">{count}</span>
+      {' '}
+      <span className="cdg-watch-word">{count === 1 ? 'spectateur' : 'spectateurs'}</span>
+      {screen && (
+        <>
+          {' '}
+          <span className="cdg-watch-screen">· Sur l’écran du salon</span>
+        </>
+      )}
+    </p>
+  );
+}
+
+/**
  * Barre du haut pendant un match : quitter (en ligne) ou pause (hors ligne), le mode, la
  * connexion (en ligne), le son. `diag` : ligne de diagnostic de l'écran d'essai. `tour` : match
  * de tournoi, le tour (« Quart de finale ») à la place du mode, derrière une coupe d'or.
+ * `watchers` (en ligne) : `{ n, screen }`, la pastille des spectateurs sous le mode quand `n > 0`.
  */
-export function GameHud({ online, label, onLeft, ping, soundOn, onToggleSound, diag, tour = false }) {
+export function GameHud({ online, label, onLeft, ping, soundOn, onToggleSound, diag, tour = false, watchers = null }) {
+  const watched = online && Number(watchers?.n) > 0;
   return (
-    <header className="cdg-hud">
+    <header className="cdg-hud" data-watch={watched ? '' : undefined}>
       <button type="button" className="cdg-icon" onClick={onLeft} aria-label={online ? 'Quitter le match' : 'Pause'}>
         {online ? <X className="h-5 w-5" aria-hidden="true" /> : <Pause className="h-[18px] w-[18px]" aria-hidden="true" />}
       </button>
@@ -53,6 +81,7 @@ export function GameHud({ online, label, onLeft, ping, soundOn, onToggleSound, d
       >
         {soundOn ? <Volume2 className="h-5 w-5" aria-hidden="true" /> : <VolumeX className="h-5 w-5" aria-hidden="true" />}
       </button>
+      {watched && <WatchersPill n={watchers.n} screen={watchers.screen === true} />}
       {diag && <p className="cdg-diag">{diag}</p>}
     </header>
   );

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Ban, Bell, Check, Loader2, Share2 } from 'lucide-react';
+import { Ban, Bell, Check, Eye, Loader2, Share2 } from 'lucide-react';
 import { HERO_BUTTON } from '../hub/CoupeShell';
 import { num } from '../hub/coupeFormat';
 import { BTN_RED, CARD, FitTitle, LABEL, LINK_QUIET, TPawn, TournamentShell } from './ui';
@@ -14,6 +14,8 @@ import { TOURNAMENT_CHECKIN_MS } from '@/lib/coupe/coupeApi';
  * c'est complet). Inscrit : ce qui est noté sous la date, « Me désinscrire » en lien discret en
  * bas de page (avec confirmation), sans pied collé (rien ne recouvre les inscrits, même à 320 ×
  * 568). Retiré par le salon : il le lit, sans bouton.
+ * Spectateurs (`spectatorsOn` : `features.coupeSpectators`) : s'inscrire, c'est accepter d'être
+ * regardé ; la page le dit (contrat docs/fonctions/coupe-spectateurs-contrat.md, section 0.2).
  */
 function Info({ title, children, gold = false }) {
   return (
@@ -75,6 +77,18 @@ export function UnregisterLink({ t, busy, onUnregister, className = '' }) {
   );
 }
 
+/** Mention des spectateurs à l'inscription (rien sans `features.coupeSpectators`). */
+export const SPECTATORS_NOTE = 'Les matchs du tournoi sont ouverts aux spectateurs et peuvent passer sur l’écran du salon.';
+
+export function SpectatorsNote({ className = '' }) {
+  return (
+    <p className={`flex items-start gap-2 text-xs leading-snug text-[color:var(--coupe-gris-clair)] ${className}`}>
+      <Eye className="mt-px h-3.5 w-3.5 shrink-0 text-[color:var(--coupe-gris)]" aria-hidden="true" />
+      <span>{SPECTATORS_NOTE}</span>
+    </p>
+  );
+}
+
 /** Retiré par le salon (à la place de « S'inscrire »). */
 export function RemovedNote() {
   return (
@@ -85,7 +99,7 @@ export function RemovedNote() {
   );
 }
 
-export default function RegistrationView({ t, busy, offline = false, onBack, onShare, onRegister, onUnregister }) {
+export default function RegistrationView({ t, busy, offline = false, spectatorsOn = false, onBack, onShare, onRegister, onUnregister }) {
   const size = num(t.size) || 16;
   const starts = msOf(t.starts_at);
   const from = msOf(t.checkin_from) ?? (starts == null ? null : starts - TOURNAMENT_CHECKIN_MS);
@@ -148,6 +162,7 @@ export default function RegistrationView({ t, busy, offline = false, onBack, onS
           <Info title="Chaque match">Premier à 5, tirs au but si égalité</Info>
           <Info title="Au bout" gold>Trophée et palmarès</Info>
         </div>
+        {spectatorsOn && <SpectatorsNote className="px-1" />}
 
         <ol aria-label="Déroulé" className="flex flex-col gap-2 px-1 py-0.5">
           <Step time={clockOf(from)}>Tu confirmes ta présence dans l’app</Step>

@@ -75,6 +75,16 @@ La spec vérifie la bande (pastilles, avertissements, jauge), les bandeaux (not�
 par un observateur : ils ne vivent que ~1,4 s), le penalty, le but en or, la place du terrain qui ne
 bouge pas, et l'écran d'aujourd'hui contre une app publiée.
 
+**Spectateurs et écran du salon** (4 nov. 2026, contrat `docs/fonctions/coupe-spectateurs-contrat.md`) :
+`features.coupeSpectators` vaut vrai par défaut (un test le met à faux). Le faux serveur de jeu
+(`support/fauxCoupe.js`) parle aussi le protocole des spectateurs (`auth watch` et `auth screen`,
+`wstart`, relais, `wend`, `cheer`, refus ; aides documentées en tête du fichier). `GET /coupe/live`
+est servi par `support/fauxDirect.js` (`api.direct`), `GET /coupe/screen` (en-tête `X-Screen-Key`,
+lu dans `req.cleEcran`) et `/coupe/admin/screens…` par `support/fauxEcran.js` (`api.ecran`).
+Specs : `coupe-regarder.spec.js` (vue spectateur), `ecran-salon.spec.js` (écran du salon, de
+960 × 540 à 3840 × 2160), `coupe-ecrans-admin.spec.js` (liens d'écran), `coupe-direct.spec.js`
+(compteur et réactions chez les joueurs, « En direct », réglage, boutons du tableau).
+
 ## Ajouter un test
 
 ```js

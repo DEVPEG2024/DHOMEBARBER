@@ -54,6 +54,21 @@ export const GAME_CSS = `
 .cdg-diag { position: absolute; left: 50%; bottom: -2px; transform: translateX(-50%); margin: 0; white-space: nowrap;
   font: 600 10.5px/1 var(--cdg-body); color: var(--cdg-gris-clair); text-shadow: ${TEXT_SHADOW}; font-variant-numeric: tabular-nums; pointer-events: none; }
 
+/* Spectateurs (Hud, WatchersPill) : sous le mode, en absolu (la barre garde ses 56 px, le terrain ne
+   bouge pas) ; le mode remonte un peu pour lui laisser la place. Jamais plus large que l'espace entre
+   les deux boutons ronds ; à 320 px, « spectateurs » n'est plus écrit (lu par les lecteurs d'écran) */
+.cdg-watch { position: absolute; left: 50%; bottom: 3px; transform: translateX(-50%); margin: 0; z-index: 1; display: inline-flex; align-items: center; gap: 5px;
+  height: 19px; max-width: calc(100% - 112px); padding: 0 8px; box-sizing: border-box; border-radius: 999px; overflow: hidden; white-space: nowrap; pointer-events: none;
+  background: ${noir(0.72)}; border: 1px solid ${blanc(0.16)}; font: 600 11px/1 var(--cdg-body); color: var(--cdg-blanc); font-variant-numeric: tabular-nums; }
+.cdg-watch svg { flex: none; color: var(--cdg-gris-clair); }
+.cdg-watch-word { color: var(--cdg-gris-clair); }
+.cdg-watch-screen { color: var(--cdg-or); }
+.cdg-hud[data-watch] .cdg-hud-label { transform: translateY(-9px); }
+.cdg-hud[data-watch] .cdg-diag { bottom: -15px; }
+@media (max-width: 359px) {
+  .cdg-watch-word { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+}
+
 .cdg-stage { position: relative; min-height: 0; flex: 1; }
 .cdg-canvas { position: absolute; inset: 0; z-index: 2; display: block; width: 100%; height: 100%; touch-action: none; }
 
@@ -249,6 +264,16 @@ export const GAME_CSS = `
   border: 1px solid ${blanc(0.28)}; font: 600 12px/1 var(--cdg-body); display: flex; align-items: center; gap: 6px; }
 .cdg-bubble.cdg-theirs b { color: var(--cdg-blanc); font-weight: 600; }
 .cdg-bubble.cdg-theirs span { font-size: 16px; line-height: 1; }
+/* Réactions des spectateurs (« cheer ») : en haut à gauche, dans les tribunes au-dessus du terrain puis
+   le long de son bord gauche, sous la place de l'astuce du début (jamais au centre, jamais du côté de
+   ton doigt, en bas), 3 au plus, une rangée chacune (--cdg-cheer-y, posée par l'écran de jeu, depuis
+   le haut du terrain ; jamais au-dessus du stage) ; elles montent et s'effacent en 1,5 s (rien ne
+   bouge avec « réduire les animations » : le texte, le temps de sa vie) */
+.cdg-cheer { position: absolute; z-index: 14; left: 10px; top: max(4px, calc(var(--cdg-pitch-top, 36px) + var(--cdg-cheer-y, -29px)));
+  display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; box-sizing: border-box; border-radius: 999px;
+  pointer-events: none; white-space: nowrap; background: ${noir(0.86)}; border: 1px solid ${alpha(C.or, 0.5)};
+  font: 700 12.5px/1 var(--cdg-body); color: var(--cdg-blanc); }
+.cdg-cheer svg { flex: none; color: var(--cdg-or); }
 
 .cdg-float { position: absolute; z-index: 16; left: 50%; top: 50%; transform: translate(-50%, -50%); width: max-content; max-width: calc(100% - 112px);
   box-sizing: border-box; padding: 14px 18px; border-radius: 18px; text-align: center; background: ${noir(0.92)};
@@ -416,9 +441,13 @@ export const GAME_CSS = `
 @keyframes cdg-vs-in { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
 @keyframes cdg-vs-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(-12px); } }
 @keyframes cdg-banner-in { 0% { opacity: 0; transform: scale(.55); } 60% { opacity: 1; transform: scale(1.08); } 100% { opacity: 1; transform: none; } }
+@keyframes cdg-cheer-up { 0% { opacity: 0; transform: translateY(6px) scale(.92); } 14% { opacity: 1; transform: none; } 72% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-12px); } }
 @media (prefers-reduced-motion: no-preference) {
   .cdg-panel, .cdg-defi { animation: cdg-rise .35s cubic-bezier(.2, .9, .3, 1.15); }
   .cdg-bubble { animation: cdg-float-up 1.6s ease-out forwards; }
+  .cdg-cheer { animation: cdg-cheer-up 1.5s ease-out forwards; }
+  .cdg-hud-label { transition: transform .2s ease; }
   .cdg-dot { animation: cdg-pulse 1.4s ease-in-out infinite; }
   .cdg-spin { animation: cdg-spin 1s linear infinite; }
   /* Caméra : 1 s vers le terrain, 1,1 s vers le stade entier ; le voile des tribunes la suit */

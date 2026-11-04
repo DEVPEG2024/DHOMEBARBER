@@ -6,7 +6,9 @@ import { Switch } from '@/components/ui/switch';
 import { hapticFeedback } from '@/lib/capacitor';
 import { COUPE_BANNED_TEXT, coupeErrorText } from '../coupeErrors';
 import { COUPE_COLORS } from '../palette';
-import { COUPE_ME_KEY, invalidateCoupe, setCoupeChallengeOptIn, setCoupeOptIn } from '@/lib/coupe/coupeApi';
+import {
+  COUPE_ME_KEY, invalidateCoupe, setCoupeChallengeOptIn, setCoupeOptIn, setCoupeWatchOptIn,
+} from '@/lib/coupe/coupeApi';
 
 /**
  * Interrupteur « Apparaître dans le classement » de la Coupe (à part de celui de la carte Gang,
@@ -21,6 +23,10 @@ import { COUPE_ME_KEY, invalidateCoupe, setCoupeChallengeOptIn, setCoupeOptIn } 
  * `kind="challenge"` (29 oct. 2026) : « Me proposer aux défis », figurer dans la liste « Défier un
  * joueur » (`challenge_opt_in`, clients seulement : la section ne le montre pas à l'équipe), à part
  * du classement, avec les mêmes règles (compte exclu : bloqué).
+ *
+ * `kind="watch"` (4 nov. 2026, docs/fonctions/coupe-spectateurs-contrat.md, section 2) : « Laisser
+ * regarder mes matchs » (`watch_opt_in`), pour tout compte (client, barber, admin) ; un compte exclu
+ * des classements garde ce choix (rien à voir avec les classements : jamais bloqué).
  */
 const STAR_STYLE = { color: COUPE_COLORS.etoile, fill: COUPE_COLORS.etoile };
 
@@ -41,10 +47,18 @@ const KINDS = {
     on: 'Tu es dans la liste des joueurs à défier',
     off: 'Tu n’es plus dans la liste des joueurs à défier',
   },
+  watch: {
+    field: 'watch_opt_in',
+    save: setCoupeWatchOptIn,
+    label: 'Laisser regarder mes matchs',
+    hint: 'Sur les téléphones et l’écran du salon. Les matchs de tournoi sont toujours ouverts aux spectateurs.',
+    on: 'Tes matchs sont ouverts aux spectateurs',
+    off: 'Tes matchs ne sont plus ouverts aux spectateurs, sauf en tournoi',
+  },
 };
 
 /**
- * Envoi d'un choix (`kind` : `leaderboard` | `challenge`) : `{ pending, save(next) }`. Les caches
+ * Envoi d'un choix (`kind` : `leaderboard` | `challenge` | `watch`) : `{ pending, save(next) }`. Les caches
  * gardent la valeur du serveur, puis la Coupe est relue ; refus : message du serveur en toast.
  * Sert à l'interrupteur et au bouton « Activer » de l'onglet Joueurs.
  */

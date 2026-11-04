@@ -1,7 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useReducedMotion } from 'framer-motion';
 import { useQueryClient } from '@tanstack/react-query';
-import { Loader2, Smartphone, Timer } from 'lucide-react';
+import { Eye, Loader2, Smartphone, Timer } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
 import { useAndroidBack } from '@/lib/useAndroidBack';
 import { LEVELS, GOALS_TO_WIN, GOALS_TO_WIN_V2 } from '@/lib/coupe/engine';
@@ -9,6 +9,7 @@ import { createRenderer, isSalonRole } from '@/lib/coupe/renderer';
 import { createSound, buzz } from '@/lib/coupe/sound';
 import { OnlineMatch, IDLE_UI, photoUrlOrNull, readPendingResume } from '@/lib/coupe/onlineMatch';
 import { LocalMatch } from '@/lib/coupe/localMatch';
+import { CHEERS } from '@/lib/coupe/watch';
 import { fingerOffset, fingerSide } from '@/lib/coupe/finger';
 import {
   COUPE_ENABLED_KEY, COUPE_RULES_FLAG_KEY, fetchCoupeEnabled, invalidateCoupe, readCoupeRulesV2, useCoupeMusic,
@@ -79,6 +80,12 @@ import { shotLabel, soGoals, tournamentOpponent } from './game/tournament';
  * L'adversaire de la salle d'attente : `tour.opp` du serveur, sinon `action.opponent`, sinon le
  * tournoi déjà lu par la page, sinon « ton adversaire ». `t_not_ready` : « Ton match n'est pas
  * encore prêt », nouvel essai tout seul toutes les 3 s pendant 30 s (`ui.notReady`), puis « Réessayer ».
+ *
+ * Spectateurs (en ligne seulement, docs/fonctions/coupe-spectateurs-contrat.md, section 1.5) : leur
+ * nombre dans la barre du haut (`ui.watchers`, « Sur l'écran du salon » quand l'écran du salon
+ * regarde), leurs réactions (`cheer`) en petites bulles en haut à gauche (3 au plus, 1,5 s), jamais
+ * au centre du terrain ni du côté de ton doigt. Rien ne bouge dans la mise en page du terrain. À
+ * deux sur un téléphone et contre le salon : rien.
  */
 
 const LANDSCAPE_QUERY = '(orientation: landscape) and (max-height: 500px)';
@@ -101,6 +108,22 @@ const later = (set, fn, ms) => {
 // mène chaque camp
 // Durée d'une astuce à l'écran
 const HINT_MS = 2400;
+// Réactions des spectateurs : 1,5 s chacune, 3 à l'écran au plus (les suivantes sont jetées). Rangées
+// (px depuis le haut du terrain) : la première dans les tribunes, les autres le long du bord gauche,
+// sous l'astuce du début (« Pose ton doigt sur ton joueur », du haut du terrain à +43 px) ; compte à
+// rebours de la fin du temps affiché (en haut à gauche, sur la première rangée) : on commence à la
+// deuxième, et une bulle déjà dans la première descend quand il apparaît (A11 du contrat des
+// spectateurs : elle restait sous le chrono)
+const CHEER_MS = 1500;
+const CHEER_MAX = 3;
+const CHEER_ROWS = [-29, 50, 86, 122];
+
+/** Rangée libre la plus haute à partir de `from` (indice de CHEER_ROWS), ou -1. */
+function freeCheerRow(list, from) {
+  const used = new Set(list.map((c) => c.row));
+  for (let row = from; row < CHEER_ROWS.length; row += 1) if (!used.has(row)) return row;
+  return -1;
+}
 
 const noPointers = () => ({ map: new Map(), offsets: new Map(), active: [null, null] });
 
@@ -246,6 +269,11 @@ export default function CoupeGame({
   const [score, setScore] = useState([0, 0]);
   const [hint, setHint] = useState(null);
   const [bubbles, setBubbles] = useState([]);
+  // Réactions des spectateurs à l'écran : [{ id, r, row }] (row : leur rangée, indice de CHEER_ROWS,
+  // fixée à leur arrivée ; seule celle de la première rangée descend, quand le chrono y apparaît)
+  const [cheers, setCheers] = useState([]);
+  const cheersRef = useRef({ list: [], seq: 0 });
+  const clockShownRef = useRef(false);
   const [endShown, setEndShown] = useState(false);
   const [reactLocked, setReactLocked] = useState(false);
   const [soundOn, setSoundOn] = useState(true);
@@ -341,6 +369,27 @@ export default function CoupeGame({
     if (sameRules(rulesUiRef.current, next)) return;
     rulesUiRef.current = next;
     setRulesUi(next);
+  }, []);
+
+  /** Bulle d'une réaction de spectateur (`CHEERS[r]`) : une place libre, sinon jetée (3 au plus). */
+  const pushCheer = useCallback((r) => {
+    const C = cheersRef.current;
+    if (!CHEERS[r] || C.list.length >= CHEER_MAX) return;
+    const row = freeCheerRow(C.list, clockShownRef.current ? 1 : 0);
+    if (row < 0) return;
+    C.seq += 1;
+    const id = C.seq;
+    C.list = [...C.list, { id, r, row }];
+    setCheers(C.list);
+    later(timersRef.current, () => {
+      C.list = C.list.filter((c) => c.id !== id);
+      setCheers(C.list);
+    }, CHEER_MS);
+  }, []);
+
+  const clearCheers = useCallback(() => {
+    cheersRef.current.list = [];
+    setCheers([]);
   }, []);
 
   const clearOutro = useCallback(() => {
@@ -520,6 +569,7 @@ export default function CoupeGame({
           setSheet(null);
           setMatchRules(data);
           clearBanners();
+          clearCheers();
           soGoalRef.current = false;
           // Ni feu ni événement en ligne : sans ce mot, ça ressemblait à une panne (3 nov. 2026)
           oldAppRef.current = online && data?.rules !== 2 && queryClient.getQueryData(COUPE_RULES_FLAG_KEY) === true;
@@ -726,6 +776,7 @@ export default function CoupeGame({
           setScore(data.score);
           setHint(null);
           clearBanners();
+          clearCheers();
           resetPointers();
           // La pluie de lames est dans l'écran de fin (thème stade) : plus de renderer.victory()
           // (à deux, un vainqueur ; un nul hors ligne, règlement v2 : but en or sans but)
@@ -766,6 +817,10 @@ export default function CoupeGame({
           try { propsRef.current.onFinished?.(result); } catch { /* écran parent démonté */ }
           break;
         }
+        // Spectateurs (en ligne) : une réaction toute faite, anonyme
+        case 'cheer':
+          if (online) pushCheer(data?.r);
+          break;
         case 'react': {
           const id = Date.now() + Math.random();
           setBubbles((list) => [...list.slice(-5), { id, r: data.r, mine: data.mine }]);
@@ -1129,6 +1184,20 @@ export default function CoupeGame({
     gaugeRef.current = el;
     gaugeFracRef.current = -1;
   }, []);
+  // Compte à rebours de la fin du temps (en haut à gauche) : les bulles des spectateurs passent dessous
+  const clockShown = (online ? ui.status === 'match' && ui.timeWarn : off.status === 'match') && timeLeft != null;
+  clockShownRef.current = clockShown;
+  // Le chrono apparaît : la bulle de la première rangée (dessous) descend à la première rangée libre,
+  // avant que l'image soit peinte ; les autres ne bougent pas (3 bulles au plus, 3 rangées sous lui)
+  useLayoutEffect(() => {
+    if (!clockShown) return;
+    const C = cheersRef.current;
+    if (!C.list.some((c) => c.row === 0)) return;
+    const row = freeCheerRow(C.list, 1);
+    C.list = row < 0 ? C.list.filter((c) => c.row !== 0) : C.list.map((c) => (c.row === 0 ? { ...c, row } : c));
+    setCheers(C.list);
+  }, [clockShown]);
+  const watchers = online && ui.status === 'match' ? ui.watchers : null;
   const oppKey = online ? ui.keys[1] : null;
   const canModerate = online && !!oppKey && !isSalonRole(ui.roles[1]);
   const waitName = ui.waitingFor?.name || 'l’autre joueur';
@@ -1322,6 +1391,7 @@ export default function CoupeGame({
             onToggleSound={toggleSound}
             diag={diag}
             tour={!!tour}
+            watchers={watchers}
           />
         )}
         {/* Règlement v2 seulement (posée au coup d'envoi, avant le zoom : le terrain ne change plus
@@ -1346,7 +1416,7 @@ export default function CoupeGame({
           />
           {inMatch && <p className="sr-only" aria-live="polite">{scoreText}</p>}
           {soText && <p className="sr-only" aria-live="polite">{soText}</p>}
-          {(online ? ui.status === 'match' && ui.timeWarn : off.status === 'match' && timeLeft != null) && (
+          {(online ? ui.status === 'match' && ui.timeWarn : clockShown) && (
             <>
               <p className="sr-only" role="status">Plus que 30 secondes de jeu</p>
               {timeLeft != null && (
@@ -1367,6 +1437,17 @@ export default function CoupeGame({
               <b>{opponent}</b><span>{REACTIONS[b.r]?.emoji}</span>
             </span>
           )))}
+          {online && ui.status === 'match' && !endOpen && cheers.map((c) => (
+            <span
+              key={c.id}
+              className="cdg-cheer"
+              style={{ '--cdg-cheer-y': `${CHEER_ROWS[c.row]}px` }}
+              aria-hidden="true"
+            >
+              <Eye className="h-[13px] w-[13px]" aria-hidden="true" />
+              {CHEERS[c.r]}
+            </span>
+          ))}
           {online && ui.status === 'match' && ui.abandoning && (
             <div className="cdg-float" role="status">
               <Loader2 className="h-6 w-6 text-[#ff3d44] cdg-spin" aria-hidden="true" />

@@ -63,6 +63,8 @@ export default function Login() {
   // est faite par la garde GuestOnly d'App.jsx, dès que la session est ouverte.
   const { login, register, welcomePending, dismissWelcome, authError, retryAuth, isRetryingAuth, dismissAuthError } = useAuth();
   const [searchParams] = useSearchParams();
+  // Lien « Regarder un match » (QR de l'écran du salon) ouvert sans être connecté : dire pourquoi
+  const watchRedirect = /^\/coupe\/regarder(\?|$)/.test(searchParams.get('redirect') || '');
 
   useEffect(() => {
     if (resendAt <= Date.now()) return undefined;
@@ -467,7 +469,7 @@ export default function Login() {
         <p className="text-sm text-muted-foreground mt-1">
           {mode === 'forgot'
             ? (resetStep === 'email' ? 'Entrez votre email pour recevoir un code' : 'Entrez le code et votre nouveau mot de passe')
-            : mode === 'login' ? 'Accédez à votre espace' : "Rejoignez D'Home Barber"}
+            : mode === 'login' ? (watchRedirect ? 'Connectez-vous pour regarder le match' : 'Accédez à votre espace') : "Rejoignez D'Home Barber"}
         </p>
       </motion.div>
 

@@ -4,7 +4,7 @@ import { COUPE_COLORS } from '../palette';
 import { HERO_BUTTON } from '../hub/CoupeShell';
 import { num } from '../hub/coupeFormat';
 import { BTN_RED, CARD, PlayerLabel, TPawn, TournamentShell } from './ui';
-import { RegisterButton, RemovedNote, UnregisterLink, isRemoved, splitPlayers } from './RegistrationView';
+import { RegisterButton, RemovedNote, SpectatorsNote, UnregisterLink, isRemoved, splitPlayers } from './RegistrationView';
 import { clockOf, mmss, msOf, playerName } from './tournoiFormat';
 import { TOURNAMENT_CHECKIN_MS } from '@/lib/coupe/coupeApi';
 
@@ -14,6 +14,7 @@ import { TOURNAMENT_CHECKIN_MS } from '@/lib/coupe/coupeApi';
  * la présence vaut présence. « Me désinscrire » : lien discret, à distance de « Je suis là », avec
  * confirmation. `drawing` : le début est passé, le serveur tire au sort (quelques secondes) :
  * anneau plein et « Tirage en cours… ». `offline` : connexion perdue, compte à rebours figé.
+ * Pas encore inscrit, avec `spectatorsOn` : sous « S'inscrire », la mention des spectateurs.
  */
 const RING = 2 * Math.PI * 88;
 
@@ -83,7 +84,7 @@ function Row({ player, mine = false }) {
   );
 }
 
-export default function PresenceView({ t, now, busy, drawing = false, offline = false, onBack, onShare, onRegister, onUnregister, onCheckin }) {
+export default function PresenceView({ t, now, busy, drawing = false, offline = false, spectatorsOn = false, onBack, onShare, onRegister, onUnregister, onCheckin }) {
   const size = num(t.size) || 16;
   const me = t.me || {};
   const starts = msOf(t.starts_at);
@@ -135,7 +136,10 @@ export default function PresenceView({ t, now, busy, drawing = false, offline = 
               <UnregisterLink t={t} busy={busy} onUnregister={onUnregister} className="mt-3" />
             </div>
           ) : (
-            <RegisterButton t={t} busy={busy} onRegister={onRegister} />
+            <div className="flex flex-col gap-2.5">
+              <RegisterButton t={t} busy={busy} onRegister={onRegister} />
+              {spectatorsOn && <SpectatorsNote className="px-1" />}
+            </div>
           )
         )}
 

@@ -12,7 +12,10 @@
  * - tournois (3 nov. 2026, seulement avec `features.coupeTournaments`, contrat
  *   docs/fonctions/coupe-tournois-contrat.md) : liste, créer, modifier, suivre en direct
  *   (`?tournoi=<id>` dans l'adresse), forfait, rejouer, retirer, annuler
- *   (src/components/admin/coupe/).
+ *   (src/components/admin/coupe/) ;
+ * - écran du salon (4 nov. 2026, seulement avec `features.coupeSpectators`, contrat
+ *   docs/fonctions/coupe-spectateurs-contrat.md) : liens des télés et tablettes, « Couper »
+ *   (ScreensSection).
  * Données : `GET /coupe/admin/overview`, `PATCH /coupe/admin/reports/:id`,
  * `POST` / `DELETE /coupe/admin/players/:keyHash/ban`, `POST /coupe/admin/players/:keyHash/reset`
  * (src/lib/coupe/coupeApi.js). La fiche du client est celle des Cartes Gang (GangClientSheet).
@@ -38,6 +41,7 @@ import {
 } from '@/lib/coupe/coupeApi';
 import TournamentsSection from '@/components/admin/coupe/TournamentsSection';
 import TournamentFollow from '@/components/admin/coupe/TournamentFollow';
+import ScreensSection from '@/components/admin/coupe/ScreensSection';
 import {
   CoupeRoleMark, coupePlayerName, coupeSeasonLabel, currentCoupeSeason,
 } from '@/components/home/GamesSection';
@@ -423,6 +427,9 @@ export default function AdminCoupe() {
       )}
 
       {tournamentsOn && <TournamentsSection onOpen={openTournament} />}
+
+      {/* Écran du salon (télé, tablette) : se cache seul sans `features.coupeSpectators` */}
+      {isAdmin && <ScreensSection />}
 
       {isPending && !failed && !notFound && (
         <div className="space-y-4" aria-busy="true">

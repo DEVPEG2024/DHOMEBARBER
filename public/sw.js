@@ -35,9 +35,12 @@ const APP_SHELL = [
 // Seules les réponses publiques de l'API sont gardées pour le hors-ligne. Une requête qui
 // porte un jeton dépend du compte, or le cache n'a que l'URL pour clé : sur un appareil
 // partagé, hors ligne, on revoyait les données du compte précédent (/me compris).
+// Écran du salon (`GET /coupe/screen`, en-tête X-Screen-Key) : jamais gardé non plus (la clé est un
+// secret, et une réponse figée tiendrait lieu d'écran à jour hors ligne).
 function isPublicApiRequest(request, url) {
   if (request.method !== 'GET') return false;
   if (request.headers.has('Authorization')) return false;
+  if (request.headers.has('X-Screen-Key')) return false;
   if (url.pathname.includes('/auth/') || /\/entities\/User\/me\/?$/.test(url.pathname)) return false;
   return true;
 }

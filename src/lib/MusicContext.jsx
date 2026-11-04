@@ -97,10 +97,12 @@ export function MusicProvider({ children }) {
     const startOnInteraction = () => {
       const audio = audioRef.current;
       if (!audio || started) return;
-      // Coupée par l'utilisateur, ou espace admin (tablette du salon, agenda) : seul le bouton
-      // lance la musique. Chemin lu au moment du toucher : le fournisseur est au-dessus du Router.
+      // Coupée par l'utilisateur, espace admin (tablette du salon, agenda), écran du salon (télé,
+      // muette) ou vue spectateur (bruitages du match seulement) : seul le bouton lance la musique.
+      // Chemin lu au moment du toucher : le fournisseur est au-dessus du Router.
       if (readMusicOff()) return;
-      if (/^\/admin(\/|$)/.test(window.location.pathname || '')) return;
+      if (/^\/(admin|ecran)(\/|$)/.test(window.location.pathname || '')) return;
+      if (/^\/coupe\/regarder(\/|$)/.test(window.location.pathname || '')) return;
       audio.play().then(() => {
         setPlaying(true);
         setStarted(true);

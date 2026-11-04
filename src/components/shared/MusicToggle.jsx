@@ -33,6 +33,9 @@ export default function MusicToggle() {
   if (pathname === '/') return null;
   // L'administration a son propre bouton, dans son en-tête
   if (pathname.startsWith('/admin')) return null;
+  // Écran du salon (télé, muette) et vue spectateur (son bouton « Son » règle les bruitages du
+  // match ; la musique y est en pause) : pas de bouton musique
+  if (pathname === '/ecran' || pathname.startsWith('/coupe/regarder')) return null;
 
   const { top, center } = PLACEMENTS.find((p) => p.match(pathname)) || DEFAULT_PLACEMENT;
 

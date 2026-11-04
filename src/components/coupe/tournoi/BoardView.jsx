@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Check, Play } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Check, Eye, Play } from 'lucide-react';
+import { watchPath } from '@/lib/coupe/watch';
 import { COUPE_COLORS } from '../palette';
 import { alpha } from '../hub/theme';
 import { num } from '../hub/coupeFormat';
@@ -18,6 +20,9 @@ import {
  * « En direct »). Exempt : « Qualifié d'office », deux places libres : « Pas de match ».
  * `offline` (connexion perdue) : ni « En direct » ni « Jouer », comptes à rebours figés et signalés.
  * À 320 px, un compte à rebours n'est jamais coupé (il passe à la ligne).
+ * Spectateurs (`canWatch` : `features.coupeSpectators`, contrat docs/fonctions/coupe-spectateurs-contrat.md,
+ * section 4.3) : « Regarder » sur chaque match en cours (`live.playing`), sauf le sien, vers
+ * `/coupe/regarder?m=<match>&tournoi=<tournoi>` ; rien hors connexion.
  */
 
 /** Durée d'un compte à rebours, jamais coupée ; « figé » quand la connexion est perdue. */
@@ -83,8 +88,14 @@ function myNote(m, now, offline) {
   return null;
 }
 
-/** Carte d'un match ; `mine` : ton match, en rouge, avec « Jouer mon match ». */
-export function MatchCard({ m, total, now, mine = false, offline = false, onPlay = null }) {
+/** Un match en cours que l'on peut regarder (jamais le sien, jamais hors connexion). */
+const watchable = (m, offline) => !offline && m.status === 'ready' && m.live?.playing === true && mySide(m) < 0;
+
+/**
+ * Carte d'un match ; `mine` : ton match, en rouge, avec « Jouer mon match » ; `watchHref` : match en
+ * cours d'autres joueurs, « Regarder ».
+ */
+export function MatchCard({ m, total, now, mine = false, offline = false, onPlay = null, watchHref = null }) {
   const title = matchTitle(m.round, m.slot, total);
   const joinable = mine && canJoin(m, now) && !offline;
   const mineNote = mine ? myNote(m, now, offline) : null;
@@ -115,6 +126,16 @@ export function MatchCard({ m, total, now, mine = false, offline = false, onPlay
           <Play className="h-5 w-5" aria-hidden="true" />
           Jouer mon match
         </button>
+      )}
+      {!mine && watchHref && (
+        <Link
+          to={watchHref}
+          aria-label={`Regarder ${playerName(m.p?.[0])} contre ${playerName(m.p?.[1])}`}
+          className="mt-1 flex min-h-[44px] items-center justify-center gap-2 rounded-[10px] border border-white/[.14] bg-[color:var(--coupe-noir3)] text-sm font-semibold text-white hover:bg-white/6 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+        >
+          <Eye className="h-4 w-4" aria-hidden="true" />
+          Regarder
+        </Link>
       )}
     </article>
   );
@@ -147,7 +168,7 @@ function MyMatchBanner({ m, total, now, offline, onPlay, onOpen }) {
   );
 }
 
-export default function BoardView({ t, now, offline = false, onBack, onPlay, note = null, header = null }) {
+export default function BoardView({ t, now, offline = false, onBack, onPlay, note = null, header = null, canWatch = false }) {
   const size = num(t.size) || 16;
   const total = roundsCount(size);
   const rounds = roundsOf(t);
@@ -229,7 +250,16 @@ export default function BoardView({ t, now, offline = false, onBack, onPlay, not
 
             <div role="tabpanel" id="coupe-tour-matchs" aria-labelledby={round ? `coupe-tour-${round.round}` : undefined} className="flex flex-col gap-2.5">
               {mineHere && <MatchCard m={mineHere} total={total} now={now} mine offline={offline} onPlay={onPlay} />}
-              {others.map((m) => <MatchCard key={m.id} m={m} total={total} now={now} offline={offline} />)}
+              {others.map((m) => (
+                <MatchCard
+                  key={m.id}
+                  m={m}
+                  total={total}
+                  now={now}
+                  offline={offline}
+                  watchHref={canWatch && watchable(m, offline) ? watchPath({ m: m.id, tournoi: t.id }) : null}
+                />
+              ))}
             </div>
 
             {next && (

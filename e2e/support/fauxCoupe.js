@@ -94,6 +94,44 @@
  *    reprise pendant la séance renvoie `start {resume, tour}` sans `shootout` (les tirs restent dans
  *    les états) ; `fermerTournoi(cnx, code)` : `error {code}` puis la salle fermée (forfait
  *    prononcé, match réglé par l'admin).
+ *
+ * Spectateurs (docs/fonctions/coupe-spectateurs-contrat.md, section 1) :
+ *  - `auth {token, v: 3, watch: true}` → `hello {name, role, watch: true}` (socket spectateur,
+ *    `cnx.spectateur`) ; `auth {screen: <clé>, v: 3}` (écran du salon) → `hello {role: 'screen',
+ *    watch: true}` si la clé est dans `clesEcran` (CLE_ECRAN au départ) ou acceptée par
+ *    `api.ecran.cleValide(clé)` quand le faux serveur de l'écran la fournit, sinon, comme le serveur
+ *    depuis le 4 nov. 2026 (S2), `error screen_revoked` puis fermeture 4401 ; `limiterAuth = n` :
+ *    les n prochaines authentifications de spectateur reçoivent `error rate_limited` puis 4429
+ *    (quota, avant `hello`). `auth.sp` (compteur des joueurs) est ignoré, comme tout champ inconnu.
+ *    Une socket spectateur qui envoie un message de joueur (`create`, `join`, `peek`, `challenge`,
+ *    `decline`, `resume`, `tjoin`, `rematch`, `in`, `hit`, `react`) reçoit `error watch_only` ; une
+ *    socket joueur qui envoie `watch` aussi ;
+ *  - matchs regardables : `ouvrirDirect(desc)` (DIRECT_TOURNOI : match de tournoi ID_MATCH_TOURNOI,
+ *    Lucas M. contre Dom, « Quart 1 », règlement v2 ; DIRECT_MATCH : match ordinaire ID_DIRECT,
+ *    Kevin contre le salon, règle d'aujourd'hui ; `commence: false` : pas encore commencé). Son état
+ *    (`etat`, repère du serveur, joueur 0 en bas) part 10 fois par seconde à ses spectateurs ;
+ *    `etatDirect(id, valeurs)` le change et l'envoie tout de suite (le temps de la phase avance tout
+ *    seul sans `pt` donné) ;
+ *  - `watch {m}` / `watch {w}` : `refusRegarder` (code rendu : 'no_match', 'watch_full', 'disabled',
+ *    'server_full' (puis fermeture 1013)…, aux `refusRegarderFois` premiers seulement, null à tous) ;
+ *    plus de 10 `watch` par minute sur une socket → `rate_limited` ; inconnu, fini, ou mauvais genre
+ *    (`m` pour un match ordinaire) → `no_match` ; pas commencé → `not_live` ; sinon `wstart` (avec
+ *    `wstartEnPlus` mêlé, pour vérifier que l'app ignore un champ en trop comme `photos`) puis l'état ;
+ *    `wstart.tour` porte `label` (le tour, « Quart de finale ») et `title` (le match, « Quart 1 ») ;
+ *    `tl` (secondes restantes) après un `time_left` relayé (jusqu'au but en or), `away {side, left}`
+ *    pendant une pause (comme le serveur, S9 et S10) ; `unwatch` : plus rien de ce match ;
+ *  - `relayer(id, obj)` : un message à ses spectateurs (`goal`, `ev`, `ev_end`, `foul`, `pen_end`,
+ *    `gold`, `shootout`, `pause`, `time_left` ; l'état suit `goal` et `pause`, les `ev` repartent dans
+ *    `wstart.evs`) ; `finDirect(id, fin)` : `wend {winner, sc, reason, forfeit, so?}` puis plus rien ;
+ *    `spectateurs(id, n, ecran)` : `watchers {n, screen}` ; `encouragement(id, r)` : `cheer {r}` d'un
+ *    autre spectateur ; `commencerDirect(id)` : le prochain `watch` reçoit `wstart` ;
+ *    `fermerEcran(clé)` : l'admin coupe l'écran (`error screen_revoked` puis 4401, clé refusée
+ *    ensuite) ; `remplacer(cnx)` : une socket plus récente du même compte ou écran (`error replaced`
+ *    puis 4409) ; `couper(cnx, 4401)` : un 4401 seul (sans `screen_revoked`) ;
+ *    `cnx.fermeeParApp` : la socket a été fermée par l'app (place de spectateur rendue) ;
+ *  - `cheer {r}` (gardé dans les messages : la cadence se lit par `messages('cheer')`) : relayé aux
+ *    autres spectateurs du match, ignoré à moins de 3 s du précédent de la socket (`cheersIgnores`) ;
+ *  - joueurs : aucune aide ici, `envoyer(cnx, {t: 'watchers' | 'cheer', …})` pousse ces messages.
  */
 export const CODE_MATCH = '4821';
 /** Lien d'un match (12 caractères [a-z0-9], contrat 4.2). */
@@ -118,6 +156,27 @@ export const TOURNOI_DEFAUT = Object.freeze({
   match: ID_MATCH_TOURNOI, nom: 'Coupe de Novembre', tour: 'Quart de finale', opp: 'Kevin', you: 0,
   forfaitDans: 102_000, avecLien: true, adversairePresent: false, refus: null, refusFois: null,
 });
+
+/** Spectateurs : clé d'un écran du salon acceptée par défaut. */
+export const CLE_ECRAN = 'ecran-salon-cle-0123456789abcdef';
+/** Match ordinaire regardable (12 caractères [a-z2-9], contrat 1.2). */
+export const ID_DIRECT = 'r3gard3k7m2p';
+/**
+ * Match de tournoi en direct : quart 1 de la Coupe de Novembre, Lucas M. (en bas) contre Dom (en haut).
+ * `tour.label` : le nom du tour (comme le serveur), `tour.title` : le match (S9, 4 nov. 2026).
+ */
+export const DIRECT_TOURNOI = Object.freeze({
+  kind: 'tour', id: ID_MATCH_TOURNOI, names: ['Lucas M.', 'Dom'], roles: ['user', 'barber'], rules: 2, gw: 5,
+  sc: [0, 0], tour: { tid: ID_TOURNOI, name: 'Coupe de Novembre', label: 'Quart de finale', title: 'Quart 1' },
+  watchers: 34, screen: false, commence: true, etat: null,
+});
+/** Match ordinaire regardable (les deux joueurs ont allumé « Laisser regarder mes matchs ») : Kevin contre le salon. */
+export const DIRECT_MATCH = Object.freeze({
+  kind: 'room', id: ID_DIRECT, names: ['Kevin', "D'Home Barber"], roles: ['barber', 'salon'], rules: 1, gw: 3,
+  sc: [0, 0], tour: null, watchers: 3, screen: false, commence: true, etat: null,
+});
+/** Messages de joueur refusés à une socket spectateur (`watch_only`, contrat 1.1). */
+const JOUEUR_SEULEMENT = new Set(['create', 'join', 'peek', 'challenge', 'decline', 'resume', 'tjoin', 'rematch', 'in', 'hit', 'react']);
 
 /** Écart fictif entre l'horloge du serveur et celle du navigateur (ms). */
 const DECALAGE_HORLOGE = 5000;
@@ -201,6 +260,17 @@ export class FauxCoupe {
     this.fermetures1008 = 0;
     /** Match de tournoi rejoint par `tjoin` (voir TOURNOI_DEFAUT) ; un test en change les champs. */
     this.tournoi = { ...TOURNOI_DEFAUT };
+    /** Spectateurs : matchs regardables (id → direct), clés d'écran acceptées, refus imposés. */
+    this.directs = new Map();
+    this.clesEcran = new Set([CLE_ECRAN]);
+    this.refusRegarder = null;
+    this.refusRegarderFois = null;
+    /** Champs mêlés à chaque `wstart` (un serveur qui enverrait trop : `{ photos: [...] }`). */
+    this.wstartEnPlus = null;
+    /** Réactions ignorées par le faux serveur (moins de 3 s après la précédente de la socket). */
+    this.cheersIgnores = 0;
+    /** Authentifications de spectateur refusées par le quota (`rate_limited` puis 4429), les n prochaines. */
+    this.limiterAuth = 0;
     this.minuteries = new Set();
   }
 
@@ -338,6 +408,252 @@ export class FauxCoupe {
     if (cnx.salle) this.fermerSalle(cnx.salle);
   }
 
+  // ─── Spectateurs ─────────────────────────────────────────────────────
+
+  /**
+   * Ouvre un match regardable (DIRECT_TOURNOI par défaut, ou DIRECT_MATCH, champs changés par
+   * `desc`) ; son état part 10 fois par seconde à ses spectateurs. Rend le direct.
+   */
+  ouvrirDirect(desc = DIRECT_TOURNOI) {
+    const base = { ...DIRECT_TOURNOI, ...desc };
+    const etat = { ph: 'live', pt: 1, b: [180, 320, 0, 0], p: [[180, 540], [180, 100]], sc: base.sc || [0, 0], k: 0, kt: 0, ...(base.etat || {}) };
+    const d = { ...base, etat, evs: [], fini: false, phaseDepuis: Date.now(), ptDonne: base.etat?.pt !== undefined, tic: null, tl: null, pause: null };
+    const ancien = this.directs.get(d.id);
+    if (ancien?.tic) { clearInterval(ancien.tic); this.minuteries.delete(ancien.tic); }
+    this.directs.set(d.id, d);
+    const id = setInterval(() => {
+      if (d.fini) return;
+      for (const cnx of this.regardent(d.id)) this.envoyerEtatDirect(d, cnx);
+    }, CADENCE_ETATS);
+    id.unref?.();
+    d.tic = id;
+    this.minuteries.add(id);
+    return d;
+  }
+
+  /** Sockets spectateurs qui regardent ce match. */
+  regardent(id) {
+    return this.connexions.filter((c) => c.spectateur && !c.ferme && c.regarde === id);
+  }
+
+  /** Change l'état du direct (repère du serveur) et l'envoie tout de suite. */
+  etatDirect(id, valeurs = {}) {
+    const d = this.directs.get(id);
+    if (!d) throw new Error(`Direct inconnu : ${id}`);
+    if (valeurs.ph && valeurs.ph !== d.etat.ph) d.phaseDepuis = Date.now();
+    if (valeurs.ph && valeurs.ph !== 'pause') d.pause = null;
+    d.ptDonne = valeurs.pt !== undefined;
+    d.etat = { ...d.etat, ...valeurs };
+    if (Array.isArray(valeurs.sc)) d.sc = valeurs.sc;
+    for (const cnx of this.regardent(id)) this.envoyerEtatDirect(d, cnx);
+  }
+
+  envoyerEtatDirect(d, cnx) {
+    const s = this.heureConnue(cnx);
+    if (s == null) return;
+    const { cd, ...etat } = d.etat;
+    if (!d.ptDonne) etat.pt = Math.round(Date.now() - d.phaseDepuis) / 1000;
+    cnx.envoyer({ t: 'state', s, ...etat, ...(etat.ph === 'count' ? { cd: cd || 3 } : {}) });
+  }
+
+  /** Message du match à ses spectateurs (l'état suit `goal` et `pause`, les `ev` restent pour `wstart.evs`). */
+  relayer(id, obj) {
+    const d = this.directs.get(id);
+    if (!d) throw new Error(`Direct inconnu : ${id}`);
+    if (obj.t === 'goal' && Array.isArray(obj.sc)) {
+      d.sc = obj.sc;
+      d.etat = { ...d.etat, ph: 'goal', sc: obj.sc };
+      d.phaseDepuis = Date.now();
+      d.ptDonne = false;
+    }
+    if (obj.t === 'pause') {
+      d.etat = { ...d.etat, ph: 'pause' };
+      d.phaseDepuis = Date.now();
+      d.ptDonne = false;
+      d.pause = { side: Number(obj.away) === 1 ? 1 : 0, left: Number(obj.left) || 0, depuis: Date.now() };
+    }
+    // Alerte des 30 s (repart dans `wstart.tl`), effacée par le but en or
+    if (obj.t === 'time_left') d.tl = { s: Number(obj.s) || 0, depuis: Date.now() };
+    if (obj.t === 'gold') d.tl = null;
+    if (obj.t === 'ev' && obj.e) d.evs = [...d.evs.filter((e) => e.id !== obj.e.id), obj.e];
+    if (obj.t === 'ev_end') d.evs = d.evs.filter((e) => e.id !== obj.id);
+    for (const cnx of this.regardent(id)) cnx.envoyer(obj);
+  }
+
+  /** Fin du match regardé : `wend` à ses spectateurs, puis ils ne regardent plus rien. */
+  finDirect(id, fin = {}) {
+    const d = this.directs.get(id);
+    if (!d) throw new Error(`Direct inconnu : ${id}`);
+    const sc = fin.sc || d.etat.sc || d.sc;
+    const msg = {
+      t: 'wend',
+      winner: fin.winner === undefined ? 0 : fin.winner,
+      sc,
+      reason: fin.reason === undefined ? null : fin.reason,
+      forfeit: fin.forfeit === true,
+      ...(fin.so ? { so: fin.so } : {}),
+    };
+    d.fini = true;
+    d.etat = { ...d.etat, ph: 'over', sc };
+    for (const cnx of this.regardent(id)) {
+      cnx.envoyer(msg);
+      cnx.regarde = null;
+    }
+    if (d.tic) { clearInterval(d.tic); this.minuteries.delete(d.tic); d.tic = null; }
+  }
+
+  /** Nombre de spectateurs (écrans compris) et écran du salon : `watchers {n, screen}`. */
+  spectateurs(id, n, ecran = false) {
+    const d = this.directs.get(id);
+    if (!d) throw new Error(`Direct inconnu : ${id}`);
+    d.watchers = n;
+    d.screen = !!ecran;
+    for (const cnx of this.regardent(id)) cnx.envoyer({ t: 'watchers', n, screen: !!ecran });
+  }
+
+  /** Réaction d'un autre spectateur (anonyme) : `cheer {r}`. */
+  encouragement(id, r) {
+    for (const cnx of this.regardent(id)) cnx.envoyer({ t: 'cheer', r });
+  }
+
+  /** Le match de tournoi pas encore commencé commence : le prochain `watch` reçoit `wstart`. */
+  commencerDirect(id) {
+    const d = this.directs.get(id);
+    if (!d) throw new Error(`Direct inconnu : ${id}`);
+    d.commence = true;
+    d.phaseDepuis = Date.now();
+  }
+
+  /**
+   * L'admin coupe un écran du salon : ses sockets reçoivent `error screen_revoked` puis sont fermées
+   * en 4401 (serveur du 4 nov. 2026, S2), la clé est refusée ensuite.
+   */
+  fermerEcran(cle) {
+    this.clesEcran.delete(cle);
+    for (const cnx of this.connexions) {
+      if (cnx.ecran === cle && !cnx.ferme) this.refuserEcran(cnx);
+    }
+  }
+
+  // Clé d'écran refusée (connexion, coupure par l'admin) : `screen_revoked` avant le 4401
+  refuserEcran(cnx) {
+    cnx.envoyer({ t: 'error', code: 'screen_revoked' });
+    cnx.ferme = true;
+    try { cnx.ws.close({ code: 4401, reason: 'ecran coupe' }); } catch { /* déjà fermée */ }
+  }
+
+  /** Une socket plus récente du même compte (ou du même écran) prend la place : `replaced` puis 4409. */
+  remplacer(cnx = this.derniere()) {
+    cnx.envoyer({ t: 'error', code: 'replaced' });
+    cnx.ferme = true;
+    try { cnx.ws.close({ code: 4409, reason: 'replaced' }); } catch { /* déjà fermée */ }
+  }
+
+  /** Clé d'écran acceptée (celles d'ici, ou celles du faux serveur de l'écran s'il sait les lire). */
+  cleEcranValide(cle) {
+    if (!cle) return false;
+    if (this.clesEcran.has(cle)) return true;
+    try { return this.serveur?.ecran?.cleValide?.(cle) === true; } catch { return false; }
+  }
+
+  // `watch {m}` / `watch {w}` d'une socket spectateur
+  regarder(cnx, m) {
+    const maintenant = Date.now();
+    cnx.watchs = (cnx.watchs || []).filter((t) => maintenant - t < 60_000);
+    cnx.regarde = null;
+    if (cnx.watchs.length >= 10) {
+      cnx.envoyer({ t: 'error', code: 'rate_limited' });
+      return;
+    }
+    cnx.watchs.push(maintenant);
+    const refus = this.refusRegarder;
+    if (refus && (this.refusRegarderFois == null || this.refusRegarderFois > 0)) {
+      if (this.refusRegarderFois != null) this.refusRegarderFois -= 1;
+      cnx.envoyer({ t: 'error', code: refus });
+      if (refus === 'server_full') {
+        cnx.ferme = true;
+        cnx.ws.close({ code: 1013, reason: 'plein' });
+      }
+      return;
+    }
+    const tournoi = m.m !== undefined;
+    const id = String(tournoi ? m.m : m.w ?? '');
+    const d = this.directs.get(id);
+    if (!d || d.fini || d.kind !== (tournoi ? 'tour' : 'room')) {
+      cnx.envoyer({ t: 'error', code: 'no_match' });
+      return;
+    }
+    if (!d.commence) {
+      cnx.envoyer({ t: 'error', code: 'not_live' });
+      return;
+    }
+    cnx.regarde = id;
+    const heure = this.heure(cnx);
+    cnx.envoyer({
+      t: 'wstart',
+      kind: d.kind,
+      id: d.id,
+      names: d.names,
+      roles: d.roles,
+      rules: d.rules,
+      gw: d.gw,
+      sc: d.etat.sc,
+      kick: 0,
+      ph: d.etat.ph,
+      ...(d.etat.ph === 'count' ? { cd: d.etat.cd || 3 } : {}),
+      evs: d.rules === 2 ? d.evs.filter((e) => !(Number(e.until) <= heure)) : [],
+      so: d.etat.so || null,
+      tour: d.tour,
+      watchers: d.watchers,
+      screen: d.screen,
+      ...(d.tl ? { tl: Math.max(0, Math.round((d.tl.s - (Date.now() - d.tl.depuis) / 1000) * 10) / 10) } : {}),
+      ...(d.etat.ph === 'pause' && d.pause
+        ? { away: { side: d.pause.side, left: Math.max(0, Math.ceil(d.pause.left - (Date.now() - d.pause.depuis) / 1000)) } }
+        : {}),
+      ...(this.wstartEnPlus || {}),
+    });
+    this.envoyerEtatDirect(d, cnx);
+  }
+
+  // Messages d'une socket spectateur après `auth`
+  repondreSpectateur(cnx, m) {
+    if (!cnx.authOk) {
+      // Vérification du jeton ou de la clé : 2 `ping` au plus, rien d'autre n'est gardé
+      if (m.t === 'ping' && (cnx.pingsAvantHello = (cnx.pingsAvantHello || 0) + 1) <= 2) return;
+      cnx.ferme = true;
+      cnx.ws.close({ code: 1008, reason: 'avant hello' });
+      return;
+    }
+    if (JOUEUR_SEULEMENT.has(m.t)) {
+      cnx.envoyer({ t: 'error', code: 'watch_only' });
+      return;
+    }
+    switch (m.t) {
+      case 'ping':
+        cnx.dernierPing = Number(m.c) || 0;
+        cnx.pingRecuA = Date.now();
+        cnx.envoyer({ t: 'pong', c: m.c, s: this.heure(cnx) });
+        break;
+      case 'watch':
+        this.regarder(cnx, m);
+        break;
+      case 'unwatch':
+        cnx.regarde = null;
+        break;
+      case 'cheer': {
+        const r = Number(m.r);
+        const maintenant = Date.now();
+        if (!cnx.regarde || cnx.ecran || !Number.isInteger(r) || r < 0 || r > 3) break;
+        if (maintenant - (cnx.dernierCheer || 0) < 3000) { this.cheersIgnores += 1; break; }
+        cnx.dernierCheer = maintenant;
+        for (const autre of this.regardent(cnx.regarde)) if (autre !== cnx) autre.envoyer({ t: 'cheer', r });
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
   /** Arrête tout (fin du test) : plus aucun envoi. */
   arreter() {
     for (const id of this.minuteries) { clearInterval(id); clearTimeout(id); }
@@ -371,7 +687,10 @@ export class FauxCoupe {
       this.repondre(cnx, m);
     });
     // Fermée par l'app (fin de l'écran, page cachée, surveillance) : la salle garde sa place
-    ws.onClose(() => this.fermeture(cnx));
+    ws.onClose(() => {
+      if (!cnx.ferme) cnx.fermeeParApp = true;
+      this.fermeture(cnx);
+    });
   }
 
   /** Envoi vers l'app ; met l'état de la salle à jour pour les messages poussés par un test. */
@@ -585,6 +904,41 @@ export class FauxCoupe {
         return;
       }
       cnx.version = m.v;
+      // Quota des authentifications de spectateur (avant `hello`) : `rate_limited` puis 4429
+      if ((m.screen !== undefined || m.watch === true) && this.limiterAuth > 0) {
+        this.limiterAuth -= 1;
+        cnx.envoyer({ t: 'error', code: 'rate_limited' });
+        cnx.ferme = true;
+        cnx.ws.close({ code: 4429, reason: 'rate_limited' });
+        return;
+      }
+      // Écran du salon : clé d'écran, sans compte ; spectateurs en protocole 3 seulement
+      if (m.screen !== undefined) {
+        const cle = String(m.screen || '');
+        if (m.v !== 3) {
+          cnx.ferme = true;
+          cnx.ws.close({ code: 4401, reason: 'auth' });
+          return;
+        }
+        if (!this.cleEcranValide(cle)) {
+          this.refuserEcran(cnx);
+          return;
+        }
+        cnx.spectateur = true;
+        cnx.ecran = cle;
+        const accueillirEcran = () => {
+          if (cnx.ferme) return;
+          cnx.authOk = true;
+          cnx.envoyer({ t: 'hello', role: 'screen', watch: true });
+        };
+        if (this.delaiAuth > 0) {
+          const id = setTimeout(() => { this.minuteries.delete(id); accueillirEcran(); }, this.delaiAuth);
+          id.unref?.();
+          this.minuteries.add(id);
+        } else accueillirEcran();
+        return;
+      }
+      if (m.watch === true) cnx.spectateur = true;
       const idCompte = this.serveur.jetons.get(m.token);
       const compte = this.serveur.comptes.find((c) => c.id === idCompte);
       if (!compte) {
@@ -602,7 +956,11 @@ export class FauxCoupe {
           return;
         }
         cnx.compte = compte;
-        cnx.envoyer({ t: 'hello', name: nomDe(compte), role: compte.role === 'admin' ? 'salon' : compte.role });
+        cnx.authOk = true;
+        cnx.envoyer({
+          t: 'hello', name: nomDe(compte), role: compte.role === 'admin' ? 'salon' : compte.role,
+          ...(cnx.spectateur ? { watch: true } : {}),
+        });
         const enAttente = cnx.commandeEnAttente;
         cnx.commandeEnAttente = null;
         if (enAttente) this.repondre(cnx, enAttente);
@@ -612,6 +970,11 @@ export class FauxCoupe {
         id.unref?.();
         this.minuteries.add(id);
       } else accueillir();
+      return;
+    }
+    // Socket spectateur (`watch: true`, ou écran du salon) : son propre protocole
+    if (cnx.spectateur) {
+      this.repondreSpectateur(cnx, m);
       return;
     }
     // Pendant la vérification du jeton : 2 `ping`, la dernière commande de salle, rien d'autre
@@ -678,6 +1041,10 @@ export class FauxCoupe {
         if (t.adversairePresent) this.rejoint(cnx);
         break;
       }
+      case 'watch':
+        // Une socket joueur ne regarde pas (spectateur : `auth {watch: true}`)
+        cnx.envoyer({ t: 'error', code: 'watch_only' });
+        break;
       case 'rematch':
         // Jamais de revanche dans une salle de tournoi (une salle ordinaire : le test pousse le `start`)
         if (salle?.tour) cnx.envoyer({ t: 'error', code: 'rematch_off' });

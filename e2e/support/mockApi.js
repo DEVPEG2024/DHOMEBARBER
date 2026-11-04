@@ -20,6 +20,8 @@
 import { creerDonnees, CLIENT, media } from './donnees.js';
 import { FauxCoupe, CLE_LISTE_LUCAS, PHOTO_LUCAS } from './fauxCoupe.js';
 import { FauxTournois } from './fauxTournois.js';
+import { FauxDirect } from './fauxDirect.js';
+import { FauxEcran } from './fauxEcran.js';
 import { MAINTENANT, cleDuJourParis, instantParis, jour } from './temps.js';
 // Snake du Gang : le faux serveur rejoue chaque partie avec le vrai moteur de l'app (comme le serveur)
 import { replay as rejouerSnake, tickMs as pasSnake } from '../../src/lib/snake/engine.js';
@@ -52,7 +54,7 @@ const LIMITE_MAX = 2000;
 const ENTETES_CORS = (origine) => ({
   'access-control-allow-origin': origine || '*',
   'access-control-allow-methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-  'access-control-allow-headers': 'Authorization, Content-Type, Accept',
+  'access-control-allow-headers': 'Authorization, Content-Type, Accept, X-Screen-Key',
   'access-control-max-age': '600',
   vary: 'Origin',
 });
@@ -175,6 +177,14 @@ export class FauxServeur {
     // départ. Un test les ferme avec `api.donnees.parametresPublics.features.coupeTournaments = false`
     this.donnees.parametresPublics.features.coupeTournaments ??= true;
     this.tournois = new FauxTournois(this);
+    // Spectateurs et écran du salon (docs/fonctions/coupe-spectateurs-contrat.md) : ouverts, comme en
+    // production sans COUPE_SPECTATEURS=off ; un test les ferme avec
+    // `api.donnees.parametresPublics.features.coupeSpectators = false`. Matchs en direct
+    // (`GET /coupe/live`) : `api.direct` ; écran du salon et ses liens (`/coupe/screen`,
+    // `/coupe/admin/screens…`) : `api.ecran`
+    this.donnees.parametresPublics.features.coupeSpectators ??= true;
+    this.direct = new FauxDirect(this);
+    this.ecran = new FauxEcran(this);
     // Fil « New Gang » v2 (routes /feed…) : état dans `api.fil` (activité, votes, réglages, vues)
     this.donnees.fil ??= { activite: [], votes: [], likesCommentaires: [], reglages: {}, vuLe: {}, vues: {} };
     this.filRest = new FauxFil(this);
@@ -322,6 +332,8 @@ export class FauxServeur {
       q,
       corps,
       jetonEnvoye: !!jeton,
+      // Écran du salon (`GET /coupe/screen`) : clé d'écran, sans compte
+      cleEcran: requete.headers()['x-screen-key'] || null,
       compte: compteId ? this.comptes.find((c) => c.id === compteId) || null : null,
     };
     this.requetes.push({ methode: req.methode, chemin: req.chemin, query: req.query, q: req.q, corps: req.corps });
@@ -429,6 +441,8 @@ export class FauxServeur {
     // La Coupe du Gang : tournois (routes/coupeTournaments.js du serveur), puis routes REST
     // (routes/coupe.js du serveur)
     if (/^\/coupe\/(admin\/)?tournaments(\/|$)/.test(chemin)) return this.tournois.traiter(req);
+    if (chemin === '/coupe/live') return this.direct.traiter(req);
+    if (chemin === '/coupe/screen' || /^\/coupe\/admin\/screens(\/|$)/.test(chemin)) return this.ecran.traiter(req);
     if (chemin.startsWith('/coupe/')) return this.coupeRest.traiter(req);
 
     // Fil « New Gang » v2 (routes/feed.js et routes/feedActivity.js du serveur)
@@ -694,7 +708,9 @@ export class FauxCoupeRest {
   /** État d'un compte : sa ligne du classement simulé (admin, barber connu) ou son état propre. */
   etatDe(compte) {
     const j = this.joueurs.find((x) => x.cle === this.cleDe(compte));
-    if (j) return { eligible: true, eligible_reason: null, opt_in: j.cle === 'salon' ? true : j.opt_in !== false, saison: j.saison, total: j.total, recent: [] };
+    // « Laisser regarder mes matchs » gardé dans `etats` pour tout compte, joueur du classement compris
+    const regarde = this.etats[compte.id]?.watch_opt_in === true;
+    if (j) return { eligible: true, eligible_reason: null, opt_in: j.cle === 'salon' ? true : j.opt_in !== false, saison: j.saison, total: j.total, recent: [], watch_opt_in: regarde };
     return this.etats[compte.id] || this.etatParDefaut(compte);
   }
 
@@ -765,9 +781,11 @@ export class FauxCoupeRest {
     }
 
     if (methode === 'PATCH' && sous === '/settings') {
-      // `opt_in` (classement) et / ou `challenge_opt_in` (liste « Défier un joueur », clients seulement)
+      // `opt_in` (classement), `challenge_opt_in` (liste « Défier un joueur », clients seulement) et / ou
+      // `watch_opt_in` (« Laisser regarder mes matchs », tout compte, exclu compris)
       const valide = (v) => v === undefined || typeof v === 'boolean';
-      if (!valide(corps.opt_in) || !valide(corps.challenge_opt_in) || (corps.opt_in === undefined && corps.challenge_opt_in === undefined)) {
+      if (!valide(corps.opt_in) || !valide(corps.challenge_opt_in) || !valide(corps.watch_opt_in)
+        || (corps.opt_in === undefined && corps.challenge_opt_in === undefined && corps.watch_opt_in === undefined)) {
         return { status: 400, json: { error: 'Choix invalide', code: 'invalid' } };
       }
       if (corps.challenge_opt_in === true && compte.role !== 'user') {
@@ -786,8 +804,17 @@ export class FauxCoupeRest {
       if (corps.challenge_opt_in !== undefined && compte.role === 'user') {
         this.etats[compte.id] = { ...this.etatDe(compte), challenge_opt_in: corps.challenge_opt_in };
       }
+      if (corps.watch_opt_in !== undefined) {
+        this.etats[compte.id] = { ...this.etatDe(compte), watch_opt_in: corps.watch_opt_in };
+      }
       const etat = this.etatDe(compte);
-      return { json: { opt_in: !!etat.opt_in, challenge_opt_in: compte.role === 'user' && etat.challenge_opt_in === true } };
+      return {
+        json: {
+          opt_in: !!etat.opt_in,
+          challenge_opt_in: compte.role === 'user' && etat.challenge_opt_in === true,
+          watch_opt_in: etat.watch_opt_in === true,
+        },
+      };
     }
 
     if (methode === 'GET' && sous === '/players') {
@@ -938,6 +965,7 @@ export class FauxCoupeRest {
       eligible_reason: etat.eligible ? null : etat.eligible_reason || 'not_eligible',
       opt_in: !!etat.opt_in,
       challenge_opt_in: compte.role === 'user' && etat.challenge_opt_in === true && !this.exclus.has(cle),
+      watch_opt_in: etat.watch_opt_in === true,
       banned: this.exclus.has(cle),
       season_stats: { ...statsDe(etat.saison), rank: rang('saison') },
       total_stats: { ...statsDe(etat.total), rank: rang('total') },

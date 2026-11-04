@@ -7,7 +7,7 @@ import { useAuth } from '@/lib/AuthContext';
 import { hapticFeedback } from '@/lib/capacitor';
 import {
   COUPE_ENABLED_KEY, invalidateCoupe, noteTournamentMatchFinished, noteTournamentMatchLeft, useCoupeBarbers,
-  useCoupeLeaderboard, useCoupeMe, useCoupeMusic, useCoupePlayers, useCoupePlayersEnabled,
+  useCoupeLeaderboard, useCoupeMe, useCoupeMusic, useCoupePlayers, useCoupePlayersEnabled, useSpectatorsEnabled,
 } from '@/lib/coupe/coupeApi';
 import { RESUME_EVENT, readPendingResume } from '@/lib/coupe/onlineMatch';
 import { preloadStadium } from '@/lib/coupe/stadiumImage';
@@ -20,6 +20,7 @@ import OpponentTabs from '@/components/coupe/hub/OpponentTabs';
 import { BotPanel, LocalPanel, MODES, ModePicker, StepTitle } from '@/components/coupe/hub/PlayModes';
 import LeaderboardPreview from '@/components/coupe/hub/LeaderboardPreview';
 import SettingsCard from '@/components/coupe/hub/SettingsCard';
+import LiveSection from '@/components/coupe/hub/LiveSection';
 import TournamentCard from '@/components/coupe/tournoi/TournamentCard';
 import { TrophyIcon } from '@/components/coupe/hub/icons';
 import {
@@ -33,7 +34,8 @@ import {
  * « 1. Comment tu joues ? » (En ligne, Contre le salon, À deux) ; « 2. Contre qui ? » en ligne
  * (onglets Barbers, Joueurs : la liste des volontaires, seulement avec `features.coupePlayers`, Un
  * ami), « Ton niveau » contre le salon, « Installez-vous » à deux ; le haut du classement ; « Tes
- * réglages » (classement, « Me proposer aux défis », joueurs bloqués). Le mode, l'onglet et le
+ * réglages » (classement, « Me proposer aux défis », « Laisser regarder mes matchs », joueurs
+ * bloqués). Le mode, l'onglet et le
  * niveau choisis sont gardés le temps de l'onglet du navigateur (`useHubChoice`) : on les retrouve
  * en revenant d'une partie. Contrat : docs/fonctions/coupe-du-gang-contrat.md, sections 2 et 5.
  *
@@ -41,6 +43,11 @@ import {
  * coupe-du-gang-stade.md) : en-tête sur le haut du stade, rouge pour les boutons, or pour le
  * trophée et les Points de Coupe. L'image du stade est chargée et décodée dès l'ouverture de la
  * page (`preloadStadium`) : l'avant-match du jeu ne l'attend pas.
+ *
+ * Spectateurs (4 nov. 2026, docs/fonctions/coupe-spectateurs-contrat.md, section 4.3) : sous le
+ * tournoi, « En direct » (les matchs qu'on peut regarder, seulement s'il y en a, relus toutes les
+ * 15 s) ; dans « Tes réglages », « Laisser regarder mes matchs ». Rien des deux sans
+ * `features.coupeSpectators` ; une panne de `/coupe/live` reste dans sa section.
  *
  * Plein écran, hors des mises en page, tout compte connecté (garde `RequireCoupe` d'App.jsx, qui
  * renvoie vers l'accueil quand `features.coupe` est faux).
@@ -229,6 +236,9 @@ function CoupeHub({ openGame }) {
   // Liste « Défier un joueur » : seulement si le serveur la connaît, relue toutes les 30 s
   const playersOn = useCoupePlayersEnabled();
   const playersQuery = useCoupePlayers({ enabled: playersOn, poll: true });
+  // Spectateurs : « En direct » et « Laisser regarder mes matchs » (jamais dans `closed` : une panne
+  // ou une coupure des spectateurs ne met pas toute la Coupe en pause)
+  const spectatorsOn = useSpectatorsEnabled();
   const pendingResume = usePendingResume();
   const closed = [meQuery, barbersQuery, leaderboardQuery, playersQuery].some((q) => isCoupeClosed(q.error));
 
@@ -285,6 +295,8 @@ function CoupeHub({ openGame }) {
           <PointsCard query={meQuery} isSalon={isSalon} />
           {/* Prochain tournoi ou tournoi en cours ; rien sans `features.coupeTournaments` */}
           <TournamentCard />
+          {/* Matchs en direct à regarder ; rien sans `features.coupeSpectators` ni sans match */}
+          <LiveSection />
           <section aria-labelledby="coupe-etape1">
             <StepTitle n={1} id="coupe-etape1">Comment tu joues ?</StepTitle>
             <ModePicker value={choice.mode} onChange={(mode) => setChoice({ mode })} eligible={eligible} labelledBy="coupe-etape1" />
@@ -318,7 +330,7 @@ function CoupeHub({ openGame }) {
             {choice.mode === 'local' && <LocalPanel onPlay={() => openGame('?mode=local')} />}
           </section>
           <LeaderboardPreview query={leaderboardQuery} me={me} />
-          <SettingsCard me={meData} isSalon={isSalon} isClient={isClient} playersOn={playersOn} />
+          <SettingsCard me={meData} isSalon={isSalon} isClient={isClient} playersOn={playersOn} spectatorsOn={spectatorsOn} />
         </div>
       )}
     </CoupeShell>

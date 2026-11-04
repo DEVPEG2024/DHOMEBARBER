@@ -61,6 +61,11 @@ const CoupeClassement = React.lazy(() => import('@/pages/CoupeClassement'));
 // Tournois de la Coupe (docs/fonctions/coupe-tournois-contrat.md) : la page elle-même cache tout sans
 // `features.coupeTournaments`
 const CoupeTournoi = React.lazy(() => import('@/pages/CoupeTournoi'));
+// Spectateurs (docs/fonctions/coupe-spectateurs-contrat.md) : regarder un match, et l'écran du salon
+// (site seulement, sans compte : clé d'écran donnée par l'admin). Les pages cachent tout sans
+// `features.coupeSpectators`
+const CoupeRegarder = React.lazy(() => import('@/pages/CoupeRegarder'));
+const EcranSalon = React.lazy(() => import('@/pages/EcranSalon'));
 // Snake du Gang : menu et partie, classement, vitesse et options, règles (lazy, plein écran)
 const Snake = React.lazy(() => import('@/pages/Snake'));
 const SnakeClassement = React.lazy(() => import('@/pages/SnakeClassement'));
@@ -187,6 +192,8 @@ function RequireAdmin() {
 // Écran d'essai /coupe-test : sur le site seulement. Dans les apps des stores, un écran réservé aux
 // testeurs serait une fonction cachée (règle Apple 2.5.19) : la route n'existe pas (page introuvable)
 const COUPE_TEST_ROUTE = (() => { try { return !Capacitor.isNativePlatform(); } catch { return true; } })();
+// Écran du salon (/ecran, télé ou tablette du salon) : sur le site seulement, pour la même raison
+const SALON_SCREEN_ROUTE = COUPE_TEST_ROUTE;
 
 // Garde du prototype réseau de La Coupe du Gang (/coupe-test) : admin, barbers et comptes
 // testeurs (`users.is_tester`, renvoyé par /me). Le serveur de jeu vérifie aussi (not_allowed).
@@ -362,11 +369,14 @@ function ScrollToTop() {
   return null;
 }
 
-// Mesure d'audience (Admin → Trafic, src/lib/analytics.js) : chaque changement de page
+// Mesure d'audience (Admin → Trafic, src/lib/analytics.js) : chaque changement de page. Jamais
+// l'écran du salon (/ecran) : une télé allumée toute la journée n'est pas une visiteuse
+// (« Clients sur l'app », durées du Trafic)
 function AnalyticsTracker() {
   const { pathname } = useLocation();
-  useEffect(() => { initAnalytics(); }, []);
-  useEffect(() => { trackPage(pathname); }, [pathname]);
+  const screen = pathname === '/ecran';
+  useEffect(() => { if (!screen) initAnalytics(); }, [screen]);
+  useEffect(() => { if (!screen) trackPage(pathname); }, [pathname, screen]);
   return null;
 }
 
@@ -474,7 +484,13 @@ const AppRoutes = () => {
         <Route path="/coupe" element={<Suspense fallback={<LazyFallback />}><Coupe /></Suspense>} />
         <Route path="/coupe/classement" element={<Suspense fallback={<LazyFallback />}><CoupeClassement /></Suspense>} />
         <Route path="/coupe/tournoi/:id" element={<Suspense fallback={<LazyFallback />}><CoupeTournoi /></Suspense>} />
+        <Route path="/coupe/regarder" element={<Suspense fallback={<LazyFallback />}><CoupeRegarder /></Suspense>} />
       </Route>
+
+      {/* Écran du salon : plein écran, sans compte (clé d'écran), site seulement (SALON_SCREEN_ROUTE) */}
+      {SALON_SCREEN_ROUTE && (
+        <Route path="/ecran" element={<Suspense fallback={<LazyFallback />}><EcranSalon /></Suspense>} />
+      )}
 
       {/* Snake du Gang : plein écran, hors des mises en page, tout compte connecté, drapeau features.snake */}
       <Route element={<RequireSnake />}>

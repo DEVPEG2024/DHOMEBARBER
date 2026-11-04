@@ -143,15 +143,17 @@ function StadiumHero() {
 /**
  * Cadre d'un écran de tournoi. `title` (h1, facultatif : l'écran peut poser le sien), `label`
  * (au-dessus du titre), `action` (bouton rond à droite), `hero` (stade et logo, écran 2),
- * `offline` (connexion perdue : bandeau en tête).
+ * `offline` (connexion perdue : bandeau en tête), `musicButton` (faux : page sans le bouton musique
+ * global, comme « Regarder » : l'en-tête reprend la place qu'il lui gardait à droite).
  */
-export function TournamentShell({ onBack, label = null, title = null, titleId, action = null, hero = false, offline = false, children, footer = null }) {
+export function TournamentShell({ onBack, label = null, title = null, titleId, action = null, hero = false, offline = false, musicButton = true, children, footer = null }) {
   useDarkBody();
+  const right = musicButton ? 'pr-12' : 'pr-3';
   return (
     <div className="min-h-[100dvh] overflow-x-clip font-inter text-white" style={{ ...COUPE_VARS, background: NOIR }}>
       <div className="mx-auto flex min-h-[100dvh] w-full max-w-[560px] flex-col">
         {hero ? (
-          <header className="relative flex h-[210px] shrink-0 items-start justify-between overflow-hidden pl-3 pr-12 pt-3">
+          <header className={`relative flex h-[210px] shrink-0 items-start justify-between overflow-hidden pl-3 ${right} pt-3`}>
             <StadiumHero />
             <button type="button" onClick={onBack} aria-label="Retour" className={`${HERO_BUTTON} relative text-white`}>
               <ChevronLeft className="h-[22px] w-[22px]" strokeWidth={2} aria-hidden="true" />
@@ -168,7 +170,7 @@ export function TournamentShell({ onBack, label = null, title = null, titleId, a
           </header>
         ) : (
           // Écran étroit (320 px) : l'action (« En direct ») passe sous le titre plutôt que de le couper
-          <header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 pl-3 pr-12 pt-3">
+          <header className={`flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 pl-3 ${right} pt-3`}>
             <button type="button" onClick={onBack} aria-label="Retour" className={`${HERO_BUTTON} border border-white/[.18] text-white`}>
               <ChevronLeft className="h-[22px] w-[22px]" strokeWidth={2} aria-hidden="true" />
             </button>

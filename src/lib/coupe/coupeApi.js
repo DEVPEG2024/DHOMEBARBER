@@ -25,6 +25,13 @@
  *   useTournament(id)              → `GET /coupe/tournaments/:id` (relu 3 s ou 30 s)
  * Envois : registerTournament, unregisterTournament, checkinTournament, puis
  * `invalidateTournaments(queryClient)`.
+ *
+ * Spectateurs (4 nov. 2026, docs/fonctions/coupe-spectateurs-contrat.md, section 2) :
+ *   useSpectatorsEnabled()         → true | false (`features.coupe` ET `features.coupeSpectators`)
+ *   useSpectatorsFlagQuery()       → la requête du drapeau (true, false ou null = illisible)
+ *   useCoupeLive({ enabled })      → `GET /coupe/live` (relu toutes les 15 s, page visible)
+ * Envoi : setCoupeWatchOptIn (« Laisser regarder mes matchs », `watch_opt_in`), puis
+ * `invalidateCoupe(queryClient)`. Liens vers un match regardé : `watchPath` de `./watch.js`.
  */
 import { useQuery } from '@tanstack/react-query';
 import { API_SERVER_URL, resolvedAppId, apiRequest, apiUrl } from '@/api/apiClient';
@@ -158,7 +165,8 @@ export function useCoupeEnabled() {
 // ─── Lectures ───────────────────────────────────────────────────────
 
 /**
- * `{ season, season_ends_at, eligible, eligible_reason, opt_in,
+ * `{ season, season_ends_at, eligible, eligible_reason, opt_in, challenge_opt_in, banned,
+ *    watch_opt_in (« Laisser regarder mes matchs » ; absent d'un serveur plus ancien : faux),
  *    season_stats: { points, rank, wins, losses, matches },
  *    total_stats: { points, rank, wins, losses, matches },
  *    recent: [{ ended_at, won, cancelled, score: [moi, adversaire], opponent: { name, role }, delta, ranked }] }`
@@ -249,6 +257,14 @@ export const setCoupeOptIn = (optIn) => apiRequest('PATCH', apiUrl('/coupe/setti
 /** Client : figurer (ou non) dans la liste « Défier un joueur » → `{ opt_in, challenge_opt_in }`. */
 export const setCoupeChallengeOptIn = (optIn) =>
   apiRequest('PATCH', apiUrl('/coupe/settings'), { challenge_opt_in: !!optIn });
+
+/**
+ * Tout compte (client, barber, admin, compte exclu des classements compris) : « Laisser regarder
+ * mes matchs » (`watch_opt_in`) → `{ opt_in, challenge_opt_in, watch_opt_in }`. Un match ordinaire
+ * est regardable seulement si les deux joueurs l'ont allumé ; un match de tournoi l'est toujours.
+ */
+export const setCoupeWatchOptIn = (optIn) =>
+  apiRequest('PATCH', apiUrl('/coupe/settings'), { watch_opt_in: !!optIn });
 
 /** Barber : « Dispo pour un match ». */
 export const setCoupeAvailability = (available) =>
@@ -421,6 +437,73 @@ export const checkinTournament = (id) =>
 /** Relit la liste et les tournois ouverts (le drapeau reste en cache). */
 export const invalidateTournaments = (queryClient) =>
   queryClient.invalidateQueries({ queryKey: COUPE_TOURNAMENTS_KEY });
+
+// ─── Spectateurs (docs/fonctions/coupe-spectateurs-contrat.md, section 2) ──
+
+// Drapeau `features.coupeSpectators` : sous `enabled` pour échapper à invalidateCoupe comme le drapeau du jeu
+export const COUPE_SPECTATORS_FLAG_KEY = ['coupe', 'enabled', 'spectators'];
+export const COUPE_LIVE_KEY = ['coupe', 'live'];
+
+/**
+ * Drapeau des spectateurs. **Ne rejette jamais** : `true` seulement si le serveur annonce le jeu
+ * (`features.coupe`) ET les spectateurs (`features.coupeSpectators`, faux avec
+ * `COUPE_SPECTATEURS=off` ou `COUPE_WS=off`) ; `false` s'il dit non ; `null` si la lecture a échoué
+ * (réseau, réponse non 2xx). Un serveur plus ancien ne connaît pas les spectateurs : faux, rien.
+ */
+export async function fetchSpectatorsEnabled() {
+  try {
+    const res = await fetch(`${API_SERVER_URL}/api/apps/public/prod/public-settings/by-id/${resolvedAppId}`);
+    if (!res.ok) return null;
+    const data = await res.json().catch(() => null);
+    if (!data || typeof data !== 'object') return null;
+    return data.features?.coupe === true && data.features?.coupeSpectators === true;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Requête du drapeau (cache 5 min). Une lecture illisible (`null`) n'est pas gardée : relue au
+ * prochain affichage et toutes les 20 s tant qu'un écran l'utilise (comme celui des tournois).
+ */
+export function useSpectatorsFlagQuery() {
+  return useQuery({
+    queryKey: COUPE_SPECTATORS_FLAG_KEY,
+    queryFn: fetchSpectatorsEnabled,
+    staleTime: (q) => (q.state.data == null ? 0 : 5 * 60 * 1000),
+    refetchInterval: (q) => (q.state.data == null ? 20 * 1000 : false),
+    retry: 0,
+  });
+}
+
+/** Regarder les matchs est-il ouvert ? Faux tant que rien n'est chargé, si le serveur dit non ou si la lecture a échoué. */
+export function useSpectatorsEnabled() {
+  const { data } = useSpectatorsFlagQuery();
+  return data === true;
+}
+
+/**
+ * `{ server_now, matches: [{ kind: 'tour' | 'room', id, names: [n0, n1], roles: [r0, r1], sc: [a, b],
+ *    started_at, watchers, screen, tour: { tid, name, label } | null }] }` : les matchs commencés
+ * que ce compte peut regarder (jamais le sien, jamais un joueur bloqué), tournoi d'abord, 20 au plus.
+ */
+export const fetchLive = () => apiRequest('GET', apiUrl('/coupe/live'));
+
+/**
+ * Matchs en direct de l'accueil de la Coupe : relus toutes les 15 s, jamais onglet caché
+ * (`refetchIntervalInBackground` faux, défaut de React Query).
+ */
+export function useCoupeLive({ enabled = true } = {}) {
+  return useQuery({
+    queryKey: COUPE_LIVE_KEY,
+    queryFn: fetchLive,
+    enabled,
+    staleTime: 10 * 1000,
+    refetchInterval: enabled ? 15 * 1000 : false,
+    // Un 404 `disabled` (spectateurs coupés pendant que la page est ouverte) ne se réessaie pas
+    retry: (n, err) => err?.status !== 404 && n < 1,
+  });
+}
 
 // ─── Retour du jeu vers le tableau d'un tournoi ──────────────────────
 // Le jeu se ferme (Coupe.jsx) : le match quitté est retenu le temps de la session, pour que la page

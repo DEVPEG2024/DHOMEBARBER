@@ -6,7 +6,7 @@ import { queryFailed } from '@/components/shared/LoadError';
 import { hapticFeedback } from '@/lib/capacitor';
 import {
   COUPE_TOURNAMENTS_FLAG_KEY, checkinTournament, invalidateTournaments, lastLeftTournamentMatch, registerTournament,
-  unregisterTournament, useCoupeMusic, useCoupeTournamentsFlagQuery, useTournament,
+  unregisterTournament, useCoupeMusic, useCoupeTournamentsFlagQuery, useSpectatorsEnabled, useTournament,
 } from '@/lib/coupe/coupeApi';
 import { preloadStadium } from '@/lib/coupe/stadiumImage';
 import { useAudioUnlockOnGesture } from '@/components/coupe/game/hooks';
@@ -53,6 +53,9 @@ import {
  * de « En direct », l'heure figée (comptes à rebours signalés « figé »), « Jouer mon match » grisé.
  * Ton match devient jouable pendant que la page est ouverte et visible : fenêtre « Ton match
  * commence » (5 s, puis le jeu s'ouvre seul), une seule fois par match.
+ * Spectateurs (`features.coupeSpectators`, docs/fonctions/coupe-spectateurs-contrat.md, section
+ * 4.3) : « Regarder » sur les matchs en cours du tableau (sauf le sien), et la mention « ouverts aux
+ * spectateurs » à l'inscription ; rien sans le drapeau.
  */
 const FALLBACKS = {
   register: 'Inscription impossible. Réessaie dans un instant.',
@@ -106,6 +109,7 @@ export default function CoupeTournoi() {
   const queryClient = useQueryClient();
   const flag = useCoupeTournamentsFlagQuery();
   const on = flag.data === true;
+  const spectatorsOn = useSpectatorsEnabled();
   const query = useTournament(id, { enabled: on });
   const t = query.data && typeof query.data === 'object' && query.data.id ? query.data : null;
   // Connexion perdue avec un tournoi déjà affiché (relecture en échec, en cours d'essai ou en pause)
@@ -255,7 +259,7 @@ export default function CoupeTournoi() {
   if (holding) return <Loading onBack={goBack} text="Mise à jour du tableau…" />;
 
   // ─── Écrans ──────────────────────────────────────────────────────
-  const common = { t, now, busy, offline, onBack: goBack, onShare: share };
+  const common = { t, now, busy, offline, spectatorsOn, onBack: goBack, onShare: share };
   const startDialog = (
     <MatchStartDialog
       match={promptMatch}
@@ -328,7 +332,16 @@ export default function CoupeTournoi() {
   }
   return (
     <>
-      <BoardView t={t} now={now} offline={offline} onBack={goBack} onPlay={play} note={phase === 'finished' ? null : boardNote(t)} header={header} />
+      <BoardView
+        t={t}
+        now={now}
+        offline={offline}
+        onBack={goBack}
+        onPlay={play}
+        note={phase === 'finished' ? null : boardNote(t)}
+        header={header}
+        canWatch={spectatorsOn}
+      />
       {startDialog}
       {sheetNode}
     </>

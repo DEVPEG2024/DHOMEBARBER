@@ -115,6 +115,20 @@
  *  - fin : `end.tour` et `end.so` → `result.tour`, `result.so` [moi, l'adversaire] ; un vainqueur
  *    toujours (« annulé » ne vaut que pour les points), jamais de revanche (`rematch_off`). Forfait
  *    pendant la séance : `end.so` ET `end.forfeit` (l'écran de fin regarde `forfeit` d'abord).
+ *
+ * Spectateurs (4 nov. 2026, docs/fonctions/coupe-spectateurs-contrat.md, section 1.5 ; protocole 3
+ * seulement, le serveur n'envoie rien à une socket en protocole 2) :
+ *  - `watchers {n, screen}` (au plus un par seconde, et juste après `start` si `n > 0`) →
+ *    `ui.watchers` = { n (spectateurs, écrans compris), screen (un écran du salon regarde) } ;
+ *    `NO_WATCHERS` à chaque `start` : nouveau match (revanche comprise) et reprise après une coupure
+ *    (le serveur renvoie `watchers` juste après son `start` seulement s'il reste des spectateurs :
+ *    un compte gardé restait à « 1 spectateur » quand tous étaient partis pendant la coupure) ;
+ *  - `cheer {r}` (réaction toute faite d'un spectateur, `CHEERS[r]`, anonyme) → événement `cheer`
+ *    `{ r }`, seulement en plein match ;
+ *  - `auth.sp: 1` (protocole 3 seulement, jamais dans le repli en v2) : ce téléphone montre au
+ *    joueur qu'il est regardé ; le serveur ne rend un match ordinaire regardable que si les deux
+ *    joueurs l'annoncent (décision S8 du contrat, section 6). Rien d'autre ne change dans le
+ *    protocole.
  */
 import {
   W, H, GL, GR, BR, PR, STEP, HUMAN_SPEED, KEEP_LIMIT, BALL_MAX, GOALS_TO_WIN,
@@ -125,6 +139,7 @@ import {
   inBigBox, pinnedBy, foulClock,
 } from './engine.js';
 import { API_SERVER_URL, getToken as readToken } from '@/api/apiClient';
+import { CHEERS } from './watch.js';
 
 /**
  * Adresse du serveur de jeu ; `VITE_COUPE_WS_URL` la remplace (serveur local). Hors développement,
@@ -435,6 +450,11 @@ const FATAL_KINDS = new Set(['session', 'not_allowed', 'replaced', 'update_requi
 /** Code d'erreur du serveur → message ; un code inconnu reste générique. */
 const errorKind = (code) => (SERVER_CODES.has(String(code)) ? String(code) : 'server');
 
+/** Personne ne regarde (`ui.watchers` hors match, et au début de chaque match). */
+export const NO_WATCHERS = Object.freeze({ n: 0, screen: false });
+// Nombre de spectateurs montré au plus (le serveur en accepte 50 par match, écrans compris)
+const WATCHERS_MAX = 999;
+
 export const IDLE_UI = Object.freeze({
   status: 'idle', // idle | connecting | invite | room | match | over | error
   code: null,
@@ -473,6 +493,8 @@ export const IDLE_UI = Object.freeze({
   // Tirs au but d'un match de tournoi : { first (tireur du premier tir, repère local, null inconnu),
   // shots: [mes tirs, les siens] (1 but, 0 raté) }, null hors séance
   shootout: null,
+  // Spectateurs du match (`watchers` du serveur) : { n, screen } ; NO_WATCHERS si personne
+  watchers: NO_WATCHERS,
 });
 
 const cleanText = (v, max) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
@@ -1643,8 +1665,33 @@ export class OnlineMatch {
       // Tournois : séance de tirs au but, tireur d'un tir (le penalty lui-même vient des états)
       case 'shootout': this._onShootout(m); break;
       case 'penalty': this._onPenaltyMsg(m); break;
+      // Spectateurs (protocole 3) : leur nombre, leurs réactions
+      case 'watchers': this._onWatchers(m); break;
+      case 'cheer': this._onCheer(m); break;
       default: break;
     }
+  }
+
+  // ─── Spectateurs ─────────────────────────────────────────────────
+
+  /** `watchers {n, screen}` : posé seulement en plein match, et seulement s'il change. */
+  _onWatchers(m) {
+    if (this.ui.status !== 'match') return;
+    const raw = Number(m.n);
+    const n = Number.isFinite(raw) && raw > 0 ? Math.min(WATCHERS_MAX, Math.floor(raw)) : 0;
+    // Un écran du salon compte parmi les spectateurs : jamais « sur l'écran » à 0
+    const screen = n > 0 && m.screen === true;
+    const cur = this.ui.watchers || NO_WATCHERS;
+    if (cur.n === n && cur.screen === screen) return;
+    this._set({ watchers: n === 0 ? NO_WATCHERS : { n, screen } });
+  }
+
+  /** `cheer {r}` : réaction d'un spectateur, en plein match seulement (texte : `CHEERS[r]`). */
+  _onCheer(m) {
+    if (this.ui.status !== 'match') return;
+    const r = m.r;
+    if (!Number.isInteger(r) || r < 0 || r >= CHEERS.length) return;
+    this.emit('cheer', { r });
   }
 
   // ─── Tournois ────────────────────────────────────────────────────
@@ -2024,7 +2071,8 @@ export class OnlineMatch {
       // Règlement v2 : événements encore en cours chez le serveur (`evs`) ; le mode, les
       // avertissements et les chronos arrivent avec le premier état
       this._eventsFromStart(m);
-      this._set({ ...info, status: 'match', reconnecting: false, away: null, error: null, notReady: null });
+      // Spectateurs : le serveur redonne leur nombre juste après, s'il en reste (A11)
+      this._set({ ...info, status: 'match', reconnecting: false, away: null, error: null, notReady: null, watchers: NO_WATCHERS });
       if (wasResuming) this.emit('resumed', { ...info, score: [...this.score] });
       return;
     }
@@ -2052,6 +2100,8 @@ export class OnlineMatch {
       error: null,
       notReady: null,
       shootout: null,
+      // Nouveau match (revanche comprise) : le serveur redonne le nombre de spectateurs juste après
+      watchers: NO_WATCHERS,
       ...(this.tour ? {} : { tour: null }),
     });
     this.emit('start', info);
@@ -2903,8 +2953,11 @@ export class OnlineMatch {
       this.opened = true;
       clearTimeout(this.timers.connect);
       // Jeton jamais dans l'adresse (journaux du routeur Heroku) : premier message, avec la
-      // version du protocole. Rien d'autre avant `hello` (le serveur fermerait).
-      this._send({ t: 'auth', v: this.proto, token: this.getToken() || '' });
+      // version du protocole. Rien d'autre avant `hello` (le serveur fermerait). Protocole 3 :
+      // `sp: 1`, ce téléphone montre les spectateurs au joueur (en v2, le message d'aujourd'hui)
+      const auth = { t: 'auth', v: this.proto, token: this.getToken() || '' };
+      if (this.proto >= PROTOCOL_VERSION) auth.sp = 1;
+      this._send(auth);
       this.timers.reply = setTimeout(() => {
         if (this.ws !== ws || this.helloSeen) return;
         if (this.resuming) { this._teardown(); this._scheduleResume(); } else if (this.ui.status === 'connecting') this._fail('unreachable');
