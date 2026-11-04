@@ -63,6 +63,6 @@ Le premier passage a trouvé un défaut invisible pour tous les tests : `subscri
 
 - Le pass Apple Wallet affiche le solde en euros et le libellé « Carte cadeau ».
 - Une formule retirée du catalogue : un RDV déjà pris ne se déplace plus en ligne (le client appelle le salon).
-- Apps déjà publiées : une formule s'y réserve encore comme un seul RDV au prix entier. Elles auront le parcours au prochain build (note de revue 2.5.19).
+- Apps d'avant la 1.0.13 (iOS) et la 1.0.21 (Android), soumises le 5 nov. 2026 : une formule s'y réserve encore comme un seul RDV au prix entier.
 - Vente d'un abonnement payé puis annulé : gardée dans le CA, même règle que les cartes cadeau ; le remboursement se fait à la main et n'y est pas retiré.
 - Détails laissés : le filtre « Abonnement à encaisser » de l'Activité clients compte aussi les abonnements réglés ; un RDV repris moins de 5 min après la création s'ajoute à la ligne ; le fichier du calendrier dit le nom de la formule, pas « Coupe 2 sur 4 » ; un débit par l'API sur un RDV dont la coupe est déjà débitée reste accepté (l'écran l'empêche).

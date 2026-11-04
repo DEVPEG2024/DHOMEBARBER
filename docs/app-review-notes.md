@@ -60,6 +60,23 @@ A client who has bought a gift card can add it to Apple Wallet: Home screen → 
 Client demo account: <email / mot de passe du compte client de démonstration déjà fourni dans App Store Connect>
 ```
 
+## Dernier bloc approuvé : iOS 1.0.12, build 20 (3 nov. 2026)
+
+Celui de la 1.0.13 (soumise le 5 nov. 2026) est dans `~/store-watch/envoi/notes-113.txt` : le recopier ici à son approbation. `<MDP2>` = mot de passe du second compte, posé à l'envoi (`~/.appstoreconnect/dist/review-account-2.txt`).
+
+```
+[Version 1.0.12 — build 20] No new permission, no new third-party SDK, no in-app purchase. New: a second mini-game, "Snake du Gang" (point 7), and new match rules for "La Coupe du Gang" (point 5). The staff dashboard (/admin) is redesigned.
+
+[Guideline compliance — November 2026 update]
+1. User-generated content (1.2). Feed posts (photos, polls, before/after, looks), comments, replies, reviews and display names are user content. Filtering: insults, hate speech, sexual terms and threats are refused before posting, in the app and on the server (try commenting "connard"). Reporting: "···" on every post, "Signaler" under every comment and reply; admins are notified and act within 24 h. Blocking: "···" → "Bloquer"; Paramètres → "Utilisateurs bloqués". Contact: Paramètres → "Nous contacter" (contact@dhomebarber.fr, +33 6 66 08 36 05). Zero tolerance: Terms section 7, accepted at sign-up.
+2. No hidden or dormant features (2.5.19). Everything is reachable from the visible navigation. The staff area (/admin) is for salon staff only (agenda, sales, clients, gift cards, notifications with an AI writing assistant whose drafts the admin reviews, moderation). Snap camera filters (Camera Kit) are in the binary but OFF for everyone: the page says "bientôt disponibles", the camera is never requested; we will describe them in a submitted version before switching them on. "Nouvelle tête" colour try-on runs on-device; its "AI ULTRA" mode appears only when enabled by the server; photos are not stored.
+3. Payments (3.1). No digital content is sold. Appointments, shop orders, gift cards and clothing pre-orders are paid in person at the salon (3.1.3(e)). No in-app payment, no external purchase link.
+4. Apple Wallet. Home → "Carte Cadeau" → an active card → "Ajouter à Apple Wallet": a signed .pkpass (recipient, validity, balance, code, QR scanned at the counter), kept up to date by a PassKit web service. No payment inside.
+5. "La Coupe du Gang" mini-game (approved in 1.0.10). Home → "Jeux" → "La Coupe du Gang" → "Jouer". New rules in this version, explained in "Règles du match" on the game home screen: first to 5 goals, fire ball (+1), electric ball (+2), fouls and penalties, golden goal, random stadium events (foam, slippery gel, storm, moving goals, sprinklers, smoke). "Contre le salon" (vs the computer, on-device, no points) is the quickest test. Online wins earn "Points de Coupe" only for clients with a real salon visit; no prize or real-world value; no chat, only 3 preset reactions; "Signaler" and "Bloquer" on the end screen, the leaderboard and the "Joueurs" list. To test online: 2nd device signed in as reviewer2@dhomebarber.fr / <MDP2>; "En ligne" → "Un ami" → "Créer un match" on one, type the code → "Rejoindre" on the other.
+6. Feed ("New's Gang !" tab). Reactions, comments with one level of replies. "Quoi de neuf ?" opens the composer: photos, poll, before/after, "Mon look" (one of the client's own past visits, no price). "Moments du Gang" are posted by the server only for members who opted into the "Team of the Season" leaderboard. Bell icon → "Activité" with optional feed notifications (never 21:00-08:00). All user content covered by point 1.
+7. "Snake du Gang" mini-game. The classic snake game on a drawn retro phone: swipe anywhere on the phone to turn (2/4/6/8 keys can be turned on in "Vitesse et options"), eat dots to grow, catch the bonus critters, do not bite your own tail (no walls). Home → "Jeux" → "Snake du Gang". Free, no purchase, no prize. Scores are checked by our server, which replays the moves. Optional monthly leaderboard (first name + initial only, opt-in in "Vitesse et options"). Offline games are not ranked.
+```
+
 ## Creative assets (2.3.14) : fiche App Store
 
 - Les visuels de mise en avant et les captures (`screenshots/app-store-2026-10/`) ne doivent montrer

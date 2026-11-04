@@ -27,7 +27,7 @@ Arrivée dans les apps : un build store (examen Apple et Google, notes de revue 
 - App : `src/lib/coupe/coupeApi.js` (drapeau, lectures, envois), `src/pages/CoupeTournoi.jsx` et `src/components/coupe/tournoi/*` (page du tournoi), carte de l'accueil dans `src/pages/Coupe.jsx` (et ouverture du match `?tmatch=&tournoi=`), jeu : `src/lib/coupe/onlineMatch.js`, `src/components/coupe/CoupeGame.jsx`, `game/TournamentWaiting.jsx`, `game/tournament.js`, `EndScreen.jsx` ; admin : `src/components/admin/coupe/*` dans `src/pages/admin/AdminCoupe.jsx`. Tests : `e2e/coupe-tournois.spec.js`, `coupe-tournoi-match.spec.js`, `coupe-tournois-admin.spec.js` ; faux serveurs `e2e/support/fauxTournois.js` (aides `api.tournois`) et `fauxCoupe.js` (`faux.tournoi`, `tirsAuBut`, `redemarrer`).
 - Relectures du 4 nov. 2026 (corrigé) : désinscription trop près de « Je suis là », retour du jeu sur un tableau périmé, présent sans place sans explication, match fini qui répondait « pas encore prêt », redémarrage en plein match, forfait pendant les tirs au but présenté comme des tirs au but, pushs vers une page absente des apps publiées, retrait par l'admin sans effet, rappel perdu entre 08:00 et 08:29, création rejouée en double.
 
-## Au prochain build (sur feu vert)
+## Build du 5 nov. 2026 (iOS 1.0.13, Android 1.0.21, soumis)
 
 - Notes de revue (règle 2.5.19) : tournois en direct de la Coupe, ouverts à tous, aucun lot, mêmes Signaler / Bloquer que le jeu.
 - Après la mise en ligne des deux apps : `TOURNAMENT_NATIVE = true` dans `lib/coupeTournaments.js` (pushs des tournois vers les apps).
