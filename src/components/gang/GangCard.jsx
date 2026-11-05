@@ -13,6 +13,7 @@ import {
   GANG_PHOTO_MASK,
   gangPhotoVeil,
   gangPhotoVeilStart,
+  gangPhotoFilter,
   GANG_STAT_COLUMNS,
   GANG_LOW_COLOR,
   GANG_PLACEHOLDER_PALETTE,
@@ -140,7 +141,7 @@ function Bust({ ink, accent }) {
 }
 
 /** Liseré + fond intérieur (bandes, arcs, reflets) d'une face ; `children` = contenu. */
-function Shell({ p, fx, animated, glareX, glareY, holoX, holoY, holoRotate, children }) {
+function Shell({ p, fx, animated, back, glareX, glareY, holoX, holoY, holoRotate, children }) {
   return (
     <>
       <div style={{ ...SHAPE, background: p.border }} />
@@ -149,7 +150,7 @@ function Shell({ p, fx, animated, glareX, glareY, holoX, holoY, holoRotate, chil
       <div className="opacity-0 group-has-[.gang-flip:focus-visible]:opacity-100" style={{ ...SHAPE, background: p.ink }} />
       <div style={{ ...INNER, background: p.bg }}>
         <div style={{ position: 'absolute', inset: 0, backgroundImage: gangDecorCss(p) }} />
-        <FxSurface fx={fx} />
+        <FxSurface fx={fx} back={back} animated={animated} lightX={glareX} lightOffset={GLARE_R} />
         <motion.div
           aria-hidden="true"
           style={{
@@ -317,6 +318,8 @@ function SeasonDecor({ p, animated }) {
 
 /** Taille du nom selon sa longueur (largeur utile 256 px). */
 const nameFontSize = (name) => (name.length <= 12 ? 40 : name.length <= 15 ? 34 : 30);
+/** Même largeur utile pour la police large de l'Icône (lettres plus espacées). */
+const displayNameSize = (name) => Math.max(16, Math.min(35, Math.floor(256 / (Math.max(1, name.length) * 0.86))));
 
 function Front({ card, p, entrance, decorAnimated, fx, fxAnimated, arrival, delay = 0, surprise, interactive }) {
   const [failedSrc, setFailedSrc] = useState(null);
@@ -324,6 +327,11 @@ function Front({ card, p, entrance, decorAnimated, fx, fxAnimated, arrival, dela
   const score = gangScore(card);
   const name = String(card?.name || 'Client').toUpperCase();
   const footLabel = gangCardFootLabel(card, p);
+  const display = p.display ? { fontFamily: p.display } : null;
+  // Note chromée de l'Icône (le dégradé reste dans les lettres ; l'ombre les détache de l'acier)
+  const scoreStyle = p.chrome
+    ? { backgroundImage: p.chrome, WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent', filter: 'drop-shadow(0 2px 2px rgba(0,0,0,.8))' }
+    : null;
 
   const stat = (key, i) => {
     const v = gangStatValue(card, key);
@@ -343,8 +351,8 @@ function Front({ card, p, entrance, decorAnimated, fx, fxAnimated, arrival, dela
       <FxInner fx={fx} animated={fxAnimated} arrival={arrival} hit={surprise.hit} active={surprise.active} />
       {/* Note, poste, niveau, logo */}
       <div style={{ position: 'absolute', left: 30, top: 40, width: 62, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, zIndex: 3 }}>
-        <b style={{ fontSize: 58, fontWeight: 800, lineHeight: 0.8, fontVariantNumeric: 'tabular-nums' }}><CountUp value={score} delay={delay + 0.35} duration={1.3} run={entrance} /></b>
-        <span style={{ fontSize: 21, fontWeight: 700, letterSpacing: '.03em', lineHeight: 1 }}>{card?.pos || ''}</span>
+        <b style={{ fontSize: 58, fontWeight: 800, lineHeight: p.display ? 0.9 : 0.8, fontVariantNumeric: 'tabular-nums', ...display, ...scoreStyle }}><CountUp value={score} delay={delay + 0.35} duration={1.3} run={entrance} /></b>
+        <span style={{ fontSize: p.display ? 18 : 21, fontWeight: p.display ? 600 : 700, letterSpacing: p.display ? '.08em' : '.03em', lineHeight: 1, ...display, textShadow: p.display ? '0 1px 3px #000' : undefined }}>{card?.pos || ''}</span>
         {fx ? (
           <FxBadge fx={fx} p={p} interactive={interactive} onSurprise={surprise.fire} active={surprise.active} />
         ) : (
@@ -370,7 +378,7 @@ function Front({ card, p, entrance, decorAnimated, fx, fxAnimated, arrival, dela
               alt=""
               draggable={false}
               onError={() => setFailedSrc(photo)}
-              style={{ width: '100%', height: '100%', display: 'block', objectFit: 'cover', objectPosition: '50% 22%', filter: 'saturate(.88) contrast(1.06)' }}
+              style={{ width: '100%', height: '100%', display: 'block', objectFit: 'cover', objectPosition: '50% 22%', filter: gangPhotoFilter(p) }}
             />
             {/* Teinte du niveau (or, bronze, bleu…) : la photo prend la lumière de la carte */}
             <div aria-hidden="true" style={{ position: 'absolute', inset: 0, background: p.accent, mixBlendMode: 'soft-light', opacity: 0.4 }} />
@@ -386,13 +394,16 @@ function Front({ card, p, entrance, decorAnimated, fx, fxAnimated, arrival, dela
       <div style={{ position: 'absolute', left: 22, right: 22, top: 232, textAlign: 'center', zIndex: 3 }}>
         <b
           style={{
-            display: 'block', fontSize: nameFontSize(name), height: 40, lineHeight: '40px', fontWeight: 800, letterSpacing: '.02em',
+            display: 'block', fontSize: p.display ? displayNameSize(name) : nameFontSize(name), height: 40, lineHeight: '40px', fontWeight: 800,
+            letterSpacing: p.display ? '.13em' : '.02em', ...display, textShadow: p.display ? '0 2px 6px #000' : undefined,
             whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
           }}
         >
           {name}
         </b>
-        <i style={{ display: 'block', width: '74%', height: 1.5, margin: '8px auto 0', background: p.accent, opacity: 0.85 }} />
+        {p.rule
+          ? <i style={{ display: 'block', width: '62%', height: 2, margin: '7.5px auto 0', background: p.rule }} />
+          : <i style={{ display: 'block', width: '74%', height: 1.5, margin: '8px auto 0', background: p.accent, opacity: 0.85 }} />}
       </div>
 
       {/* Stats en deux colonnes */}
@@ -405,8 +416,8 @@ function Front({ card, p, entrance, decorAnimated, fx, fxAnimated, arrival, dela
       <div
         style={{
           // Libellé long (« OR · ÉDITION LIMITÉE ») : plus petit, la pointe de l'écusson est étroite
-          position: 'absolute', left: 0, right: 0, top: footLabel.length > 12 ? 394 : 392, textAlign: 'center', fontSize: footLabel.length > 12 ? 11 : 13, fontWeight: 700,
-          letterSpacing: footLabel.length > 12 ? '.1em' : '.22em', textTransform: 'uppercase', color: p.accent, opacity: 0.85, zIndex: 3, whiteSpace: 'nowrap',
+          position: 'absolute', left: 0, right: 0, top: footLabel.length > 12 ? 394 : 392, textAlign: 'center', fontSize: footLabel.length > 12 ? 11 : 13, fontWeight: p.display ? 600 : 700,
+          letterSpacing: footLabel.length > 12 ? '.1em' : p.display ? '.3em' : '.22em', textTransform: 'uppercase', color: p.accent, opacity: 0.85, zIndex: 3, whiteSpace: 'nowrap', ...display,
         }}
       >
         {footLabel}
@@ -442,7 +453,6 @@ function Back({ card, p }) {
   const ellipsis = { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 };
   // Écussons débloqués (7 au plus, ordre du serveur), en petites pastilles sous la progression
   const badges = (Array.isArray(card?.badges) ? card.badges : []).filter((b) => b?.unlocked && b.emoji).slice(0, 7);
-  const light = p.key === 'icone';
 
   return (
     <div
@@ -454,7 +464,7 @@ function Back({ card, p }) {
       }}
     >
       <Logo size={badges.length ? 36 : 40} />
-      <div style={{ fontSize: 80, fontWeight: 800, lineHeight: 0.82, fontVariantNumeric: 'tabular-nums' }}>{visits}</div>
+      <div style={{ fontSize: p.display ? 72 : 80, fontWeight: 800, lineHeight: p.display ? 0.92 : 0.82, fontVariantNumeric: 'tabular-nums', fontFamily: p.display }}>{visits}</div>
       <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: '.2em', textTransform: 'uppercase', color: p.accent }}>
         {visits > 1 ? 'Visites au salon' : 'Visite au salon'}
       </div>
@@ -483,7 +493,7 @@ function Back({ card, p }) {
               key={b.key}
               style={{
                 width: 26, height: 26, borderRadius: '50%', display: 'grid', placeItems: 'center', fontSize: 14, lineHeight: 1,
-                background: light ? 'rgba(20,21,31,.07)' : 'rgba(255,255,255,.1)',
+                background: 'rgba(255,255,255,.1)',
                 boxShadow: `0 0 0 1px ${p.accent}${/^#[0-9a-f]{6}$/i.test(p.accent) ? '66' : ''} inset`,
                 fontFamily: 'system-ui, "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif',
               }}
@@ -635,7 +645,9 @@ export default function GangCard({
         width: W * size,
         height: H * size,
         marginTop: big ? gangFxOverhangTop(p) * size : undefined,
-        filter: SHADOW,
+        // WebKit ne dessine un `filter` qu'à environ 56 px autour du bloc : le cimier de l'Icône (112 px)
+        // y serait coupé, cette carte porte donc son ombre elle-même (GangLame.jsx)
+        filter: big && fx?.ownShadow ? undefined : SHADOW,
         cursor: flippable ? 'pointer' : undefined,
         touchAction: tilt ? 'pan-y' : 'manipulation',
         WebkitTapHighlightColor: 'transparent',
@@ -664,7 +676,7 @@ export default function GangCard({
         >
         <motion.div style={{ position: 'absolute', inset: 0, rotateX, rotateY, transformStyle: 'preserve-3d' }}>
           <div ref={fxCardRef} style={{ position: 'absolute', inset: 0, transformStyle: 'preserve-3d' }}>
-          {big && <FxBack fx={fx} arrival={showArrival} />}
+          {big && <FxBack fx={fx} arrival={showArrival} animated={fxAnimated} hit={surprise.hit} />}
           <motion.div
             initial={false}
             animate={{ rotateY: isFlipped ? 180 : 0 }}
@@ -688,7 +700,7 @@ export default function GangCard({
               </Shell>
             </div>
             <div style={{ ...SIDE, transform: 'rotateY(180deg)' }} aria-hidden={!isFlipped || undefined}>
-              <Shell p={p} fx={fx} animated={fxAnimated} glareX={glareXBack} glareY={glareY} holoX={holoXBack} holoY={holoY} holoRotate={holoRotate}>
+              <Shell p={p} fx={fx} animated={fxAnimated} back glareX={glareXBack} glareY={glareY} holoX={holoXBack} holoY={holoY} holoRotate={holoRotate}>
                 <Back card={card} p={p} />
               </Shell>
             </div>

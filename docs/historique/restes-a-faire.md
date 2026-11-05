@@ -116,6 +116,7 @@ Source : `docs/fonctions/fil-new-gang.md`, `fil-new-gang-contrat.md`.
 
 ## Contrôles jamais faits sur un vrai appareil ou dans un navigateur
 
+- **Carte Icône « La Lame »** (5 nov. 2026) : vue dans Chromium et sur le simulateur iPhone 17, jamais sur un téléphone physique (fluidité de l'arrivée sur un vieil iPhone, reflet au gyroscope). Dans les apps seulement au prochain build (iOS 22, Android 23).
 - Clavier sur iPad Air 11-inch (M3) pour le composeur du fil, le signalement et Bugs et suggestions ; barre d'état Android API 35 / 36 (tour 6).
 - Clavier sur iPad Air 11-inch (M3) pour le build 17 (26 oct. 2026) : touchers non refaits. **Refaits au build 18 le 30 oct. 2026** (prénom du proche compris), sauf « Signaler » de La Coupe : voir la soumission iOS 1.0.10 plus haut.
 - Panneau de débit des cartes cadeau, fenêtre Last Minute, `NotificationPrompt`, toast « Activer » du textile, barre d'état sur un vrai iPhone (tour 5).

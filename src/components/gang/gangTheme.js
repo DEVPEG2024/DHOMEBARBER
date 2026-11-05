@@ -48,6 +48,29 @@ export function gangGradientCss(g) {
 /** Trame horizontale de l'édition Drop (posée par-dessus le fond). */
 const SCANLINES_CSS = 'repeating-linear-gradient(0deg, rgba(255,255,255,.03) 0 1px, transparent 1px 4px)';
 
+/** Carte Icône : note en lettres chromées, filet tricolore sous le nom (couleurs du logo). */
+const GANG_CHROME_TEXT = 'linear-gradient(176deg, #ffffff 6%, #c6ced6 30%, #ffffff 48%, #7c8590 62%, #e8edf2 86%)';
+const GANG_TRICOLOR_RULE = 'linear-gradient(90deg, #17a35b 0 33.3%, #f4f6f8 33.3% 66.6%, #d6283a 66.6% 100%)';
+/** Liseré tricolore de la carte Icône : vert à gauche, blanc en haut, rouge à droite, comme le logo. */
+export const GANG_TRICOLOR_EDGE = [['#17a35b', 0], ['#17a35b', 0.3], ['#eef2f5', 0.42], ['#eef2f5', 0.58], ['#d6283a', 0.7], ['#d6283a', 1]];
+
+/**
+ * Rasoir de la carte Icône (repère 460 × 70, pivot en x = 200, croisé au centre x = 230) :
+ * partagé par la carte (GangLame.jsx) et l'image de story (lib/gangStory.js).
+ */
+export const GANG_RAZOR = {
+  width: 460,
+  height: 70,
+  handle: 'M198 22 L44 15 Q8 14 5 31 Q7 47 44 45 L198 38 Q206 30 198 22 Z',
+  handleLight: 'M40 19 L190 25',
+  blade: 'M196 19 L432 10 Q446 9.5 449 20 L455 59 L204 48 Q192 34 196 19 Z',
+  spine: 'M198 22.5 L432 13.5 Q443 13 446 22',
+  edge: 'M204 48 L455 59',
+  name: "D'HOME BARBER",
+};
+/** Place du cimier sur la carte : croisement des lames et angle (repère 300 × 440). */
+export const GANG_RAZOR_CROSS = { x: 150, y: 10, angle: 37, scale: 0.9 };
+
 // ── Palettes (objet `C` de la maquette) ─────────────────────────────────────
 // border : liseré · bg : fond · band / band2 : bandes diagonales · arc / arc2 : arcs
 // ink : texte · accent : abréviations, filets · gem / gemInk : pastille du niveau
@@ -89,12 +112,14 @@ const TIER_RAW = {
     band: 'rgba(120,180,255,.16)', band2: 'rgba(120,180,255,.1)', arc: 'rgba(130,200,255,.45)', arc2: 'rgba(130,200,255,.25)',
     ink: '#ffffff', accent: '#7fd0ff', gem: '#e43a4f', gemInk: '#ffffff', glare: 0.28,
   },
+  // « La Lame » (planche validée le 5 nov. 2026) : acier de Damas, liseré chromé et tricolore, rasoirs en cimier
   icone: {
     label: 'Icône', code: 'ICON', fx: 'icone', stars: 6,
-    border: conic(0, ['#ffffff', '#d9c8ff', '#c9f3ff', '#fff1c9', '#ffffff']),
-    bg: lin(165, [['#f6f3ee', 0], ['#e7e4f0', 0.55], ['#d6d3e3', 1]]),
-    band: 'rgba(140,110,255,.1)', band2: 'rgba(120,200,220,.12)', arc: 'rgba(140,110,255,.35)', arc2: 'rgba(120,200,220,.3)',
-    ink: '#14151f', accent: '#7a5cf0', gem: lin(120, ['#d9c8ff', '#c9f3ff', '#fff1c9']), gemInk: '#14151f', holo: 0.55, glare: 0.35,
+    border: conic(215, [['#ffffff', 0], ['#7d8690', 0.14], ['#f1f5f9', 0.28], ['#59616b', 0.44], ['#dfe6ec', 0.6], ['#6d7681', 0.78], ['#ffffff', 1]]),
+    bg: lin(165, [['#22262c', 0], ['#101216', 0.55], ['#08090b', 1]]),
+    band: 'transparent', band2: 'transparent', arc: 'transparent', arc2: 'transparent',
+    ink: '#ffffff', accent: '#c3ccd6', gem: lin(120, ['#ffffff', '#9aa4af']), gemInk: '#0c0e11', glare: 0.26,
+    display: "'Bodoni Moda', Georgia, serif", chrome: GANG_CHROME_TEXT, rule: GANG_TRICOLOR_RULE, photoGray: true,
   },
 };
 
@@ -205,6 +230,8 @@ export const GANG_PLACEHOLDER_PALETTE = build('placeholder', 'placeholder', PLAC
  * scanlines, decor ('snow' | 'bats' | 'stars' | 'sun' | null : décor immobile de la story, et de la carte
  * quand la palette n'a pas d'effets), fx (effets animés de GangFx.jsx : un par niveau, plus Halloween,
  * Noël, Nouvel An, anniversaire), stars (1 à 6 étoiles sous la note, niveaux seulement), grad.
+ * Carte Icône seulement : display (police du nom et de la note), chrome (dégradé de la note), rule (filet
+ * sous le nom), photoGray (photo en noir et blanc).
  */
 export function gangPalette(card) {
   const edition = card?.edition && GANG_EDITION_PALETTES[card.edition];
@@ -393,7 +420,9 @@ export function gangSerialLabel(serial) {
  */
 export const GANG_PHOTO_BOX = { left: 58, top: 10, width: 234, height: 238 };
 /** Voile du pourtour de la photo : efface le fond de la photo (mur, pièce) dans la couleur de la carte. */
-export const gangPhotoVeil = (p) => (p && p.key === 'icone' ? 'rgba(240,237,246,1)' : 'rgba(8,8,10,.45)');
-/** Début du voile (part du rayon restée nette autour du visage) : plus tôt sur la carte claire. */
-export const gangPhotoVeilStart = (p) => (p && p.key === 'icone' ? 0.28 : 0.38);
+export const gangPhotoVeil = (p) => (p && p.key === 'icone' ? 'rgba(6,7,10,.86)' : 'rgba(8,8,10,.45)');
+/** Début du voile (part du rayon restée nette autour du visage) : plus tôt sur l'acier. */
+export const gangPhotoVeilStart = (p) => (p && p.key === 'icone' ? 0.3 : 0.38);
+/** Photo de la carte : couleurs d'origine, ou noir et blanc froid sur l'acier de l'Icône. */
+export const gangPhotoFilter = (p) => (p?.photoGray ? 'grayscale(1) contrast(1.16) brightness(1.02)' : 'saturate(.88) contrast(1.06)');
 export const GANG_PHOTO_MASK = { cx: 0.54, cy: 0.42, rx: 0.46, ry: 0.52, stops: [[0, 1], [0.42, 1], [0.66, 0.5], [0.86, 0.12], [1, 0]] };

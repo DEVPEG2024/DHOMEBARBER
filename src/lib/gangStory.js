@@ -16,6 +16,10 @@ import {
   GANG_PHOTO_MASK,
   gangPhotoVeil,
   gangPhotoVeilStart,
+  gangPhotoFilter,
+  GANG_RAZOR,
+  GANG_RAZOR_CROSS,
+  GANG_TRICOLOR_EDGE,
   GANG_STAT_COLUMNS,
   GANG_LOW_COLOR,
   gangPalette,
@@ -31,6 +35,7 @@ import {
   GANG_BAT_STROKE,
 } from '@/components/gang/gangTheme';
 import { isNative } from '@/lib/capacitor';
+import acierUrl from '@/assets/gang/acier-damas.webp';
 
 export const GANG_STORY_WIDTH = 1080;
 export const GANG_STORY_HEIGHT = 1920;
@@ -65,6 +70,7 @@ async function loadFonts() {
   const faces = [
     `800 40px ${FUT}`, `700 40px ${FUT}`, `600 40px ${FUT}`,
     `500 36px ${BODY}`, `600 36px ${BODY}`,
+    '800 40px "Bodoni Moda"', '600 40px "Bodoni Moda"',
   ];
   try {
     await withTimeout(Promise.all(faces.map((f) => document.fonts.load(f).catch(() => null))), FONT_TIMEOUT_MS);
@@ -211,9 +217,16 @@ function drawPhoto(ctx, p, photo, px) {
     const r = Math.max(bw / photo.naturalWidth, bh / photo.naturalHeight);
     const dw = photo.naturalWidth * r;
     const dh = photo.naturalHeight * r;
-    o.filter = 'saturate(.88) contrast(1.06)';
+    o.filter = gangPhotoFilter(p);
     o.drawImage(photo, (bw - dw) * 0.5, (bh - dh) * 0.22, dw, dh);
     o.filter = 'none';
+    // Noir et blanc de l'Icône : `filter` n'existe pas sur le canvas de Safari, la saturation partout
+    if (p.photoGray) {
+      o.globalCompositeOperation = 'saturation';
+      o.fillStyle = '#808080';
+      o.fillRect(0, 0, bw, bh);
+      o.globalCompositeOperation = 'source-over';
+    }
     // Teinte du niveau, comme sur la carte (soft-light, 40 %)
     o.globalCompositeOperation = 'soft-light';
     o.globalAlpha = 0.4;
@@ -360,11 +373,70 @@ function drawSeasonDecor(ctx, p, px = 2) {
   ctx.restore();
 }
 
+/** Un rasoir de la carte Icône, dans son repère (GANG_RAZOR, 460 × 70). */
+function drawRazor(ctx, engraved) {
+  const blade = ctx.createLinearGradient(0, 9, 0, 59);
+  [[0, '#6d7680'], [0.12, '#3f464e'], [0.2, '#d7dee5'], [0.52, '#8e97a2'], [0.82, '#eef3f7'], [1, '#ffffff']].forEach(([at, c]) => blade.addColorStop(at, c));
+  const handle = ctx.createLinearGradient(0, 14, 0, 46);
+  [[0, '#3e4247'], [0.35, '#17191c'], [1, '#050506']].forEach(([at, c]) => handle.addColorStop(at, c));
+  const line = (d, color, width) => {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.stroke(new Path2D(d));
+  };
+  const dot = (cx, cy, r, color, ring) => {
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.strokeStyle = ring;
+    ctx.lineWidth = 0.8;
+    ctx.stroke();
+  };
+  ctx.fillStyle = handle;
+  ctx.fill(new Path2D(GANG_RAZOR.handle));
+  line(GANG_RAZOR.handle, '#5a616a', 1);
+  line(GANG_RAZOR.handleLight, 'rgba(255,255,255,.28)', 1.2);
+  dot(34, 30, 4.2, '#d9b35a', '#6e4d0d');
+  ctx.fillStyle = blade;
+  ctx.fill(new Path2D(GANG_RAZOR.blade));
+  line(GANG_RAZOR.blade, '#2f353c', 0.8);
+  line(GANG_RAZOR.spine, 'rgba(255,255,255,.75)', 1);
+  line(GANG_RAZOR.edge, '#ffffff', 1.8);
+  if (engraved) {
+    ctx.save();
+    ctx.translate(262, 39);
+    ctx.rotate((0.9 * Math.PI) / 180);
+    ctx.font = '600 13px "Bodoni Moda", Georgia, serif';
+    ctx.fillStyle = 'rgba(16,20,26,.68)';
+    drawText(ctx, GANG_RAZOR.name, 0, 0, { spacing: 3 });
+    ctx.restore();
+  }
+  dot(200, 31, 5.2, '#c9d1d9', '#2f353c');
+}
+
+/** Les deux rasoirs croisés au-dessus de la carte Icône (dessinés avant elle : ils passent derrière). */
+function drawRazors(ctx, x, y, scale) {
+  const a = (GANG_RAZOR_CROSS.angle * Math.PI) / 180;
+  const place = (rotation, flip, engraved) => {
+    ctx.save();
+    ctx.translate(x + GANG_RAZOR_CROSS.x * scale, y + GANG_RAZOR_CROSS.y * scale);
+    ctx.scale(scale * GANG_RAZOR_CROSS.scale, scale * GANG_RAZOR_CROSS.scale);
+    ctx.rotate(rotation);
+    if (flip) ctx.scale(1, -1);
+    ctx.translate(-GANG_RAZOR.width / 2, -GANG_RAZOR.height / 2);
+    drawRazor(ctx, engraved);
+    ctx.restore();
+  };
+  place(-a, false, true);
+  place(a - Math.PI, true, false);
+}
+
 /**
  * Dessine la carte (recto) dans `ctx`, coin haut gauche en (x, y), à l'échelle
- * `scale` (1 = 300 × 440). `photo` et `logo` : images déjà chargées ou null.
+ * `scale` (1 = 300 × 440). `photo`, `logo`, `steel` (acier de l'Icône) : images déjà chargées ou null.
  */
-export function drawGangCard(ctx, card, { x = 0, y = 0, scale = 1, photo = null, logo = null, shadow = true } = {}) {
+export function drawGangCard(ctx, card, { x = 0, y = 0, scale = 1, photo = null, logo = null, steel = null, shadow = true } = {}) {
   const p = gangPalette(card);
   const shield = new Path2D(GANG_SHIELD_PATH);
   ctx.save();
@@ -386,6 +458,19 @@ export function drawGangCard(ctx, card, { x = 0, y = 0, scale = 1, photo = null,
   ctx.fillStyle = paint(ctx, p.grad.border, W, H);
   ctx.fill(shield);
 
+  // Fine ligne tricolore entre le chrome et l'acier (carte Icône)
+  if (p.display) {
+    ctx.save();
+    ctx.translate(W * GANG_INNER_SCALE.originX, H * GANG_INNER_SCALE.originY);
+    ctx.scale(GANG_INNER_SCALE.x + 0.006, GANG_INNER_SCALE.y + 0.004);
+    ctx.translate(-W * GANG_INNER_SCALE.originX, -H * GANG_INNER_SCALE.originY);
+    const edge = ctx.createLinearGradient(0, 0, W, 0);
+    GANG_TRICOLOR_EDGE.forEach(([c, at]) => edge.addColorStop(at, c));
+    ctx.fillStyle = edge;
+    ctx.fill(shield);
+    ctx.restore();
+  }
+
   // Fond intérieur : écusson réduit autour de (50 %, 47 %)
   ctx.save();
   const ox = W * GANG_INNER_SCALE.originX;
@@ -396,6 +481,24 @@ export function drawGangCard(ctx, card, { x = 0, y = 0, scale = 1, photo = null,
   ctx.clip(shield);
   ctx.fillStyle = paint(ctx, p.grad.bg, W, H);
   ctx.fillRect(0, 0, W, H);
+  // Acier de Damas et voile de la carte Icône (mêmes réglages que SHADE_FRONT de GangLame.jsx)
+  if (steel) {
+    ctx.drawImage(steel, 0, 0, W, H);
+    const shade = ctx.createLinearGradient(0, 0, 0, H);
+    [[0, 0.56], [0.44, 0.6], [0.56, 0.84], [1, 0.9]].forEach(([at, a]) => shade.addColorStop(at, `rgba(6,7,10,${a})`));
+    ctx.fillStyle = shade;
+    ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    ctx.translate(W * 0.62, H * 0.27);
+    ctx.scale(1, (0.34 * H) / (0.4 * W));
+    const niche = ctx.createRadialGradient(0, 0, 0, 0, 0, 0.4 * W);
+    niche.addColorStop(0, 'rgba(2,3,5,.74)');
+    niche.addColorStop(0.7, 'rgba(2,3,5,.28)');
+    niche.addColorStop(1, 'rgba(2,3,5,0)');
+    ctx.fillStyle = niche;
+    ctx.fillRect(-W, -H, W * 2, H * 2);
+    ctx.restore();
+  }
   if (p.scanlines) {
     ctx.fillStyle = 'rgba(255,255,255,.03)';
     for (let yy = H - 1; yy >= 0; yy -= 4) ctx.fillRect(0, yy, W, 1);
@@ -443,40 +546,64 @@ export function drawGangCard(ctx, card, { x = 0, y = 0, scale = 1, photo = null,
 
   // Note, poste, pastille, logo (colonne de 62 px centrée en x = 61)
   const cx = 30 + 31;
+  const DISPLAY = p.display || FUT;
   ctx.fillStyle = p.ink;
-  ctx.font = `800 58px ${FUT}`;
+  ctx.font = `800 58px ${DISPLAY}`;
   const score = gangScore(card);
+  if (p.chrome) {
+    const chrome = ctx.createLinearGradient(0, 44, 0, 90);
+    [[0.06, '#ffffff'], [0.3, '#c6ced6'], [0.48, '#ffffff'], [0.62, '#7c8590'], [0.86, '#e8edf2']].forEach(([at, c]) => chrome.addColorStop(at, c));
+    ctx.fillStyle = chrome;
+  }
   drawText(ctx, String(score ?? '–'), cx, baselineIn(ctx, 40, 46.4, 58), { align: 'center' });
-  ctx.font = `700 21px ${FUT}`;
-  drawText(ctx, String(card?.pos || ''), cx, baselineIn(ctx, 90.4, 21, 21), { align: 'center', spacing: 21 * 0.03 });
+  ctx.fillStyle = p.ink;
+  ctx.font = p.display ? `600 18px ${DISPLAY}` : `700 21px ${FUT}`;
+  drawText(ctx, String(card?.pos || ''), cx, baselineIn(ctx, 90.4, 21, 21), { align: 'center', spacing: p.display ? 18 * 0.08 : 21 * 0.03 });
   ctx.font = `800 11px ${FUT}`;
   const gemW = Math.max(34, spacedWidth(ctx, p.code, 0.44) + 8);
-  // Pastille du niveau, peinte dans son propre repère (dégradé à sa taille)
-  ctx.save();
-  ctx.translate(cx - gemW / 2, 121.4);
-  roundRect(ctx, 0, 0, gemW, 22, 3);
-  ctx.fillStyle = paint(ctx, p.grad.gem, gemW, 22);
-  ctx.fill();
-  roundRect(ctx, 0.5, 0.5, gemW - 1, 21, 2.5);
-  ctx.strokeStyle = 'rgba(255,255,255,.25)';
-  ctx.lineWidth = 1;
-  ctx.stroke();
-  ctx.restore();
-  ctx.fillStyle = p.gemInk;
-  drawText(ctx, p.code, cx, baselineIn(ctx, 121.4, 22, 11), { align: 'center', spacing: 0.44 });
+  if (p.display) {
+    // Carte Icône : ses six étoiles, comme à l'écran
+    ctx.fillStyle = p.accent;
+    ctx.font = `600 15px ${FUT}`;
+    [0, 1].forEach((row) => [-1, 0, 1].forEach((col) => drawText(ctx, '★', cx + col * 15, 130 + row * 16, { align: 'center' })));
+  } else {
+    // Pastille du niveau, peinte dans son propre repère (dégradé à sa taille)
+    ctx.save();
+    ctx.translate(cx - gemW / 2, 121.4);
+    roundRect(ctx, 0, 0, gemW, 22, 3);
+    ctx.fillStyle = paint(ctx, p.grad.gem, gemW, 22);
+    ctx.fill();
+    roundRect(ctx, 0.5, 0.5, gemW - 1, 21, 2.5);
+    ctx.strokeStyle = 'rgba(255,255,255,.25)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle = p.gemInk;
+    drawText(ctx, p.code, cx, baselineIn(ctx, 121.4, 22, 11), { align: 'center', spacing: 0.44 });
+  }
   drawLogo(ctx, logo, cx - 18, 153.4, 36, 'rgba(255,255,255,.18)');
 
   // Nom (majuscules, réduit puis tronqué s'il est trop long)
   const name = String(card?.name || 'Client').toUpperCase();
   ctx.fillStyle = p.ink;
-  const nameSize = fitFont(ctx, name, { weight: 800, family: FUT, max: 40, min: 30, maxWidth: 256, spacingEm: 0.02 });
-  const shownName = ellipsize(ctx, name, 256, nameSize * 0.02);
-  drawText(ctx, shownName, W / 2, baselineIn(ctx, 232, 40, nameSize), { align: 'center', spacing: nameSize * 0.02 });
-  ctx.save();
-  ctx.globalAlpha = 0.85;
-  ctx.fillStyle = p.accent;
-  ctx.fillRect(W / 2 - 256 * 0.37, 280, 256 * 0.74, 1.5);
-  ctx.restore();
+  const nameEm = p.display ? 0.13 : 0.02;
+  const nameSize = fitFont(ctx, name, { weight: 800, family: DISPLAY, max: p.display ? 35 : 40, min: p.display ? 16 : 30, maxWidth: 256, spacingEm: nameEm });
+  const shownName = ellipsize(ctx, name, 256, nameSize * nameEm);
+  drawText(ctx, shownName, W / 2, baselineIn(ctx, 232, 40, nameSize), { align: 'center', spacing: nameSize * nameEm });
+  if (p.rule) {
+    // Filet tricolore de la carte Icône
+    const w3 = (256 * 0.62) / 3;
+    ['#17a35b', '#f4f6f8', '#d6283a'].forEach((c, i) => {
+      ctx.fillStyle = c;
+      ctx.fillRect(W / 2 - w3 * 1.5 + w3 * i, 279.5, w3, 2);
+    });
+  } else {
+    ctx.save();
+    ctx.globalAlpha = 0.85;
+    ctx.fillStyle = p.accent;
+    ctx.fillRect(W / 2 - 256 * 0.37, 280, 256 * 0.74, 1.5);
+    ctx.restore();
+  }
 
   // Stats : deux colonnes de 87,25 px séparées par un filet
   const colX = [44, 44 + 87.25 + 18 + 1.5 + 18];
@@ -505,8 +632,8 @@ export function drawGangCard(ctx, card, { x = 0, y = 0, scale = 1, photo = null,
   ctx.save();
   ctx.globalAlpha = 0.85;
   ctx.fillStyle = p.accent;
-  ctx.font = `700 13px ${FUT}`;
-  drawText(ctx, gangTierLabel(p).toUpperCase(), W / 2, baselineIn(ctx, 392, 19.5, 13), { align: 'center', spacing: 13 * 0.22 });
+  ctx.font = p.display ? `600 13px ${DISPLAY}` : `700 13px ${FUT}`;
+  drawText(ctx, gangTierLabel(p).toUpperCase(), W / 2, baselineIn(ctx, 392, 19.5, 13), { align: 'center', spacing: 13 * (p.display ? 0.3 : 0.22) });
   ctx.restore();
 
   ctx.restore(); // fond intérieur
@@ -543,7 +670,7 @@ function toBlob(canvas) {
   });
 }
 
-function drawStory(card, { photo, logo }) {
+function drawStory(card, { photo, logo, steel }) {
   const canvas = document.createElement('canvas');
   canvas.width = GANG_STORY_WIDTH;
   canvas.height = GANG_STORY_HEIGHT;
@@ -553,15 +680,18 @@ function drawStory(card, { photo, logo }) {
 
   drawBackground(ctx);
 
-  // En-tête : logo et « D'HOME BARBER · GANG »
+  // En-tête : logo et « D'HOME BARBER · GANG » (carte Icône : le logo seul entre les lames, le nom est gravé dessus)
   drawLogo(ctx, logo, cw / 2 - 56, 150, 112, 'rgba(255,255,255,.18)');
-  ctx.fillStyle = '#c9d4ff';
-  ctx.font = `600 34px ${BODY}`;
-  drawText(ctx, "D'HOME BARBER · GANG", cw / 2, baselineIn(ctx, 300, 44, 34), { align: 'center', spacing: 34 * 0.22 });
+  if (!p.display) {
+    ctx.fillStyle = '#c9d4ff';
+    ctx.font = `600 34px ${BODY}`;
+    drawText(ctx, "D'HOME BARBER · GANG", cw / 2, baselineIn(ctx, 300, 44, 34), { align: 'center', spacing: 34 * 0.22 });
+  }
 
   // La carte, au centre
   const scale = 2.2;
-  drawGangCard(ctx, card, { x: (cw - W * scale) / 2, y: 400, scale, photo, logo });
+  if (p.display) drawRazors(ctx, (cw - W * scale) / 2, 400, scale);
+  drawGangCard(ctx, card, { x: (cw - W * scale) / 2, y: 400, scale, photo, logo, steel });
 
   // Niveau en gros
   const level = (p.kind === 'edition' ? p.label : card?.tier_label || p.label).toUpperCase();
@@ -595,17 +725,18 @@ function drawStory(card, { photo, logo }) {
  * @returns {Promise<Blob>}
  */
 export async function renderGangStory(card) {
-  const [photo, logo] = await Promise.all([
+  const [photo, logo, steel] = await Promise.all([
     loadImage(card?.photo_url, { cors: true }),
     loadImage(LOGO_SRC),
+    gangPalette(card).display ? loadImage(acierUrl) : null,
     loadFonts(),
   ]);
   try {
-    return await toBlob(drawStory(card, { photo, logo }));
+    return await toBlob(drawStory(card, { photo, logo, steel }));
   } catch (err) {
     // Canvas « sali » par une image refusée : on refait sans la photo
     if (!photo) throw err;
-    return toBlob(drawStory(card, { photo: null, logo }));
+    return toBlob(drawStory(card, { photo: null, logo, steel }));
   }
 }
 

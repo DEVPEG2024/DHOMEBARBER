@@ -9,6 +9,7 @@ import { hapticFeedback, isNative } from '@/lib/capacitor';
 import { useGangCard, markGangSeen, markGangTierSeen, useInvalidateGang, GANG_BADGE_INFO } from '@/lib/gangCardApi';
 import { renderGangStory, shareGangStory } from '@/lib/gangStory';
 import GangCard from '@/components/gang/GangCard';
+import { gangFxOverhangTop } from './GangFx';
 import { gangPalette } from '@/components/gang/gangTheme';
 import { GangBadgeUnlock } from '@/components/gang/GangBadges';
 import { useAndroidBack } from '@/lib/useAndroidBack';
@@ -160,10 +161,11 @@ function otherDialogOpen() {
 // Courbe de la maquette (cubic-bezier(.16,1,.3,1)) pour la montée de la carte
 const RISE_EASE = [0.16, 1, 0.3, 1];
 
-function revealSize() {
+/** Taille de la carte, ornements du dessus compris (`overhang`, repère 300 × 440). */
+function revealSize(overhang = 0) {
   if (typeof window === 'undefined') return 0.8;
   const byWidth = (window.innerWidth - 64) / 300;
-  const byHeight = (window.innerHeight - 320) / 440;
+  const byHeight = (window.innerHeight - 320) / (440 + overhang);
   return Math.max(0.5, Math.min(0.9, byWidth, byHeight));
 }
 
@@ -172,7 +174,8 @@ function LevelUpReveal({ card, firstCard, onClose, onSeeCard, onAction }) {
   const [blurDone, setBlurDone] = useState(false);
   const reduceMotion = useReducedMotion();
   const closeRef = useRef(null);
-  const [size] = useState(revealSize);
+  const overhang = gangFxOverhangTop(gangPalette(card));
+  const [size] = useState(() => revealSize(overhang));
   const { share, busy, storyOpen, dialog } = useGangStoryShare(card);
   // Dernières valeurs lues par le clavier, sans réabonner l'écouteur à chaque rendu : `onClose`
   // change quand la carte est rechargée (après « Partager », `markSeen` invalide la carte)
@@ -217,7 +220,8 @@ function LevelUpReveal({ card, firstCard, onClose, onSeeCard, onAction }) {
     : { initial: from, animate: to, transition });
 
   const w = 300 * size;
-  const h = 440 * size;
+  // La marge du dessus de la carte (cimier, couronne…) fait partie du bloc : rien ne chevauche le titre
+  const h = (440 + overhang) * size;
 
   return createPortal(
     <div

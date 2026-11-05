@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { hapticFeedback } from '@/lib/capacitor';
 import { GANG_SHIELD_PATH as SHIELD } from './gangTheme';
+import { LameBehind, LameCurtain, LameHit, LameRazors, LameRing, LameSurface, LameSweep } from './GangLame';
 
 /**
  * Effets de la carte Gang, repris de la maquette validée par le salon (16 oct. 2026) :
- * chaque niveau (Bronze → Icône) et chaque fête (Halloween, Noël, Nouvel An, anniversaire)
+ * chaque niveau (Bronze → Icône, dessinée dans GangLame.jsx) et chaque fête (Halloween, Noël, Nouvel An, anniversaire)
  * a ses ornements, son animation au repos, son arrivée et sa surprise au toucher.
  * Plus le niveau est rare, plus la carte en fait ; aucun bandeau écrit.
  *
@@ -28,7 +29,7 @@ const FX = {
   or: { arrival: 'slide', offset: 0, ms: 1400 },
   orrare: { arrival: 'holo', offset: 0.2, ms: 1500, side: 46 },
   tots: { arrival: 'drop', offset: 1, ms: 2000, top: 22, side: 46 },
-  icone: { arrival: 'icone', offset: 0.3, ms: 2300, top: 56 },
+  icone: { arrival: 'lame', offset: 1, ms: 3400, top: 112, ownShadow: true },
   halloween: { arrival: 'storm', offset: 0.4, ms: 1700, emblem: '🎃', emblemLabel: 'Toucher la citrouille' },
   noel: { arrival: 'gift', offset: 1.6, ms: 2300, top: 12, emblem: '🎄', emblemLabel: 'Faire tourbillonner la neige' },
   anniv: { arrival: 'neon', offset: 0.5, ms: 1700, top: 58, emblem: '👑', emblemLabel: 'Lancer le son' },
@@ -80,8 +81,6 @@ const SNOW = list(1225, 22, (rnd) => ({ x: f1(rnd(4, 296)), s: f1(rnd(3, 7)), du
 const BUBBLES = list(2027, 18, (rnd) => ({ x: f1(rnd(10, 290)), s: f1(rnd(4, 10)), dur: f1(rnd(4, 9)), delay: f1(rnd(0, 9)), dx: Math.round(rnd(-12, 12)) }));
 const TWINKLES = list(1818, 7, (rnd) => ({ x: Math.round(rnd(24, 270)), y: Math.round(rnd(40, 380)), delay: f1(rnd(0, 2)) }));
 const RISE = list(3636, 10, (rnd) => ({ x: Math.round(rnd(10, 290)), delay: f1(rnd(0, 3)) }));
-const DUST = list(1806, 12, (rnd) => ({ x: Math.round(rnd(-30, 330)), y: Math.round(rnd(-10, 450)), delay: f1(rnd(0, 4)) }));
-const GOLDRAIN = list(9999, 26, (rnd) => ({ x: Math.round(rnd(0, 300)), delay: f1(rnd(0, 0.6)), dur: f1(rnd(1.1, 1.8)), dx: Math.round(rnd(-20, 20)) }));
 const CONFETTI = list(1607, 54, (rnd, i) => {
   const a = (i / 54) * Math.PI * 2;
   const d = rnd(110, 240);
@@ -103,7 +102,7 @@ const CSS = `
 @keyframes gfx-slide{from{opacity:0;transform:translateY(40px)}to{opacity:1;transform:none}}
 @keyframes gfx-holo-in{0%{opacity:0;transform:scale(.94)}60%{opacity:1}100%{opacity:1;transform:none}}
 @keyframes gfx-drop{0%,55%{opacity:0;transform:translateY(-120px)}80%{opacity:1;transform:translateY(6px)}100%{opacity:1;transform:none}}
-@keyframes gfx-icone-in{0%,15%{opacity:0;transform:scale(.9)}100%{opacity:1;transform:none}}
+@keyframes gfx-lame-in{0%{opacity:0;transform:scale(1.14)}10%{opacity:1}100%{opacity:1;transform:none}}
 @keyframes gfx-storm{0%,7%{opacity:0;transform:scale(.94)}9%{opacity:1}12%{opacity:.15}25%{opacity:1;transform:none}100%{opacity:1;transform:none}}
 @keyframes gfx-fade-in{from{opacity:0}to{opacity:1}}
 @keyframes gfx-neon-in{0%,30%{opacity:0;transform:translateY(18px) scale(.95)}100%{opacity:1;transform:none}}
@@ -121,11 +120,19 @@ const CSS = `
 @keyframes gfx-walk{0%{opacity:0;transform:scale(2)}25%{opacity:1;transform:scale(1)}70%{opacity:1}100%{opacity:0;transform:scale(.9)}}
 @keyframes gfx-up{0%{opacity:0;transform:translateY(0)}20%{opacity:1}100%{opacity:0;transform:translateY(-220px)}}
 @keyframes gfx-zap{0%,100%{opacity:0}20%,60%{opacity:.6}40%,80%{opacity:0}}
-@keyframes gfx-breathe{50%{transform:scale(1.12);opacity:.7}}
-@keyframes gfx-float{50%{transform:translateY(-14px);opacity:.3}}
-@keyframes gfx-rays{0%{opacity:0;transform:rotate(0)}30%{opacity:1}100%{opacity:0;transform:rotate(40deg)}}
-@keyframes gfx-descend{from{transform:translateY(-80px);opacity:0}to{transform:none;opacity:1}}
-@keyframes gfx-shine{0%,100%{opacity:0}25%,75%{opacity:1}50%{opacity:.3}}
+@keyframes gfx-spark{0%{opacity:1;transform:translate(var(--ox,0px),var(--oy,0px)) rotate(var(--r))}80%{opacity:.9}100%{opacity:0;transform:translate(calc(var(--ox,0px) + var(--x)),calc(var(--oy,0px) + var(--y))) rotate(var(--r)) scaleY(.3)}}
+@keyframes gfx-sheet{to{transform:translate(var(--tx),var(--ty))}}
+@keyframes gfx-cut{to{transform:scaleX(1)}}
+@keyframes gfx-fly{0%{opacity:1;transform:translateX(-900px)}100%{opacity:1;transform:translateX(900px)}}
+@keyframes gfx-rz-lock{0%{opacity:0;transform:translateZ(-2px) var(--rz) translateX(620px)}12%{opacity:1}100%{opacity:1;transform:translateZ(-2px) var(--rz)}}
+@keyframes gfx-rz-clac{0%,100%{transform:translateZ(-2px) var(--rz)}26%{transform:translateZ(-2px) var(--rz-clac)}}
+@keyframes gfx-rz-edge{0%{opacity:0;transform:translateX(0)}6%{opacity:1}30%{opacity:1;transform:translateX(160px)}36%,100%{opacity:0;transform:translateX(181px)}}
+@keyframes gfx-ember{0%{opacity:0;transform:translate(0,10px)}18%{opacity:.9}100%{opacity:0;transform:translate(var(--x),-90px)}}
+@keyframes gfx-shine-tri{0%,100%{opacity:0}18%{opacity:1}}
+@keyframes gfx-sw{0%{opacity:1;transform:translateX(-200px) rotate(22deg)}99%{opacity:1}100%{opacity:0;transform:translateX(520px) rotate(22deg)}}
+@keyframes gfx-swb{0%{transform:translateX(200px)}100%{transform:translateX(-520px)}}
+@keyframes gfx-swr{0%{opacity:1;transform:translateX(-200px) rotate(22deg)}20%{opacity:1;transform:translateX(520px) rotate(22deg)}21%,100%{opacity:0;transform:translateX(520px) rotate(22deg)}}
+@keyframes gfx-swrb{0%{transform:translateX(200px)}20%,100%{transform:translateX(-520px)}}
 @keyframes gfx-fall{to{transform:translate(var(--dx,10px),470px)}}
 @keyframes gfx-drip{0%,100%{transform:scaleY(.75)}50%{transform:scaleY(1.15)}}
 @keyframes gfx-flicker{0%,100%{opacity:.9}12%{opacity:.55}20%{opacity:1}47%{opacity:.7}53%{opacity:.95}78%{opacity:.6}}
@@ -151,7 +158,7 @@ const CSS = `
 .gfx-in-slide{animation:gfx-slide .9s cubic-bezier(.2,1,.3,1) both}
 .gfx-in-holo{animation:gfx-holo-in 1.1s ease-out both}
 .gfx-in-drop{animation:gfx-drop 1.9s cubic-bezier(.3,1.4,.5,1) both}
-.gfx-in-icone{animation:gfx-icone-in 1.6s ease-out both}
+.gfx-in-lame{animation:gfx-lame-in 1s cubic-bezier(.18,1,.3,1) 1.26s both}
 .gfx-in-storm{animation:gfx-storm 1.6s ease-out both}
 .gfx-in-gift{animation:gfx-fade-in .3s ease-out both}
 .gfx-in-neon{animation:gfx-neon-in 1.4s ease-out both}
@@ -178,7 +185,7 @@ export const gangFxArrivalClass = (fx) => (fx ? `gfx-anim gfx-in-${fx.arrival}` 
 const CARD_MOVES = {
   argent: [[{ transform: 'rotateY(0deg)' }, { transform: 'rotateY(360deg)' }], { duration: 900, easing: 'cubic-bezier(.3,.9,.3,1)' }],
   tots: [[{ transform: 'none' }, { transform: 'translateX(3px)' }, { transform: 'translateX(-3px)' }, { transform: 'translateX(2px)' }, { transform: 'translateX(-2px)' }, { transform: 'none' }], { duration: 600 }],
-  icone: [[{ transform: 'none' }, { transform: 'translateY(-14px)' }, { transform: 'none' }], { duration: 1400, easing: 'ease-in-out' }],
+  icone: [[{ transform: 'none' }, { transform: 'translateY(-6px) rotate(-.6deg)', offset: 0.3 }, { transform: 'translateY(2px) rotate(.3deg)', offset: 0.65 }, { transform: 'none' }], { duration: 420, easing: 'ease-out' }],
   halloween: [[{ transform: 'none' }, { transform: 'translateX(-5px) rotate(-1deg)' }, { transform: 'translateX(5px) rotate(1deg)' }, { transform: 'translateX(-4px)' }, { transform: 'translateX(3px)' }, { transform: 'none' }], { duration: 500 }],
   anniv: [[{ transform: 'scale(1.05)' }, { transform: 'none' }], { duration: 480, iterations: 4, easing: 'ease-out' }],
   nouvel_an: [[{ transform: 'none' }, { transform: 'translateY(-6px)' }, { transform: 'none' }], { duration: 400, easing: 'ease-out' }],
@@ -300,21 +307,7 @@ export function FxBehind({ fx, animated, arrival }) {
       </div>
     );
   }
-  if (fx.key === 'icone') {
-    return (
-      <div className="gfx-a" style={{ ...CARD_BOX }} aria-hidden="true">
-        {arrival && (
-          <div className="gfx-anim" style={{ ...abs, left: -150, top: -100, width: 600, height: 640, opacity: 0, background: 'repeating-conic-gradient(from 0deg, transparent 0 10deg, rgba(255,236,170,.2) 10deg 14deg)', WebkitMaskImage: 'radial-gradient(closest-side, #000 40%, transparent)', maskImage: 'radial-gradient(closest-side, #000 40%, transparent)', ...anim('gfx-rays 2.2s ease-out') }} />
-        )}
-        <div style={{ ...abs, left: 0, top: 40, width: 300, height: 360 }}>
-          <div className="gfx-anim" style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: 'radial-gradient(closest-side, rgba(255,236,170,.55), rgba(217,200,255,.25) 55%, transparent)', filter: 'blur(10px)', ...anim('gfx-breathe 3.2s ease-in-out infinite') }} />
-        </div>
-        {DUST.map((d, i) => (
-          <i key={i} className="gfx-anim" style={{ ...abs, left: d.x, top: d.y, width: 4, height: 4, borderRadius: '50%', background: '#ffe08a', boxShadow: '0 0 6px #ffd34d', opacity: 0.8, ...anim(`gfx-float 4s ease-in-out -${d.delay}s infinite`) }} />
-        ))}
-      </div>
-    );
-  }
+  if (fx.key === 'icone') return <LameBehind />;
   if (fx.key === 'anniv') {
     // Halo menthe du néon autour de l'écusson
     return (
@@ -343,8 +336,9 @@ export function FxBehind({ fx, animated, arrival }) {
 }
 
 /** Ornements qui dépassent derrière la carte (lauriers, ailes), inclinés avec elle. */
-export function FxBack({ fx, arrival }) {
+export function FxBack({ fx, arrival, animated, hit }) {
   const gold = useSvgId('gold');
+  if (fx?.key === 'icone') return <LameRazors arrival={arrival} animated={animated} hit={hit} />;
   if (!fx || !['or', 'orrare', 'tots'].includes(fx.key)) return null;
   const laurels = fx.key !== 'tots';
   const wings = fx.key !== 'or';
@@ -361,13 +355,13 @@ export function FxBack({ fx, arrival }) {
 }
 
 /** Fond des deux faces : textures et lueurs propres au niveau ou à la fête. */
-export function FxSurface({ fx }) {
+export function FxSurface({ fx, back, animated, lightX, lightOffset }) {
   if (!fx) return null;
+  if (fx.key === 'icone') return <LameSurface back={back} animated={animated} lightX={lightX} lightOffset={lightOffset} />;
   const layers = {
     argent: 'repeating-linear-gradient(90deg, rgba(255,255,255,.035) 0 1px, transparent 1px 3px)',
     or: 'radial-gradient(ellipse 80% 50% at 50% 0%, rgba(231,196,99,.25), transparent 70%)',
     tots: 'radial-gradient(ellipse 80% 50% at 50% 0%, rgba(127,208,255,.3), transparent 70%)',
-    icone: 'radial-gradient(ellipse 70% 50% at 50% 10%, #fff, transparent 70%)',
     halloween: 'radial-gradient(ellipse 80% 55% at 60% 30%, rgba(58,26,16,.9) 0%, transparent 70%)',
     noel: 'radial-gradient(ellipse 80% 55% at 50% 0%, rgba(179,32,42,.9) 0%, transparent 70%)',
     anniv: 'repeating-linear-gradient(90deg, rgba(225,38,44,.2) 0 24px, transparent 24px 48px), radial-gradient(ellipse 80% 50% at 50% 0%, rgba(46,230,176,.22), transparent 70%)',
@@ -378,6 +372,7 @@ export function FxSurface({ fx }) {
 
 /** Liseré : la lumière qui fait le tour de la carte TOTS (cachée au centre par le fond). */
 export function FxRing({ fx, animated }) {
+  if (fx?.key === 'icone') return <LameRing animated={animated} />;
   if (!fx || fx.key !== 'tots' || !animated) return null;
   return (
     <div aria-hidden="true" style={{ ...abs, inset: 0, ...clipShield, overflow: 'hidden' }}>
@@ -460,6 +455,7 @@ export function FxInner({ fx, animated, arrival, hit, active }) {
       {k === 'argent' && animated && <div className="gfx-anim" style={{ ...glintStyle(false), ...anim(arrival ? 'gfx-glint-once .9s ease-out .3s 1, gfx-glint 6s ease-in-out 2s infinite' : 'gfx-glint 6s ease-in-out 1.5s infinite') }} />}
       {k === 'or' && animated && <div className="gfx-anim" style={{ ...glintStyle(true), ...anim('gfx-glint 4s ease-in-out 1s infinite') }} />}
       {k === 'bronze' && hit > 0 && <div key={hit} className="gfx-anim" style={{ ...glintStyle(false), ...anim('gfx-glint-once .9s ease-out both') }} />}
+      {k === 'icone' && animated && <LameSweep arrival={arrival} active={active} hit={hit} />}
 
       {k === 'orrare' && (
         <>
@@ -591,7 +587,6 @@ export function FxInner({ fx, animated, arrival, hit, active }) {
 
 /** Ornements posés sur la carte, inclinés avec elle. */
 export function FxFront({ fx, big, animated, arrival, hit, interactive, onSurprise }) {
-  const gold = useSvgId('gold');
   const rivet = useSvgId('rivet');
   const snow = useSvgId('snow');
   if (!fx) return null;
@@ -621,21 +616,6 @@ export function FxFront({ fx, big, animated, arrival, hit, interactive, onSurpri
         <path d="M147 0 L153 -22 L159 0 Z M115 0 L119 -14 L125 0 Z M169 0 L175 -14 L179 0 Z" fill="#ff5a6a" />
       </OrnamentSvg>
     ) : null;
-  }
-  if (k === 'icone') {
-    if (!big) return null;
-    return (
-      <OrnamentSvg style={z}>
-        <GoldDefs id={gold} />
-        <g transform="translate(-40 -58)">
-          <g className={arrival ? 'gfx-anim' : undefined} style={{ animation: arrival ? 'gfx-descend 1.2s cubic-bezier(.3,1.3,.5,1) .5s both' : undefined }}>
-            {hit > 0 && <ellipse key={hit} cx="190" cy="30" rx="56" ry="34" fill="#ffd34d" opacity="0" className="gfx-anim" style={{ filter: 'blur(10px)', animation: 'gfx-shine 1.6s ease-in-out' }} />}
-            <path d="M154 52 L148 18 L168 34 L190 4 L212 34 L232 18 L226 52 Z" fill={`url(#${gold})`} stroke="#8a6418" strokeWidth="1.5" />
-            <circle cx="190" cy="6" r="4" fill="#fff6c8" /><circle cx="148" cy="17" r="3" fill="#fff6c8" /><circle cx="232" cy="17" r="3" fill="#fff6c8" />
-          </g>
-        </g>
-      </OrnamentSvg>
-    );
   }
   if (k === 'noel') {
     const lights = (color, offset, delay) => (
@@ -726,6 +706,7 @@ export function FxOver({ fx, arrival, hit }) {
   return (
     <div aria-hidden="true" style={{ ...CARD_BOX, zIndex: 5 }}>
       {/* ── Arrivées ── */}
+      {arrival && k === 'icone' && <LameCurtain />}
       {arrival && k === 'halloween' && (
         <div className="gfx-anim" style={{ ...abs, left: -90, right: -90, top: -90, bottom: -90, opacity: 0, background: 'radial-gradient(closest-side, rgba(233,221,255,.95), rgba(233,221,255,.5) 60%, transparent)', ...anim('gfx-lightning 1.6s ease-out') }} />
       )}
@@ -760,11 +741,7 @@ export function FxOver({ fx, arrival, hit }) {
       {hit > 0 && k === 'tots' && (
         <div key={hit} className="gfx-anim" style={{ ...abs, inset: 0, ...clipShield, background: 'radial-gradient(circle at 50% 40%, rgba(220,245,255,.9), rgba(127,208,255,.6))', mixBlendMode: 'screen', opacity: 0, ...anim('gfx-zap .6s steps(1) 2') }} />
       )}
-      {hit > 0 && k === 'icone' && (
-        <div key={hit} style={{ ...abs, left: -10, right: -10, top: -10, height: 480, overflow: 'hidden' }}>
-          {GOLDRAIN.map((g, i) => <i key={i} className="gfx-anim" style={{ ...abs, left: g.x, top: -10, width: 4, height: 8, borderRadius: 2, background: '#ffd34d', '--dx': `${g.dx}px`, ...anim(`gfx-fall ${g.dur}s linear ${g.delay}s both`) }} />)}
-        </div>
-      )}
+      {hit > 0 && k === 'icone' && <LameHit key={hit} />}
       {hit > 0 && k === 'anniv' && (
         <>
           <div key={hit} style={{ ...abs, left: 150, top: 62 }}>

@@ -14,7 +14,7 @@ const TIER_STYLES = {
   or: { bg: 'linear-gradient(160deg, #e3c473, #6d5320)', fg: '#1a1406' },
   orrare: { bg: 'linear-gradient(160deg, #fff1bf, #d4a93c 45%, #6d5320)', fg: '#1a1406' },
   tots: { bg: 'linear-gradient(160deg, #6aa8ff, #1e3a8a)', fg: '#ffffff', short: 'TOTS' },
-  icone: { bg: 'linear-gradient(160deg, #fbf7ea, #b9a76a)', fg: '#1a1406' },
+  icone: { bg: 'linear-gradient(160deg, #4a515a, #0c0e11)', fg: '#ffffff' },
 };
 
 /**
